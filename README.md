@@ -13,12 +13,14 @@ step is required to play.
 | Input | Action |
 | --- | --- |
 | Mouse | Pitch / yaw (click the canvas to capture the pointer) |
-| `A` / `D` or `←` / `→` | Roll left / right |
-| `S` / `↓` | Backup pull (pitch up) |
-| `W` / `↑` | Backup push (pitch down) |
+| Hold `Alt` and move mouse | Look around the cockpit without steering |
+| `A` / `D` or left / right arrows | Roll left / right |
+| `S` / down arrow | Backup pull (pitch up) |
+| `W` / up arrow | Backup push (pitch down) |
 | `Q` / `E` | Rudder left / right |
-| `C` or right-click | Center the mouse stick |
+| `C` or right-click | Center the mouse stick and the head view |
 | `V` | Toggle cockpit / chase view |
+| `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
 | `B` | Airbrake |
@@ -30,6 +32,12 @@ Moving the mouse down pulls the nose up, matching a conventional flight-sim
 stick. Mouse X commands yaw, while A/D rolls the jet. The pointer is captured by
 clicking the canvas; release it with `Esc`. If pointer lock is unavailable, the
 keyboard controls still work.
+
+Hold Alt to inspect the pilot, consoles, wings and tail from the seat. Head
+movement stays where you leave it; C restores the forward view. Free look also
+works without pointer lock while the mouse is inside the game window. The
+physical cockpit and HUD combiner move in perspective with the head. The HUD
+is visible only through its glass, rather than following the head around.
 
 Hold a pull rather than tapping it. The F-16 is fly-by-wire, but it still carries
 energy and alpha. Roll into the turn first, then pull through the valley. Watch
@@ -62,14 +70,29 @@ running out of margin. Best score and time are kept in `localStorage`.
   and a 6,000 m turn/roll test that produces less authority than at low level.
 - Low-resolution WebGL 2 world (terrain, river, ocean, sky, volumetric-ish
   clouds, gates) composited through a CRT-style post pass.
-- Canvas 2D F-16C Block 50-style cockpit with HUD and camera housing, pitch
-  ladder, speed/altitude tapes, heading tape, 20-button tactical/engine MFDs,
-  data-entry display (DED), integrated control panel (ICP), standby ADI and
-  gauges, three-row caution/advisory panel, glareshield HUD/clock panels,
-  canopy lock and jettison handles, and a throttle/sidestick. The pilot wears an
-  olive flight suit and Nomex gloves; both gloved hands follow the cockpit
-  controls as they move. The chase view draws a procedural F-16 airframe and
-  afterburner plume.
+- Depth-buffered WebGL cockpit with a reclined pilot, visible legs and boots,
+  lap belts, kneeboard, ejection handle, articulated sleeves and gloved fingers
+  around the left throttle and right pressure sidestick. Throttle, hands and
+  rudder pedals follow the live controls. The sidestick has deliberately tiny
+  travel, consistent with its pressure-sensing role.
+- F-16C-inspired panel: central ICP below the HUD, separate DED to its right,
+  two square MFDs, upper-left RWR, right-hand RPM / FTIT / nozzle / oil gauges,
+  standby ADI, altimeter, airspeed, HSI, vertical speed and caution indications.
+  FCR and RWR show no contacts because the navigation mission has no enemies.
+  HSD plots the actual route in heading-up orientation; ENG reads simulation
+  telemetry. Decorative ICP keys and console switches are not clickable.
+- Green NAV HUD with inertial pitch ladder, velocity-vector flight-path marker,
+  KCAS, barometric MSL altitude, radar-style terrain AGL, heading, Mach, alpha,
+  current / maximum G, steerpoint cue and warnings. AGL assumes flat terrain
+  immediately below the jet; it is not a radar beam simulation. Mission time
+  and score remain outside the combiner. Exterior wings and tail are rendered
+  from the same aircraft position and attitude as the cockpit camera.
+- Compressible calibrated airspeed, including the supersonic pitot relation;
+  the HUD no longer confuses true and calibrated airspeed. Empty fuel cuts
+  thrust and fuel flow. Engine indications follow spool and afterburner lag.
+- The aerodynamic coefficients, engine lapse and instrument conversions are
+  game approximations, not a full F-16 aerodynamic database or avionics suite.
+  Sources, calibration and omissions are in [F16-REFERENCES.md](docs/F16-REFERENCES.md).
 - Procedural audio only. No samples, images, or other external assets.
 - Embedded Silkscreen font (OFL 1.1, by Jason Kottke).
 
@@ -96,6 +119,19 @@ Test URLs:
 Requirements: a WebGL 2 browser, a mouse, and a keyboard. Chrome, Edge, and
 Firefox on desktop are the target; Safari may work but is not the primary target.
 
+Checks, with no third-party test dependencies:
+
+```bash
+node tests/physics.mjs
+node tests/performance.mjs
+```
+
+Serve the repository root with any local static HTTP server and open
+`tests/browser.html`. It verifies boot, Alt/mouse isolation, MFD pages, pilot
+animation, pause/resume, chase mode, gate crossings, win, timeout, crash and
+restart. The view buttons freeze the mission for visual inspection. Keep
+the harness on HTTP; the shipped single-file game also works from a local file.
+
 ## Project layout
 
 ```
@@ -106,7 +142,8 @@ viper-run/
 │   └── index.html          # same file for hosting
 └── src/
     ├── game.js             # physics, terrain, mission, WebGL renderer, audio
-    ├── app.js              # game states, HUD/cockpit, UI screens, input
+    ├── app.js              # game states, camera, UI screens, input
+    ├── cockpit.js          # 3D cockpit, pilot, instruments and NAV HUD
     ├── style.css           # menu and CRT presentation
     ├── index.html          # source shell
     └── fonts/              # embedded Silkscreen TTFs

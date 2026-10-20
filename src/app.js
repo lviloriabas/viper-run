@@ -70,7 +70,6 @@
   const ctx = cockpitCanvas.getContext("2d");
 
   let renderer = null;
-  let mapCanvas = null;
   let previewMission = null;
   let lastFrame = performance.now();
   let dpr = 1;
@@ -97,7 +96,9 @@
     lastResult: null,
     view: "cockpit",
     mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 },
-    hands: { roll: 0, pitch: 0, throttle: 0.82 },
+    look: { yaw: 0, pitch: -10 * D2R },
+    mfdPages: ["FCR", "HSD"],
+    hands: { roll: 0, pitch: 0, throttle: 0.82, rudder: 0, brake: 0, ab: 0, grip: 0 },
   };
 
   function loadBest() {
@@ -148,14 +149,14 @@
       <section class="screen">
         <div class="menu-shell">
           <div class="menu-topline">
-            <span>// TACTICAL AIR COMMAND · 0715 ZULU</span>
+            <span>// TACTICAL AIR COMMAND , 0715 ZULU</span>
             <div class="lights"><i class="lamp"></i><i class="lamp dim"></i><i class="lamp red"></i><span>FLCS ONLINE</span></div>
           </div>
           <div class="menu-grid">
             <div>
-              <div class="kicker">F-16C BLOCK 50 · LOW LEVEL QUALIFICATION</div>
+              <div class="kicker">F-16C BLOCK 50 , LOW LEVEL QUALIFICATION</div>
               <h1 class="title">VIPER<span><span class="slash">/</span>RUN</span></h1>
-              <div class="title-rule">COLD RIVER GORGE · SECTOR 07</div>
+              <div class="title-rule">COLD RIVER GORGE , SECTOR 07</div>
               <p class="mission-copy">
                 You are already airborne, twenty clicks from the border, with
                 ten navigation gates strung down a black river gorge. Thread
@@ -170,13 +171,13 @@
             <aside class="briefing">
               <div class="briefing-label">Mission data // COLD RIVER</div>
               <div class="brief-row"><span class="k">AIRFRAME</span><span class="v"><strong>F-16C FIGHTING FALCON</strong><br>F110-GE-129 / FLCS NORM</span></div>
-              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong> · RIVER GORGE · COASTAL EGRESS</span></div>
+              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong> , RIVER GORGE , COASTAL EGRESS</span></div>
               <div class="brief-row"><span class="k">CLOCK</span><span class="v"><em>02:30</em> + 8 SEC PER GATE</span></div>
-              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em> · STALL · G-LIMIT</span></div>
+              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em> , STALL , G-LIMIT</span></div>
               <div class="controls-block">
                 <div class="controls-title"><span>Flight controls</span><span>Hybrid</span></div>
                 <div class="keys">
-                  <div><kbd>MOUSE</kbd> PITCH / YAW</div>
+                  <div><kbd>MOUSE</kbd> PITCH / YAW</div><div><kbd>ALT + MOUSE</kbd> LOOK AROUND</div><div><kbd>F1</kbd><kbd>F2</kbd> MFD PAGES</div>
                   <div><kbd>A</kbd><kbd>D</kbd> ROLL</div>
                   <div><kbd>W</kbd><kbd>S</kbd> BACKUP PITCH</div>
                   <div><kbd>Q</kbd><kbd>E</kbd> RUDDER</div>
@@ -185,14 +186,14 @@
                   <div><kbd>V</kbd> CHASE / COCKPIT</div>
                   <div><kbd>C</kbd> CENTER MOUSE</div>
                   <div><kbd>B</kbd> AIRBRAKE</div>
-                  <div><kbd>P</kbd> PAUSE · <kbd>M</kbd> AUDIO</div>
+                  <div><kbd>P</kbd> PAUSE , <kbd>M</kbd> AUDIO</div>
                 </div>
               </div>
             </aside>
           </div>
           <div class="menu-footer">
             <span class="best">${best}</span>
-            <span>CLICK TO CAPTURE MOUSE · <kbd>V</kbd> CHASE VIEW · <kbd>P</kbd> PAUSE</span>
+            <span>CLICK TO CAPTURE MOUSE , <kbd>V</kbd> CHASE VIEW , <kbd>P</kbd> PAUSE</span>
             <span class="coords">37°14′N 081°06′E<br>ALT 2,140 FT</span>
           </div>
         </div>
@@ -205,13 +206,13 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// flight suspended · flcs hold</div>
+          <div class="status-kicker">// flight suspended , flcs hold</div>
           <h2 class="status-title">PAUSED</h2>
           <p class="status-sub">Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.</p>
           <div class="stats">
             <div class="stat"><div class="k">CLEARED</div><div class="v green">${pad(m.passed, 2)} / ${pad(m.gates.length, 2)}</div></div>
             <div class="stat"><div class="k">TIME LEFT</div><div class="v amber">${formatTime(m.timeLeft)}</div></div>
-            <div class="stat"><div class="k">AIRSPEED</div><div class="v">${pad(kt(a.speed), 3)} KT</div></div>
+            <div class="stat"><div class="k">AIRSPEED</div><div class="v">${pad(a.airspeedKt, 3)} KT</div></div>
             <div class="stat"><div class="k">ALTITUDE</div><div class="v">${pad(ft(a.pos[1]), 5)} FT</div></div>
           </div>
           <div class="result-actions">
@@ -219,7 +220,7 @@
             <button class="btn ghost" data-action="restart">RESTART RUN <small>R</small></button>
             <button class="btn ghost" data-action="menu">ABORT TO MENU</button>
           </div>
-          <div class="small-print">P / ESC RESUME · R RESTART · M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
+          <div class="small-print">P / ESC RESUME , R RESTART , M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
         </div>
       </section>`;
   }
@@ -230,7 +231,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// route complete · cold river gorge</div>
+          <div class="status-kicker">// route complete , cold river gorge</div>
           <h2 class="status-title win">COURSE<br> COMPLETE</h2>
           <p class="status-sub">All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as <strong>${rank}</strong>.</p>
           <div class="stats">
@@ -243,7 +244,7 @@
             <button class="btn" data-action="restart" data-autofocus>FLY AGAIN <small>R</small></button>
             <button class="btn ghost" data-action="menu">MISSION BOARD</button>
           </div>
-          <div class="small-print">${bestLine()} · R RESTART · ESC MENU</div>
+          <div class="small-print">${bestLine()} , R RESTART , ESC MENU</div>
         </div>
       </section>`;
   }
@@ -253,7 +254,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--red)">// flight terminated · airframe lost</div>
+          <div class="status-kicker" style="color:var(--red)">// flight terminated , airframe lost</div>
           <h2 class="status-title fail">TERRAIN<br> WINS</h2>
           <p class="status-sub">The gorge is unforgiving. The flight recorder shows ${pad(r.gates, 2)} gates cleared before impact.</p>
           <div class="stats">
@@ -276,7 +277,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--amber)">// clock expired · run invalid</div>
+          <div class="status-kicker" style="color:var(--amber)">// clock expired , run invalid</div>
           <h2 class="status-title fail" style="color:var(--amber)">RUN<br> EXPIRED</h2>
           <p class="status-sub">The coast is still out there. You cleared ${pad(r.gates, 2)} gates before the clock ran dry.</p>
           <div class="stats">
@@ -334,6 +335,8 @@
   function centerMouseStick(announce = true) {
     game.mouse.x = 0;
     game.mouse.y = 0;
+    game.look.yaw = 0;
+    game.look.pitch = -10 * D2R;
     if (announce) flashToast("MOUSE STICK CENTERED", 1.1);
   }
 
@@ -342,9 +345,11 @@
     try {
       const result = canvas.requestPointerLock({ unadjustedMovement: true });
       if (result && typeof result.catch === "function") {
-        result.catch(() => canvas.requestPointerLock().catch(() => {
-          flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2);
-        }));
+        result.catch(() => {
+          try {
+            Promise.resolve(canvas.requestPointerLock()).catch(() => flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2));
+          } catch (_) { flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2); }
+        });
       }
     } catch (err) {
       try {
@@ -597,11 +602,16 @@
       q = qMultiply(q, qAxisAngle([0, 1, 0], Math.sin(t * 17.3 + 0.4) * shake * 0.65));
       q = qMultiply(q, qAxisAngle([0, 0, 1], sr * shake * 1.1));
     }
+    q = qMultiply(q, qAxisAngle([0, 1, 0], -game.look.yaw));
+    q = qMultiply(q, qAxisAngle([1, 0, 0], game.look.pitch));
     const qAx = axisSet(q);
-    const eyeBase = add(a.pos, add(mul(ax.up, 1.26), mul(ax.forward, 2.05)));
+    const eyeBase = add(a.pos, qRotate(a.q, window.__VIPER_COCKPIT.EYE));
     const groundHere = Math.max(0, terrainAt(eyeBase[0], eyeBase[2])) + 0.55;
     const eye = [eyeBase[0], Math.max(eyeBase[1], groundHere), eyeBase[2]];
-    const fov = (65.5 + clamp(a.speed / 380, 0, 1) * 2.8) * D2R;
+    // Wide cockpit field of view. The HUD symbology is projected with this
+    // same cone, so a wider view keeps the ladder and flight-path marker tied
+    // to the real horizon instead of drifting as a decorative overlay.
+    const fov = 78 * D2R;
     return { eye, forward: qAx.forward, right: qAx.right, up: qAx.up, fov };
   }
 
@@ -672,1857 +682,15 @@
   }
 
   function layoutFor(W, H) {
-    const s = clamp(Math.min(W / 1280, H / 720), 1.0, 1.35);
-    const panelY = H * 0.702;
-    const hudTop = H * 0.108;
-    const hudW = Math.min(W * 0.46, 900 * s);
-    const hudBottom = panelY - H * 0.012;
-    const cx = W * 0.5;
-    const hudL = cx - hudW / 2;
-    const hudR = cx + hudW / 2;
-    const hudCy = hudTop + (hudBottom - hudTop) * 0.445;
-    const mfdW = Math.min(W * 0.135, 265 * s);
-    const centerW = mfdW;
-    const mfdH = mfdW * 0.70;
-    const gap = W * 0.022;
-    const totalW = mfdW * 2 + centerW + gap * 2;
-    const mfdLX = cx - totalW / 2;
-    const centerX = mfdLX + mfdW + gap;
-    const mfdRX = centerX + centerW + gap;
-    const mfdY = panelY + H * 0.042;
-    const dedH = mfdH * 0.30;
-    const icpY = mfdY + dedH + mfdH * 0.045;
-    const icpH = mfdY + mfdH - icpY;
-    const gaugeR = Math.min(W * 0.036, H * 0.052, 54 * s);
-    const gaugeY = panelY + H * 0.145;
-    const adiR = Math.min(gaugeR * 0.86, 46 * s);
-    const adiX = mfdLX - gaugeR * 1.60;
-    const cautionW = Math.min(W * 0.30, 470 * s);
-    const cautionY = panelY + H * 0.225;
-    const cautionH = Math.min(H * 0.060, 52 * s);
-    return { s, panelY, hudTop, hudBottom, hudW, hudL, hudR, hudCy, cx, mfdW, centerW, mfdH, mfdLX, centerX, mfdRX, mfdY, dedH, icpY, icpH, gaugeR, gaugeY, adiR, adiX, cautionW, cautionY, cautionH };
-  }
-
-  // --------------------------------------------------------------- map texture
-  function buildMapCanvas() {
-    const w = 240;
-    const h = 180;
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const g = c.getContext("2d");
-    const img = g.createImageData(w, h);
-    const b = previewMission.mapBounds;
-    const data = img.data;
-    let o = 0;
-    for (let py = 0; py < h; py++) {
-      const z = lerp(b.zMin, b.zMax, py / (h - 1));
-      for (let px = 0; px < w; px++) {
-        const x = lerp(b.xMin, b.xMax, px / (w - 1));
-        const elev = terrainAt(x, z);
-        let r = 3, gg = 13, bb = 10;
-        if (elev < 12) {
-          r = 2; gg = 13; bb = 18;
-        } else {
-          const t = clamp(elev / 2500, 0, 1);
-          r = 5 + t * 29;
-          gg = 25 + t * 88;
-          bb = 13 + t * 36;
-          const band = Math.floor(elev / 170) % 2;
-          if (band === 0) { gg += 8; bb += 3; }
-          if (elev > 1900) { r += 18; gg += 5; bb += 5; }
-          const riv = Math.abs(x - riverX(z));
-          if (elev < 480 && riv < 80) { r = 5; gg = 35; bb = 38; }
-        }
-        data[o++] = r;
-        data[o++] = gg;
-        data[o++] = bb;
-        data[o++] = 255;
-      }
-    }
-    g.putImageData(img, 0, 0);
-    return c;
-  }
-
-  // ------------------------------------------------------------------ map MFD
-  function mapProject(p, sx, sy, sw, sh, b) {
-    return [
-      sx + ((p[0] - b.xMin) / (b.xMax - b.xMin)) * sw,
-      sy + ((p[2] - b.zMin) / (b.zMax - b.zMin)) * sh,
-    ];
-  }
-
-  function drawMFDMap(x, y, w, h, L) {
-    const s = L.s;
-    const m = game.mission;
-    const b = m.mapBounds;
-    const inset = 7 * s;
-    const sx = x + inset, sy = y + inset, sw = w - inset * 2, sh = h - inset * 2;
-
-    ctx.save();
-    ctx.fillStyle = "#030906";
-    ctx.fillRect(sx, sy, sw, sh);
-    ctx.beginPath();
-    ctx.rect(sx, sy, sw, sh);
-    ctx.clip();
-
-    ctx.globalAlpha = 0.94;
-    ctx.drawImage(mapCanvas, 0, 0, mapCanvas.width, mapCanvas.height, sx, sy, sw, sh);
-    ctx.globalAlpha = 1;
-
-    // Grid
-    ctx.strokeStyle = "rgba(126,225,150,0.11)";
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 4; i++) {
-      ctx.beginPath();
-      ctx.moveTo(sx + (sw * i) / 4, sy);
-      ctx.lineTo(sx + (sw * i) / 4, sy + sh);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(sx, sy + (sh * i) / 4);
-      ctx.lineTo(sx + sw, sy + (sh * i) / 4);
-      ctx.stroke();
-    }
-
-    // Route
-    ctx.strokeStyle = "rgba(255,192,91,0.58)";
-    ctx.setLineDash([4 * s, 5 * s]);
-    ctx.lineWidth = Math.max(1, 1.1 * s);
-    ctx.beginPath();
-    for (let i = 0; i < m.gates.length; i++) {
-      const pt = mapProject(m.gates[i].pos, sx, sy, sw, sh, b);
-      if (i === 0) ctx.moveTo(pt[0], pt[1]);
-      else ctx.lineTo(pt[0], pt[1]);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Gates
-    for (let i = 0; i < m.gates.length; i++) {
-      const gate = m.gates[i];
-      const pt = mapProject(gate.pos, sx, sy, sw, sh, b);
-      const next = i === m.gateIndex;
-      ctx.beginPath();
-      ctx.arc(pt[0], pt[1], (next ? 4.2 : 2.5) * s, 0, TAU);
-      ctx.fillStyle = gate.passed ? "rgba(86,206,116,0.52)" : next ? AMBER : "rgba(119,227,216,0.55)";
-      ctx.fill();
-      if (next) {
-        ctx.strokeStyle = "rgba(255,192,91,0.8)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(pt[0], pt[1], (7 + Math.sin(game.time * 5) * 2) * s, 0, TAU);
-        ctx.stroke();
-      }
-    }
-
-    // Ownship
-    const ap = mapProject(game.aircraft.pos, sx, sy, sw, sh, b);
-    ctx.save();
-    ctx.translate(clamp(ap[0], sx + 8, sx + sw - 8), clamp(ap[1], sy + 8, sy + sh - 8));
-    ctx.rotate(game.aircraft.heading * D2R);
-    ctx.fillStyle = "#d8ff86";
-    ctx.beginPath();
-    ctx.moveTo(0, -6 * s);
-    ctx.lineTo(4.4 * s, 4.5 * s);
-    ctx.lineTo(0, 2.5 * s);
-    ctx.lineTo(-4.4 * s, 4.5 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    // Heading/N marks
-    ctx.font = `${Math.max(7.2, 8.2 * s)}px Silkscreen, monospace`;
-    ctx.fillStyle = "rgba(155,255,170,0.74)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("TAC", sx + 6 * s, sy + 5 * s);
-    ctx.textAlign = "right";
-    ctx.fillText("N", sx + sw - 7 * s, sy + 5 * s);
-    ctx.textAlign = "left";
-    ctx.fillText(`${pad(game.aircraft.heading, 3)}`, sx + 6 * s, sy + sh - 15 * s);
-    ctx.fillText("KT", sx + 39 * s, sy + sh - 15 * s);
-    ctx.fillStyle = "rgba(255,192,91,0.7)";
-    ctx.textAlign = "right";
-    ctx.fillText(`${pad(kt(game.aircraft.speed), 3)}KT`, sx + sw - 6 * s, sy + sh - 15 * s);
-
-    // Phosphor scanlines + glass reflection
-    ctx.fillStyle = "rgba(0,0,0,0.18)";
-    for (let yy = sy; yy < sy + sh; yy += Math.max(2, 2.2 * s)) ctx.fillRect(sx, yy, sw, 1);
-    const gl = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
-    gl.addColorStop(0, "rgba(220,255,220,0.075)");
-    gl.addColorStop(0.4, "rgba(220,255,220,0)");
-    gl.addColorStop(1, "rgba(220,255,220,0.025)");
-    ctx.fillStyle = gl;
-    ctx.fillRect(sx, sy, sw, sh);
-    ctx.restore();
-  }
-
-  // ---------------------------------------------------------------- engine MFD
-  function drawBar(x, y, w, h, value, color) {
-    ctx.fillStyle = "rgba(141,255,167,0.10)";
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, w * clamp(value, 0, 1), h);
-    ctx.strokeStyle = "rgba(141,255,167,0.22)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    const segs = Math.max(6, Math.floor(w / 12));
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    for (let i = 1; i < segs; i++) ctx.fillRect(x + (w * i) / segs, y, 1, h);
-  }
-
-  function drawMFDEngine(x, y, w, h, L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const inset = 7 * s;
-    const sx = x + inset, sy = y + inset, sw = w - inset * 2, sh = h - inset * 2;
-    const fs = clamp(w * 0.048, 6.2, 12);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sx, sy, sw, sh);
-    ctx.clip();
-    ctx.fillStyle = "#06100b";
-    ctx.fillRect(sx, sy, sw, sh);
-    ctx.font = `${fs}px Silkscreen, monospace`;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    ctx.fillStyle = HUD;
-    ctx.fillText("ENG SYS", sx + 9 * s, sy + 4 * s);
-    ctx.textAlign = "right";
-    ctx.fillStyle = HUD_DIM;
-    ctx.fillText("F110-GE-129", sx + sw - 9 * s, sy + 4 * s);
-
-    const labelX = sx + 9 * s;
-    const valueX = sx + sw - 9 * s;
-    const dividerY = sy + Math.max(fs * 1.9, sh * 0.18);
-    ctx.fillStyle = "rgba(169,255,178,0.18)";
-    ctx.fillRect(sx + 8 * s, dividerY, sw - 16 * s, 1);
-
-    const barH = Math.max(2.5, 4 * s);
-    const row = sy + sh * 0.26;
-    ctx.textAlign = "left";
-    ctx.fillStyle = HUD_DIM;
-    ctx.fillText("THR", labelX, row);
-    ctx.textAlign = "right";
-    ctx.fillStyle = a.ab ? AMBER : HUD;
-    ctx.fillText(`${pad(a.throttle * 100, 3)}%`, valueX, row);
-    drawBar(labelX, row + fs * 1.05, sw - 18 * s, barH, a.throttle, a.ab ? AMBER : "rgba(155,255,170,0.76)");
-
-    const row2 = sy + sh * 0.44;
-    ctx.textAlign = "left";
-    ctx.fillStyle = HUD_DIM;
-    ctx.fillText("RPM", labelX, row2);
-    ctx.textAlign = "right";
-    ctx.fillStyle = HUD;
-    ctx.fillText(`${pad(61 + a.throttle * 37, 3)}%`, valueX, row2);
-    drawBar(labelX, row2 + fs * 1.0, sw - 18 * s, barH, 0.61 + a.throttle * 0.37, "rgba(155,255,170,0.52)");
-
-    const row3 = sy + sh * 0.62;
-    ctx.textAlign = "left";
-    ctx.fillStyle = HUD_DIM;
-    ctx.fillText("NOZ", labelX, row3);
-    ctx.textAlign = "right";
-    ctx.fillStyle = a.ab ? AMBER : HUD;
-    ctx.fillText(`${pad(a.ab ? 94 : 38 + a.throttle * 22, 2)}`, valueX, row3);
-
-    const fuelY = sy + sh * 0.76;
-    ctx.textAlign = "left";
-    ctx.fillStyle = HUD_DIM;
-    ctx.fillText("FUEL", labelX, fuelY);
-    ctx.textAlign = "right";
-    ctx.fillStyle = a.fuel < 500 ? RED : HUD;
-    ctx.fillText(`${pad(a.fuel * 2.20462, 4)} LB`, valueX, fuelY);
-
-    const by = sy + sh - fs - 2;
-    if (by - (fuelY + fs) > fs * 0.6) {
-      ctx.fillStyle = "rgba(169,255,178,0.18)";
-      ctx.fillRect(sx + 8 * s, by - fs * 0.3, sw - 16 * s, 1);
-    }
-    ctx.textAlign = "left";
-    ctx.fillStyle = a.ab ? AMBER : "rgba(169,255,178,0.62)";
-    ctx.fillText(a.ab ? "AB ARMED" : "AB SAFE", labelX, by);
-    ctx.textAlign = "right";
-    ctx.fillStyle = a.stall > 0.1 ? RED : "rgba(169,255,178,0.78)";
-    ctx.fillText(a.stall > 0.1 ? "STALL" : "FLCS NORM", valueX, by);
-
-    // Phosphor texture
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    for (let yy = sy; yy < sy + sh; yy += Math.max(2, 2.2 * s)) ctx.fillRect(sx, yy, sw, 1);
-    const gl = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
-    gl.addColorStop(0, "rgba(220,255,220,0.075)");
-    gl.addColorStop(0.45, "rgba(220,255,220,0)");
-    gl.addColorStop(1, "rgba(220,255,220,0.022)");
-    ctx.fillStyle = gl;
-    ctx.fillRect(sx, sy, sw, sh);
-    ctx.restore();
-  }
-
-  function drawMFDBezel(x, y, w, h, L) {
-    const s = L.s;
-    const padX = 12 * s;
-    ctx.fillStyle = "#070a08";
-    ctx.fillRect(x - padX, y - padX, w + padX * 2, h + padX * 2);
-    ctx.strokeStyle = "rgba(173,197,170,0.16)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - padX + 0.5, y - padX + 0.5, w + padX * 2 - 1, h + padX * 2 - 1);
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.strokeRect(x - 2.5, y - 2.5, w + 5, h + 5);
-    ctx.fillStyle = "#27312a";
-    for (const [sx, sy] of [[x - padX + 4, y - padX + 4], [x + w + padX - 7, y - padX + 4], [x - padX + 4, y + h + padX - 7], [x + w + padX - 7, y + h + padX - 7]]) {
-      ctx.beginPath();
-      ctx.arc(sx, sy, 2.2 * s, 0, TAU);
-      ctx.fill();
-    }
-
-    // Twenty bezel switches (OSBs): five on each edge of the real 4x4 MFD.
-    // They are deliberately small, but they give the panel the correct rhythm.
-    const osb = (bx, by, bw, bh, hot) => {
-      ctx.fillStyle = hot ? "rgba(47,81,49,0.95)" : "#101510";
-      ctx.beginPath();
-      ctx.roundRect(bx, by, bw, bh, 1.2 * s);
-      ctx.fill();
-      ctx.strokeStyle = hot ? "rgba(169,255,178,0.36)" : "rgba(143,164,139,0.16)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    };
-    const topW = (w - 12 * s - 8 * s) / 5;
-    for (let i = 0; i < 5; i++) {
-      osb(x + 6 * s + i * (topW + 2 * s), y - padX + 2.5 * s, topW, 3.2 * s, i === 1 || i === 3);
-      osb(x + 6 * s + i * (topW + 2 * s), y + h - 3.4 * s, topW, 2.2 * s, i === 2);
-    }
-    const sideH = (h - 8 * s - 8 * s) / 5;
-    for (let i = 0; i < 5; i++) {
-      osb(x - padX + 2.5 * s, y + 6 * s + i * (sideH + 2 * s), 3.4 * s, sideH, i === 1);
-      osb(x + w + padX - 5.9 * s, y + 6 * s + i * (sideH + 2 * s), 3.4 * s, sideH, i === 3);
-    }
-
-    ctx.fillStyle = "rgba(169,255,178,0.48)";
-    ctx.font = `${Math.max(7.4, 8 * s)}px Silkscreen, monospace`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(x === L.mfdLX ? "TAC MAP" : "ENGINE", x - padX + 2, y - padX - 4);
-  }
-
-  // -------------------------------------------------------------------- gauges
-  function drawAnalogGauge(cx, cy, r, value, max, label, unit, L) {
-    const s = L.s;
-    ctx.save();
-    ctx.translate(cx, cy);
-    // Bezel
-    const bg = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.12, 0, 0, r);
-    bg.addColorStop(0, "#252d26");
-    bg.addColorStop(0.72, "#0d120f");
-    bg.addColorStop(1, "#050706");
-    ctx.fillStyle = bg;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(195,210,190,0.22)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 3 * s, 0, TAU);
-    ctx.stroke();
-
-    const a0 = Math.PI * 0.77;
-    const a1 = Math.PI * 2.23;
-    ctx.strokeStyle = "rgba(183,206,178,0.32)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.78, a0, a1);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(255,109,95,0.35)";
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.78, a1 - 0.28, a1);
-    ctx.stroke();
-
-    for (let i = 0; i <= 10; i++) {
-      const a = a0 + (a1 - a0) * (i / 10);
-      const major = i % 2 === 0;
-      ctx.strokeStyle = major ? "rgba(208,226,199,0.7)" : "rgba(180,200,175,0.33)";
-      ctx.lineWidth = major ? 1.4 : 0.8;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r * (major ? 0.68 : 0.72), Math.sin(a) * r * (major ? 0.68 : 0.72));
-      ctx.lineTo(Math.cos(a) * r * 0.84, Math.sin(a) * r * 0.84);
-      ctx.stroke();
-    }
-
-    const frac = clamp(value / max, 0, 1);
-    const na = a0 + (a1 - a0) * frac;
-    ctx.strokeStyle = "#d8ff86";
-    ctx.shadowColor = "rgba(216,255,134,0.6)";
-    ctx.shadowBlur = 6;
-    ctx.lineWidth = 1.7;
-    ctx.beginPath();
-    ctx.moveTo(-Math.cos(na) * r * 0.15, -Math.sin(na) * r * 0.15);
-    ctx.lineTo(Math.cos(na) * r * 0.65, Math.sin(na) * r * 0.65);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "#0b0e0c";
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.12, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(210,230,200,0.4)";
-    ctx.stroke();
-
-    ctx.fillStyle = "rgba(196,218,187,0.64)";
-    ctx.font = `${Math.max(6.4, 7.2 * s)}px Silkscreen, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(label, 0, r * 0.34);
-    ctx.fillStyle = "rgba(169,255,178,0.56)";
-    ctx.fillText(unit, 0, r * 0.34 + 8 * s);
-
-    // Glass
-    const gl = ctx.createLinearGradient(-r, -r, r * 0.4, r);
-    gl.addColorStop(0, "rgba(230,255,230,0.10)");
-    gl.addColorStop(0.35, "rgba(230,255,230,0.01)");
-    gl.addColorStop(1, "rgba(230,255,230,0)");
-    ctx.fillStyle = gl;
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 3 * s, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function drawStandbyADI(cx, cy, r, L) {
-    const a = game.aircraft;
-    const s = L.s;
-    ctx.save();
-    ctx.translate(cx, cy);
-    // Instrument can and bezel.
-    const bg = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r);
-    bg.addColorStop(0, "#2a3029");
-    bg.addColorStop(0.7, "#0b0f0c");
-    bg.addColorStop(1, "#040604");
-    ctx.fillStyle = bg;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(195,210,190,0.22)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    const rr = r * 0.78;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, rr, 0, TAU);
-    ctx.clip();
-    // Sky/ground card, opposite the aircraft's bank and displaced by pitch.
-    ctx.save();
-    ctx.rotate(-a.bank * D2R);
-    const pitchPx = clamp(a.pitch, -55, 55) * (rr / 28);
-    ctx.translate(0, pitchPx);
-    ctx.fillStyle = "#34565d";
-    ctx.fillRect(-rr * 2, -rr * 3, rr * 4, rr * 3);
-    ctx.fillStyle = "#5a4a34";
-    ctx.fillRect(-rr * 2, 0, rr * 4, rr * 3);
-    ctx.strokeStyle = "rgba(225,240,220,0.86)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-rr * 1.8, 0);
-    ctx.lineTo(rr * 1.8, 0);
-    ctx.stroke();
-    // Sparse pitch bars.
-    ctx.strokeStyle = "rgba(230,240,220,0.36)";
-    ctx.lineWidth = 0.8;
-    for (let i = -2; i <= 2; i++) {
-      if (!i) continue;
-      const py = -i * (rr / 5.5);
-      ctx.beginPath();
-      ctx.moveTo(-rr * 0.26, py);
-      ctx.lineTo(rr * 0.26, py);
-      ctx.stroke();
-    }
-    ctx.restore();
-    // Fixed wing symbol.
-    ctx.strokeStyle = "#f0d06a";
-    ctx.lineWidth = 2.1 * s;
-    ctx.beginPath();
-    ctx.moveTo(-rr * 0.45, 0);
-    ctx.lineTo(-rr * 0.16, 0);
-    ctx.lineTo(-rr * 0.06, rr * 0.12);
-    ctx.lineTo(rr * 0.06, rr * 0.12);
-    ctx.lineTo(rr * 0.16, 0);
-    ctx.lineTo(rr * 0.45, 0);
-    ctx.stroke();
-    ctx.fillStyle = "#f0d06a";
-    ctx.beginPath();
-    ctx.arc(0, 0, 1.8 * s, 0, TAU);
-    ctx.fill();
-    // Bank pointer.
-    ctx.strokeStyle = "rgba(225,238,216,0.55)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, rr * 0.88, Math.PI * 1.16, Math.PI * 1.84);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.fillStyle = "rgba(185,208,178,0.58)";
-    ctx.font = `${Math.max(5.8, 6.4 * s)}px Silkscreen, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText("STBY ADI", 0, r * 0.34);
-    ctx.restore();
-  }
-
-  // --------------------------------------------------------------- canopy/panel
-  function drawCanopy(W, H, L) {
-    const s = L.s;
-    const side = W * 0.09;
-    const pY = L.panelY;
-    const lg = ctx.createLinearGradient(0, 0, side, 0);
-    lg.addColorStop(0, "#040605");
-    lg.addColorStop(0.55, "#101510");
-    lg.addColorStop(0.86, "#20261f");
-    lg.addColorStop(1, "#090c09");
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(side * 0.96, 0);
-    ctx.lineTo(side * 0.88, H * 0.15);
-    ctx.bezierCurveTo(side * 0.79, H * 0.28, side * 0.70, H * 0.45, side * 0.70, H * 0.55);
-    ctx.lineTo(side * 0.86, pY + H * 0.02);
-    ctx.lineTo(0, pY + H * 0.02);
-    ctx.closePath();
-    ctx.fillStyle = lg;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(187,208,179,0.12)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(side * 0.96, 0);
-    ctx.lineTo(side * 0.88, H * 0.15);
-    ctx.bezierCurveTo(side * 0.79, H * 0.28, side * 0.70, H * 0.45, side * 0.70, H * 0.55);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(W, 0);
-    ctx.lineTo(W - side * 0.96, 0);
-    ctx.lineTo(W - side * 0.88, H * 0.15);
-    ctx.bezierCurveTo(W - side * 0.79, H * 0.28, W - side * 0.70, H * 0.45, W - side * 0.70, H * 0.55);
-    ctx.lineTo(W - side * 0.86, pY + H * 0.02);
-    ctx.lineTo(W, pY + H * 0.02);
-    ctx.closePath();
-    const rg = ctx.createLinearGradient(W, 0, W - side, 0);
-    rg.addColorStop(0, "#040605");
-    rg.addColorStop(0.55, "#101510");
-    rg.addColorStop(0.86, "#20261f");
-    rg.addColorStop(1, "#090c09");
-    ctx.fillStyle = rg;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(187,208,179,0.12)";
-    ctx.beginPath();
-    ctx.moveTo(W - side * 0.96, 0);
-    ctx.lineTo(W - side * 0.88, H * 0.15);
-    ctx.bezierCurveTo(W - side * 0.79, H * 0.28, W - side * 0.70, H * 0.45, W - side * 0.70, H * 0.55);
-    ctx.stroke();
-
-    // Side-rail bolts and ribs
-    for (let i = 0; i < 5; i++) {
-      const y = H * (0.10 + i * 0.105);
-      const x = side * (0.83 - i * 0.018);
-      ctx.fillStyle = "rgba(145,160,140,0.22)";
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(1.5, H * 0.0025), 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(W - x, y, Math.max(1.5, H * 0.0025), 0, TAU);
-      ctx.fill();
-    }
-
-    // Canopy jettison handle on the right rail. The yellow/black stripes are a
-    // useful splash of warning color in the otherwise green cockpit.
-    const jx = W - side * 0.48;
-    const jy = H * 0.505;
-    ctx.save();
-    ctx.translate(jx, jy);
-    ctx.rotate(-0.055);
-    ctx.fillStyle = "#11150f";
-    ctx.strokeStyle = "rgba(190,205,180,0.24)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(-9 * s, -25 * s, 18 * s, 50 * s, 3 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.roundRect(-4.5 * s, -19 * s, 9 * s, 38 * s, 2.2 * s);
-    ctx.clip();
-    for (let i = -5; i < 6; i++) {
-      ctx.fillStyle = i % 2 === 0 ? "#d8b64a" : "#171a13";
-      ctx.fillRect(-5 * s, -21 * s + i * 4 * s, 10 * s, 4 * s);
-    }
-    ctx.restore();
-    ctx.save();
-    ctx.translate(jx, jy);
-    ctx.rotate(-0.055);
-    ctx.strokeStyle = "rgba(0,0,0,0.72)";
-    ctx.strokeRect(-4.5 * s, -19 * s, 9 * s, 38 * s);
-    ctx.restore();
-    ctx.fillStyle = "rgba(220,197,128,0.54)";
-    ctx.font = Math.max(4.7, 5.1 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.fillText("JETT", jx, jy - 28 * s);
-    ctx.strokeStyle = "rgba(219,196,120,0.13)";
-    ctx.setLineDash([3 * s, 4 * s]);
-    ctx.beginPath();
-    ctx.moveTo(W - side * 0.70, H * 0.15);
-    ctx.bezierCurveTo(W - side * 0.76, H * 0.28, W - side * 0.76, H * 0.45, W - side * 0.70, H * 0.55);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(side * 0.70, H * 0.15);
-    ctx.bezierCurveTo(side * 0.76, H * 0.28, side * 0.76, H * 0.45, side * 0.70, H * 0.55);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Canopy lock handle on the left rail.
-    const lx = side * 0.47;
-    const ly = H * 0.505;
-    ctx.save();
-    ctx.translate(lx, ly);
-    ctx.rotate(0.055);
-    ctx.fillStyle = "#11150f";
-    ctx.strokeStyle = "rgba(190,205,180,0.24)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(-8 * s, -20 * s, 16 * s, 40 * s, 3 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#20251a";
-    ctx.beginPath();
-    ctx.roundRect(-4 * s, -15 * s, 8 * s, 30 * s, 2 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(143,227,162,0.58)";
-    ctx.fillRect(-3 * s, -11 * s, 6 * s, 2 * s);
-    ctx.fillRect(-3 * s, 9 * s, 6 * s, 2 * s);
-    ctx.fillStyle = "rgba(169,255,178,0.38)";
-    ctx.font = Math.max(4.7, 5.1 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.fillText("LOCK", lx, ly - 23 * s);
-    ctx.restore();
-
-    // Thin overhead canopy rim
-    ctx.strokeStyle = "rgba(6,8,6,0.96)";
-    ctx.lineWidth = Math.max(3, H * 0.012);
-    ctx.beginPath();
-    ctx.moveTo(0, H * 0.033);
-    ctx.bezierCurveTo(W * 0.24, H * 0.017, W * 0.76, H * 0.017, W, H * 0.033);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(190,210,180,0.10)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, H * 0.041);
-    ctx.bezierCurveTo(W * 0.24, H * 0.025, W * 0.76, H * 0.025, W, H * 0.041);
-    ctx.stroke();
-
-    // Canopy bow and center latch. The F-16's one-piece bubble canopy has a
-    // prominent arch just ahead of the pilot, so give it a real silhouette.
-    const bowY = H * 0.058;
-    const bow = ctx.createLinearGradient(0, bowY - 9 * s, 0, bowY + 9 * s);
-    bow.addColorStop(0, "#070907");
-    bow.addColorStop(0.5, "#2a3028");
-    bow.addColorStop(1, "#060806");
-    ctx.strokeStyle = bow;
-    ctx.lineWidth = Math.max(6 * s, 8 * s);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(W * 0.235, bowY + 4 * s);
-    ctx.quadraticCurveTo(W * 0.5, bowY - 4 * s, W * 0.765, bowY + 4 * s);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(206,220,195,0.16)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(W * 0.235, bowY + 1 * s);
-    ctx.quadraticCurveTo(W * 0.5, bowY - 7 * s, W * 0.765, bowY + 1 * s);
-    ctx.stroke();
-    // Canopy unlock/latch handle.
-    ctx.fillStyle = "#11160f";
-    ctx.strokeStyle = "rgba(190,205,180,0.26)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(W * 0.5 - 17 * s, bowY - 3 * s, 34 * s, 8 * s, 2 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = HUD;
-    ctx.beginPath();
-    ctx.arc(W * 0.5 + 11 * s, bowY + 1 * s, 1.6 * s, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "rgba(169,255,178,0.34)";
-    ctx.font = Math.max(5.4, 5.8 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.fillText("CANOPY", W * 0.5, bowY - 7 * s);
-
-    // Canopy glass reflection bands
-    ctx.globalCompositeOperation = "screen";
-    const sheen = ctx.createLinearGradient(0, 0, W * 0.5, H * 0.7);
-    sheen.addColorStop(0, "rgba(205,230,215,0.065)");
-    sheen.addColorStop(0.16, "rgba(205,230,215,0.005)");
-    sheen.addColorStop(0.5, "rgba(205,230,215,0)");
-    ctx.fillStyle = sheen;
-    ctx.beginPath();
-    ctx.moveTo(0, H * 0.02);
-    ctx.lineTo(W * 0.28, H * 0.02);
-    ctx.lineTo(W * 0.13, H * 0.6);
-    ctx.lineTo(0, H * 0.56);
-    ctx.closePath();
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.restore();
-  }
-
-  function drawPanelBase(W, H, L) {
-    const s = L.s;
-    const pY = L.panelY;
-    const cx = L.cx;
-    ctx.save();
-
-    // Glare shield and dashboard lip
-    const glare = ctx.createLinearGradient(0, pY - H * 0.05, 0, pY + H * 0.03);
-    glare.addColorStop(0, "#060806");
-    glare.addColorStop(0.6, "#151a14");
-    glare.addColorStop(1, "#080a08");
-    ctx.beginPath();
-    ctx.moveTo(0, pY - H * 0.018);
-    ctx.bezierCurveTo(W * 0.26, pY - H * 0.048, W * 0.74, pY - H * 0.048, W, pY - H * 0.018);
-    ctx.lineTo(W, pY + H * 0.033);
-    ctx.lineTo(0, pY + H * 0.033);
-    ctx.closePath();
-    ctx.fillStyle = glare;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(190,205,178,0.11)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, pY - H * 0.018);
-    ctx.bezierCurveTo(W * 0.26, pY - H * 0.048, W * 0.74, pY - H * 0.048, W, pY - H * 0.018);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(192,205,177,0.10)";
-    ctx.setLineDash([3 * s, 3 * s]);
-    ctx.beginPath();
-    ctx.moveTo(W * 0.02, pY - H * 0.022);
-    ctx.bezierCurveTo(W * 0.27, pY - H * 0.054, W * 0.73, pY - H * 0.054, W * 0.98, pY - H * 0.022);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Main panel
-    const pg = ctx.createLinearGradient(0, pY, 0, H);
-    pg.addColorStop(0, "#181d17");
-    pg.addColorStop(0.35, "#111510");
-    pg.addColorStop(1, "#070907");
-    ctx.fillStyle = pg;
-    ctx.fillRect(0, pY + H * 0.018, W, H - pY);
-
-    // Side consoles
-    ctx.fillStyle = "rgba(7,10,7,0.86)";
-    ctx.beginPath();
-    ctx.moveTo(0, pY + H * 0.08);
-    ctx.lineTo(W * 0.19, pY + H * 0.08);
-    ctx.lineTo(W * 0.16, H);
-    ctx.lineTo(0, H);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(W, pY + H * 0.08);
-    ctx.lineTo(W * 0.81, pY + H * 0.08);
-    ctx.lineTo(W * 0.84, H);
-    ctx.lineTo(W, H);
-    ctx.closePath();
-    ctx.fill();
-
-    // Panel seams and rivets
-    ctx.strokeStyle = "rgba(160,180,155,0.07)";
-    for (let i = 1; i < 6; i++) {
-      ctx.beginPath();
-      ctx.moveTo((W * i) / 6, pY + H * 0.036);
-      ctx.lineTo((W * i) / 6 + (i < 3 ? -5 : 5), H);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(0,0,0,0.5)";
-    ctx.beginPath();
-    ctx.moveTo(0, pY + H * 0.13);
-    ctx.bezierCurveTo(W * 0.3, pY + H * 0.115, W * 0.7, pY + H * 0.115, W, pY + H * 0.13);
-    ctx.stroke();
-
-    for (let i = 0; i < 16; i++) {
-      const x = W * (0.13 + (i % 8) * 0.105);
-      const y = pY + H * (0.052 + Math.floor(i / 8) * 0.018);
-      ctx.fillStyle = "rgba(156,171,150,0.13)";
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(1.2, 1.5 * s), 0, TAU);
-      ctx.fill();
-    }
-
-    // Top center data strip
-    ctx.font = `${Math.max(6.2, 7.2 * s)}px Silkscreen, monospace`;
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(169,255,178,0.4)";
-    ctx.fillText("F-16C  //  FLCS NORM  //  MAIN BUS A", cx, pY + H * 0.013);
-
-    // Side console switch blocks
-    drawSwitchBlock(W * 0.115, pY + H * 0.190, W * 0.075, H * 0.085, ["IFF", "NAV", "TAC"], L);
-    drawSwitchBlock(W * 0.770, pY + H * 0.190, W * 0.065, H * 0.085, ["ECM", "FLIR", "ARM"], L);
-
-    // Outboard circuit-breaker strips. They sit in the shadow at the edges of
-    // the side consoles, clear of the pilot's forearms.
-    for (const side of [0, 1]) {
-      const bx = side ? W * 0.973 : W * 0.027;
-      const by = pY + H * 0.095;
-      const bh = H * 0.075;
-      ctx.fillStyle = "rgba(7,10,7,0.88)";
-      ctx.beginPath();
-      ctx.roundRect(bx - 8 * s, by - 7 * s, 16 * s, bh + 14 * s, 1.5 * s);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(150,168,145,0.14)";
-      ctx.stroke();
-      ctx.fillStyle = "rgba(169,255,178,0.28)";
-      ctx.font = Math.max(4.7, 5.1 * s) + "px Silkscreen, monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText("C/B", bx, by - 5.2 * s);
-      for (let i = 0; i < 6; i++) {
-        const cy = by + 3.5 * s + i * (bh - 4 * s) / 6;
-        ctx.fillStyle = "#070a07";
-        ctx.beginPath();
-        ctx.arc(bx, cy, 2.1 * s, 0, TAU);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(184,199,175,0.24)";
-        ctx.beginPath();
-        ctx.arc(bx, cy, 2.1 * s, 0, TAU);
-        ctx.stroke();
-        ctx.fillStyle = i % 3 === 1 ? "rgba(169,255,178,0.55)" : "rgba(187,199,177,0.42)";
-        ctx.fillRect(bx - 1.1 * s, cy - 0.7 * s, 2.2 * s, 1.4 * s);
-      }
-    }
-    ctx.restore();
-  }
-
-  function drawGlareShieldPanels(W, H, L) {
-    const m = game.mission;
-    const s = L.s;
-    if (!m) return;
-    const y = L.panelY - H * 0.034;
-    const h = H * 0.036;
-    const w = W * 0.07;
-    const panel = (x, title) => {
-      ctx.save();
-      const g = ctx.createLinearGradient(0, y, 0, y + h);
-      g.addColorStop(0, "#20261e");
-      g.addColorStop(0.45, "#101510");
-      g.addColorStop(1, "#070a07");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 2.2 * s);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(184,203,176,0.20)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(0,0,0,0.7)";
-      ctx.strokeRect(x + 2 * s, y + 2 * s, w - 4 * s, h - 4 * s);
-      ctx.fillStyle = "rgba(169,255,178,0.42)";
-      ctx.font = Math.max(4.8, 5.3 * s) + "px Silkscreen, monospace";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(title, x + 4 * s, y + 3 * s);
-      for (const sx of [x + 4 * s, x + w - 4 * s]) {
-        ctx.fillStyle = "rgba(190,205,180,0.24)";
-        ctx.beginPath();
-        ctx.arc(sx, y + h - 3 * s, 1.1 * s, 0, TAU);
-        ctx.fill();
-      }
-      ctx.restore();
-    };
-
-    const leftX = W * 0.17;
-    panel(leftX, "HUD CTL");
-    const knob = (x, cy, r, label) => {
-      ctx.save();
-      const rg = ctx.createRadialGradient(x - r * 0.35, cy - r * 0.35, r * 0.1, x, cy, r);
-      rg.addColorStop(0, "#3b4438");
-      rg.addColorStop(1, "#0a0d0a");
-      ctx.fillStyle = rg;
-      ctx.beginPath();
-      ctx.arc(x, cy, r, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(191,207,183,0.28)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.strokeStyle = HUD_DIM;
-      ctx.beginPath();
-      ctx.moveTo(x, cy);
-      ctx.lineTo(x + r * 0.62, cy - r * 0.38);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(169,255,178,0.34)";
-      ctx.font = Math.max(4.4, 4.8 * s) + "px Silkscreen, monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText(label, x, cy + r + 1 * s);
-      ctx.restore();
-    };
-    knob(leftX + w * 0.34, y + h * 0.54, Math.max(4.5, 5.4 * s), "BRT");
-    knob(leftX + w * 0.66, y + h * 0.54, Math.max(4.5, 5.4 * s), "SYM");
-    ctx.fillStyle = "rgba(169,255,178,0.42)";
-    ctx.fillRect(leftX + w * 0.82, y + h * 0.46, 5 * s, 2 * s);
-
-    const rightX = W * 0.76;
-    panel(rightX, "CLOCK");
-    ctx.fillStyle = "#07130b";
-    ctx.fillRect(rightX + w * 0.20, y + h * 0.36, w * 0.60, h * 0.38);
-    ctx.strokeStyle = "rgba(169,255,178,0.30)";
-    ctx.strokeRect(rightX + w * 0.20, y + h * 0.36, w * 0.60, h * 0.38);
-    ctx.fillStyle = HUD;
-    ctx.font = Math.max(7.2, 8.5 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(formatClock(14 * 3600 + 32 * 60 + m.elapsed), rightX + w * 0.50, y + h * 0.545);
-    ctx.fillStyle = "rgba(169,255,178,0.34)";
-    ctx.font = Math.max(4.3, 4.7 * s) + "px Silkscreen, monospace";
-    ctx.textBaseline = "top";
-    ctx.fillText("ZULU", rightX + w * 0.50, y + h * 0.78);
-  }
-
-  function drawSwitchBlock(x, y, w, h, labels, L) {
-    const s = L.s;
-    ctx.save();
-    // Recessed switch panel with a raised lip. Keeping these blocks inboard of
-    // the throttle and stick avoids the old overlap on the side consoles.
-    ctx.fillStyle = "rgba(7,10,7,0.82)";
-    ctx.beginPath();
-    ctx.roundRect(x - 4 * s, y - 5 * s, w + 8 * s, h + 10 * s, 2.5 * s);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(150,170,145,0.16)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    ctx.strokeRect(x - 2 * s, y - 3 * s, w + 4 * s, h + 6 * s);
-
-    const cellH = h / labels.length;
-    for (let i = 0; i < labels.length; i++) {
-      const cy = y + cellH * (i + 0.5);
-      ctx.fillStyle = "rgba(169,255,178,0.36)";
-      ctx.font = Math.max(6.2, 7 * s) + "px Silkscreen, monospace";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(labels[i], x + 2 * s, cy);
-      // Toggle switch base and bat handle.
-      const sx = x + w * 0.63;
-      const baseW = Math.max(7 * s, 8 * s);
-      const baseH = Math.max(10 * s, 11 * s);
-      ctx.fillStyle = "#1b211b";
-      ctx.strokeStyle = "rgba(190,205,180,0.23)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(sx - baseW / 2, cy - baseH / 2, baseW, baseH, 1.8 * s);
-      ctx.fill();
-      ctx.stroke();
-      const up = i % 2 === 0;
-      ctx.strokeStyle = up ? "rgba(169,255,178,0.7)" : "rgba(135,153,132,0.5)";
-      ctx.lineWidth = 1.6 * s;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(sx, cy + 2 * s);
-      ctx.lineTo(sx + (up ? -2.4 : 2.4) * s, cy - 4.5 * s);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(169,255,178,0.34)";
-      ctx.beginPath();
-      ctx.arc(x + w - 6 * s, cy, 1.5 * s, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  function drawThrottle(W, H, L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const x = W * 0.052;
-    const top = L.panelY + H * 0.045;
-    const bottom = L.panelY + H * 0.235;
-    const ty = lerp(bottom - 9 * s, top + 15 * s, a.throttle);
-    ctx.save();
-
-    // Recessed throttle quadrant with a real detent gate.
-    ctx.fillStyle = "rgba(3,6,3,0.78)";
-    ctx.beginPath();
-    ctx.roundRect(x - 10 * s, top - 6 * s, 20 * s, bottom - top + 12 * s, 3 * s);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(151,172,146,0.20)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(150,168,146,0.20)";
-    ctx.lineWidth = 2.4 * s;
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i <= 8; i++) {
-      const y = top + (bottom - top) * (i / 8);
-      const major = i === 0 || i === 4 || i === 8;
-      ctx.beginPath();
-      ctx.moveTo(x - (major ? 7 : 4) * s, y);
-      ctx.lineTo(x + (major ? 7 : 4) * s, y);
-      ctx.stroke();
-    }
-    ctx.fillStyle = "rgba(169,255,178,0.30)";
-    ctx.font = Math.max(4.8, 5.4 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText("IDLE", x + 13 * s, bottom);
-    ctx.fillText("MIL", x + 13 * s, top + (bottom - top) * 0.16);
-    ctx.fillStyle = "rgba(255,192,91,0.56)";
-    ctx.fillText("AB", x + 13 * s, top + 3 * s);
-
-    // Throttle arm and grip. The hand is drawn over it later, leaving the
-    // finger-lift, COMM switch and afterburner light readable.
-    ctx.strokeStyle = "rgba(0,0,0,0.88)";
-    ctx.lineWidth = 4.2 * s;
-    ctx.beginPath();
-    ctx.moveTo(x - 1 * s, bottom + 2 * s);
-    ctx.lineTo(x, ty + 14 * s);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(140,157,134,0.28)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x - 2.2 * s, bottom + 2 * s);
-    ctx.lineTo(x - 1.2 * s, ty + 14 * s);
-    ctx.stroke();
-
-    ctx.translate(x, ty);
-    ctx.rotate(-0.055);
-    const gg = ctx.createLinearGradient(-13 * s, -20 * s, 13 * s, 18 * s);
-    gg.addColorStop(0, "#42493a");
-    gg.addColorStop(0.45, "#20251d");
-    gg.addColorStop(1, "#090c09");
-    ctx.fillStyle = gg;
-    ctx.strokeStyle = "rgba(190,207,180,0.28)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-10 * s, 15 * s);
-    ctx.lineTo(-12 * s, -10 * s);
-    ctx.quadraticCurveTo(-11 * s, -19 * s, -2 * s, -20 * s);
-    ctx.quadraticCurveTo(9 * s, -19 * s, 11 * s, -9 * s);
-    ctx.lineTo(12 * s, 12 * s);
-    ctx.quadraticCurveTo(10 * s, 18 * s, 2 * s, 18 * s);
-    ctx.quadraticCurveTo(-8 * s, 18 * s, -10 * s, 15 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Finger lift on the left side of the grip.
-    ctx.strokeStyle = "rgba(0,0,0,0.9)";
-    ctx.lineWidth = 4 * s;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-10 * s, 10 * s);
-    ctx.quadraticCurveTo(-18 * s, 8 * s, -16 * s, -2 * s);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(177,190,164,0.28)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // Top switches: COMM, DMS and the pinky paddle.
-    ctx.fillStyle = "#0b0f0b";
-    ctx.strokeStyle = "rgba(190,205,180,0.26)";
-    ctx.beginPath();
-    ctx.roundRect(-6 * s, -16 * s, 12 * s, 5 * s, 1.5 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(169,255,178,0.56)";
-    ctx.fillRect(-4 * s, -14.5 * s, 8 * s, 1 * s);
-    ctx.fillStyle = "#151a14";
-    ctx.beginPath();
-    ctx.roundRect(-7 * s, -7 * s, 9 * s, 6 * s, 1.4 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.roundRect(2 * s, -7 * s, 7 * s, 6 * s, 1.4 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = a.ab ? AMBER : "rgba(169,255,178,0.55)";
-    ctx.beginPath();
-    ctx.arc(6 * s, 8 * s, 1.8 * s, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.7)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(-7 * s, 2 * s + i * 4 * s);
-      ctx.lineTo(7 * s, 2 * s + i * 4 * s);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-    ctx.fillStyle = "rgba(169,255,178,0.45)";
-    ctx.font = Math.max(6, 6.8 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("THR", x, bottom + 12 * s);
-    ctx.fillStyle = a.ab ? AMBER : "rgba(169,255,178,0.58)";
-    ctx.fillText(`${pad(a.throttle * 100, 3)}${a.ab ? " AB" : "%"}`, x, bottom + 22 * s);
-    return { x, y: ty, angle: -0.055, throttle: a.throttle };
-  }
-
-  function drawStick(W, H, L) {
-    const s = L.s;
-    const x = W * 0.948;
-    const y = L.panelY + H * 0.155;
-    const roll = game.hands.roll;
-    const pitch = game.hands.pitch;
-    const gx = x - 10 * s + roll * 10 * s;
-    const gy = y + pitch * 9 * s;
-    ctx.save();
-
-    // Sidestick shaft and its rubber boot at the console.
-    ctx.strokeStyle = "rgba(0,0,0,0.90)";
-    ctx.lineWidth = 7 * s;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(x - 3 * s, H + 14 * s);
-    ctx.quadraticCurveTo(x - 8 * s, y + 62 * s, gx, gy + 27 * s);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(120,137,117,0.25)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    ctx.fillStyle = "#111610";
-    ctx.strokeStyle = "rgba(174,191,165,0.18)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x - 13 * s, y + 63 * s);
-    ctx.quadraticCurveTo(x - 2 * s, y + 43 * s, x + 10 * s, y + 63 * s);
-    ctx.lineTo(x + 16 * s, y + 83 * s);
-    ctx.lineTo(x - 19 * s, y + 83 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    for (let i = 0; i < 3; i++) {
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.beginPath();
-      ctx.moveTo(x - 14 * s, y + (69 + i * 4) * s);
-      ctx.quadraticCurveTo(x - 2 * s, y + (54 + i * 4) * s, x + 11 * s, y + (69 + i * 4) * s);
-      ctx.stroke();
-    }
-
-    ctx.translate(gx, gy);
-    ctx.rotate(-0.055 + roll * 0.14);
-    const sg = ctx.createLinearGradient(-13 * s, -21 * s, 13 * s, 20 * s);
-    sg.addColorStop(0, "#394034");
-    sg.addColorStop(0.42, "#1b2018");
-    sg.addColorStop(1, "#080b08");
-    ctx.fillStyle = sg;
-    ctx.strokeStyle = "rgba(190,205,180,0.28)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-10 * s, 20 * s);
-    ctx.lineTo(-12 * s, -11 * s);
-    ctx.quadraticCurveTo(-11 * s, -21 * s, -2 * s, -22 * s);
-    ctx.quadraticCurveTo(9 * s, -21 * s, 11 * s, -11 * s);
-    ctx.lineTo(12 * s, 19 * s);
-    ctx.quadraticCurveTo(8 * s, 23 * s, 1 * s, 23 * s);
-    ctx.quadraticCurveTo(-7 * s, 23 * s, -10 * s, 20 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Trim hat, pickle button, trigger and pinky paddle.
-    ctx.fillStyle = "#0a0e0a";
-    ctx.strokeStyle = "rgba(190,205,180,0.26)";
-    ctx.beginPath();
-    ctx.arc(0, -15 * s, 3.8 * s, 0, TAU);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(169,255,178,0.45)";
-    ctx.fillRect(-2 * s, -18 * s, 4 * s, 1 * s);
-    ctx.fillRect(-0.5 * s, -19.5 * s, 1 * s, 4 * s);
-    ctx.fillStyle = RED;
-    ctx.beginPath();
-    ctx.arc(4.5 * s, -8 * s, 2.4 * s, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "#111610";
-    ctx.strokeStyle = "rgba(190,205,180,0.22)";
-    ctx.beginPath();
-    ctx.roundRect(-13 * s, -4 * s, 5 * s, 14 * s, 2 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,109,95,0.82)";
-    ctx.beginPath();
-    ctx.moveTo(-9 * s, -1 * s);
-    ctx.lineTo(-13 * s, -4 * s);
-    ctx.lineTo(-13 * s, 2 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "#0b0f0b";
-    ctx.beginPath();
-    ctx.roundRect(-7 * s, 10 * s, 14 * s, 4 * s, 1.2 * s);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(169,255,178,0.25)";
-    ctx.stroke();
-    ctx.fillStyle = "rgba(169,255,178,0.36)";
-    ctx.font = Math.max(5.4, 5.9 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("FLCS", 0, 31 * s);
-    ctx.restore();
-    return { x: gx, y: gy, angle: -0.055 + roll * 0.14, roll, pitch };
-  }
-
-  function drawPilotArm(ax, ay, bx, by, cx, cy, w0, w1, L, watch) {
-    const s = L.s;
-    const n = 18;
-    const samples = [];
-    const left = [];
-    const right = [];
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      const x = (1 - t) * (1 - t) * ax + 2 * (1 - t) * t * cx + t * t * bx;
-      const y = (1 - t) * (1 - t) * ay + 2 * (1 - t) * t * cy + t * t * by;
-      const dx = 2 * (1 - t) * (cx - ax) + 2 * t * (bx - cx);
-      const dy = 2 * (1 - t) * (cy - ay) + 2 * t * (by - cy);
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len;
-      const ny = dx / len;
-      const hw = (lerp(w0, w1, t) + Math.sin(Math.PI * t) * 4.5 * s) / 2;
-      const p = { x, y, nx, ny, hw, t, dx, dy };
-      samples.push(p);
-      left.push([x + nx * hw, y + ny * hw]);
-      right.push([x - nx * hw, y - ny * hw]);
-    }
-
-    ctx.save();
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(left[0][0], left[0][1]);
-    for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
-    for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
-    ctx.closePath();
-    ctx.save();
-    ctx.translate(2.2 * s, 3.2 * s);
-    ctx.fillStyle = "rgba(0,0,0,0.27)";
-    ctx.fill();
-    ctx.restore();
-    const sleeve = ctx.createLinearGradient(bx, by, ax, ay);
-    sleeve.addColorStop(0, "#5c6243");
-    sleeve.addColorStop(0.46, "#42472e");
-    sleeve.addColorStop(1, "#252a1a");
-    ctx.fillStyle = sleeve;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(17,20,12,0.78)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // Give the sleeve a shaded underside rather than reading as a flat tube.
-    ctx.beginPath();
-    for (let i = 0; i <= n; i++) {
-      const p = samples[i];
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-    for (let i = n; i >= 0; i--) {
-      const p = samples[i];
-      ctx.lineTo(p.x - p.nx * p.hw, p.y - p.ny * p.hw);
-    }
-    ctx.closePath();
-    ctx.fillStyle = "rgba(12,15,9,0.20)";
-    ctx.fill();
-
-    // Flyer's sleeve seam and a few fabric folds.
-    ctx.strokeStyle = "rgba(26,30,18,0.42)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i <= n; i++) {
-      const p = samples[i];
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-    for (const t of [0.35, 0.57, 0.78]) {
-      const p = samples[Math.round(t * n)];
-      const hw = p.hw * 0.78;
-      ctx.strokeStyle = "rgba(28,32,20,0.36)";
-      ctx.beginPath();
-      ctx.moveTo(p.x + p.nx * hw, p.y + p.ny * hw);
-      ctx.quadraticCurveTo(p.x + p.dx * 0.06, p.y + p.dy * 0.06 + 2 * s, p.x - p.nx * hw, p.y - p.ny * hw);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(163,172,122,0.10)";
-      ctx.beginPath();
-      ctx.moveTo(p.x + p.nx * hw, p.y + p.ny * hw - 1.5 * s);
-      ctx.quadraticCurveTo(p.x + p.dx * 0.06, p.y + p.dy * 0.06 + 0.5 * s, p.x - p.nx * hw, p.y - p.ny * hw - 1.5 * s);
-      ctx.stroke();
-    }
-
-    // Left sleeve pen pocket and right subdued velcro patch. These small
-    // uniform details keep the forearms from reading as plain tubes.
-    const patch = samples[Math.round(0.52 * n)];
-    ctx.save();
-    ctx.translate(patch.x, patch.y);
-    ctx.rotate(Math.atan2(patch.dy, patch.dx));
-    if (watch) {
-      ctx.fillStyle = "#343a25";
-      ctx.strokeStyle = "rgba(189,198,164,0.20)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(-8 * s, -patch.hw * 0.54, 16 * s, patch.hw * 1.08, 1.7 * s);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#2a2f1e";
-      ctx.beginPath();
-      ctx.roundRect(-8 * s, -patch.hw * 0.54, 16 * s, 4.4 * s, 1.6 * s);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(196,203,170,0.16)";
-      ctx.setLineDash([1.8 * s, 1.8 * s]);
-      ctx.strokeRect(-6.8 * s, -patch.hw * 0.44, 13.6 * s, patch.hw * 0.9);
-      ctx.setLineDash([]);
-      for (let i = 0; i < 2; i++) {
-        ctx.fillStyle = i ? "#91977c" : "#b0b596";
-        ctx.fillRect(-4.5 * s, (-1.6 + i * 3.4) * s, 9 * s, 1.2 * s);
-        ctx.fillStyle = "rgba(30,34,22,0.8)";
-        ctx.fillRect(3.2 * s, (-1.6 + i * 3.4) * s, 2.2 * s, 1.2 * s);
-      }
-    } else {
-      ctx.fillStyle = "#3b412c";
-      ctx.strokeStyle = "rgba(189,198,164,0.18)";
-      ctx.beginPath();
-      ctx.roundRect(-5.5 * s, -patch.hw * 0.40, 11 * s, patch.hw * 0.80, 1.4 * s);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "rgba(173,183,148,0.30)";
-      for (let i = 0; i < 3; i++) {
-        ctx.fillRect(-4.2 * s, (-2.2 + i * 2.2) * s, 8.4 * s, 0.9 * s);
-      }
-      ctx.fillStyle = "rgba(170,180,145,0.22)";
-      ctx.fillRect(-4.2 * s, -2.2 * s, 3.6 * s, 2.6 * s);
-    }
-    ctx.restore();
-
-    // Ribbed glove cuff where the sleeve meets the hand.
-    const wrist = samples[n];
-    const ang = Math.atan2(wrist.dy, wrist.dx);
-    ctx.save();
-    ctx.translate(wrist.x, wrist.y);
-    ctx.rotate(ang);
-    ctx.fillStyle = "#22271a";
-    ctx.beginPath();
-    ctx.roundRect(-4 * s, -w1 / 2 - 2 * s, 8 * s, w1 + 4 * s, 2.5 * s);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(177,190,158,0.20)";
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(8,10,7,0.75)";
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(-2.7 * s, -w1 / 2 + (i + 0.5) * (w1 / 3));
-      ctx.lineTo(2.7 * s, -w1 / 2 + (i + 0.5) * (w1 / 3));
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  function drawGlove(x, y, angle, s, dir, watch) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-
-    // Contact shadow under the hand.
-    ctx.fillStyle = "rgba(0,0,0,0.42)";
-    ctx.beginPath();
-    ctx.ellipse(0, 20 * s, 16 * s, 5 * s, -0.08, 0, TAU);
-    ctx.fill();
-
-    // Gauntlet cuff and its closure strap. This sits behind the glove.
-    ctx.fillStyle = "#272c1b";
-    ctx.strokeStyle = "rgba(170,185,151,0.22)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(-14.5 * s, 13.5 * s, 29 * s, 15 * s, 3.2 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(12,15,9,0.62)";
-    for (let i = 0; i < 4; i++) {
-      ctx.beginPath();
-      ctx.moveTo(-12.5 * s, 16.5 * s + i * 2.7 * s);
-      ctx.lineTo(12.5 * s, 16.5 * s + i * 2.7 * s);
-      ctx.stroke();
-    }
-
-    // Fingertips curl around the far side of the grip. Drawing them before the
-    // back of the hand leaves just the gloved knuckle lobes visible.
-    const fingerW = [9.6, 9.9, 9.1, 7.8];
-    const fingerH = [8.4, 8.7, 8.2, 7.4];
-    for (let i = 0; i < 4; i++) {
-      const fw = fingerW[i] * s;
-      const fh = fingerH[i] * s;
-      ctx.save();
-      ctx.translate(dir * (14.9 + i * 0.14) * s, (-8.6 + i * 6.6) * s);
-      ctx.rotate(dir * (0.15 + i * 0.035));
-      const fg = ctx.createLinearGradient(-fw * 0.45, -fh * 0.45, fw * 0.45, fh * 0.45);
-      fg.addColorStop(0, "#858b66");
-      fg.addColorStop(1, "#50563a");
-      ctx.fillStyle = fg;
-      ctx.strokeStyle = "rgba(18,22,13,0.80)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(-fw / 2, -fh / 2, fw, fh, fw * 0.38);
-      ctx.fill();
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(36,41,24,0.42)";
-      ctx.beginPath();
-      ctx.moveTo(-fw * 0.28, 0.1 * s);
-      ctx.lineTo(fw * 0.28, 0.1 * s);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(201,209,164,0.15)";
-      ctx.beginPath();
-      ctx.ellipse(-fw * 0.12, -fh * 0.25, fw * 0.22, fh * 0.14, -0.2, 0, TAU);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Thumb base and tip are drawn behind the palm so they grow naturally out
-    // of the hand instead of looking like an attached capsule.
-    ctx.save();
-    ctx.translate(-dir * 12.9 * s, -8.8 * s);
-    ctx.rotate(-dir * 0.64);
-    const tg = ctx.createLinearGradient(-4 * s, -12 * s, 4 * s, 8 * s);
-    tg.addColorStop(0, "#878d67");
-    tg.addColorStop(1, "#555b3d");
-    ctx.fillStyle = tg;
-    ctx.strokeStyle = "rgba(18,22,13,0.74)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-4.8 * s, 6 * s);
-    ctx.quadraticCurveTo(-7.2 * s, -4 * s, -4.2 * s, -11 * s);
-    ctx.quadraticCurveTo(-2 * s, -15 * s, 2.4 * s, -12 * s);
-    ctx.quadraticCurveTo(6 * s, -6 * s, 4.6 * s, 6 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(62,69,45,0.82)";
-    ctx.beginPath();
-    ctx.ellipse(0, -9.4 * s, 2.4 * s, 3.3 * s, -0.05, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(188,196,151,0.14)";
-    ctx.beginPath();
-    ctx.moveTo(-1.8 * s, -1 * s);
-    ctx.quadraticCurveTo(0, 2 * s, 2.6 * s, -1 * s);
-    ctx.stroke();
-    ctx.restore();
-
-    // Back of the Nomex glove: broader at the knuckles, tapered at the wrist.
-    const glove = ctx.createLinearGradient(-12 * s, -20 * s, 13 * s, 19 * s);
-    glove.addColorStop(0, "#8e946d");
-    glove.addColorStop(0.42, "#737954");
-    glove.addColorStop(1, "#454b32");
-    ctx.fillStyle = glove;
-    ctx.strokeStyle = "rgba(18,22,13,0.86)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-11.5 * s, 18 * s);
-    ctx.quadraticCurveTo(-15.5 * s, 7 * s, -15 * s, -5 * s);
-    ctx.quadraticCurveTo(-13.5 * s, -17 * s, -3 * s, -22 * s);
-    ctx.quadraticCurveTo(8 * s, -22 * s, 14.5 * s, -12 * s);
-    ctx.lineTo(14 * s, 17 * s);
-    ctx.quadraticCurveTo(8 * s, 23 * s, 0 * s, 23 * s);
-    ctx.quadraticCurveTo(-7 * s, 23 * s, -11.5 * s, 18 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Palm heel, wrist crease and glove seams.
-    ctx.fillStyle = "rgba(38,43,28,0.34)";
-    ctx.beginPath();
-    ctx.ellipse(-2 * s, 15 * s, 9.5 * s, 5 * s, 0, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(25,30,18,0.55)";
-    ctx.beginPath();
-    ctx.moveTo(-8 * s, 9 * s);
-    ctx.quadraticCurveTo(0, 12 * s, 8.5 * s, 9 * s);
-    ctx.stroke();
-
-    // Knuckle guard with four raised ridges.
-    ctx.fillStyle = "#484e35";
-    ctx.strokeStyle = "rgba(24,28,17,0.76)";
-    ctx.beginPath();
-    ctx.roundRect(-9.5 * s, -15.5 * s, 19 * s, 10.5 * s, 2.8 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(163,173,122,0.18)";
-    ctx.beginPath();
-    ctx.roundRect(-8.4 * s, -14.4 * s, 16.8 * s, 8.3 * s, 2.2 * s);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(27,31,19,0.52)";
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(-6.8 * s, (-13.2 + i * 2.7) * s);
-      ctx.quadraticCurveTo(0, (-14.3 + i * 2.7) * s, 6.8 * s, (-13.2 + i * 2.7) * s);
-      ctx.stroke();
-    }
-    for (let i = 0; i < 4; i++) {
-      ctx.strokeStyle = "rgba(179,188,143,0.12)";
-      ctx.beginPath();
-      ctx.moveTo((-8 + i * 5.2) * s, -17 * s);
-      ctx.quadraticCurveTo((-6.8 + i * 5.2) * s, -20 * s, (-5.6 + i * 5.2) * s, -21 * s);
-      ctx.stroke();
-    }
-
-    // Stitched seam down the back of the hand.
-    ctx.strokeStyle = "rgba(35,40,24,0.46)";
-    ctx.setLineDash([2.2 * s, 2.4 * s]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-1 * s, -1.5 * s);
-    ctx.quadraticCurveTo(1.8 * s, 8 * s, 0, 15 * s);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Glove closure tab and small buckle.
-    ctx.fillStyle = "#333923";
-    ctx.strokeStyle = "rgba(170,184,148,0.20)";
-    ctx.beginPath();
-    ctx.roundRect(-2 * s, 17 * s, 12 * s, 7 * s, 1.8 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(183,191,158,0.35)";
-    ctx.fillRect(6.5 * s, 18.5 * s, 1.8 * s, 4 * s);
-
-    // Wristwatch on the free hand.
-    if (watch) {
-      ctx.fillStyle = "#12160f";
-      ctx.strokeStyle = "rgba(173,187,151,0.24)";
-      ctx.beginPath();
-      ctx.roundRect(-10.5 * s, 10.5 * s, 11.5 * s, 8 * s, 1.6 * s);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "rgba(143,227,162,0.78)";
-      ctx.fillRect(-9.2 * s, 12.5 * s, 6.8 * s, 1.1 * s);
-      ctx.fillRect(-9.2 * s, 15 * s, 4.2 * s, 1.1 * s);
-      ctx.fillStyle = "rgba(177,190,151,0.20)";
-      ctx.fillRect(-10.7 * s, 9.8 * s, 12 * s, 1.2 * s);
-    }
-
-    ctx.restore();
-  }
-
-  function drawPilotHands(W, H, L, throttlePose, stickPose) {
-    const s = L.s;
-    const breathe = Math.sin(game.time * 1.75) * 0.45 * s;
-    const lx = throttlePose.x + 1.5 * s;
-    const ly = throttlePose.y + 6.5 * s + breathe;
-    const rx = stickPose.x + 1.5 * s;
-    const ry = stickPose.y + 6.5 * s + breathe;
-    const leftAngle = -0.09 + (throttlePose.throttle - 0.5) * 0.10;
-    const rightAngle = stickPose.angle * 0.72 + stickPose.pitch * 0.05;
-    const lw = { x: lx, y: ly + 24 * s };
-    const rw = { x: rx, y: ry + 24 * s };
-
-    drawPilotArm(W * 0.145, H + 18 * s, lw.x, lw.y, W * 0.100, H * 0.90, 38 * s, 27 * s, L, true);
-    drawPilotArm(W * 0.855, H + 18 * s, rw.x, rw.y, W * 0.900, H * 0.90, 38 * s, 27 * s, L, false);
-    drawGlove(lx, ly, leftAngle, s, 1, true);
-    drawGlove(rx, ry, rightAngle, s, -1, false);
-  }
-
-  function drawCenterConsole(L) {
-    const a = game.aircraft;
-    const m = game.mission;
-    const s = L.s;
-    const x = L.centerX;
-    const w = L.centerW;
-    const top = L.mfdY;
-    const totalH = L.mfdH;
-    const px = 10 * s;
-
-    ctx.save();
-    // Central instrument-panel plate. The DED and ICP are mounted together in
-    // the real jet; keeping them in one column reads more like an F-16 panel
-    // than the old pair of floating MFDs did.
-    const plateX = x - px;
-    const plateY = top - 12 * s;
-    const plateW = w + px * 2;
-    const plateH = totalH + 17 * s;
-    const plate = ctx.createLinearGradient(0, plateY, 0, plateY + plateH);
-    plate.addColorStop(0, "#1b211a");
-    plate.addColorStop(0.14, "#0c110c");
-    plate.addColorStop(1, "#060806");
-    ctx.fillStyle = plate;
-    ctx.fillRect(plateX, plateY, plateW, plateH);
-    ctx.strokeStyle = "rgba(190,206,181,0.18)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(plateX + 0.5, plateY + 0.5, plateW - 1, plateH - 1);
-    ctx.fillStyle = "rgba(3,5,3,0.86)";
-    ctx.fillRect(plateX + 2.5, plateY + 2.5, plateW - 5, plateH - 5);
-    for (const [sx, sy] of [[plateX + 5, plateY + 5], [plateX + plateW - 5, plateY + 5], [plateX + 5, plateY + plateH - 5], [plateX + plateW - 5, plateY + plateH - 5]]) {
-      ctx.fillStyle = "rgba(181,196,174,0.28)";
-      ctx.beginPath();
-      ctx.arc(sx, sy, 1.7 * s, 0, TAU);
-      ctx.fill();
-    }
-
-    // Data Entry Display (DED).
-    const dedX = x + 9 * s;
-    const dedY = top + 8 * s;
-    const dedW = w - 18 * s;
-    const dedH = Math.max(16 * s, L.dedH - 12 * s);
-    ctx.fillStyle = "#070d08";
-    ctx.fillRect(dedX - 3 * s, dedY - 3 * s, dedW + 6 * s, dedH + 6 * s);
-    ctx.strokeStyle = "rgba(174,224,163,0.26)";
-    ctx.strokeRect(dedX - 2.5 * s, dedY - 2.5 * s, dedW + 5 * s, dedH + 5 * s);
-    const glass = ctx.createLinearGradient(0, dedY, 0, dedY + dedH);
-    glass.addColorStop(0, "#07130b");
-    glass.addColorStop(0.5, "#041008");
-    glass.addColorStop(1, "#020804");
-    ctx.fillStyle = glass;
-    ctx.fillRect(dedX, dedY, dedW, dedH);
-    for (let sy = dedY + 1; sy < dedY + dedH; sy += 2) {
-      ctx.fillStyle = "rgba(81,177,108,0.055)";
-      ctx.fillRect(dedX, sy, dedW, 1);
-    }
-    const dedLines = [
-      `GATE ${pad(m.gateIndex + 1, 2)}/${pad(m.gates.length, 2)}  ${formatTime(m.timeLeft)}`,
-      `SPD ${pad(kt(a.speed), 3)}KT  ALT ${pad(ft(a.pos[1]), 5)}FT`,
-      `M${a.mach.toFixed(2)}  G${a.gSmooth.toFixed(1)}  AOA${a.alphaDeg.toFixed(1)}`,
-    ];
-    const dedFs = clamp(dedW * 0.036, 5.0, 7.4);
-    ctx.font = `${dedFs}px Silkscreen, monospace`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = HUD;
-    for (let i = 0; i < dedLines.length; i++) {
-      ctx.fillText(dedLines[i], dedX + 3 * s, dedY + 2 * s + i * (dedH / 3));
-    }
-    ctx.fillStyle = "rgba(169,255,178,0.34)";
-    ctx.font = `${Math.max(4.8, 5.2 * s)}px Silkscreen, monospace`;
-    ctx.textAlign = "right";
-    ctx.fillText("DED", dedX + dedW - 3 * s, dedY - 1 * s);
-
-    // Integrated Control Panel (ICP) keypad.
-    const keyAreaY = L.icpY;
-    const keyAreaH = L.icpH;
-    const gap = 2 * s;
-    const cols = 5;
-    const rows = 4;
-    const keyW = (w - 18 * s - gap * (cols - 1)) / cols;
-    const keyH = (keyAreaH - gap * (rows - 1)) / rows;
-    const labels = [
-      ["1", "2", "3", "4", "5"],
-      ["6", "7", "8", "9", "0"],
-      ["CLR", "RCL", "ENT", "UP", "DN"],
-      ["FLCS", "NAV", "COMM", "IFF", "TEST"],
-    ];
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const kx = x + 9 * s + c * (keyW + gap);
-        const ky = keyAreaY + r * (keyH + gap);
-        const hot = labels[r][c] === "ENT" || labels[r][c] === "FLCS";
-        ctx.fillStyle = hot ? "#17251a" : "#0d120d";
-        ctx.beginPath();
-        ctx.roundRect(kx, ky, keyW, keyH, 1.7 * s);
-        ctx.fill();
-        ctx.strokeStyle = hot ? "rgba(169,255,178,0.34)" : "rgba(151,170,145,0.17)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = hot ? HUD : "rgba(169,255,178,0.46)";
-        const fs = clamp(keyW * 0.30, 4.8, 7.2);
-        ctx.font = `${fs}px Silkscreen, monospace`;
-        ctx.fillText(labels[r][c], kx + keyW / 2, ky + keyH / 2 + 0.5 * s);
-      }
-    }
-    ctx.restore();
-  }
-
-  function drawCautionPanel(W, H, L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const x = L.cx - L.cautionW / 2;
-    const y = L.cautionY;
-    const w = L.cautionW;
-    const h = L.cautionH;
-    const lights = [
-      { label: "ENG FIRE", on: false, color: RED },
-      { label: "HYD", on: true, color: "#8fff9d" },
-      { label: "FLCS", on: true, color: "#8fff9d" },
-      { label: "FUEL", on: a.fuel < 500, color: AMBER },
-      { label: "BINGO", on: a.fuel < 700, color: AMBER },
-      { label: "STALL", on: a.stall > 0.08, color: RED },
-      { label: "G LIMIT", on: a.gSmooth > 9, color: RED },
-      { label: "CANOPY", on: true, color: "#8fff9d" },
-      { label: "SEC", on: a.brake > 0.1, color: AMBER },
-      { label: "PROBE", on: true, color: "#8fff9d" },
-      { label: "IFF", on: true, color: "#8fff9d" },
-      { label: "OXY", on: true, color: "#8fff9d" },
-    ];
-    ctx.save();
-    ctx.fillStyle = "rgba(4,6,4,0.88)";
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = "rgba(169,255,178,0.14)";
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    ctx.strokeStyle = "rgba(0,0,0,0.72)";
-    ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5);
-    ctx.fillStyle = "rgba(169,255,178,0.27)";
-    ctx.font = `${Math.max(5.2, 5.8 * s)}px Silkscreen, monospace`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText("CAUTION / ADVISORY", x + 4 * s, y - 3 * s);
-    ctx.textAlign = "right";
-    ctx.fillText("MASTER CAUTION  //  OFF", x + w - 4 * s, y - 3 * s);
-
-    const cols = 4;
-    const rows = 3;
-    const cellW = w / cols;
-    const cellH = h / rows;
-    ctx.textBaseline = "middle";
-    for (let i = 0; i < lights.length; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const lx = x + col * cellW;
-      const ly = y + row * cellH;
-      const light = lights[i];
-      ctx.strokeStyle = "rgba(140,160,136,0.09)";
-      ctx.strokeRect(lx + 0.5, ly + 0.5, cellW - 1, cellH - 1);
-      const ledX = lx + 7 * s;
-      const ledY = ly + cellH * 0.30;
-      const ledW = Math.max(8 * s, 12 * s);
-      const ledH = Math.max(2.6 * s, 3.4 * s);
-      ctx.fillStyle = light.on ? light.color : "rgba(55,64,53,0.42)";
-      ctx.fillRect(ledX, ledY, ledW, ledH);
-      ctx.strokeStyle = "rgba(0,0,0,0.55)";
-      ctx.strokeRect(ledX + 0.5, ledY + 0.5, ledW - 1, ledH - 1);
-      ctx.fillStyle = light.on && (light.color === AMBER || light.color === RED)
-        ? "rgba(240,245,230,0.92)"
-        : "rgba(169,255,178,0.43)";
-      ctx.font = `${Math.max(5.2, 5.9 * s)}px Silkscreen, monospace`;
-      ctx.textAlign = "left";
-      ctx.fillText(light.label, ledX + ledW + 5 * s, ly + cellH * 0.57);
-    }
-    ctx.restore();
-  }
-
-  // ---------------------------------------------------------------- HUD frame
-  function drawHUDFrame(W, H, L) {
-    const s = L.s;
-    const l = L.hudL, r = L.hudR, top = L.hudTop, bottom = L.hudBottom;
-    const post = Math.max(5, 7 * s);
-    ctx.save();
-
-    // Glass tint
-    const glass = ctx.createLinearGradient(0, top, 0, bottom);
-    glass.addColorStop(0, "rgba(72,132,92,0.055)");
-    glass.addColorStop(0.45, "rgba(72,132,92,0.012)");
-    glass.addColorStop(1, "rgba(72,132,92,0.03)");
-    ctx.fillStyle = glass;
-    ctx.fillRect(l, top, r - l, bottom - top);
-
-    // Side frame posts
-    const postGradient = ctx.createLinearGradient(l - post, 0, l + post, 0);
-    postGradient.addColorStop(0, "#030403");
-    postGradient.addColorStop(0.5, "#252a23");
-    postGradient.addColorStop(1, "#080a08");
-    ctx.fillStyle = postGradient;
-    ctx.fillRect(l - post, top - post * 0.5, post, bottom - top + post);
-    ctx.fillRect(r, top - post * 0.5, post, bottom - top + post);
-    ctx.strokeStyle = "rgba(198,210,190,0.18)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(l - post + 0.5, top - post * 0.5 + 0.5, post - 1, bottom - top + post - 1);
-    ctx.strokeRect(r + 0.5, top - post * 0.5 + 0.5, post - 1, bottom - top + post - 1);
-
-    // Top and bottom rails
-    ctx.fillStyle = "#080a08";
-    ctx.fillRect(l - post * 1.6, top - post * 1.25, r - l + post * 3.2, post * 1.25);
-    ctx.strokeStyle = "rgba(198,210,190,0.16)";
-    ctx.strokeRect(l - post * 1.6 + 0.5, top - post * 1.25 + 0.5, r - l + post * 3.2 - 1, post * 1.25 - 1);
-    ctx.fillStyle = "#060806";
-    ctx.fillRect(l - post * 1.6, bottom - post * 0.25, r - l + post * 3.2, post * 1.3);
-    ctx.fillStyle = "rgba(198,210,190,0.12)";
-    ctx.fillRect(l - post, bottom + post * 0.15, r - l + post * 2, 1);
-
-    // Mounting bolts
-    for (const bx of [l - post * 0.5, r + post * 0.5]) {
-      for (let i = 0; i < 5; i++) {
-        const by = top + (bottom - top) * (0.08 + i * 0.2);
-        ctx.fillStyle = "rgba(159,175,153,0.22)";
-        ctx.beginPath();
-        ctx.arc(bx, by, Math.max(1.2, 1.5 * s), 0, TAU);
-        ctx.fill();
-      }
-    }
-
-    // Fine inner glass edge and a restrained canopy reflection across the
-    // combiner glass.
-    ctx.strokeStyle = "rgba(169,255,178,0.14)";
-    ctx.strokeRect(l + 1, top + 1, r - l - 2, bottom - top - 2);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(l + 1, top + 1, r - l - 2, bottom - top - 2);
-    ctx.clip();
-    ctx.globalCompositeOperation = "screen";
-    const reflection = ctx.createLinearGradient(l, top, r, bottom);
-    reflection.addColorStop(0, "rgba(214,232,208,0.028)");
-    reflection.addColorStop(0.42, "rgba(214,232,208,0.008)");
-    reflection.addColorStop(0.55, "rgba(214,232,208,0.0)");
-    reflection.addColorStop(1, "rgba(214,232,208,0.018)");
-    ctx.fillStyle = reflection;
-    ctx.fillRect(l, top, r - l, bottom - top);
-    ctx.globalCompositeOperation = "source-over";
-    ctx.restore();
-    ctx.font = `${Math.max(6, 6.6 * s)}px Silkscreen, monospace`;
-    ctx.fillStyle = "rgba(169,255,178,0.38)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("HUD // 1", l + 5 * s, top + 4 * s);
-
-    // HUD camera housing mounted on the upper rail.
-    const camW = Math.min(64 * s, L.hudW * 0.14);
-    const camH = 9 * s;
-    const camX = L.cx - camW / 2;
-    const camY = top - 16 * s;
-    ctx.fillStyle = "#10140f";
-    ctx.strokeStyle = "rgba(189,204,180,0.25)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(camX, camY, camW, camH, 2 * s);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#050705";
-    ctx.beginPath();
-    ctx.arc(camX + camW * 0.22, camY + camH * 0.5, 2.6 * s, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(178,202,165,0.36)";
-    ctx.beginPath();
-    ctx.arc(camX + camW * 0.22, camY + camH * 0.5, 1.5 * s, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(169,255,178,0.40)";
-    ctx.font = Math.max(4.5, 4.9 * s) + "px Silkscreen, monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText("HUD CAM", camX + camW * 0.37, camY + camH * 0.52);
-    ctx.fillStyle = "rgba(143,227,162,0.72)";
-    ctx.beginPath();
-    ctx.arc(camX + camW * 0.91, camY + camH * 0.5, 1.2 * s, 0, TAU);
-    ctx.fill();
-
-    // Projector lens set into the lower HUD rail.
-    ctx.fillStyle = "#030503";
-    ctx.beginPath();
-    ctx.ellipse(L.cx, bottom + 3.3 * s, 4.2 * s, 3 * s, 0, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(169,255,178,0.36)";
-    ctx.beginPath();
-    ctx.ellipse(L.cx, bottom + 3.3 * s, 2.1 * s, 1.5 * s, 0, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(193,224,173,0.20)";
-    ctx.beginPath();
-    ctx.arc(L.cx - 0.8 * s, bottom + 2.6 * s, 0.6 * s, 0, TAU);
-    ctx.fill();
-    ctx.restore();
+    return { s: clamp(Math.min(W / 1280, H / 720), 0.75, 1.35) };
   }
 
   // --------------------------------------------------------------- HUD helpers
   function hudFont(size, weight = 400) {
-    return `${weight} ${Math.max(5.8, size)}px Silkscreen, monospace`;
+    // The real combiner uses a thin stroke font. A clean monospace reads much
+    // closer to that than the blocky terminal face used by the rest of the HUD
+    // furniture, and stays legible at small sizes.
+    return `${weight} ${Math.max(6, size)}px "DejaVu Sans Mono", "Consolas", "Liberation Mono", monospace`;
   }
 
   function hText(text, x, y, size, color = HUD, align = "left", baseline = "middle", weight = 400, glow = 0) {
@@ -2561,356 +729,40 @@
     };
   }
 
-  function drawPitchLadder(W, H, L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const ppd = Math.max(5.4, 7.1 * s);
-    const half = (L.hudBottom - L.hudTop) * 0.43;
-    const ladderW = Math.min(L.hudW * 0.33, 250 * s);
-    const gap = ladderW * 0.11;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(L.hudL + 4, L.hudTop + 4, L.hudW - 8, L.hudBottom - L.hudTop - 8);
-    ctx.clip();
-    ctx.translate(L.cx, L.hudCy);
-    ctx.rotate(-a.bank * D2R);
-    for (let deg = -70; deg <= 70; deg += 10) {
-      const y = (a.pitch - deg) * ppd;
-      if (Math.abs(y) > half) continue;
-      const major = deg === 0;
-      const w = major ? ladderW * 0.57 : ladderW * (deg % 20 === 0 ? 0.44 : 0.34);
-      const alpha = major ? 0.92 : 0.58;
-      const color = `rgba(169,255,178,${alpha})`;
-      const dash = deg < 0 ? [6 * s, 5 * s] : null;
-      hLine(-w, y, -gap, y, color, major ? 1.5 : 1, dash);
-      hLine(gap, y, w, y, color, major ? 1.5 : 1, dash);
-      if (!major) {
-        hLine(-w, y, -w, y + 3 * s, color, 1);
-        hLine(w, y, w, y + 3 * s, color, 1);
-      }
-      if (deg % 20 === 0 && !major) {
-        hText(`${Math.abs(deg)}`, w + 7 * s, y, 7.1 * s, HUD_DIM, "left");
-        hText(`${Math.abs(deg)}`, -w - 7 * s, y, 7.1 * s, HUD_DIM, "right");
-      }
-    }
-    ctx.restore();
-  }
-
-  function drawSpeedTape(L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const x = L.hudL + L.hudW * 0.135;
-    const center = L.hudCy;
-    const step = 50;
-    const px = 22 * s;
-    const value = kt(a.speed);
-    const top = center - px * 4.4;
-    const bottom = center + px * 4.4;
-    ctx.save();
-    hLine(x, top, x, bottom, HUD_DIM, 1);
-    const base = Math.floor(value / step) * step;
-    for (let i = -5; i <= 5; i++) {
-      const v = base + i * step;
-      if (v < 0) continue;
-      const y = center - ((v - value) / step) * px;
-      if (y < top - 2 || y > bottom + 2) continue;
-      const major = v % 100 === 0;
-      hLine(x, y, x + (major ? 10 : 6) * s, y, major ? HUD_SOFT : HUD_DIM, major ? 1.2 : 1);
-      if (major) hText(`${v}`, x - 7 * s, y, 7.1 * s, HUD_DIM, "right");
-    }
-    // bug / readout
-    const boxW = 61 * s, boxH = 23 * s;
-    ctx.fillStyle = "rgba(0,8,4,0.88)";
-    ctx.fillRect(x - boxW / 2, center - boxH / 2, boxW, boxH);
-    ctx.strokeStyle = HUD_SOFT;
-    ctx.strokeRect(x - boxW / 2 + 0.5, center - boxH / 2 + 0.5, boxW - 1, boxH - 1);
-    hText(pad(value, 3), x, center + 1, 15 * s, HUD, "center", "middle", 700, 5 * s);
-    hText("KCAS", x, top - 12 * s, 6.9 * s, HUD_DIM, "center");
-    ctx.restore();
-  }
-
-  function drawAltTape(L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const x = L.hudR - L.hudW * 0.135;
-    const center = L.hudCy;
-    const step = 500;
-    const px = 22 * s;
-    const value = ft(a.pos[1]);
-    const top = center - px * 4.4;
-    const bottom = center + px * 4.4;
-    ctx.save();
-    hLine(x, top, x, bottom, HUD_DIM, 1);
-    const base = Math.floor(value / step) * step;
-    for (let i = -5; i <= 5; i++) {
-      const v = base + i * step;
-      const y = center - ((v - value) / step) * px;
-      if (y < top - 2 || y > bottom + 2) continue;
-      const major = v % 1000 === 0;
-      hLine(x, y, x - (major ? 10 : 6) * s, y, major ? HUD_SOFT : HUD_DIM, major ? 1.2 : 1);
-      if (major) hText(`${v / 1000}`, x + 7 * s, y, 7.1 * s, HUD_DIM, "left");
-    }
-    const boxW = 68 * s, boxH = 23 * s;
-    ctx.fillStyle = "rgba(0,8,4,0.88)";
-    ctx.fillRect(x - boxW / 2, center - boxH / 2, boxW, boxH);
-    ctx.strokeStyle = HUD_SOFT;
-    ctx.strokeRect(x - boxW / 2 + 0.5, center - boxH / 2 + 0.5, boxW - 1, boxH - 1);
-    hText(pad(value, 5), x, center + 1, 15 * s, HUD, "center", "middle", 700, 5 * s);
-    hText("FT MSL", x, top - 12 * s, 6.9 * s, HUD_DIM, "center");
-    hText("THOU", x + boxW / 2 + 6 * s, center - 6 * s, 6.1 * s, HUD_DIM, "left");
-    hText("SANDS", x + boxW / 2 + 6 * s, center + 5 * s, 6.1 * s, HUD_DIM, "left");
-    ctx.restore();
-  }
-
-  function drawCompass(L) {
-    const a = game.aircraft;
-    const s = L.s;
-    const y = L.hudTop + 21 * s;
-    const halfW = Math.min(L.hudW * 0.24, 200 * s);
-    const pxPerDeg = halfW / 45;
-    const target = game.mission.gates[game.mission.gateIndex];
-    const targetBearing = target ? wrap360(Math.atan2(target.pos[0] - a.pos[0], -(target.pos[2] - a.pos[2])) * R2D) : null;
-
-    ctx.save();
-    hLine(L.cx - halfW, y, L.cx + halfW, y, HUD_DIM, 1);
-    for (let dd = -45; dd <= 45; dd += 5) {
-      const targetDeg = Math.round((a.heading + dd) / 5) * 5;
-      const diff = wrap180(targetDeg - a.heading);
-      if (Math.abs(diff) > 45) continue;
-      const tx = L.cx + diff * pxPerDeg;
-      const major = targetDeg % 30 === 0;
-      hLine(tx, y, tx, y + (major ? 6 : 3) * s, major ? HUD_SOFT : HUD_DIM, 1);
-      if (major) {
-        const label = targetDeg % 90 === 0
-          ? ["N", "E", "S", "W"][wrap360(targetDeg) / 90 % 4]
-          : `${wrap360(targetDeg) / 10 | 0}`.padStart(2, "0");
-        hText(label, tx, y - 9 * s, 7.1 * s, HUD_SOFT, "center");
-      }
-    }
-    if (targetBearing != null) {
-      const diff = wrap180(targetBearing - a.heading);
-      if (Math.abs(diff) <= 45) {
-        const tx = L.cx + diff * pxPerDeg;
-        ctx.fillStyle = AMBER;
-        ctx.beginPath();
-        ctx.moveTo(tx, y + 8 * s);
-        ctx.lineTo(tx + 4 * s, y + 13 * s);
-        ctx.lineTo(tx - 4 * s, y + 13 * s);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-    hLine(L.cx - 6 * s, y, L.cx, y - 5 * s, HUD, 1.3);
-    hLine(L.cx + 6 * s, y, L.cx, y - 5 * s, HUD, 1.3);
-    ctx.restore();
-  }
-
-  function drawTargetCue(L) {
-    const a = game.aircraft;
+  function drawMissionOverlay(W, H, L) {
     const m = game.mission;
+    const a = game.aircraft;
+    if (!m || !a) return;
     const s = L.s;
     const gate = m.gates[m.gateIndex];
-    if (!gate) return;
-    const rel = sub(gate.pos, a.pos);
-    const dist = length(rel);
-    const bearing = Math.atan2(rel[0], -rel[2]) * R2D;
-    const diff = wrap180(bearing - a.heading);
-    const elevation = Math.atan2(rel[1], Math.hypot(rel[0], rel[2])) * R2D;
+    const rel = gate ? sub(gate.pos, a.pos) : null;
+    const dist = rel ? length(rel) : 0;
+    const bearing = rel ? Math.atan2(rel[0], -rel[2]) * R2D : 0;
+    const diff = rel ? wrap180(bearing - a.heading) : 0;
+    const elevation = rel ? Math.atan2(rel[1], Math.hypot(rel[0], rel[2])) * R2D : 0;
 
-    const lx = L.hudL + 17 * s;
-    const ly = L.hudTop + 21 * s;
-    hText(`GATE ${pad(m.gateIndex + 1, 2)}/${pad(m.gates.length, 2)}`, lx, ly, 8.8 * s, AMBER, "left", "middle", 700);
-    hText(`${(dist / 1000).toFixed(1)} KM`, lx, ly + 14 * s, 8.6 * s, HUD, "left", "middle");
-    hText(`${diff >= 0 ? "R" : "L"} ${pad(Math.abs(diff), 2)}°  ${elevation >= 0 ? "+" : "−"}${pad(Math.abs(elevation), 2)}°`, lx, ly + 27 * s, 7.4 * s, HUD_SOFT, "left", "middle");
-
-    const p = projectPoint(gate.pos);
-    if (p && p.x > L.hudL + 8 && p.x < L.hudR - 8 && p.y > L.hudTop + 40 && p.y < L.hudBottom - 10) {
-      const size = 8 * s + clamp(1 - dist / 5000, 0, 1) * 5 * s;
-      ctx.save();
-      ctx.strokeStyle = AMBER;
-      ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y - size);
-      ctx.lineTo(p.x + size, p.y);
-      ctx.lineTo(p.x, p.y + size);
-      ctx.lineTo(p.x - size, p.y);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,192,91,0.35)";
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, size * 1.75, 0, TAU);
-      ctx.stroke();
-      hText(`${(dist / 1000).toFixed(1)}`, p.x, p.y + size * 2.4, 7 * s, AMBER, "center");
-      ctx.restore();
-    } else {
-      // Edge locator: point toward the target around the HUD rim.
-      let dx = diff * D2R;
-      let dy = -elevation * D2R;
-      const mag = Math.hypot(dx, dy) || 1;
-      dx /= mag; dy /= mag;
-      const ex = L.hudL + L.hudW * (dx > 0 ? 0.91 : 0.09);
-      const ey = L.hudTop + (L.hudBottom - L.hudTop) * clamp(0.5 + dy * 0.38, 0.14, 0.84);
-      ctx.save();
-      ctx.translate(ex, ey);
-      ctx.rotate(Math.atan2(dy, dx));
-      ctx.fillStyle = AMBER;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(-10 * s, -6 * s);
-      ctx.lineTo(-10 * s, 6 * s);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
-  function drawWarnings(L) {
-    const a = game.aircraft;
-    const m = game.mission;
-    const s = L.s;
-    const agl = Math.min(a.agl, a.clearance > 0 ? a.clearance : a.agl);
-    const sinkRate = -a.vs;
-    const timeToImpact = sinkRate > 1 ? agl / sinkRate : 99;
-    const pullUp = agl < 260 && sinkRate > 7 && (timeToImpact < 6.2 || agl < 95);
-    const stallWarn = a.stall > 0.06 || a.alphaDeg > 20.5 || a.speed < 92;
-    const gWarn = a.gSmooth > 9.15;
-    const lowFuel = a.fuel < 400;
-    const timeWarn = m.timeLeft < 20;
-    const warns = [];
-    if (pullUp) warns.push({ text: "PULL UP", color: RED });
-    if (stallWarn) warns.push({ text: "STALL", color: RED });
-    if (gWarn) warns.push({ text: "G LIMIT", color: AMBER });
-    if (lowFuel) warns.push({ text: "BINGO", color: AMBER });
-    if (timeWarn) warns.push({ text: "TIME CRITICAL", color: AMBER });
-
-    if (game.toastTimer > 0) {
-      const alpha = clamp(game.toastTimer, 0, 1);
-      hText(game.toast, L.cx, L.hudTop + 58 * s, 9.5 * s, `rgba(216,255,134,${0.62 + alpha * 0.36})`, "center", "middle", 700, 6 * s);
-    }
-
-    if (warns.length) {
-      const blink = Math.floor(game.time * 4.5) % 2 === 0;
-      if (blink && game.state === "flying") {
-        for (let i = 0; i < Math.min(2, warns.length); i++) {
-          hText(warns[i].text, L.cx, L.hudCy + (138 + i * 16) * s, 11.5 * s, warns[i].color, "center", "middle", 700, 7 * s);
-        }
-      }
-    } else {
-      hText("FLCS NORM", L.cx, L.hudCy + 142 * s, 7.1 * s, HUD_DIM, "center");
-    }
-
-    // lower data line
-    const by = L.hudCy + 105 * s;
-    hLine(L.cx - 175 * s, by, L.cx + 175 * s, by, HUD_FAINT, 1);
-    hText(`M ${a.mach.toFixed(2)}`, L.cx - 168 * s, by + 12 * s, 7.3 * s, HUD_SOFT);
-    hText(`G ${a.gSmooth.toFixed(1)}`, L.cx - 110 * s, by + 12 * s, 7.3 * s, a.gSmooth > 8.5 ? AMBER : HUD_SOFT);
-    hText(`AOA ${a.alphaDeg.toFixed(1)}`, L.cx - 41 * s, by + 12 * s, 7.3 * s, a.stall > 0.05 ? RED : HUD_SOFT);
-    hText(`GAVL ${a.gAvail.toFixed(1)}`, L.cx + 38 * s, by + 12 * s, 7.1 * s, a.gAvail < 2 ? AMBER : HUD_DIM);
-    hText(`VS ${a.vs >= 0 ? "+" : "−"}${pad(Math.abs(fpm(a.vs)), 4)}`, L.cx + 112 * s, by + 12 * s, 7.1 * s, HUD_SOFT);
-    hText(`AB ${a.ab ? "ON" : "OFF"}`, L.cx + 170 * s, by + 12 * s, 7.3 * s, a.ab ? AMBER : HUD_DIM, "right");
-    hText(game.mouse.locked ? "MSE LOCK" : "CLICK MOUSE", L.cx - 168 * s, by + 27 * s, 6.4 * s, game.mouse.locked ? HUD_DIM : AMBER, "left");
-    hText("C CENTER STICK", L.cx - 74 * s, by + 27 * s, 6.4 * s, HUD_FAINT, "left");
-    hText("V CHASE VIEW", L.cx + 170 * s, by + 27 * s, 6.4 * s, HUD_DIM, "right");
-  }
-
-  function drawMissionInfo(L) {
-    const m = game.mission;
-    const s = L.s;
-    const rx = L.hudR - 16 * s;
-    const ry = L.hudTop + 21 * s;
-    hText(`CLK ${formatTime(m.timeLeft)}`, rx, ry, 8.8 * s, m.timeLeft < 20 ? RED : HUD, "right", "middle", 700);
-    hText(`SCR ${pad(m.score, 5)}`, rx, ry + 14 * s, 8 * s, HUD_SOFT, "right");
-    hText(`${pad(kt(game.aircraft.speed), 3)} KT`, rx, ry + 27 * s, 7.2 * s, HUD_DIM, "right");
-  }
-
-  function drawHUD(W, H, L) {
-    const a = game.aircraft;
-    const m = game.mission;
-    if (!a || !m) return;
-    const s = L.s;
+    // Mission data lives at the edges of the canopy, not in the HUD combiner.
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(L.hudL, L.hudTop, L.hudW, L.hudBottom - L.hudTop);
-    ctx.clip();
-    ctx.lineCap = "butt";
-    ctx.lineJoin = "miter";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(169,255,178,0.72)";
+    ctx.font = `${Math.max(7.5, 9 * s)}px Silkscreen, monospace`;
+    ctx.fillText(`GATE ${pad(Math.min(m.gateIndex + 1, m.gates.length), 2)}/${pad(m.gates.length, 2)}`, W * 0.026, H * 0.058);
+    ctx.font = `${Math.max(6.5, 7.6 * s)}px Silkscreen, monospace`;
+    ctx.fillStyle = "rgba(169,255,178,0.54)";
+    ctx.fillText(`${(dist / 1000).toFixed(1)} KM`, W * 0.026, H * 0.084);
+    ctx.fillStyle = "rgba(169,255,178,0.40)";
+    ctx.fillText(`${diff >= 0 ? "R" : "L"} ${pad(Math.abs(diff), 2)}°  ${elevation >= 0 ? "+" : "−"}${pad(Math.abs(elevation), 2)}°`, W * 0.026, H * 0.108);
 
-    drawPitchLadder(W, H, L);
-    drawCompass(L);
-    drawTargetCue(L);
-    drawMissionInfo(L);
-    drawSpeedTape(L);
-    drawAltTape(L);
-    drawWarnings(L);
-
-    // Flight path marker
-    const speed = length(a.vel);
-    if (speed > 4) {
-      const fpmPoint = add(a.pos, mul(norm(a.vel), 700));
-      const pp = projectPoint(fpmPoint);
-      if (pp && pp.x > L.hudL + 3 && pp.x < L.hudR - 3 && pp.y > L.hudTop + 32 && pp.y < L.hudBottom - 3) {
-        const fs = 6 * s;
-        ctx.strokeStyle = HUD;
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(pp.x, pp.y, fs, 0, TAU);
-        ctx.stroke();
-        hLine(pp.x - fs - 6 * s, pp.y, pp.x - fs, pp.y, HUD, 1.2);
-        hLine(pp.x + fs, pp.y, pp.x + fs + 6 * s, pp.y, HUD, 1.2);
-        hLine(pp.x, pp.y - fs, pp.x, pp.y - fs - 5 * s, HUD, 1.2);
-      }
-    }
-
-    // Fixed reticle
-    const cx = L.cx, cy = L.hudCy;
-    hLine(cx - 9 * s, cy, cx - 3 * s, cy, HUD_SOFT, 1);
-    hLine(cx + 3 * s, cy, cx + 9 * s, cy, HUD_SOFT, 1);
-    hLine(cx, cy - 9 * s, cx, cy - 3 * s, HUD_SOFT, 1);
-    hLine(cx, cy + 3 * s, cx, cy + 9 * s, HUD_SOFT, 1);
-
-    // Bank scale at the top of the ladder. The caret follows the actual bank.
-    const bankY = L.hudCy - Math.min((L.hudBottom - L.hudTop) * 0.36, 150 * s);
-    ctx.save();
-    ctx.translate(cx, bankY);
-    ctx.rotate(-a.bank * D2R);
-    ctx.strokeStyle = HUD_DIM;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, 27 * s, Math.PI * 1.18, Math.PI * 1.82);
-    ctx.stroke();
-    for (let i = -3; i <= 3; i++) {
-      const ang = -Math.PI / 2 + i * 0.13;
-      const x1 = Math.cos(ang) * 25 * s, y1 = Math.sin(ang) * 25 * s;
-      const x2 = Math.cos(ang) * 29 * s, y2 = Math.sin(ang) * 29 * s;
-      hLine(x1, y1, x2, y2, i === 0 ? HUD : HUD_DIM, 1);
-    }
-    ctx.fillStyle = HUD;
-    ctx.beginPath();
-    ctx.moveTo(0, -30 * s);
-    ctx.lineTo(-4 * s, -36 * s);
-    ctx.lineTo(4 * s, -36 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    // Corner brackets
-    const inset = 10 * s;
-    const bl = 15 * s;
-    ctx.strokeStyle = HUD_DIM;
-    ctx.lineWidth = 1;
-    for (const [x, y, dx, dy] of [
-      [L.hudL + inset, L.hudTop + inset, 1, 1],
-      [L.hudR - inset, L.hudTop + inset, -1, 1],
-      [L.hudL + inset, L.hudBottom - inset, 1, -1],
-      [L.hudR - inset, L.hudBottom - inset, -1, -1],
-    ]) {
-      ctx.beginPath();
-      ctx.moveTo(x + dx * bl, y);
-      ctx.lineTo(x, y);
-      ctx.lineTo(x, y + dy * bl);
-      ctx.stroke();
-    }
-
+    ctx.textAlign = "right";
+    ctx.fillStyle = m.timeLeft < 20 ? RED : "rgba(169,255,178,0.78)";
+    ctx.font = `${Math.max(8.5, 10.5 * s)}px Silkscreen, monospace`;
+    ctx.fillText(`CLK ${formatTime(m.timeLeft)}`, W * 0.974, H * 0.058);
+    ctx.fillStyle = "rgba(169,255,178,0.54)";
+    ctx.font = `${Math.max(6.5, 7.6 * s)}px Silkscreen, monospace`;
+    ctx.fillText(`SCR ${pad(m.score, 5)}`, W * 0.974, H * 0.084);
+    ctx.fillStyle = "rgba(169,255,178,0.40)";
+    ctx.fillText(`${pad(a.airspeedKt, 3)} KT`, W * 0.974, H * 0.108);
     ctx.restore();
   }
 
@@ -3027,7 +879,7 @@
     hText("COLD RIVER  /  SECTOR 07", edge, 31 * s, 6.8 * s, HUD_DIM, "left", "top");
     hText(`GATE ${pad(m.gateIndex + 1, 2)} / ${pad(m.gates.length, 2)}`, W * 0.5, 14 * s, 8.8 * s, AMBER, "center", "top", 700);
     hText(formatTime(m.timeLeft), W * 0.5, 27 * s, 19 * s, m.timeLeft < 20 ? RED : HUD, "center", "top", 700, 5 * s);
-    hText(`${pad(kt(a.speed), 3)} KT`, W - edge, 14 * s, 12 * s, HUD, "right", "top", 700);
+    hText(`${pad(a.airspeedKt, 3)} KT`, W - edge, 14 * s, 12 * s, HUD, "right", "top", 700);
     hText(`ALT ${pad(ft(a.pos[1]), 5)} FT`, W - edge, 30 * s, 7.4 * s, HUD_SOFT, "right", "top");
     hText(`M ${a.mach.toFixed(2)}  G ${a.gSmooth.toFixed(1)}  AOA ${a.alphaDeg.toFixed(0)}  GAVL ${a.gAvail.toFixed(1)}`, W - edge, 43 * s, 6.8 * s, HUD_DIM, "right", "top");
     hText(`SCR ${pad(m.score, 5)}`, W - edge, 55 * s, 6.6 * s, HUD_DIM, "right", "top");
@@ -3059,7 +911,7 @@
     hText(game.mouse.locked ? "MOUSE CAPTURED  //  C CENTER" : "CLICK TO CAPTURE MOUSE  //  C CENTER", edge, H - 46 * s, 7.2 * s, game.mouse.locked ? HUD_SOFT : AMBER, "left", "top");
     hText(`FUEL ${pad(a.fuel * 2.20462, 4)} LB`, edge, H - 32 * s, 7 * s, a.fuel < 500 ? RED : HUD_DIM, "left", "top");
     hText("V  COCKPIT VIEW", W - edge, H - 46 * s, 7.6 * s, HUD_SOFT, "right", "top");
-    hText("A / D  ROLL   ·   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
+    hText("A / D  ROLL   ,   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
     hText("CHASE", W * 0.5, H - 18 * s, 6.2 * s, HUD_FAINT, "center", "top");
     ctx.restore();
   }
@@ -3087,37 +939,13 @@
 
   // ---------------------------------------------------------------- composition
   function drawCockpit(W, H) {
-    const L = layoutFor(W, H);
     ctx.clearRect(0, 0, W, H);
     if (game.state === "attract" || !game.aircraft || !game.mission) return;
-
-    if (game.view === "chase") {
-      drawChaseHUD(W, H);
-      drawEffects(W, H);
-      return;
+    if (game.view === "chase") drawChaseHUD(W, H);
+    else {
+      window.__VIPER_COCKPIT.render(ctx, W, H, game);
+      drawMissionOverlay(W, H, layoutFor(W, H));
     }
-
-    drawCanopy(W, H, L);
-    drawPanelBase(W, H, L);
-    drawGlareShieldPanels(W, H, L);
-
-    drawMFDBezel(L.mfdLX, L.mfdY, L.mfdW, L.mfdH, L);
-    drawMFDBezel(L.mfdRX, L.mfdY, L.mfdW, L.mfdH, L);
-    drawMFDMap(L.mfdLX, L.mfdY, L.mfdW, L.mfdH, L);
-    drawMFDEngine(L.mfdRX, L.mfdY, L.mfdW, L.mfdH, L);
-    drawCenterConsole(L);
-
-    drawAnalogGauge(W * 0.135, L.gaugeY, L.gaugeR, kt(game.aircraft.speed), 800, "STBY", "KTS", L);
-    drawStandbyADI(L.adiX, L.gaugeY, L.adiR, L);
-    drawAnalogGauge(W * 0.865, L.gaugeY, L.gaugeR, ft(game.aircraft.pos[1]), 50000, "STBY", "FT", L);
-
-    const throttlePose = drawThrottle(W, H, L);
-    const stickPose = drawStick(W, H, L);
-    drawCautionPanel(W, H, L);
-    drawPilotHands(W, H, L, throttlePose, stickPose);
-
-    drawHUDFrame(W, H, L);
-    drawHUD(W, H, L);
     drawEffects(W, H);
   }
 
@@ -3138,6 +966,7 @@
     "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyB", "KeyV", "KeyC",
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
+    "AltLeft", "AltRight", "F1", "F2",
   ]);
 
   function toggleMute() {
@@ -3152,6 +981,18 @@
 
   window.addEventListener("keydown", (event) => {
     if (gameKeys.has(event.code)) event.preventDefault();
+    if ((event.code === "AltLeft" || event.code === "AltRight") && game.state === "flying") {
+      // Changing head direction must not add a new flight-control demand.
+      game.mouse.x = 0; game.mouse.y = 0;
+      keys.add(event.code);
+      return;
+    }
+    if ((event.code === "F1" || event.code === "F2") && !event.repeat && game.state === "flying") {
+      const i = event.code === "F1" ? 0 : 1;
+      const pages = ["FCR", "HSD", "ENG"];
+      game.mfdPages[i] = pages[(pages.indexOf(game.mfdPages[i]) + 1) % pages.length];
+      return;
+    }
     if (event.code === "KeyM" && !event.repeat) {
       toggleMute();
       return;
@@ -3165,17 +1006,20 @@
       return;
     }
     if (event.code === "KeyP") {
+      if (event.repeat) return;
       if (game.state === "flying") pauseMission();
       else if (game.state === "paused") { sound.init(); resumeMission(); }
       return;
     }
     if (event.code === "Escape") {
+      if (event.repeat) return;
       if (game.state === "flying") pauseMission();
       else if (game.state === "paused") { sound.init(); resumeMission(); }
       else if (game.state === "won" || game.state === "crashed" || game.state === "timedout") goMenu();
       return;
     }
     if (event.code === "Enter") {
+      if (event.repeat) return;
       if (game.state === "attract") { sound.init(); startMission(true); }
       else if (game.state === "paused") { sound.init(); resumeMission(); }
       else if (game.state === "won" || game.state === "crashed" || game.state === "timedout") { sound.init(); startMission(true); }
@@ -3193,6 +1037,7 @@
   });
 
   window.addEventListener("keyup", (event) => {
+    if (gameKeys.has(event.code)) event.preventDefault();
     keys.delete(event.code);
   });
 
@@ -3214,7 +1059,13 @@
   });
 
   window.addEventListener("mousemove", (event) => {
-    if (!game.mouse.locked || game.state !== "flying") return;
+    if (game.state !== "flying") return;
+    if ((event.altKey || keys.has("AltLeft") || keys.has("AltRight")) && game.view === "cockpit") {
+      game.look.yaw = clamp(game.look.yaw + event.movementX * 0.003, -155 * D2R, 155 * D2R);
+      game.look.pitch = clamp(game.look.pitch - event.movementY * 0.003, -85 * D2R, 85 * D2R);
+      return;
+    }
+    if (!game.mouse.locked) return;
     game.mouse.x = clamp(game.mouse.x + event.movementX * game.mouse.sensitivity, -1, 1);
     game.mouse.y = clamp(game.mouse.y + event.movementY * game.mouse.sensitivity, -1, 1);
   });
@@ -3257,16 +1108,27 @@
     const active = game.state === "flying" && a && !a.crashed;
     let roll = 0;
     let pitch = 0;
+    let rudder = 0;
+    let brake = 0;
+    let ab = 0;
     if (active) {
       const input = readInput();
       roll = clamp((input.rollAxis || 0) + (input.rollRight ? 1 : 0) - (input.rollLeft ? 1 : 0), -1, 1);
       pitch = clamp((input.pitchAxis || 0) + (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0), -1, 1);
+      rudder = clamp((input.yawRight ? 1 : 0) - (input.yawLeft ? 1 : 0), -1, 1);
+      brake = input.airbrake ? 1 : 0;
+      ab = a.ab ? 1 : 0;
     }
     const response = 1 - Math.exp(-Math.max(0, dt) * 11);
     const throttleResponse = 1 - Math.exp(-Math.max(0, dt) * 7);
+    const rudderResponse = 1 - Math.exp(-Math.max(0, dt) * 8);
     game.hands.roll += (roll - game.hands.roll) * response;
     game.hands.pitch += (pitch - game.hands.pitch) * response;
+    game.hands.rudder += (rudder - game.hands.rudder) * rudderResponse;
+    game.hands.brake += (brake - game.hands.brake) * response;
+    game.hands.ab += (ab - game.hands.ab) * response;
     game.hands.throttle += ((active ? a.throttle : 0.82) - game.hands.throttle) * throttleResponse;
+    game.hands.grip += ((active ? clamp(Math.hypot(pitch, roll) * 0.35 + Math.abs(rudder) * 0.15, 0, 0.5) : 0) - game.hands.grip) * response;
   }
 
   function updateWorldAndCockpit(frameDt) {
@@ -3341,7 +1203,6 @@
       renderer = new Renderer(canvas);
       previewMission = buildMission();
       resizePresentation();
-      mapCanvas = buildMapCanvas();
       try {
         await document.fonts.load("12px Silkscreen");
         await document.fonts.ready;
@@ -3382,7 +1243,12 @@
     },
     setMouseLocked: (locked) => { game.mouse.locked = Boolean(locked); },
     centerMouseStick: () => centerMouseStick(false),
+    setLook: (yaw, pitch) => {
+      game.look.yaw = clamp(yaw * D2R, -155 * D2R, 155 * D2R);
+      game.look.pitch = clamp(pitch * D2R, -85 * D2R, 85 * D2R);
+    },
     readInput,
+    stepSimulation,
     snapshot: () => ({
       state: game.state,
       view: game.view,

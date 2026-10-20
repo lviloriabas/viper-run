@@ -228,13 +228,13 @@
   // aero model, but it follows the real aircraft's mass, wing, thrust, fuel,
   // load-factor, roll-rate and high-altitude trends.
   const AIRCRAFT_SPEC = {
-    emptyMass: 8600,
+    emptyMass: 8273,
     storesMass: 450,
-    mass: 12250,
+    mass: 11923,
     wingArea: 27.87,
     wingspan: 9.96,
     dryThrust: 76300,
-    abThrust: 127000,
+    abThrust: 128922,
     fuelMax: 3200,
     fuelRateIdle: 0.18,
     fuelRateDry: 1.45,
@@ -255,16 +255,36 @@
   // 8,000 ft has noticeably more lift and thrust than one at 30,000 ft.
   function atmosphereAt(altitudeM) {
     const h = clamp(altitudeM, 0, 20000);
-    let rho, sound;
+    let rho, sound, temperature, pressure;
     if (h <= 11000) {
       const theta = 1 - 2.25577e-5 * h;
       rho = 1.225 * Math.pow(theta, 4.2559);
-      sound = 340.3 - 0.0041 * h;
+      temperature = 288.15 - 0.0065 * h;
+      pressure = 101325 * Math.pow(theta, 5.2559);
+      sound = Math.sqrt(1.4 * 287.05287 * temperature);
     } else {
       rho = 0.3639 * Math.exp(-(h - 11000) / 6341.62);
       sound = 295.1;
+      temperature = 216.65;
+      pressure = 22632.1 * Math.exp(-(h - 11000) / 6341.62);
     }
-    return { rho: Math.max(rho, 0.0001), sound };
+    return { rho: Math.max(rho, 0.0001), sound, temperature, pressure };
+  }
+
+  // Compressible pitot impact pressure, including a normal shock above Mach 1.
+  function impactRatio(mach) {
+    if (mach <= 1) return Math.pow(1 + 0.2 * mach * mach, 3.5) - 1;
+    return Math.pow(1.2 * mach * mach, 3.5) * Math.pow(2.4 / (2.8 * mach * mach - 0.4), 2.5) - 1;
+  }
+
+  function calibratedAirspeed(speed, atmosphere) {
+    const impact = atmosphere.pressure * impactRatio(speed / atmosphere.sound) / 101325;
+    let low = 0, high = 5;
+    for (let i = 0; i < 32; i++) {
+      const mid = (low + high) / 2;
+      if (impactRatio(mid) < impact) low = mid; else high = mid;
+    }
+    return (low + high) * 0.5 * Math.sqrt(1.4 * 287.05287 * 288.15);
   }
 
   // Body-space contact points: nose, canopy, tail, wingtips, belly and fin.
@@ -346,7 +366,7 @@
 
   // ---------------------------------------------------------------- flight model
   function makeAircraft(mission) {
-    return {
+    const aircraft = {
       pos: [...mission.start.pos],
       vel: [...mission.start.velocity],
       q: [...mission.start.q],
@@ -359,8 +379,8 @@
       brake: 0,
       fuel: AIRCRAFT_SPEC.fuelMax,
       mass: AIRCRAFT_SPEC.emptyMass + AIRCRAFT_SPEC.storesMass + AIRCRAFT_SPEC.fuelMax,
-      speed: 0,
-      airspeedKt: 0,
+      speed: len(mission.start.velocity),
+      airspeedKt: calibratedAirspeed(len(mission.start.velocity), atmosphereAt(mission.start.pos[1])) * 1.94384,
       altitudeM: mission.start.pos[1],
       agl: 0,
       clearance: 0,
@@ -371,6 +391,7 @@
       qbar: 0,
       gLoad: 1,
       gSmooth: 1,
+      maxG: 1,
       gAvail: AIRCRAFT_SPEC.gLimit,
       vs: 0,
       stall: 0,
@@ -392,6 +413,8 @@
       dragN: 0,
       thrustN: 0,
     };
+    updateAircraft(aircraft, 0, {});
+    return aircraft;
   }
 
   function axisSet(q) {
@@ -460,7 +483,8 @@
     if (input.throttleUp) a.throttle = clamp(a.throttle + dt * 0.62, 0, 1);
     if (input.throttleDown) a.throttle = clamp(a.throttle - dt * 0.62, 0, 1);
 
-    const wantAB = Boolean(input.afterburner) && a.throttle > 0.55 && a.fuel > 1;
+    const fueled = a.fuel > 0;
+    const wantAB = Boolean(input.afterburner) && a.throttle >= 0.95 && fueled;
     a.ab = wantAB;
     a.brake = approach(a.brake, input.airbrake ? 1 : 0, dt * 2.5);
     a.mass = AIRCRAFT_SPEC.emptyMass + AIRCRAFT_SPEC.storesMass + a.fuel;
@@ -551,7 +575,7 @@
     // F110 spool and afterburner light-up are intentionally not instant. The
     // density lapse and ram effect reproduce the most useful real-world trend:
     // less thrust upstairs, more thrust at speed.
-    const targetSpool = wantAB ? 1 : Math.max(0.08, a.throttle);
+    const targetSpool = fueled ? (wantAB ? 1 : Math.max(0.08, a.throttle)) : 0;
     a.engineSpool += (targetSpool - a.engineSpool) * clamp(dt * (wantAB ? 2.0 : 1.4), 0, 1);
     a.abLevel += ((wantAB ? 1 : 0) - a.abLevel) * clamp(dt * 3.5, 0, 1);
     const densityRatio = rho / 1.225;
@@ -560,7 +584,7 @@
       * (1 - 0.22 * smoothstep(2.0, 2.4, mach)));
     const milThrust = AIRCRAFT_SPEC.dryThrust * (0.055 + 0.945 * a.throttle) * a.engineSpool;
     const abExtra = (AIRCRAFT_SPEC.abThrust - AIRCRAFT_SPEC.dryThrust) * a.abLevel;
-    a.thrustN = (milThrust + abExtra) * lapse * ram;
+    a.thrustN = fueled ? (milThrust + abExtra) * lapse * ram : 0;
     const thrustWorld = mul(ax.forward, a.thrustN);
     const gravity = [0, -a.mass * G0, 0];
 
@@ -570,6 +594,7 @@
     a.loadAccel = dot(add(aeroForce, thrustWorld), ax.up) / (a.mass * G0);
     a.gLoad = a.loadAccel;
     a.gSmooth += (a.gLoad - a.gSmooth) * clamp(dt * 4, 0, 1);
+    a.maxG = Math.max(a.maxG, a.gSmooth);
 
     a.vel = add(a.vel, mul(accel, dt));
     a.pos = add(a.pos, mul(a.vel, dt));
@@ -577,17 +602,25 @@
     const fuelFlow = wantAB
       ? AIRCRAFT_SPEC.fuelRateAB
       : AIRCRAFT_SPEC.fuelRateIdle + AIRCRAFT_SPEC.fuelRateDry * clamp(a.throttle, 0, 1);
-    a.fuel = Math.max(0, a.fuel - fuelFlow * dt);
+    a.fuelFlow = fueled ? fuelFlow : 0;
+    a.fuel = Math.max(0, a.fuel - a.fuelFlow * dt);
+    a.rpm = a.fuel > 0 ? 61 + 38 * a.engineSpool : 99 * a.engineSpool;
+    a.ftit = a.fuel > 0 ? 420 + 480 * a.engineSpool + 130 * a.abLevel : 20 + 400 * a.engineSpool;
+    a.nozzle = 15 + 80 * a.abLevel + 60 * Math.max(0, 1 - a.engineSpool * 2);
+    a.oilPsi = Math.max(0, a.rpm * 0.65);
 
     // Derived data for instruments.
     a.speed = len(a.vel);
-    a.airspeedKt = a.speed * 1.94384;
+    const newAtmosphere = atmosphereAt(a.pos[1]);
+    a.airspeedKt = calibratedAirspeed(a.speed, newAtmosphere) * 1.94384;
+    a.tasKt = a.speed * 1.94384;
+    a.easKt = a.tasKt * Math.sqrt(newAtmosphere.rho / 1.225);
     a.altitudeM = a.pos[1];
     a.agl = a.pos[1] - terrainFloor(a.pos[0], a.pos[2]);
     a.alpha = alpha;
     a.alphaDeg = alpha * RAD;
     a.beta = beta;
-    a.mach = a.speed / sound;
+    a.mach = a.speed / newAtmosphere.sound;
     a.qbar = 0.5 * rho * a.speed * a.speed;
     a.cl = cl;
     a.cd = cd;
@@ -597,8 +630,8 @@
     const axNow = axisSet(a.q);
     a.heading = wrap(Math.atan2(axNow.forward[0], -axNow.forward[2]) * RAD, 360);
     a.pitch = Math.asin(clamp(axNow.forward[1], -1, 1)) * RAD;
-    a.bank = Math.atan2(-axNow.right[1], Math.max(0.001, axNow.up[1])) * RAD;
-    a.afterburnerVisual += ((wantAB ? 1 : 0) - a.afterburnerVisual) * clamp(dt * 5, 0, 1);
+    a.bank = Math.atan2(-axNow.right[1], axNow.up[1]) * RAD;
+    a.afterburnerVisual += (a.abLevel - a.afterburnerVisual) * clamp(dt * 5, 0, 1);
 
     // Collision is evaluated against the whole airframe, not just its centre.
     detectTerrainCollision(a);
@@ -1522,12 +1555,15 @@
       // Intake.
       box(verts, [0, -0.83, -0.25], [1.30, 0.62, 4.15], belly, [0.42, 0.46, 0.42]);
       quad(verts, [-0.56, -1.11, -2.34], [0.56, -1.11, -2.34], [0.56, -0.57, -2.34], [-0.56, -0.57, -2.34], [0.035, 0.045, 0.04], [0, 0, -1]);
+      // The first-person mesh keeps the exterior but omits the opaque bubble.
+      const exteriorBeforeCanopy = verts.length;
       // Canopy bubble and rails.
       addEllipsoid(0, 0.90, -2.78, 0.55, 0.78, 1.50, canopy, 7, 12);
       box(verts, [0, 1.16, -3.95], [1.04, 0.055, 0.10], metal);
       box(verts, [0, 1.10, -1.58], [0.94, 0.05, 0.09], metal);
       box(verts, [-0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
       box(verts, [0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
+      const exteriorAfterCanopy = verts.length;
       // Wings, tails and fin.
       addWing(1);
       addWing(-1);
@@ -1591,6 +1627,7 @@
         return { vao, count: arr.length / 9 };
       };
       this.aircraftMesh = setup(verts);
+      this.cockpitExteriorMesh = setup([...verts.slice(0, exteriorBeforeCanopy), ...verts.slice(exteriorAfterCanopy)]);
       this.flameMesh = setup(flameVerts);
     }
 
@@ -1612,10 +1649,11 @@
       gl.enable(gl.DEPTH_TEST);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
-      gl.bindVertexArray(this.aircraftMesh.vao);
-      gl.drawArrays(gl.TRIANGLES, 0, this.aircraftMesh.count);
+      const mesh = sim.view === "cockpit" ? this.cockpitExteriorMesh : this.aircraftMesh;
+      gl.bindVertexArray(mesh.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
 
-      if (a.afterburnerVisual > 0.03) {
+      if (sim.view === "chase" && a.afterburnerVisual > 0.03) {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         gl.depthMask(false);
@@ -1807,7 +1845,7 @@
       const gl = this.gl;
       this.time = sim.time;
       const vp = mat4Mul(
-        mat4Perspective(cam.fov, this.cssW / this.cssH, 0.7, 70000),
+        mat4Perspective(cam.fov, this.cssW / this.cssH, sim.view === "cockpit" ? 0.08 : 0.7, 70000),
         mat4LookAt(cam.eye, add(cam.eye, cam.forward), cam.up)
       );
       const tanHalf = Math.tan(cam.fov / 2);
@@ -1928,9 +1966,8 @@
       }
       gl.bindVertexArray(null);
 
-      // Chase view aircraft. The first-person view is inside the model, so it
-      // is only drawn when the external camera is active.
-      if (sim.view === "chase" && sim.aircraft) {
+      // Both cameras share the exterior. First person omits the opaque bubble.
+      if ((sim.view === "chase" || sim.view === "cockpit") && sim.aircraft) {
         this.drawAircraft(vp, cam, sim);
       }
 
@@ -1973,6 +2010,8 @@
     GATE_BONUS,
     MISSION_TIME,
     AIRCRAFT_SPEC,
+    atmosphereAt,
+    calibratedAirspeed,
     mat4Mul,
     mat4Perspective,
     mat4LookAt,

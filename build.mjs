@@ -11,6 +11,7 @@ let html = read("src/index.html");
 let css = read("src/style.css");
 const game = read("src/game.js");
 const app = read("src/app.js");
+const cockpit = read("src/cockpit.js");
 
 // Font files are referenced relatively in source; bake them into the page.
 css = css.replace(/url\((fonts\/[^)]+)\)/g, (_, rel) => {
@@ -20,8 +21,8 @@ css = css.replace(/url\((fonts\/[^)]+)\)/g, (_, rel) => {
 
 html = html.replace('<link rel="stylesheet" href="style.css">', `<style>\n${css}\n</style>`);
 html = html.replace(
-  '<script src="game.js"></script>\n<script src="app.js"></script>',
-  `<script>\n${game}\n</script>\n<script>\n${app}\n</script>`
+  '<script src="game.js"></script>\n<script src="cockpit.js"></script>\n<script src="app.js"></script>',
+  `<script>\n${game}\n</script>\n<script>\n${cockpit}\n</script>\n<script>\n${app}\n</script>`
 );
 
 mkdirSync(resolve(root, "dist"), { recursive: true });
