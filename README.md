@@ -12,10 +12,13 @@ step is required to play.
 
 | Input | Action |
 | --- | --- |
-| `S` / `↓` | Pull (pitch up) |
-| `W` / `↑` | Push (pitch down) |
+| Mouse | Pitch / yaw (click the canvas to capture the pointer) |
 | `A` / `D` or `←` / `→` | Roll left / right |
+| `S` / `↓` | Backup pull (pitch up) |
+| `W` / `↑` | Backup push (pitch down) |
 | `Q` / `E` | Rudder left / right |
+| `C` or right-click | Center the mouse stick |
+| `V` | Toggle cockpit / chase view |
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
 | `B` | Airbrake |
@@ -23,9 +26,15 @@ step is required to play.
 | `R` | Restart from pause or a result screen |
 | `M` | Audio on / off |
 
-Hold a pull rather than tapping it — the F-16 is fly-by-wire, but it still
-carries energy and alpha. Roll into the turn first, then pull through the
-valley. Watch the airspeed and the ridge lines.
+Moving the mouse down pulls the nose up, matching a conventional flight-sim
+stick. Mouse X commands yaw, while A/D rolls the jet. The pointer is captured by
+clicking the canvas; release it with `Esc`. If pointer lock is unavailable, the
+keyboard controls still work.
+
+Hold a pull rather than tapping it. The F-16 is fly-by-wire, but it still carries
+energy and alpha. Roll into the turn first, then pull through the valley. Watch
+the airspeed and the ridge lines. Press `V` when you want a chase-camera view of
+the jet and the gorge.
 
 ## Objective
 
@@ -38,19 +47,26 @@ Fly through all **10 gates** in order before the clock reaches zero.
 - Final rating: `ACE` under 1:35, `VIPER` under 2:05, `QUALIFIED` under 2:35,
   otherwise `CADET`
 
-Terrain impact ends the run. So do stall departure, over-G, and the clock.
-Best score and time are kept in `localStorage`.
+Hitting the ground, a canyon wall, a wingtip on either side, or the water ends
+the run. So do stall departure, over-G, and the clock. Best score and time are
+kept in `localStorage`.
 
 ## The jet
 
-- Fixed-step 120 Hz simulation with sub-stepped rendering-independent input.
-- Quaternion flight model with lift, drag, stall, alpha/G limiting, afterburner,
-  fuel, airbrake, and terrain collision.
+- Fixed-step 120 Hz simulation with rendering-independent input.
+- Quaternion flight model with ISA density and speed-of-sound variation,
+  lift-dependent drag, Mach wave drag, ground effect, stall, alpha/G limiting,
+  engine spool and afterburner lag, altitude thrust lapse, ram effect, fuel mass,
+  airbrake, and multi-point airframe collision.
+- F-16C Block 50 / F110-GE-129 scale and limits: approximately 9 g, 26° AoA,
+  and a 6,000 m turn/roll test that produces less authority than at low level.
 - Low-resolution WebGL 2 world (terrain, river, ocean, sky, volumetric-ish
   clouds, gates) composited through a CRT-style post pass.
 - Canvas 2D cockpit with HUD, pitch ladder, speed/altitude tapes, heading tape,
-  tactical map MFD, engine MFD, standby gauges, caution panel, throttle, and
-  stick.
+  tactical map MFD, engine MFD, data-entry display (DED), integrated control
+  panel (ICP), standby ADI, standby gauges, caution/advisory panel, throttle,
+  and stick. The chase view draws a procedural F-16 airframe and afterburner
+  plume.
 - Procedural audio only. No samples, images, or other external assets.
 - Embedded Silkscreen font (OFL 1.1, by Jason Kottke).
 
@@ -72,8 +88,9 @@ Test URLs:
 
 - `dist/viper-run.html` — normal start menu
 - `dist/viper-run.html?autostart=1` — skip the menu and fly immediately
+- `dist/viper-run.html?autostart=1&view=chase` — start directly in chase view
 
-Requirements: a WebGL 2 browser. A keyboard is recommended. Chrome, Edge, and
+Requirements: a WebGL 2 browser, a mouse, and a keyboard. Chrome, Edge, and
 Firefox on desktop are the target; Safari may work but is not the primary target.
 
 ## Project layout
