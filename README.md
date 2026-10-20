@@ -48,8 +48,8 @@ Fly through all **10 gates** in order before the clock reaches zero.
   otherwise `CADET`
 
 Hitting the ground, a canyon wall, a wingtip on either side, or the water ends
-the run. So do stall departure, over-G, and the clock. Best score and time are
-kept in `localStorage`.
+the run. The clock is a hard limit; stall and over-G warnings mean you are
+running out of margin. Best score and time are kept in `localStorage`.
 
 ## The jet
 
