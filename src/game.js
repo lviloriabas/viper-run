@@ -223,18 +223,66 @@
   const MISSION_TIME = 150;
   const GATE_BONUS = 8;
 
+  // Public F-16C Block 50 / F110-GE-129 figures, rounded for a game-scale
+  // simulation. The model is still a deliberately simplified, game-tuned
+  // aero model, but it follows the real aircraft's mass, wing, thrust, fuel,
+  // load-factor, roll-rate and high-altitude trends.
   const AIRCRAFT_SPEC = {
-    mass: 11400,
+    emptyMass: 8600,
+    storesMass: 450,
+    mass: 12250,
     wingArea: 27.87,
-    dryThrust: 76000,
-    abThrust: 129000,
+    wingspan: 9.96,
+    dryThrust: 76300,
+    abThrust: 127000,
     fuelMax: 3200,
-    fuelRateDry: 0.9,
-    fuelRateAB: 3.1,
-    clMax: 1.62,
-    cd0: 0.022,
-    inducedK: 0.105,
+    fuelRateIdle: 0.18,
+    fuelRateDry: 1.45,
+    fuelRateAB: 5.2,
+    clMax: 1.63,
+    clAlpha: 3.55,
+    alphaStall: 0.445,
+    alphaLimit: 0.455,
+    cd0: 0.019,
+    inducedK: 0.118,
+    gLimit: 9.0,
+    negGLimit: -2.4,
+    rollRateMax: 4.45,
+    minRollAuthority: 0.18,
   };
+
+  // ISA density and speed of sound. The density lapse matters: a jet at
+  // 8,000 ft has noticeably more lift and thrust than one at 30,000 ft.
+  function atmosphereAt(altitudeM) {
+    const h = clamp(altitudeM, 0, 20000);
+    let rho, sound;
+    if (h <= 11000) {
+      const theta = 1 - 2.25577e-5 * h;
+      rho = 1.225 * Math.pow(theta, 4.2559);
+      sound = 340.3 - 0.0041 * h;
+    } else {
+      rho = 0.3639 * Math.exp(-(h - 11000) / 6341.62);
+      sound = 295.1;
+    }
+    return { rho: Math.max(rho, 0.0001), sound };
+  }
+
+  // Body-space contact points: nose, canopy, tail, wingtips, belly and fin.
+  // Sampling the whole airframe means a banked wing can clip a canyon wall
+  // before the centre of mass reaches the terrain.
+  const COLLISION_POINTS = [
+    { name: "nose", local: [0, 0.02, -8.35], margin: 0.10 },
+    { name: "canopy", local: [0, 1.32, -3.0], margin: 0.16 },
+    { name: "tail", local: [0, 0.48, 7.4], margin: 0.15 },
+    { name: "left wing", local: [-4.92, -0.02, 1.1], margin: 0.08 },
+    { name: "right wing", local: [4.92, -0.02, 1.1], margin: 0.08 },
+    { name: "belly", local: [0, -1.08, 0.2], margin: 0.10 },
+    { name: "fin", local: [0, 2.85, 6.7], margin: 0.10 },
+  ];
+
+  function terrainFloor(x, z) {
+    return Math.max(0, terrainAt(x, z));
+  }
 
   function buildMission() {
     const gates = [];
@@ -267,7 +315,11 @@
     const start = [first.pos[0] + back[0], 0, first.pos[2] + back[2]];
     start[1] = Math.max(first.pos[1] + 150, terrainAt(start[0], start[2]) + 180);
     const forward = normalize(sub(first.pos, start));
-    const q = qFromForwardUp(forward, [0, 1, 0]);
+    // Start very close to 1G trim: a small nose-up body attitude relative to
+    // the velocity vector gives the wing the lift it needs without an instant
+    // sink at mission start.
+    let q = qFromForwardUp(forward, [0, 1, 0]);
+    q = qMul(q, qAxis([1, 0, 0], 2.35 * DEG));
     const initialSpeed = 218;
 
     const mapBounds = { xMin: -4200, xMax: 4200, zMin: -11200, zMax: 13000 };
@@ -300,20 +352,26 @@
       q: [...mission.start.q],
       omega: [0, 0, 0],
       throttle: mission.start.throttle,
-      thrustLevel: mission.start.throttle * 0.75,
+      engineSpool: mission.start.throttle,
+      abLevel: 0,
+      thrustLevel: mission.start.throttle,
       ab: false,
       brake: 0,
       fuel: AIRCRAFT_SPEC.fuelMax,
+      mass: AIRCRAFT_SPEC.emptyMass + AIRCRAFT_SPEC.storesMass + AIRCRAFT_SPEC.fuelMax,
       speed: 0,
       airspeedKt: 0,
       altitudeM: mission.start.pos[1],
       agl: 0,
+      clearance: 0,
       alpha: 0,
       alphaDeg: 0,
       beta: 0,
       mach: 0,
+      qbar: 0,
       gLoad: 1,
       gSmooth: 1,
+      gAvail: AIRCRAFT_SPEC.gLimit,
       vs: 0,
       stall: 0,
       buffet: 0,
@@ -324,8 +382,15 @@
       bank: 0,
       maxQ: 0,
       crashed: false,
+      impactType: null,
+      impactPoint: null,
       lastPos: [...mission.start.pos],
       loadAccel: 0,
+      cl: 0,
+      cd: 0,
+      liftN: 0,
+      dragN: 0,
+      thrustN: 0,
     };
   }
 
@@ -333,13 +398,46 @@
     return axesFromQ(q);
   }
 
+  function detectTerrainCollision(a) {
+    let minClearance = Infinity;
+    let hit = null;
+    let hitFloor = 0;
+    for (const point of COLLISION_POINTS) {
+      const p = add(a.pos, qRotate(a.q, point.local));
+      const floor = terrainFloor(p[0], p[2]);
+      const clearance = p[1] - floor - point.margin;
+      if (clearance < minClearance) {
+        minClearance = clearance;
+        hitFloor = floor;
+      }
+      if (clearance < 0 && !hit) {
+        hit = { point, p, floor, clearance };
+        hitFloor = floor;
+      }
+    }
+    a.clearance = Math.max(0, minClearance);
+    if (hit) {
+      a.crashed = true;
+      a.impactSpeed = len(a.vel);
+      a.impactVS = a.vel[1];
+      a.impactType = hitFloor < 0.5 ? "WATER" : "TERRAIN";
+      a.impactPoint = [...hit.p];
+      a.collisionLabel = hit.point.name;
+      a.vel = mul(a.vel, 0.08);
+      a.omega = [0, 0, 0];
+      a.pos[1] = Math.max(a.pos[1], hit.floor + 0.8);
+    }
+    return a.clearance;
+  }
+
   function updateAircraft(a, dt, input) {
     if (a.crashed) return;
 
     a.lastPos = [...a.pos];
     const ax = axisSet(a.q);
-    const rho = 1.225 * Math.exp(-clamp(a.pos[1], 0, 20000) / 8500);
-    const sound = 340.3 - 0.004 * clamp(a.pos[1], 0, 12000);
+    const atmosphere = atmosphereAt(a.pos[1]);
+    const rho = atmosphere.rho;
+    const sound = atmosphere.sound;
     const speed = len(a.vel);
     const qbar = 0.5 * rho * speed * speed;
     const localV = qRotate([-a.q[0], -a.q[1], -a.q[2], a.q[3]], a.vel);
@@ -353,72 +451,92 @@
     alpha = clamp(alpha, -1.15, 1.15);
     beta = clamp(beta, -0.75, 0.75);
 
-    // Pilot inputs -----------------------------------------------------------
-    let pitchIn = 0, rollIn = 0, yawIn = 0;
-    if (input.pitchUp) pitchIn += 1;
-    if (input.pitchDown) pitchIn -= 1;
-    if (input.rollRight) rollIn += 1;
-    if (input.rollLeft) rollIn -= 1;
-    if (input.yawRight) yawIn += 1;
-    if (input.yawLeft) yawIn -= 1;
+    // Pilot inputs. Keyboard and mouse axes are additive so a player can use
+    // the mouse for fine pitch/yaw and the keyboard for deliberate roll.
+    const pitchIn = clamp((input.pitchAxis || 0) + (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0), -1, 1);
+    const rollIn = clamp((input.rollAxis || 0) + (input.rollRight ? 1 : 0) - (input.rollLeft ? 1 : 0), -1, 1);
+    const yawIn = clamp((input.yawAxis || 0) + (input.yawRight ? 1 : 0) - (input.yawLeft ? 1 : 0), -1, 1);
 
     if (input.throttleUp) a.throttle = clamp(a.throttle + dt * 0.62, 0, 1);
     if (input.throttleDown) a.throttle = clamp(a.throttle - dt * 0.62, 0, 1);
 
-    const wantAB = input.afterburner && a.throttle > 0.55 && a.fuel > 1;
+    const wantAB = Boolean(input.afterburner) && a.throttle > 0.55 && a.fuel > 1;
     a.ab = wantAB;
     a.brake = approach(a.brake, input.airbrake ? 1 : 0, dt * 2.5);
+    a.mass = AIRCRAFT_SPEC.emptyMass + AIRCRAFT_SPEC.storesMass + a.fuel;
 
-    // Fly-by-wire-ish rate demand. The limiter keeps the jet from pulling
-    // absurd angles of attack or G at high speed, while leaving it lively.
-    const absAlpha = Math.abs(alpha);
-    let pitchLimit = 1.0;
-    if (pitchIn > 0) {
-      // FBW alpha limiter: ease the commanded rate to zero around 27 degrees.
-      pitchLimit *= clamp((0.50 - alpha) / 0.075, 0, 1);
-      const gTurnLimit = speed > 55 ? (87.8 / speed) : 1.15;
-      pitchLimit = Math.min(pitchLimit, Math.max(0.17, gTurnLimit));
-    } else if (pitchIn < 0) {
-      pitchLimit *= clamp((alpha + 0.38) / 0.11, 0, 1);
+    const aglCenter = a.pos[1] - terrainFloor(a.pos[0], a.pos[2]);
+    const groundEffect = 1 + 0.045 * Math.exp(-Math.max(0, aglCenter) / 18);
+    const mach = speed / sound;
+    const clMaxEff = AIRCRAFT_SPEC.clMax * Math.max(0.82, 1 - 0.28 * smoothstep(0.85, 1.25, mach));
+    const liftCapacity = qbar * AIRCRAFT_SPEC.wingArea * clMaxEff * groundEffect;
+    const gAvailable = liftCapacity / (a.mass * G0);
+    a.gAvail = Math.min(AIRCRAFT_SPEC.gLimit, Math.max(0, gAvailable));
+
+    // FBW pitch command: ask for a load factor, then convert that demand into
+    // a pitch rate for the current speed. At high altitude the lower dynamic
+    // pressure reduces both available G and pitch response; at low speed the
+    // alpha limiter protects the jet from departing.
+    let pitchTarget = 0;
+    if (pitchIn !== 0) {
+      if (pitchIn > 0) {
+        const nLimit = Math.max(1.12, Math.min(AIRCRAFT_SPEC.gLimit, gAvailable));
+        const nDemand = 1 + pitchIn * (nLimit - 1);
+        const baseRate = G0 * (nDemand - 1) / Math.max(speed, 70);
+        const alphaMargin = clamp((AIRCRAFT_SPEC.alphaLimit - Math.max(0, alpha)) / 0.07, 0, 1);
+        pitchTarget = baseRate * alphaMargin;
+        if (a.gLoad > AIRCRAFT_SPEC.gLimit + 0.12) pitchTarget = Math.min(pitchTarget, 0);
+      } else {
+        const nDemand = 1 + pitchIn * 2.2;
+        const baseRate = G0 * (nDemand - 1) / Math.max(speed, 70);
+        const alphaMargin = clamp((alpha + 0.38) / 0.08, 0, 1);
+        pitchTarget = baseRate * alphaMargin;
+        if (a.gLoad < AIRCRAFT_SPEC.negGLimit - 0.1) pitchTarget = Math.max(pitchTarget, 0);
+      }
+      pitchTarget *= 1 - 0.18 * smoothstep(0.9, 1.6, mach);
+      pitchTarget = clamp(pitchTarget, -0.9, 0.9);
     }
-    const maxPitchRate = 1.12 * clamp(speed / 110, 0.22, 1) * pitchLimit;
-    const maxRollRate = clamp(0.75 + speed / 140, 1.1, 3.1);
-    const maxYawRate = 0.5;
-    const targetPitch = pitchIn * maxPitchRate;
-    const targetRoll = -rollIn * maxRollRate;
-    const targetYaw = -yawIn * maxYawRate - beta * 1.4 - rollIn * 0.018 * Math.min(speed / 220, 1);
-    const response = clamp(dt * (speed > 20 ? 7 : 2), 0, 1);
-    a.omega[0] += (targetPitch - a.omega[0]) * response;
-    a.omega[1] += (targetYaw - a.omega[1]) * response * 0.72;
-    a.omega[2] += (targetRoll - a.omega[2]) * response;
 
-    // Record low-altitude roughness for camera shake, but never let it wander
-    // the flight path or accumulate as a bank angle.
-    a.turbulence = 1 - smoothstep(300, 1700, a.pos[1] - Math.max(0, terrainAt(a.pos[0], a.pos[2])));
+    const qRef = 0.5 * 1.225 * 200 * 200;
+    const rollAuthority = clamp(Math.sqrt(Math.max(0, qbar) / qRef), AIRCRAFT_SPEC.minRollAuthority, 1.18);
+    const maxRollRate = Math.min(4.6, AIRCRAFT_SPEC.rollRateMax * rollAuthority);
+    const targetRoll = -rollIn * maxRollRate;
+    const yawAuthority = clamp(Math.sqrt(Math.max(0, qbar) / qRef), 0.12, 1.05);
+    const targetYaw = -yawIn * 0.62 * yawAuthority - beta * 1.9 - rollIn * 0.018 * Math.min(speed / 220, 1);
+
+    const pitchResponse = clamp(dt * (3.8 + qbar / 6500), 0, 1);
+    const yawResponse = clamp(dt * (3.0 + qbar / 16000), 0, 1);
+    const rollResponse = clamp(dt * (4.5 + qbar / 12000), 0, 1);
+    a.omega[0] += (pitchTarget - a.omega[0]) * pitchResponse;
+    a.omega[1] += (targetYaw - a.omega[1]) * yawResponse;
+    a.omega[2] += (targetRoll - a.omega[2]) * rollResponse;
+
+    // Low-altitude roughness is recorded for camera shake and audio only.
+    a.turbulence = 1 - smoothstep(300, 1700, a.pos[1] - terrainFloor(a.pos[0], a.pos[2]));
     a.q = qIntegrate(a.q, a.omega, dt);
 
     // Aerodynamics -----------------------------------------------------------
-    let cl = 0;
-    if (absAlpha < 0.44) {
-      cl = 3.75 * absAlpha + 0.035;
+    const absAlpha = Math.abs(alpha);
+    let cl;
+    if (absAlpha <= AIRCRAFT_SPEC.alphaStall) {
+      cl = clMaxEff * (absAlpha / AIRCRAFT_SPEC.alphaStall);
     } else {
-      cl = Math.max(0.4, 1.685 - (absAlpha - 0.44) * 2.35);
+      cl = Math.max(0.42, clMaxEff - 1.95 * (absAlpha - AIRCRAFT_SPEC.alphaStall));
     }
-    cl = Math.min(cl, AIRCRAFT_SPEC.clMax + 0.06);
+    cl = clamp(cl, 0, clMaxEff);
     if (alpha < 0) cl = -cl;
-    const stall = smoothstep(0.46, 0.76, absAlpha);
+    const stall = smoothstep(AIRCRAFT_SPEC.alphaStall - 0.015, AIRCRAFT_SPEC.alphaStall + 0.11, absAlpha);
+    const machBuffet = smoothstep(0.92, 1.08, mach) * (1 - smoothstep(1.16, 1.4, mach)) * 0.6;
     a.stall = stall;
-    a.buffet = Math.max(stall, clamp((absAlpha - 0.36) / 0.16, 0, 1));
+    a.buffet = clamp(Math.max(stall, (absAlpha - 0.32) / 0.15) + machBuffet, 0, 1);
 
-    // Ground effect is tiny for the Viper, but it is a nice low-level touch.
-    const agl = a.pos[1] - Math.max(0, terrainAt(a.pos[0], a.pos[2]));
-    const groundEffect = 1 + 0.045 * Math.exp(-Math.max(0, agl) / 18);
     const lift = qbar * AIRCRAFT_SPEC.wingArea * cl * groundEffect;
     let cd = AIRCRAFT_SPEC.cd0 + AIRCRAFT_SPEC.inducedK * cl * cl;
-    cd += a.brake * 0.045;
-    const mach = speed / sound;
-    cd += smoothstep(0.84, 1.08, mach) * 0.017;
-    cd += stall * 0.09;
+    cd += a.brake * 0.05;
+    const waveDrag = 0.004
+      + 0.032 * Math.exp(-Math.pow((mach - 1.04) / 0.22, 2))
+      + 0.018 * smoothstep(1.15, 1.85, mach);
+    cd += waveDrag + stall * 0.10;
     const drag = qbar * AIRCRAFT_SPEC.wingArea * cd;
     const side = -qbar * AIRCRAFT_SPEC.wingArea * 1.25 * beta;
 
@@ -430,50 +548,60 @@
     const dragWorld = speed > 0.5 ? mul(a.vel, -drag / speed) : [0, 0, 0];
 
     // Engine -----------------------------------------------------------------
+    // F110 spool and afterburner light-up are intentionally not instant. The
+    // density lapse and ram effect reproduce the most useful real-world trend:
+    // less thrust upstairs, more thrust at speed.
+    const targetSpool = wantAB ? 1 : Math.max(0.08, a.throttle);
+    a.engineSpool += (targetSpool - a.engineSpool) * clamp(dt * (wantAB ? 2.0 : 1.4), 0, 1);
+    a.abLevel += ((wantAB ? 1 : 0) - a.abLevel) * clamp(dt * 3.5, 0, 1);
     const densityRatio = rho / 1.225;
-    const targetThrustLevel = a.throttle * (wantAB ? 1 : 0.58);
-    a.thrustLevel += (targetThrustLevel - a.thrustLevel) * clamp(dt * 4.5, 0, 1);
-    const thrustMax = wantAB ? AIRCRAFT_SPEC.abThrust : AIRCRAFT_SPEC.dryThrust;
-    const thrust = a.thrustLevel * thrustMax * Math.pow(densityRatio, 0.72);
-    const thrustWorld = mul(ax.forward, thrust);
-    const gravity = [0, -AIRCRAFT_SPEC.mass * G0, 0];
+    const lapse = Math.pow(densityRatio, 0.72);
+    const ram = Math.max(0.55, (1 + 0.22 * Math.min(mach, 1.6) - 0.06 * Math.max(0, mach - 1.6))
+      * (1 - 0.22 * smoothstep(2.0, 2.4, mach)));
+    const milThrust = AIRCRAFT_SPEC.dryThrust * (0.055 + 0.945 * a.throttle) * a.engineSpool;
+    const abExtra = (AIRCRAFT_SPEC.abThrust - AIRCRAFT_SPEC.dryThrust) * a.abLevel;
+    a.thrustN = (milThrust + abExtra) * lapse * ram;
+    const thrustWorld = mul(ax.forward, a.thrustN);
+    const gravity = [0, -a.mass * G0, 0];
 
-    const force = add(add(add(add(liftWorld, dragWorld), sideWorld), thrustWorld), gravity);
-    const accel = mul(force, 1 / AIRCRAFT_SPEC.mass);
-    a.loadAccel = dot(add(add(liftWorld, dragWorld), sideWorld), ax.up) / (AIRCRAFT_SPEC.mass * G0);
+    const aeroForce = add(add(liftWorld, dragWorld), sideWorld);
+    const force = add(add(aeroForce, thrustWorld), gravity);
+    const accel = mul(force, 1 / a.mass);
+    a.loadAccel = dot(add(aeroForce, thrustWorld), ax.up) / (a.mass * G0);
     a.gLoad = a.loadAccel;
     a.gSmooth += (a.gLoad - a.gSmooth) * clamp(dt * 4, 0, 1);
 
     a.vel = add(a.vel, mul(accel, dt));
     a.pos = add(a.pos, mul(a.vel, dt));
 
-    // Fuel burn is visual but persistent for the sortie.
-    const burn = (wantAB ? AIRCRAFT_SPEC.fuelRateAB : AIRCRAFT_SPEC.fuelRateDry * a.throttle) * dt;
-    a.fuel = Math.max(0, a.fuel - burn);
+    const fuelFlow = wantAB
+      ? AIRCRAFT_SPEC.fuelRateAB
+      : AIRCRAFT_SPEC.fuelRateIdle + AIRCRAFT_SPEC.fuelRateDry * clamp(a.throttle, 0, 1);
+    a.fuel = Math.max(0, a.fuel - fuelFlow * dt);
 
     // Derived data for instruments.
     a.speed = len(a.vel);
     a.airspeedKt = a.speed * 1.94384;
     a.altitudeM = a.pos[1];
-    a.agl = a.pos[1] - Math.max(0, terrainAt(a.pos[0], a.pos[2]));
+    a.agl = a.pos[1] - terrainFloor(a.pos[0], a.pos[2]);
     a.alpha = alpha;
     a.alphaDeg = alpha * RAD;
     a.beta = beta;
     a.mach = a.speed / sound;
+    a.qbar = 0.5 * rho * a.speed * a.speed;
+    a.cl = cl;
+    a.cd = cd;
+    a.liftN = lift;
+    a.dragN = drag;
     a.vs = a.vel[1];
-    a.heading = wrap(Math.atan2(ax.forward[0], -ax.forward[2]) * RAD, 360);
-    a.pitch = Math.asin(clamp(ax.forward[1], -1, 1)) * RAD;
-    a.bank = Math.atan2(-ax.right[1], Math.max(0.001, ax.up[1])) * RAD;
+    const axNow = axisSet(a.q);
+    a.heading = wrap(Math.atan2(axNow.forward[0], -axNow.forward[2]) * RAD, 360);
+    a.pitch = Math.asin(clamp(axNow.forward[1], -1, 1)) * RAD;
+    a.bank = Math.atan2(-axNow.right[1], Math.max(0.001, axNow.up[1])) * RAD;
     a.afterburnerVisual += ((wantAB ? 1 : 0) - a.afterburnerVisual) * clamp(dt * 5, 0, 1);
 
-    // Crash detection.
-    const floor = Math.max(0, terrainAt(a.pos[0], a.pos[2]));
-    if (a.pos[1] < floor + 1.3) {
-      a.pos[1] = floor + 1.3;
-      a.crashed = true;
-      a.impactSpeed = a.speed;
-      a.impactVS = a.vel[1];
-    }
+    // Collision is evaluated against the whole airframe, not just its centre.
+    detectTerrainCollision(a);
   }
 
   // --------------------------------------------------------------------- audio
