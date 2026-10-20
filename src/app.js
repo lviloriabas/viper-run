@@ -91,6 +91,8 @@
     muted: false,
     best: loadBest(),
     lastResult: null,
+    view: "cockpit",
+    mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 },
   };
 
   function loadBest() {
@@ -167,25 +169,25 @@
               <div class="brief-row"><span class="k">CLOCK</span><span class="v"><em>02:30</em> + 8 SEC PER GATE</span></div>
               <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em> · STALL · G-LIMIT</span></div>
               <div class="controls-block">
-                <div class="controls-title"><span>Flight controls</span><span>Keyboard</span></div>
+                <div class="controls-title"><span>Flight controls</span><span>Hybrid</span></div>
                 <div class="keys">
-                  <div><kbd>S</kbd><kbd>↓</kbd> PULL</div>
-                  <div><kbd>W</kbd><kbd>↑</kbd> PUSH</div>
+                  <div><kbd>MOUSE</kbd> PITCH / YAW</div>
                   <div><kbd>A</kbd><kbd>D</kbd> ROLL</div>
+                  <div><kbd>W</kbd><kbd>S</kbd> BACKUP PITCH</div>
                   <div><kbd>Q</kbd><kbd>E</kbd> RUDDER</div>
-                  <div><kbd>SHIFT</kbd> THROTTLE +</div>
-                  <div><kbd>CTRL</kbd> THROTTLE −</div>
+                  <div><kbd>SHIFT</kbd><kbd>CTRL</kbd> THROTTLE</div>
                   <div><kbd>SPACE</kbd> AFTERBURNER</div>
+                  <div><kbd>V</kbd> CHASE / COCKPIT</div>
+                  <div><kbd>C</kbd> CENTER MOUSE</div>
                   <div><kbd>B</kbd> AIRBRAKE</div>
-                  <div><kbd>P</kbd> PAUSE</div>
-                  <div><kbd>M</kbd> AUDIO</div>
+                  <div><kbd>P</kbd> PAUSE · <kbd>M</kbd> AUDIO</div>
                 </div>
               </div>
             </aside>
           </div>
           <div class="menu-footer">
             <span class="best">${best}</span>
-            <span>HOLD <kbd>S</kbd> TO PULL · RELEASE TO ROLL OUT · <kbd>P</kbd> PAUSE</span>
+            <span>CLICK TO CAPTURE MOUSE · <kbd>V</kbd> CHASE VIEW · <kbd>P</kbd> PAUSE</span>
             <span class="coords">37°14′N 081°06′E<br>ALT 2,140 FT</span>
           </div>
         </div>
@@ -314,6 +316,44 @@
     game.toastTimer = duration;
   }
 
+  function setView(view, announce = true) {
+    game.view = view === "chase" ? "chase" : "cockpit";
+    if (announce) flashToast(game.view === "chase" ? "CHASE VIEW // V COCKPIT" : "COCKPIT VIEW // V CHASE", 1.8);
+  }
+
+  function toggleView() {
+    if (game.state !== "flying" && game.state !== "transition") return;
+    setView(game.view === "chase" ? "cockpit" : "chase");
+  }
+
+  function centerMouseStick(announce = true) {
+    game.mouse.x = 0;
+    game.mouse.y = 0;
+    if (announce) flashToast("MOUSE STICK CENTERED", 1.1);
+  }
+
+  function requestMouseControl() {
+    if (game.state !== "flying" || document.pointerLockElement === canvas) return;
+    try {
+      const result = canvas.requestPointerLock({ unadjustedMovement: true });
+      if (result && typeof result.catch === "function") {
+        result.catch(() => canvas.requestPointerLock().catch(() => {
+          flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2);
+        }));
+      }
+    } catch (err) {
+      try {
+        canvas.requestPointerLock();
+      } catch (err2) {
+        flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2);
+      }
+    }
+  }
+
+  function releaseMouseControl() {
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+  }
+
   function startMission(fromGesture = true) {
     const mission = buildMission();
     game.mission = mission;
@@ -324,11 +364,12 @@
     game.flash = 0;
     game.toastTimer = 0;
     keys.clear();
+    centerMouseStick(false);
     hideUI();
     setBody("playing");
     if (fromGesture && sound.ctx && sound.ctx.state === "suspended") sound.ctx.resume().catch(() => {});
     if (fromGesture) sound.init();
-    flashToast("COLD RIVER // 10 GATES // CLEARED HOT", 3.1);
+    flashToast("COLD RIVER // 10 GATES // CLICK TO CAPTURE MOUSE", 3.4);
     lastFrame = performance.now();
   }
 
@@ -336,6 +377,8 @@
     if (game.state !== "flying") return;
     game.state = "paused";
     keys.clear();
+    centerMouseStick(false);
+    releaseMouseControl();
     if (sound.ctx) sound.ctx.suspend().catch(() => {});
     mountScreen(pauseScreen());
   }
@@ -344,9 +387,11 @@
     if (game.state !== "paused") return;
     game.state = "flying";
     keys.clear();
+    centerMouseStick(false);
     hideUI();
     setBody("playing");
     if (sound.ctx) sound.ctx.resume().catch(() => {});
+    flashToast("CLICK TO CAPTURE MOUSE // V CHASE", 1.8);
     lastFrame = performance.now();
     game.accumulator = 0;
   }
@@ -355,6 +400,8 @@
     game.state = "attract";
     game.attractTime = 0;
     keys.clear();
+    centerMouseStick(false);
+    releaseMouseControl();
     hideUI();
     setBody("menu");
     mountScreen(startScreen());
@@ -382,6 +429,8 @@
     game.transitionTimer = kind === "win" ? 1.35 : kind === "crash" ? 1.05 : 0.85;
     game.state = "transition";
     keys.clear();
+    centerMouseStick(false);
+    releaseMouseControl();
     if (kind === "win") {
       game.flashColor = "210,255,180";
       game.flash = 0.6;
@@ -419,6 +468,7 @@
   }
 
   function readInput() {
+    const mouse = game.mouse.locked ? game.mouse : { x: 0, y: 0 };
     return {
       pitchUp: keys.has("KeyS") || keys.has("ArrowDown"),
       pitchDown: keys.has("KeyW") || keys.has("ArrowUp"),
@@ -426,6 +476,11 @@
       rollRight: keys.has("KeyD") || keys.has("ArrowRight"),
       yawLeft: keys.has("KeyQ"),
       yawRight: keys.has("KeyE"),
+      // Mouse Y is pitch (down = pull) and mouse X is yaw, matching the
+      // requested hybrid mouse/hands-on-stick layout. A/D remains roll.
+      pitchAxis: mouse.y,
+      yawAxis: mouse.x,
+      rollAxis: 0,
       throttleUp: keys.has("ShiftLeft") || keys.has("ShiftRight"),
       throttleDown: keys.has("ControlLeft") || keys.has("ControlRight"),
       afterburner: keys.has("Space"),
@@ -542,8 +597,57 @@
     return { eye, forward: qAx.forward, right: qAx.right, up: qAx.up, fov };
   }
 
+  function chaseCamera() {
+    const a = game.aircraft;
+    const ax = axisSet(a.q);
+    const t = game.time;
+    const speedFactor = clamp(a.speed / 380, 0, 1);
+    const velocityDir = a.speed > 5 ? norm(a.vel) : ax.forward;
+    const viewDir = norm(add(mul(ax.forward, 0.55), mul(velocityDir, 0.45)));
+    const eye = add(a.pos, add(mul(ax.back, 17.5 + speedFactor * 4.5), mul(ax.up, 4.2)));
+    const look = add(a.pos, add(mul(viewDir, 15), mul(ax.up, 0.7)));
+
+    // A partially stabilized up vector keeps the horizon readable during a
+    // fast roll without making the chase view feel rigidly welded to the jet.
+    const stableUp = norm(add(mul(ax.up, 0.70), [0, 0.30, 0]));
+    let forward = norm(sub(look, eye));
+    let right = norm(cross(forward, stableUp));
+    if (length(right) < 1e-4) right = ax.right;
+    let up = norm(cross(right, forward));
+
+    const active = game.state === "flying" || game.state === "transition";
+    if (active) {
+      let shake = 0.00055 + a.turbulence * 0.0012 + a.buffet * 0.004 + a.afterburnerVisual * 0.0007;
+      if (a.mach > 0.92) shake += 0.0007;
+      if (game.state === "transition" && game.transitionKind === "crash") {
+        shake += Math.max(0, game.transitionTimer) * 0.02;
+      }
+      const sx = Math.sin(t * 31.1) * 0.6 + Math.sin(t * 18.3 + 0.4) * 0.4;
+      const sy = Math.sin(t * 26.3 + 1.7) * 0.6 + Math.sin(t * 41.7 + 0.3) * 0.4;
+      const shakenEye = add(eye, add(mul(right, sx * shake * 210), mul(up, sy * shake * 210)));
+      eye[0] = shakenEye[0];
+      eye[1] = shakenEye[1];
+      eye[2] = shakenEye[2];
+    }
+
+    const floor = Math.max(0, terrainAt(eye[0], eye[2])) + 2.4;
+    if (eye[1] < floor) eye[1] = floor;
+    forward = norm(sub(look, eye));
+    right = norm(cross(forward, stableUp));
+    if (length(right) < 1e-4) right = ax.right;
+    up = norm(cross(right, forward));
+    return {
+      eye,
+      forward,
+      right,
+      up,
+      fov: (57.5 + speedFactor * 4.5) * D2R,
+    };
+  }
+
   function currentCamera() {
-    return game.state === "attract" ? attractCamera(game.attractTime) : flightCamera();
+    if (game.state === "attract") return attractCamera(game.attractTime);
+    return game.view === "chase" ? chaseCamera() : flightCamera();
   }
 
   // ------------------------------------------------------------ canvas / layout
@@ -560,7 +664,7 @@
   }
 
   function layoutFor(W, H) {
-    const s = clamp(Math.min(W / 1440, H / 810), 1.0, 1.35);
+    const s = clamp(Math.min(W / 1280, H / 720), 1.0, 1.35);
     const panelY = H * 0.702;
     const hudTop = H * 0.108;
     const hudW = Math.min(W * 0.46, 900 * s);
@@ -569,15 +673,26 @@
     const hudL = cx - hudW / 2;
     const hudR = cx + hudW / 2;
     const hudCy = hudTop + (hudBottom - hudTop) * 0.445;
-    const mfdW = Math.min(W * 0.145, 290 * s);
-    const mfdH = mfdW * 0.69;
-    const gap = W * 0.016;
-    const mfdY = panelY + H * 0.047;
-    const mfdLX = cx - gap / 2 - mfdW;
-    const mfdRX = cx + gap / 2;
+    const mfdW = Math.min(W * 0.135, 265 * s);
+    const centerW = mfdW;
+    const mfdH = mfdW * 0.70;
+    const gap = W * 0.010;
+    const totalW = mfdW * 2 + centerW + gap * 2;
+    const mfdLX = cx - totalW / 2;
+    const centerX = mfdLX + mfdW + gap;
+    const mfdRX = centerX + centerW + gap;
+    const mfdY = panelY + H * 0.042;
+    const dedH = mfdH * 0.30;
+    const icpY = mfdY + dedH + mfdH * 0.045;
+    const icpH = mfdY + mfdH - icpY;
     const gaugeR = Math.min(W * 0.036, H * 0.052, 54 * s);
     const gaugeY = panelY + H * 0.145;
-    return { s, panelY, hudTop, hudBottom, hudW, hudL, hudR, hudCy, cx, mfdW, mfdH, mfdLX, mfdRX, mfdY, gaugeR, gaugeY };
+    const adiR = Math.min(gaugeR * 0.86, 46 * s);
+    const adiX = mfdLX - gaugeR * 1.60;
+    const cautionW = Math.min(W * 0.30, 470 * s);
+    const cautionY = panelY + H * 0.225;
+    const cautionH = Math.min(H * 0.066, 56 * s);
+    return { s, panelY, hudTop, hudBottom, hudW, hudL, hudR, hudCy, cx, mfdW, centerW, mfdH, mfdLX, centerX, mfdRX, mfdY, dedH, icpY, icpH, gaugeR, gaugeY, adiR, adiX, cautionW, cautionY, cautionH };
   }
 
   // --------------------------------------------------------------- map texture
@@ -940,8 +1055,90 @@
     ctx.restore();
   }
 
+  function drawStandbyADI(cx, cy, r, L) {
+    const a = game.aircraft;
+    const s = L.s;
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Instrument can and bezel.
+    const bg = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r);
+    bg.addColorStop(0, "#2a3029");
+    bg.addColorStop(0.7, "#0b0f0c");
+    bg.addColorStop(1, "#040604");
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(195,210,190,0.22)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    const rr = r * 0.78;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, rr, 0, TAU);
+    ctx.clip();
+    // Sky/ground card, opposite the aircraft's bank and displaced by pitch.
+    ctx.save();
+    ctx.rotate(-a.bank * D2R);
+    const pitchPx = clamp(a.pitch, -55, 55) * (rr / 28);
+    ctx.translate(0, pitchPx);
+    ctx.fillStyle = "#34565d";
+    ctx.fillRect(-rr * 2, -rr * 3, rr * 4, rr * 3);
+    ctx.fillStyle = "#5a4a34";
+    ctx.fillRect(-rr * 2, 0, rr * 4, rr * 3);
+    ctx.strokeStyle = "rgba(225,240,220,0.86)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-rr * 1.8, 0);
+    ctx.lineTo(rr * 1.8, 0);
+    ctx.stroke();
+    // Sparse pitch bars.
+    ctx.strokeStyle = "rgba(230,240,220,0.36)";
+    ctx.lineWidth = 0.8;
+    for (let i = -2; i <= 2; i++) {
+      if (!i) continue;
+      const py = -i * (rr / 5.5);
+      ctx.beginPath();
+      ctx.moveTo(-rr * 0.26, py);
+      ctx.lineTo(rr * 0.26, py);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // Fixed wing symbol.
+    ctx.strokeStyle = "#f0d06a";
+    ctx.lineWidth = 2.1 * s;
+    ctx.beginPath();
+    ctx.moveTo(-rr * 0.45, 0);
+    ctx.lineTo(-rr * 0.16, 0);
+    ctx.lineTo(-rr * 0.06, rr * 0.12);
+    ctx.lineTo(rr * 0.06, rr * 0.12);
+    ctx.lineTo(rr * 0.16, 0);
+    ctx.lineTo(rr * 0.45, 0);
+    ctx.stroke();
+    ctx.fillStyle = "#f0d06a";
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.8 * s, 0, TAU);
+    ctx.fill();
+    // Bank pointer.
+    ctx.strokeStyle = "rgba(225,238,216,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, rr * 0.88, Math.PI * 1.16, Math.PI * 1.84);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(185,208,178,0.58)";
+    ctx.font = `${Math.max(5.8, 6.4 * s)}px Silkscreen, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText("STBY ADI", 0, r * 0.34);
+    ctx.restore();
+  }
+
   // --------------------------------------------------------------- canopy/panel
   function drawCanopy(W, H, L) {
+    const s = L.s;
     const side = W * 0.09;
     const pY = L.panelY;
     const lg = ctx.createLinearGradient(0, 0, side, 0);
@@ -1017,6 +1214,44 @@
     ctx.moveTo(0, H * 0.041);
     ctx.bezierCurveTo(W * 0.24, H * 0.025, W * 0.76, H * 0.025, W, H * 0.041);
     ctx.stroke();
+
+    // Canopy bow and center latch. The F-16's one-piece bubble canopy has a
+    // prominent arch just ahead of the pilot, so give it a real silhouette.
+    const bowY = H * 0.058;
+    const bow = ctx.createLinearGradient(0, bowY - 9 * s, 0, bowY + 9 * s);
+    bow.addColorStop(0, "#070907");
+    bow.addColorStop(0.5, "#2a3028");
+    bow.addColorStop(1, "#060806");
+    ctx.strokeStyle = bow;
+    ctx.lineWidth = Math.max(6 * s, 8 * s);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(W * 0.235, bowY + 4 * s);
+    ctx.quadraticCurveTo(W * 0.5, bowY - 4 * s, W * 0.765, bowY + 4 * s);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(206,220,195,0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.235, bowY + 1 * s);
+    ctx.quadraticCurveTo(W * 0.5, bowY - 7 * s, W * 0.765, bowY + 1 * s);
+    ctx.stroke();
+    // Canopy unlock/latch handle.
+    ctx.fillStyle = "#11160f";
+    ctx.strokeStyle = "rgba(190,205,180,0.26)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(W * 0.5 - 17 * s, bowY - 3 * s, 34 * s, 8 * s, 2 * s);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = HUD;
+    ctx.beginPath();
+    ctx.arc(W * 0.5 + 11 * s, bowY + 1 * s, 1.6 * s, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(169,255,178,0.34)";
+    ctx.font = Math.max(5.4, 5.8 * s) + "px Silkscreen, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText("CANOPY", W * 0.5, bowY - 7 * s);
 
     // Canopy glass reflection bands
     ctx.globalCompositeOperation = "screen";
@@ -1115,29 +1350,60 @@
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(169,255,178,0.4)";
-    ctx.fillText("F-16C  //  FLCS NORM  //  MAIN BUS A", cx, pY + H * 0.034);
+    ctx.fillText("F-16C  //  FLCS NORM  //  MAIN BUS A", cx, pY + H * 0.013);
 
     // Side console switch blocks
-    drawSwitchBlock(W * 0.025, pY + H * 0.16, W * 0.08, H * 0.10, ["IFF", "NAV", "TAC"], L);
-    drawSwitchBlock(W * 0.895, pY + H * 0.16, W * 0.08, H * 0.10, ["ECM", "FLIR", "ARM"], L);
+    drawSwitchBlock(W * 0.115, pY + H * 0.190, W * 0.075, H * 0.085, ["IFF", "NAV", "TAC"], L);
+    drawSwitchBlock(W * 0.770, pY + H * 0.190, W * 0.065, H * 0.085, ["ECM", "FLIR", "ARM"], L);
     ctx.restore();
   }
 
   function drawSwitchBlock(x, y, w, h, labels, L) {
     const s = L.s;
     ctx.save();
-    ctx.font = `${Math.max(6.2, 7 * s)}px Silkscreen, monospace`;
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "rgba(169,255,178,0.34)";
+    // Recessed switch panel with a raised lip. Keeping these blocks inboard of
+    // the throttle and stick avoids the old overlap on the side consoles.
+    ctx.fillStyle = "rgba(7,10,7,0.82)";
+    ctx.beginPath();
+    ctx.roundRect(x - 4 * s, y - 5 * s, w + 8 * s, h + 10 * s, 2.5 * s);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(150,170,145,0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.strokeRect(x - 2 * s, y - 3 * s, w + 4 * s, h + 6 * s);
+
     const cellH = h / labels.length;
     for (let i = 0; i < labels.length; i++) {
-      ctx.fillText(labels[i], x, y + cellH * (i + 0.5));
-      ctx.fillStyle = i === 0 ? "rgba(169,255,178,0.5)" : "rgba(72,88,72,0.7)";
-      ctx.fillRect(x + w * 0.38, y + cellH * i + cellH * 0.28, w * 0.16, cellH * 0.40);
-      ctx.strokeStyle = "rgba(0,0,0,0.55)";
-      ctx.strokeRect(x + w * 0.38, y + cellH * i + cellH * 0.28, w * 0.16, cellH * 0.40);
+      const cy = y + cellH * (i + 0.5);
+      ctx.fillStyle = "rgba(169,255,178,0.36)";
+      ctx.font = Math.max(6.2, 7 * s) + "px Silkscreen, monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(labels[i], x + 2 * s, cy);
+      // Toggle switch base and bat handle.
+      const sx = x + w * 0.63;
+      const baseW = Math.max(7 * s, 8 * s);
+      const baseH = Math.max(10 * s, 11 * s);
+      ctx.fillStyle = "#1b211b";
+      ctx.strokeStyle = "rgba(190,205,180,0.23)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(sx - baseW / 2, cy - baseH / 2, baseW, baseH, 1.8 * s);
+      ctx.fill();
+      ctx.stroke();
+      const up = i % 2 === 0;
+      ctx.strokeStyle = up ? "rgba(169,255,178,0.7)" : "rgba(135,153,132,0.5)";
+      ctx.lineWidth = 1.6 * s;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(sx, cy + 2 * s);
+      ctx.lineTo(sx + (up ? -2.4 : 2.4) * s, cy - 4.5 * s);
+      ctx.stroke();
       ctx.fillStyle = "rgba(169,255,178,0.34)";
+      ctx.beginPath();
+      ctx.arc(x + w - 6 * s, cy, 1.5 * s, 0, TAU);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -1220,51 +1486,176 @@
     ctx.restore();
   }
 
-  function drawCautionPanel(W, H, L) {
+  function drawCenterConsole(L) {
     const a = game.aircraft;
     const m = game.mission;
     const s = L.s;
-    const y = L.panelY + H * 0.25;
-    const cx = L.cx;
-    const lights = [
-      { label: "ENG", on: true, color: "#8fff9d" },
-      { label: "FLCS", on: true, color: "#8fff9d" },
-      { label: "FUEL", on: a.fuel < 500, color: AMBER },
-      { label: "HYD", on: false, color: AMBER },
-      { label: "STALL", on: a.stall > 0.08, color: RED },
-      { label: "G", on: a.gSmooth > 9, color: RED },
-      { label: "LG", on: false, color: "#8fff9d" },
-    ];
-    const width = Math.min(W * 0.27, 420 * s);
-    const start = cx - width / 2;
-    const step = width / lights.length;
+    const x = L.centerX;
+    const w = L.centerW;
+    const top = L.mfdY;
+    const totalH = L.mfdH;
+    const px = 10 * s;
+
     ctx.save();
-    ctx.fillStyle = "rgba(4,6,4,0.75)";
-    ctx.fillRect(start - 10 * s, y - 14 * s, width + 20 * s, 37 * s);
-    ctx.strokeStyle = "rgba(169,255,178,0.11)";
-    ctx.strokeRect(start - 10 * s + 0.5, y - 14 * s + 0.5, width + 20 * s - 1, 37 * s - 1);
-    ctx.font = `${Math.max(6, 6.6 * s)}px Silkscreen, monospace`;
+    // Central instrument-panel plate. The DED and ICP are mounted together in
+    // the real jet; keeping them in one column reads more like an F-16 panel
+    // than the old pair of floating MFDs did.
+    const plateX = x - px;
+    const plateY = top - 12 * s;
+    const plateW = w + px * 2;
+    const plateH = totalH + 17 * s;
+    const plate = ctx.createLinearGradient(0, plateY, 0, plateY + plateH);
+    plate.addColorStop(0, "#1b211a");
+    plate.addColorStop(0.14, "#0c110c");
+    plate.addColorStop(1, "#060806");
+    ctx.fillStyle = plate;
+    ctx.fillRect(plateX, plateY, plateW, plateH);
+    ctx.strokeStyle = "rgba(190,206,181,0.18)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(plateX + 0.5, plateY + 0.5, plateW - 1, plateH - 1);
+    ctx.fillStyle = "rgba(3,5,3,0.86)";
+    ctx.fillRect(plateX + 2.5, plateY + 2.5, plateW - 5, plateH - 5);
+    for (const [sx, sy] of [[plateX + 5, plateY + 5], [plateX + plateW - 5, plateY + 5], [plateX + 5, plateY + plateH - 5], [plateX + plateW - 5, plateY + plateH - 5]]) {
+      ctx.fillStyle = "rgba(181,196,174,0.28)";
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.7 * s, 0, TAU);
+      ctx.fill();
+    }
+
+    // Data Entry Display (DED).
+    const dedX = x + 9 * s;
+    const dedY = top + 8 * s;
+    const dedW = w - 18 * s;
+    const dedH = Math.max(16 * s, L.dedH - 12 * s);
+    ctx.fillStyle = "#070d08";
+    ctx.fillRect(dedX - 3 * s, dedY - 3 * s, dedW + 6 * s, dedH + 6 * s);
+    ctx.strokeStyle = "rgba(174,224,163,0.26)";
+    ctx.strokeRect(dedX - 2.5 * s, dedY - 2.5 * s, dedW + 5 * s, dedH + 5 * s);
+    const glass = ctx.createLinearGradient(0, dedY, 0, dedY + dedH);
+    glass.addColorStop(0, "#07130b");
+    glass.addColorStop(0.5, "#041008");
+    glass.addColorStop(1, "#020804");
+    ctx.fillStyle = glass;
+    ctx.fillRect(dedX, dedY, dedW, dedH);
+    for (let sy = dedY + 1; sy < dedY + dedH; sy += 2) {
+      ctx.fillStyle = "rgba(81,177,108,0.055)";
+      ctx.fillRect(dedX, sy, dedW, 1);
+    }
+    const dedLines = [
+      `GATE ${pad(m.gateIndex + 1, 2)}/${pad(m.gates.length, 2)}  ${formatTime(m.timeLeft)}`,
+      `SPD ${pad(kt(a.speed), 3)}KT  ALT ${pad(ft(a.pos[1]), 5)}FT`,
+      `M${a.mach.toFixed(2)}  G${a.gSmooth.toFixed(1)}  AOA${a.alphaDeg.toFixed(1)}`,
+    ];
+    const dedFs = clamp(dedW * 0.036, 5.0, 7.4);
+    ctx.font = `${dedFs}px Silkscreen, monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = HUD;
+    for (let i = 0; i < dedLines.length; i++) {
+      ctx.fillText(dedLines[i], dedX + 3 * s, dedY + 2 * s + i * (dedH / 3));
+    }
+    ctx.fillStyle = "rgba(169,255,178,0.34)";
+    ctx.font = `${Math.max(4.8, 5.2 * s)}px Silkscreen, monospace`;
+    ctx.textAlign = "right";
+    ctx.fillText("DED", dedX + dedW - 3 * s, dedY - 1 * s);
+
+    // Integrated Control Panel (ICP) keypad.
+    const keyAreaY = L.icpY;
+    const keyAreaH = L.icpH;
+    const gap = 2 * s;
+    const cols = 5;
+    const rows = 4;
+    const keyW = (w - 18 * s - gap * (cols - 1)) / cols;
+    const keyH = (keyAreaH - gap * (rows - 1)) / rows;
+    const labels = [
+      ["1", "2", "3", "4", "5"],
+      ["6", "7", "8", "9", "0"],
+      ["CLR", "RCL", "ENT", "UP", "DN"],
+      ["FLCS", "NAV", "COMM", "IFF", "TEST"],
+    ];
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (let i = 0; i < lights.length; i++) {
-      const lx = start + step * (i + 0.5);
-      const lit = lights[i].on;
-      ctx.fillStyle = lit ? lights[i].color : "rgba(69,80,67,0.36)";
-      if (lit) {
-        ctx.shadowColor = lights[i].color;
-        ctx.shadowBlur = 8 * s;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const kx = x + 9 * s + c * (keyW + gap);
+        const ky = keyAreaY + r * (keyH + gap);
+        const hot = labels[r][c] === "ENT" || labels[r][c] === "FLCS";
+        ctx.fillStyle = hot ? "#17251a" : "#0d120d";
+        ctx.beginPath();
+        ctx.roundRect(kx, ky, keyW, keyH, 1.7 * s);
+        ctx.fill();
+        ctx.strokeStyle = hot ? "rgba(169,255,178,0.34)" : "rgba(151,170,145,0.17)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = hot ? HUD : "rgba(169,255,178,0.46)";
+        const fs = clamp(keyW * 0.30, 4.8, 7.2);
+        ctx.font = `${fs}px Silkscreen, monospace`;
+        ctx.fillText(labels[r][c], kx + keyW / 2, ky + keyH / 2 + 0.5 * s);
       }
-      ctx.fillRect(lx - 7 * s, y - 7 * s, 14 * s, 4 * s);
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = lit ? "rgba(220,235,210,0.7)" : "rgba(110,125,105,0.4)";
-      ctx.fillText(lights[i].label, lx, y + 5 * s);
     }
-    ctx.fillStyle = "rgba(169,255,178,0.42)";
+    ctx.restore();
+  }
+
+  function drawCautionPanel(W, H, L) {
+    const a = game.aircraft;
+    const s = L.s;
+    const x = L.cx - L.cautionW / 2;
+    const y = L.cautionY;
+    const w = L.cautionW;
+    const h = L.cautionH;
+    const lights = [
+      { label: "ENG FIRE", on: false, color: RED },
+      { label: "HYD", on: true, color: "#8fff9d" },
+      { label: "FLCS", on: true, color: "#8fff9d" },
+      { label: "FUEL", on: a.fuel < 500, color: AMBER },
+      { label: "BINGO", on: a.fuel < 700, color: AMBER },
+      { label: "STALL", on: a.stall > 0.08, color: RED },
+      { label: "G LIMIT", on: a.gSmooth > 9, color: RED },
+      { label: "CANOPY", on: true, color: "#8fff9d" },
+    ];
+    ctx.save();
+    ctx.fillStyle = "rgba(4,6,4,0.88)";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(169,255,178,0.14)";
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.strokeStyle = "rgba(0,0,0,0.72)";
+    ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5);
+    ctx.fillStyle = "rgba(169,255,178,0.27)";
+    ctx.font = `${Math.max(5.2, 5.8 * s)}px Silkscreen, monospace`;
     ctx.textAlign = "left";
-    ctx.font = `${Math.max(6, 6.4 * s)}px Silkscreen, monospace`;
-    ctx.fillText(`COLD RIVER ${pad(m.gateIndex, 2)}/${pad(m.gates.length, 2)}`, start - 4 * s, y + 19 * s);
+    ctx.textBaseline = "bottom";
+    ctx.fillText("CAUTION / ADVISORY", x + 4 * s, y - 3 * s);
     ctx.textAlign = "right";
-    ctx.fillText("MASTER CAUTION  //  OFF", start + width + 4 * s, y + 19 * s);
+    ctx.fillText("MASTER CAUTION  //  OFF", x + w - 4 * s, y - 3 * s);
+
+    const cols = 4;
+    const rows = 2;
+    const cellW = w / cols;
+    const cellH = h / rows;
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < lights.length; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const lx = x + col * cellW;
+      const ly = y + row * cellH;
+      const light = lights[i];
+      ctx.strokeStyle = "rgba(140,160,136,0.09)";
+      ctx.strokeRect(lx + 0.5, ly + 0.5, cellW - 1, cellH - 1);
+      const ledX = lx + 7 * s;
+      const ledY = ly + cellH * 0.30;
+      const ledW = Math.max(8 * s, 12 * s);
+      const ledH = Math.max(2.6 * s, 3.4 * s);
+      ctx.fillStyle = light.on ? light.color : "rgba(55,64,53,0.42)";
+      ctx.fillRect(ledX, ledY, ledW, ledH);
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeRect(ledX + 0.5, ledY + 0.5, ledW - 1, ledH - 1);
+      ctx.fillStyle = light.on && (light.color === AMBER || light.color === RED)
+        ? "rgba(240,245,230,0.92)"
+        : "rgba(169,255,178,0.43)";
+      ctx.font = `${Math.max(5.2, 5.9 * s)}px Silkscreen, monospace`;
+      ctx.textAlign = "left";
+      ctx.fillText(light.label, ledX + ledW + 5 * s, ly + cellH * 0.57);
+    }
     ctx.restore();
   }
 
@@ -1338,12 +1729,7 @@
     ctx.textAlign = align;
     ctx.textBaseline = baseline;
     ctx.fillStyle = color;
-    if (glow) {
-      ctx.shadowColor = color;
-      ctx.shadowBlur = glow;
-    }
     ctx.fillText(text, x, y);
-    if (glow) ctx.shadowBlur = 0;
   }
 
   function hLine(x1, y1, x2, y2, color = HUD, width = 1, dash = null) {
@@ -1433,7 +1819,7 @@
     }
     // bug / readout
     const boxW = 61 * s, boxH = 23 * s;
-    ctx.fillStyle = "rgba(0,8,4,0.56)";
+    ctx.fillStyle = "rgba(0,8,4,0.88)";
     ctx.fillRect(x - boxW / 2, center - boxH / 2, boxW, boxH);
     ctx.strokeStyle = HUD_SOFT;
     ctx.strokeRect(x - boxW / 2 + 0.5, center - boxH / 2 + 0.5, boxW - 1, boxH - 1);
@@ -1464,7 +1850,7 @@
       if (major) hText(`${v / 1000}`, x + 7 * s, y, 7.1 * s, HUD_DIM, "left");
     }
     const boxW = 68 * s, boxH = 23 * s;
-    ctx.fillStyle = "rgba(0,8,4,0.56)";
+    ctx.fillStyle = "rgba(0,8,4,0.88)";
     ctx.fillRect(x - boxW / 2, center - boxH / 2, boxW, boxH);
     ctx.strokeStyle = HUD_SOFT;
     ctx.strokeRect(x - boxW / 2 + 0.5, center - boxH / 2 + 0.5, boxW - 1, boxH - 1);
@@ -1581,7 +1967,7 @@
     const a = game.aircraft;
     const m = game.mission;
     const s = L.s;
-    const agl = a.agl;
+    const agl = Math.min(a.agl, a.clearance > 0 ? a.clearance : a.agl);
     const sinkRate = -a.vs;
     const timeToImpact = sinkRate > 1 ? agl / sinkRate : 99;
     const pullUp = agl < 260 && sinkRate > 7 && (timeToImpact < 6.2 || agl < 95);
@@ -1618,8 +2004,12 @@
     hText(`M ${a.mach.toFixed(2)}`, L.cx - 168 * s, by + 12 * s, 7.3 * s, HUD_SOFT);
     hText(`G ${a.gSmooth.toFixed(1)}`, L.cx - 110 * s, by + 12 * s, 7.3 * s, a.gSmooth > 8.5 ? AMBER : HUD_SOFT);
     hText(`AOA ${a.alphaDeg.toFixed(1)}`, L.cx - 41 * s, by + 12 * s, 7.3 * s, a.stall > 0.05 ? RED : HUD_SOFT);
-    hText(`VS ${a.vs >= 0 ? "+" : "−"}${pad(Math.abs(fpm(a.vs)), 4)}`, L.cx + 48 * s, by + 12 * s, 7.3 * s, HUD_SOFT);
+    hText(`GAVL ${a.gAvail.toFixed(1)}`, L.cx + 38 * s, by + 12 * s, 7.1 * s, a.gAvail < 2 ? AMBER : HUD_DIM);
+    hText(`VS ${a.vs >= 0 ? "+" : "−"}${pad(Math.abs(fpm(a.vs)), 4)}`, L.cx + 112 * s, by + 12 * s, 7.1 * s, HUD_SOFT);
     hText(`AB ${a.ab ? "ON" : "OFF"}`, L.cx + 170 * s, by + 12 * s, 7.3 * s, a.ab ? AMBER : HUD_DIM, "right");
+    hText(game.mouse.locked ? "MSE LOCK" : "CLICK MOUSE", L.cx - 168 * s, by + 27 * s, 6.4 * s, game.mouse.locked ? HUD_DIM : AMBER, "left");
+    hText("C CENTER STICK", L.cx - 74 * s, by + 27 * s, 6.4 * s, HUD_FAINT, "left");
+    hText("V CHASE VIEW", L.cx + 170 * s, by + 27 * s, 6.4 * s, HUD_DIM, "right");
   }
 
   function drawMissionInfo(L) {
@@ -1723,6 +2113,156 @@
     ctx.restore();
   }
 
+  // -------------------------------------------------------------- chase HUD
+  function chaseWarnings() {
+    const a = game.aircraft;
+    const m = game.mission;
+    const clearance = Math.min(a.agl, a.clearance > 0 ? a.clearance : a.agl);
+    const sinkRate = -a.vs;
+    const timeToImpact = sinkRate > 1 ? clearance / sinkRate : 99;
+    const pullUp = clearance < 260 && sinkRate > 7 && (timeToImpact < 6.2 || clearance < 95);
+    const warns = [];
+    if (pullUp) warns.push({ text: "PULL UP", color: RED });
+    if (a.stall > 0.06 || a.alphaDeg > 20.5 || a.speed < 92) warns.push({ text: "STALL", color: RED });
+    if (a.gSmooth > 9.15) warns.push({ text: "G LIMIT", color: AMBER });
+    if (a.fuel < 400) warns.push({ text: "BINGO", color: AMBER });
+    if (m.timeLeft < 20) warns.push({ text: "TIME CRITICAL", color: AMBER });
+    return warns;
+  }
+
+  function drawChaseGateCue(W, H, s) {
+    const m = game.mission;
+    const gate = m.gates[m.gateIndex];
+    if (!gate) return;
+    const rel = sub(gate.pos, game.camera.eye);
+    const dist = length(rel);
+    const p = projectPoint(gate.pos);
+    const marginX = 44 * s;
+    const marginTop = 96 * s;
+    const marginBottom = 88 * s;
+    if (p && p.x > marginX && p.x < W - marginX && p.y > marginTop && p.y < H - marginBottom) {
+      const size = 8 * s + clamp(1 - dist / 5000, 0, 1) * 6 * s;
+      ctx.save();
+      ctx.strokeStyle = AMBER;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - size);
+      ctx.lineTo(p.x + size, p.y);
+      ctx.lineTo(p.x, p.y + size);
+      ctx.lineTo(p.x - size, p.y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,192,91,0.30)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 1.85, 0, TAU);
+      ctx.stroke();
+      hText(`GATE ${pad(m.gateIndex + 1, 2)}  ${(dist / 1000).toFixed(1)} KM`, p.x, p.y + size * 2.6, 7.2 * s, AMBER, "center");
+      ctx.restore();
+      return;
+    }
+
+    // Off-screen locator. Use the camera basis directly so the arrow still
+    // points at the gate when the target is behind the chase camera.
+    const cam = game.camera;
+    const tan = Math.tan(cam.fov / 2);
+    const aspect = W / H;
+    let nx = dot(rel, cam.right) / Math.max(Math.abs(dot(rel, cam.forward)) * tan * aspect, 0.05);
+    let ny = dot(rel, cam.up) / Math.max(Math.abs(dot(rel, cam.forward)) * tan, 0.05);
+    if (dot(rel, cam.forward) <= 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    const mag = Math.hypot(nx, ny) || 1;
+    nx /= mag;
+    ny /= mag;
+    const cx = W * 0.5;
+    const cy = H * 0.48;
+    const rx = W * 0.39;
+    const ry = H * 0.31;
+    const x = cx + clamp(nx, -1, 1) * rx;
+    const y = cy - clamp(ny, -1, 1) * ry;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.atan2(-ny, nx));
+    ctx.fillStyle = AMBER;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-11 * s, -6 * s);
+    ctx.lineTo(-11 * s, 6 * s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    hText(`${pad(m.gateIndex + 1, 2)}  ${(dist / 1000).toFixed(1)} KM`, x, y + 16 * s, 7.2 * s, AMBER, "center");
+  }
+
+  function drawChaseHUD(W, H) {
+    const a = game.aircraft;
+    const m = game.mission;
+    if (!a || !m) return;
+    const s = clamp(Math.min(W / 1440, H / 810), 1.0, 1.35);
+    const edge = 20 * s;
+    const topH = 76 * s;
+    const bottomH = 70 * s;
+
+    ctx.save();
+    // Restrained canopy-frame HUD slabs.
+    const topGrad = ctx.createLinearGradient(0, 0, 0, topH);
+    topGrad.addColorStop(0, "rgba(4,10,6,0.82)");
+    topGrad.addColorStop(0.72, "rgba(4,10,6,0.42)");
+    topGrad.addColorStop(1, "rgba(4,10,6,0)");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 0, W, topH);
+    const botGrad = ctx.createLinearGradient(0, H - bottomH, 0, H);
+    botGrad.addColorStop(0, "rgba(4,10,6,0)");
+    botGrad.addColorStop(0.28, "rgba(4,10,6,0.44)");
+    botGrad.addColorStop(1, "rgba(4,10,6,0.78)");
+    ctx.fillStyle = botGrad;
+    ctx.fillRect(0, H - bottomH, W, bottomH);
+    hLine(edge, topH - 5 * s, W - edge, topH - 5 * s, "rgba(169,255,178,0.16)", 1);
+    hLine(edge, H - bottomH + 5 * s, W - edge, H - bottomH + 5 * s, "rgba(169,255,178,0.12)", 1);
+
+    // Top strip: airframe, route, time, energy.
+    hText("F-16C  //  CHASE VIEW", edge, 17 * s, 8.5 * s, HUD, "left", "top", 700);
+    hText("COLD RIVER  /  SECTOR 07", edge, 31 * s, 6.8 * s, HUD_DIM, "left", "top");
+    hText(`GATE ${pad(m.gateIndex + 1, 2)} / ${pad(m.gates.length, 2)}`, W * 0.5, 14 * s, 8.8 * s, AMBER, "center", "top", 700);
+    hText(formatTime(m.timeLeft), W * 0.5, 27 * s, 19 * s, m.timeLeft < 20 ? RED : HUD, "center", "top", 700, 5 * s);
+    hText(`${pad(kt(a.speed), 3)} KT`, W - edge, 14 * s, 12 * s, HUD, "right", "top", 700);
+    hText(`ALT ${pad(ft(a.pos[1]), 5)} FT`, W - edge, 30 * s, 7.4 * s, HUD_SOFT, "right", "top");
+    hText(`M ${a.mach.toFixed(2)}  G ${a.gSmooth.toFixed(1)}  AOA ${a.alphaDeg.toFixed(0)}  GAVL ${a.gAvail.toFixed(1)}`, W - edge, 43 * s, 6.8 * s, HUD_DIM, "right", "top");
+    hText(`SCR ${pad(m.score, 5)}`, W - edge, 55 * s, 6.6 * s, HUD_DIM, "right", "top");
+
+    // Gate locator and target data.
+    drawChaseGateCue(W, H, s);
+    const gate = m.gates[m.gateIndex];
+    if (gate) {
+      const rel = sub(gate.pos, a.pos);
+      const bearing = Math.atan2(rel[0], -rel[2]) * R2D;
+      const diff = wrap180(bearing - a.heading);
+      const elevation = Math.atan2(rel[1], Math.hypot(rel[0], rel[2])) * R2D;
+      hText(`TGT ${diff >= 0 ? "R" : "L"} ${pad(Math.abs(diff), 2)}°   EL ${elevation >= 0 ? "+" : "−"}${pad(Math.abs(elevation), 2)}°`, edge, H - 48 * s, 7.2 * s, AMBER, "left", "top");
+    }
+
+    // Warnings and transient messages.
+    if (game.toastTimer > 0) {
+      const alpha = clamp(game.toastTimer, 0, 1);
+      hText(game.toast, W * 0.5, topH + 21 * s, 8.8 * s, `rgba(216,255,134,${0.62 + alpha * 0.36})`, "center", "middle", 700, 5 * s);
+    }
+    const warns = chaseWarnings();
+    if (warns.length && game.state === "flying" && Math.floor(game.time * 4.5) % 2 === 0) {
+      const y = H * 0.60;
+      hText(warns[0].text, W * 0.5, y, 13 * s, warns[0].color, "center", "middle", 700, 7 * s);
+      if (warns[1]) hText(warns[1].text, W * 0.5, y + 19 * s, 10 * s, warns[1].color, "center", "middle", 700, 5 * s);
+    }
+
+    // Bottom strip: mouse state, view hint, fuel.
+    hText(game.mouse.locked ? "MOUSE CAPTURED  //  C CENTER" : "CLICK TO CAPTURE MOUSE  //  C CENTER", edge, H - 46 * s, 7.2 * s, game.mouse.locked ? HUD_SOFT : AMBER, "left", "top");
+    hText(`FUEL ${pad(a.fuel * 2.20462, 4)} LB`, edge, H - 32 * s, 7 * s, a.fuel < 500 ? RED : HUD_DIM, "left", "top");
+    hText("V  COCKPIT VIEW", W - edge, H - 46 * s, 7.6 * s, HUD_SOFT, "right", "top");
+    hText("A / D  ROLL   ·   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
+    hText("CHASE", W * 0.5, H - 18 * s, 6.2 * s, HUD_FAINT, "center", "top");
+    ctx.restore();
+  }
+
   // ------------------------------------------------------------------ effects
   function drawEffects(W, H) {
     const a = game.aircraft;
@@ -1750,6 +2290,12 @@
     ctx.clearRect(0, 0, W, H);
     if (game.state === "attract" || !game.aircraft || !game.mission) return;
 
+    if (game.view === "chase") {
+      drawChaseHUD(W, H);
+      drawEffects(W, H);
+      return;
+    }
+
     drawCanopy(W, H, L);
     drawPanelBase(W, H, L);
 
@@ -1757,11 +2303,11 @@
     drawMFDBezel(L.mfdRX, L.mfdY, L.mfdW, L.mfdH, L);
     drawMFDMap(L.mfdLX, L.mfdY, L.mfdW, L.mfdH, L);
     drawMFDEngine(L.mfdRX, L.mfdY, L.mfdW, L.mfdH, L);
+    drawCenterConsole(L);
 
     drawAnalogGauge(W * 0.135, L.gaugeY, L.gaugeR, kt(game.aircraft.speed), 800, "STBY", "KTS", L);
+    drawStandbyADI(L.adiX, L.gaugeY, L.adiR, L);
     drawAnalogGauge(W * 0.865, L.gaugeY, L.gaugeR, ft(game.aircraft.pos[1]), 50000, "STBY", "FT", L);
-    drawSwitchBlock(W * 0.025, L.panelY + H * 0.16, W * 0.075, H * 0.10, ["IFF", "NAV", "TAC"], L);
-    drawSwitchBlock(W * 0.9, L.panelY + H * 0.16, W * 0.075, H * 0.10, ["ECM", "FLIR", "ARM"], L);
 
     drawThrottle(W, H, L);
     drawStick(W, H, L);
@@ -1776,16 +2322,17 @@
   function warningInfo() {
     const a = game.aircraft;
     if (!a) return { pullUp: false, stall: false };
+    const clearance = Math.min(a.agl, a.clearance > 0 ? a.clearance : a.agl);
     const sink = -a.vs;
-    const timeToImpact = sink > 1 ? a.agl / sink : 99;
-    const pullUp = a.agl < 260 && sink > 7 && (timeToImpact < 6.2 || a.agl < 95);
+    const timeToImpact = sink > 1 ? clearance / sink : 99;
+    const pullUp = clearance < 260 && sink > 7 && (timeToImpact < 6.2 || clearance < 95);
     const stall = a.stall > 0.06 || a.alphaDeg > 20.5 || a.speed < 92;
     return { pullUp, stall };
   }
 
   // --------------------------------------------------------------------- input
   const gameKeys = new Set([
-    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyB",
+    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyB", "KeyV", "KeyC",
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
   ]);
@@ -1804,6 +2351,14 @@
     if (gameKeys.has(event.code)) event.preventDefault();
     if (event.code === "KeyM" && !event.repeat) {
       toggleMute();
+      return;
+    }
+    if (event.code === "KeyV" && !event.repeat) {
+      toggleView();
+      return;
+    }
+    if (event.code === "KeyC" && !event.repeat) {
+      if (game.state === "flying") centerMouseStick();
       return;
     }
     if (event.code === "KeyP") {
@@ -1838,6 +2393,42 @@
     keys.delete(event.code);
   });
 
+  canvas.addEventListener("mousedown", (event) => {
+    if (game.state !== "flying") return;
+    if (event.button === 2 || event.button === 1) {
+      event.preventDefault();
+      centerMouseStick();
+      return;
+    }
+    if (event.button === 0) requestMouseControl();
+  });
+
+  canvas.addEventListener("contextmenu", (event) => {
+    if (game.state === "flying") {
+      event.preventDefault();
+      centerMouseStick();
+    }
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (!game.mouse.locked || game.state !== "flying") return;
+    game.mouse.x = clamp(game.mouse.x + event.movementX * game.mouse.sensitivity, -1, 1);
+    game.mouse.y = clamp(game.mouse.y + event.movementY * game.mouse.sensitivity, -1, 1);
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    game.mouse.locked = document.pointerLockElement === canvas;
+    if (!game.mouse.locked) {
+      centerMouseStick(false);
+      if (game.state === "flying") pauseMission();
+    }
+  });
+
+  document.addEventListener("pointerlockerror", () => {
+    game.mouse.locked = false;
+    flashToast("MOUSE CAPTURE UNAVAILABLE // KEYBOARD", 2.2);
+  });
+
   window.addEventListener("blur", () => {
     keys.clear();
     if (game.state === "flying") pauseMission();
@@ -1861,7 +2452,7 @@
   function updateWorldAndCockpit(frameDt) {
     if (!renderer) return;
     updateCamera();
-    renderer.render(game.camera, { time: game.time, mission: game.mission });
+    renderer.render(game.camera, { time: game.time, mission: game.mission, view: game.view, aircraft: game.aircraft });
     drawCockpit(cssW, cssH);
     if (game.aircraft) sound.update(game.aircraft, game.state === "flying");
   }
@@ -1877,7 +2468,7 @@
     if (game.state === "attract") {
       game.attractTime += frameDt;
       updateCamera();
-      renderer.render(game.camera, { time: game.time, mission: previewMission });
+      renderer.render(game.camera, { time: game.time, mission: previewMission, view: "attract", aircraft: null });
       drawCockpit(cssW, cssH);
       return;
     }
@@ -1941,6 +2532,7 @@
       window.addEventListener("resize", resizePresentation);
       lastFrame = performance.now();
       const params = new URLSearchParams(window.location.search);
+      if (params.get("view") === "chase" || params.has("chase")) game.view = "chase";
       if (params.has("autostart")) {
         startMission(false);
       }
@@ -1961,11 +2553,22 @@
     aircraft: () => game.aircraft,
     setKeys: (codes) => { keys.clear(); for (const c of codes) keys.add(c); },
     clearKeys: () => keys.clear(),
+    setView: (view) => setView(view, false),
+    toggleView,
+    setMouse: (x, y) => {
+      game.mouse.x = clamp(Number(x) || 0, -1, 1);
+      game.mouse.y = clamp(Number(y) || 0, -1, 1);
+    },
+    setMouseLocked: (locked) => { game.mouse.locked = Boolean(locked); },
+    centerMouseStick: () => centerMouseStick(false),
+    readInput,
     snapshot: () => ({
       state: game.state,
+      view: game.view,
       mission: game.mission,
       aircraft: game.aircraft,
       camera: game.camera,
+      mouse: { ...game.mouse },
       time: game.time,
     }),
   };

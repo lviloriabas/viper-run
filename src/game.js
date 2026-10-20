@@ -1089,6 +1089,53 @@
     }
   `;
 
+  const VS_AIRCRAFT = `#version 300 es
+    precision highp float;
+    in vec3 aPos;
+    in vec3 aNormal;
+    in vec3 aColor;
+    uniform mat4 u_vp;
+    uniform mat4 u_model;
+    out vec3 vWorld;
+    out vec3 vNormal;
+    out vec3 vColor;
+    void main() {
+      vec4 world = u_model * vec4(aPos, 1.0);
+      vWorld = world.xyz;
+      vNormal = mat3(u_model) * aNormal;
+      vColor = aColor;
+      gl_Position = u_vp * world;
+    }
+  `;
+
+  const FS_AIRCRAFT = `#version 300 es
+    precision highp float;
+    in vec3 vWorld;
+    in vec3 vNormal;
+    in vec3 vColor;
+    uniform vec3 u_camPos;
+    uniform vec3 u_sunDir;
+    uniform vec3 u_fogColor;
+    uniform float u_alpha;
+    uniform float u_glow;
+    out vec4 outColor;
+    void main() {
+      vec3 n = normalize(vNormal);
+      float lit = max(abs(dot(n, normalize(u_sunDir))), 0.0);
+      float sky = max(dot(n, vec3(0.0, 1.0, 0.0)), 0.0);
+      vec3 col = vColor * (0.56 + 0.48 * lit);
+      col += vec3(0.035, 0.05, 0.045) * sky;
+      vec3 viewDir = normalize(u_camPos - vWorld);
+      float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+      col += vec3(0.16, 0.2, 0.18) * rim * 0.35;
+      if (u_glow > 0.5) col *= 1.8;
+      float dist = length(vWorld - u_camPos);
+      float fog = clamp(1.0 - exp(-dist * 0.000045), 0.0, 0.9);
+      col = mix(col, u_fogColor, fog);
+      outColor = vec4(col, u_alpha * (1.0 - fog * 0.8));
+    }
+  `;
+
   const FS_POST = `#version 300 es
     precision highp float;
     in vec2 vUv;
@@ -1148,6 +1195,7 @@
         ocean: this.program(VS_OCEAN, FS_OCEAN, "ocean"),
         cloud: this.program(VS_CLOUD, FS_CLOUD, "cloud"),
         gate: this.program(VS_GATE, FS_GATE, "gate"),
+        aircraft: this.program(VS_AIRCRAFT, FS_AIRCRAFT, "aircraft"),
         post: this.program(VS_FULL, FS_POST, "post"),
       };
       this.uniforms = {};
@@ -1158,6 +1206,7 @@
       this.createTerrain();
       this.createOcean();
       this.createGate();
+      this.createAircraft();
       this.createClouds();
       this.createPost();
 
@@ -1326,6 +1375,260 @@
       gl.bindVertexArray(null);
     }
 
+    createAircraft() {
+      const gl = this.gl;
+      const verts = [];
+      const flameVerts = [];
+      const push = (arr, p, n, c) => {
+        arr.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2]);
+      };
+      const tri = (arr, a, b, c, color, normal) => {
+        let n = normal;
+        if (!n) {
+          n = normalize(cross(sub(b, a), sub(c, a)));
+          if (len(n) < 1e-5) n = [0, 1, 0];
+        }
+        push(arr, a, n, color);
+        push(arr, b, n, color);
+        push(arr, c, n, color);
+      };
+      const quad = (arr, a, b, c, d, color, normal) => {
+        tri(arr, a, b, c, color, normal);
+        tri(arr, a, c, d, color, normal);
+      };
+      const box = (arr, center, size, color, topColor) => {
+        const [x, y, z] = center;
+        const [sx, sy, sz] = size;
+        const x0 = x - sx / 2, x1 = x + sx / 2;
+        const y0 = y - sy / 2, y1 = y + sy / 2;
+        const z0 = z - sz / 2, z1 = z + sz / 2;
+        const p = [
+          [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+          [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+        ];
+        quad(arr, p[0], p[1], p[2], p[3], color, [0, 0, -1]);
+        quad(arr, p[5], p[4], p[7], p[6], color, [0, 0, 1]);
+        quad(arr, p[4], p[0], p[3], p[7], color, [-1, 0, 0]);
+        quad(arr, p[1], p[5], p[6], p[2], color, [1, 0, 0]);
+        quad(arr, p[3], p[2], p[6], p[7], topColor || color, [0, 1, 0]);
+        quad(arr, p[4], p[5], p[1], p[0], color, [0, -1, 0]);
+      };
+      const addWing = (sign) => {
+        const xr = 0.68 * sign, xt = 4.96 * sign;
+        const yr = 0.03, yt = -0.035;
+        const tr = 0.14, tt = 0.045;
+        const rLE = [xr, yr + tr, -2.35], rTE = [xr, yr + tr, 3.72];
+        const tLE = [xt, yt + tt, 1.62], tTE = [xt, yt + tt, 3.42];
+        const rLEb = [xr, yr - tr, -2.35], rTEb = [xr, yr - tr, 3.72];
+        const tLEb = [xt, yt - tt, 1.62], tTEb = [xt, yt - tt, 3.42];
+        quad(verts, rLE, rTE, tTE, tLE, [0.47, 0.51, 0.46], [0, 1, 0]);
+        quad(verts, rLEb, tLEb, tTEb, rTEb, [0.31, 0.35, 0.32], [0, -1, 0]);
+        quad(verts, rTE, tTE, tTEb, rTEb, [0.39, 0.43, 0.39], [0, 0, 1]);
+        quad(verts, tLE, rLE, rLEb, tLEb, [0.35, 0.39, 0.35], [0, 0, -1]);
+        quad(verts, tLE, tTE, tTEb, tLEb, [0.39, 0.43, 0.39], [sign, 0, 0]);
+        quad(verts, rLE, tLE, tLEb, rLEb, [0.30, 0.34, 0.31], [sign, 0, 0]);
+        // Dark leading-edge strip.
+        const leIn = [xr, yr + tr + 0.004, -2.23], leTipIn = [xt, yt + tt + 0.004, 1.74];
+        quad(verts, rLE, leIn, leTipIn, tLE, [0.24, 0.28, 0.26], [0, 1, 0]);
+      };
+      const addStabilator = (sign) => {
+        const xr = 0.48 * sign, xt = 2.92 * sign;
+        const y = 0.08;
+        const p1 = [xr, y + 0.06, 5.35], p2 = [xr, y + 0.06, 7.62];
+        const p3 = [xt, y, 6.72], p4 = [xt, y, 7.68];
+        const p1b = [xr, y - 0.06, 5.35], p2b = [xr, y - 0.06, 7.62];
+        const p3b = [xt, y - 0.045, 6.72], p4b = [xt, y - 0.045, 7.68];
+        quad(verts, p1, p2, p4, p3, [0.44, 0.48, 0.44], [0, 1, 0]);
+        quad(verts, p1b, p3b, p4b, p2b, [0.30, 0.34, 0.31], [0, -1, 0]);
+        quad(verts, p2, p4, p4b, p2b, [0.36, 0.40, 0.36], [0, 0, 1]);
+        quad(verts, p1b, p3b, p3, p1, [0.36, 0.40, 0.36], [0, 0, -1]);
+        quad(verts, p3, p4, p4b, p3b, [0.37, 0.41, 0.37], [sign, 0, 0]);
+      };
+      const addFin = () => {
+        const x = 0.075;
+        const rLE = [-x, 0.72, 5.02], rTE = [-x, 0.82, 7.72];
+        const tLE = [-x, 3.02, 6.20], tTE = [-x, 2.86, 7.62];
+        const RLE = [x, 0.72, 5.02], RTE = [x, 0.82, 7.72];
+        const TLE = [x, 3.02, 6.20], TTE = [x, 2.86, 7.62];
+        quad(verts, rLE, rTE, tTE, tLE, [0.40, 0.44, 0.40], [-1, 0, 0]);
+        quad(verts, RLE, TLE, TTE, RTE, [0.46, 0.50, 0.45], [1, 0, 0]);
+        quad(verts, rLE, tLE, TLE, RLE, [0.31, 0.35, 0.32], [0, 0, -1]);
+        quad(verts, rTE, RTE, TTE, tTE, [0.33, 0.37, 0.33], [0, 0, 1]);
+        quad(verts, tLE, tTE, TTE, TLE, [0.37, 0.41, 0.37], [0, 1, 0]);
+        // Tail-code stripe.
+        quad(verts, [-x - 0.002, 1.58, 6.72], [-x - 0.002, 1.62, 7.42],
+          [-x - 0.002, 1.86, 7.39], [-x - 0.002, 1.82, 6.68], [0.16, 0.20, 0.18], [-1, 0, 0]);
+      };
+      const addVentralFin = (sign) => {
+        const x = 0.92 * sign;
+        const a = [x, -0.34, 5.6], b = [x, -0.34, 7.25];
+        const c = [x + 0.16 * sign, -1.02, 6.85], d = [x + 0.16 * sign, -0.55, 6.95];
+        quad(verts, a, b, d, c, [0.35, 0.39, 0.35], [sign, 0, 0]);
+      };
+      const addEllipsoid = (cx, cy, cz, rx, ry, rz, color, lat = 6, lon = 10) => {
+        const pt = (i, j) => {
+          const v = (i / lat) * Math.PI;
+          const u = (j / lon) * TAU;
+          return [cx + rx * Math.sin(v) * Math.cos(u), cy + ry * Math.cos(v), cz + rz * Math.sin(v) * Math.sin(u)];
+        };
+        for (let i = 0; i < lat; i++) {
+          for (let j = 0; j < lon; j++) {
+            const a = pt(i, j), b = pt(i, j + 1), c = pt(i + 1, j + 1), d = pt(i + 1, j);
+            tri(verts, a, b, c, color);
+            tri(verts, a, c, d, color);
+          }
+        }
+      };
+      const lathe = (stations, segments, color) => {
+        const ring = (i, j) => {
+          const st = stations[i];
+          const a = (j / segments) * TAU;
+          return [Math.cos(a) * st.rx, st.cy + Math.sin(a) * st.ry, st.z];
+        };
+        for (let i = 0; i < stations.length - 1; i++) {
+          for (let j = 0; j < segments; j++) {
+            const a = ring(i, j), b = ring(i, j + 1), c = ring(i + 1, j + 1), d = ring(i + 1, j);
+            const st = stations[i];
+            const col = st.color || color;
+            quad(verts, a, b, c, d, col);
+          }
+        }
+      };
+
+      const body = [0.46, 0.50, 0.45];
+      const dark = [0.30, 0.34, 0.31];
+      const belly = [0.38, 0.42, 0.38];
+      const radome = [0.18, 0.20, 0.19];
+      const canopy = [0.07, 0.15, 0.15];
+      const metal = [0.31, 0.34, 0.32];
+      const nozzle = [0.24, 0.25, 0.23];
+
+      // Fuselage and radome.
+      lathe([
+        { z: -8.55, rx: 0.015, ry: 0.015, cy: 0.28, color: radome },
+        { z: -8.15, rx: 0.16, ry: 0.13, cy: 0.28, color: radome },
+        { z: -7.55, rx: 0.33, ry: 0.28, cy: 0.25, color: radome },
+        { z: -6.9, rx: 0.52, ry: 0.40, cy: 0.20, color: body },
+        { z: -5.6, rx: 0.68, ry: 0.55, cy: 0.14, color: body },
+        { z: -3.2, rx: 0.82, ry: 0.66, cy: 0.08, color: body },
+        { z: 0.0, rx: 0.86, ry: 0.69, cy: 0.03, color: body },
+        { z: 2.6, rx: 0.82, ry: 0.66, cy: 0.0, color: body },
+        { z: 4.7, rx: 0.68, ry: 0.56, cy: 0.0, color: body },
+        { z: 6.3, rx: 0.53, ry: 0.45, cy: 0.0, color: body },
+        { z: 7.2, rx: 0.43, ry: 0.38, cy: 0.0, color: dark },
+      ], 14, body);
+      // Dorsal spine.
+      box(verts, [0, 0.57, 1.9], [0.42, 0.16, 7.0], dark, [0.36, 0.40, 0.36]);
+      // Intake.
+      box(verts, [0, -0.83, -0.25], [1.30, 0.62, 4.15], belly, [0.42, 0.46, 0.42]);
+      quad(verts, [-0.56, -1.11, -2.34], [0.56, -1.11, -2.34], [0.56, -0.57, -2.34], [-0.56, -0.57, -2.34], [0.035, 0.045, 0.04], [0, 0, -1]);
+      // Canopy bubble and rails.
+      addEllipsoid(0, 0.90, -2.78, 0.55, 0.78, 1.50, canopy, 7, 12);
+      box(verts, [0, 1.16, -3.95], [1.04, 0.055, 0.10], metal);
+      box(verts, [0, 1.10, -1.58], [0.94, 0.05, 0.09], metal);
+      box(verts, [-0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
+      box(verts, [0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
+      // Wings, tails and fin.
+      addWing(1);
+      addWing(-1);
+      addStabilator(1);
+      addStabilator(-1);
+      addFin();
+      addVentralFin(1);
+      addVentralFin(-1);
+      // Wingtip rails and navigation lights.
+      box(verts, [4.82, 0.02, 2.9], [0.11, 0.10, 1.55], metal);
+      box(verts, [-4.82, 0.02, 2.9], [0.11, 0.10, 1.55], metal);
+      quad(verts, [4.94, 0.05, 3.36], [4.94, 0.15, 3.36], [4.94, 0.15, 3.50], [4.94, 0.05, 3.50], [0.08, 1.0, 0.22], [1, 0, 0]);
+      quad(verts, [-4.94, 0.05, 3.36], [-4.94, 0.05, 3.50], [-4.94, 0.15, 3.50], [-4.94, 0.15, 3.36], [1.0, 0.08, 0.04], [-1, 0, 0]);
+      // Nozzle ring and exhaust disc.
+      lathe([
+        { z: 6.72, rx: 0.44, ry: 0.37, cy: 0.0, color: dark },
+        { z: 7.18, rx: 0.49, ry: 0.41, cy: 0.0, color: nozzle },
+        { z: 7.78, rx: 0.46, ry: 0.39, cy: 0.0, color: nozzle },
+      ], 14, nozzle);
+      const ex = 7.78, exr = 0.40;
+      for (let i = 0; i < 12; i++) {
+        const a0 = (i / 12) * TAU, a1 = ((i + 1) / 12) * TAU;
+        tri(verts, [0, 0, ex + 0.02], [Math.cos(a1) * exr, Math.sin(a1) * exr * 0.84, ex], [Math.cos(a0) * exr, Math.sin(a0) * exr * 0.84, ex], [0.025, 0.03, 0.028], [0, 0, 1]);
+      }
+
+      // Afterburner plume (drawn additively only in chase view).
+      const flameStations = [
+        { z: 7.84, rx: 0.40, ry: 0.33, cy: 0.0 },
+        { z: 8.45, rx: 0.36, ry: 0.30, cy: 0.0 },
+        { z: 9.5, rx: 0.22, ry: 0.18, cy: 0.0 },
+        { z: 10.9, rx: 0.035, ry: 0.03, cy: 0.0 },
+      ];
+      const flameRing = (i, j, segs = 10) => {
+        const st = flameStations[i];
+        const a = (j / segs) * TAU;
+        return [Math.cos(a) * st.rx, st.cy + Math.sin(a) * st.ry, st.z];
+      };
+      for (let i = 0; i < flameStations.length - 1; i++) {
+        for (let j = 0; j < 10; j++) {
+          const a = flameRing(i, j), b = flameRing(i, j + 1), c = flameRing(i + 1, j + 1), d = flameRing(i + 1, j);
+          const col = i === 0 ? [1.0, 0.66, 0.20] : i === 1 ? [1.0, 0.40, 0.06] : [0.95, 0.22, 0.02];
+          quad(flameVerts, a, b, c, d, col);
+        }
+      }
+
+      const setup = (arr) => {
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        this.buffer(gl.ARRAY_BUFFER, new Float32Array(arr));
+        const stride = 9 * 4;
+        const aPos = gl.getAttribLocation(this.programs.aircraft.program, "aPos");
+        const aNormal = gl.getAttribLocation(this.programs.aircraft.program, "aNormal");
+        const aColor = gl.getAttribLocation(this.programs.aircraft.program, "aColor");
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(aNormal);
+        gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, stride, 12);
+        gl.enableVertexAttribArray(aColor);
+        gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, stride, 24);
+        gl.bindVertexArray(null);
+        return { vao, count: arr.length / 9 };
+      };
+      this.aircraftMesh = setup(verts);
+      this.flameMesh = setup(flameVerts);
+    }
+
+    drawAircraft(vp, cam, sim) {
+      const gl = this.gl;
+      const a = sim.aircraft;
+      if (!a) return;
+      const ax = axisSet(a.q);
+      const model = mat4Basis(ax.right, ax.up, ax.back, a.pos);
+      const p = this.programs.aircraft;
+      const u = this.use(p);
+      this.u(u, "u_vp", vp, "m4");
+      this.u(u, "u_model", model, "m4");
+      this.u(u, "u_camPos", cam.eye, "v3");
+      this.u(u, "u_sunDir", this.sunDir, "v3");
+      this.u(u, "u_fogColor", this.fogColor, "v3");
+      this.u(u, "u_alpha", 1, "f");
+      this.u(u, "u_glow", 0, "f");
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(this.aircraftMesh.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.aircraftMesh.count);
+
+      if (a.afterburnerVisual > 0.03) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.depthMask(false);
+        this.u(u, "u_alpha", 0.26 + 0.48 * a.afterburnerVisual, "f");
+        this.u(u, "u_glow", 1, "f");
+        gl.bindVertexArray(this.flameMesh.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, this.flameMesh.count);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+      gl.bindVertexArray(null);
+    }
+
     cloudTexture() {
       const c = document.createElement("canvas");
       c.width = 256;
@@ -1462,7 +1765,8 @@
         p === this.programs.terrain ? "terrain" :
         p === this.programs.ocean ? "ocean" :
         p === this.programs.cloud ? "cloud" :
-        p === this.programs.gate ? "gate" : "post"];
+        p === this.programs.gate ? "gate" :
+        p === this.programs.aircraft ? "aircraft" : "post"];
     }
 
     u(map, name, value, type) {
@@ -1623,6 +1927,12 @@
         }
       }
       gl.bindVertexArray(null);
+
+      // Chase view aircraft. The first-person view is inside the model, so it
+      // is only drawn when the external camera is active.
+      if (sim.view === "chase" && sim.aircraft) {
+        this.drawAircraft(vp, cam, sim);
+      }
 
       // --- post --------------------------------------------------------------
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
