@@ -62,11 +62,14 @@ running out of margin. Best score and time are kept in `localStorage`.
   and a 6,000 m turn/roll test that produces less authority than at low level.
 - Low-resolution WebGL 2 world (terrain, river, ocean, sky, volumetric-ish
   clouds, gates) composited through a CRT-style post pass.
-- Canvas 2D cockpit with HUD, pitch ladder, speed/altitude tapes, heading tape,
-  tactical map MFD, engine MFD, data-entry display (DED), integrated control
-  panel (ICP), standby ADI, standby gauges, caution/advisory panel, throttle,
-  and stick. The chase view draws a procedural F-16 airframe and afterburner
-  plume.
+- Canvas 2D F-16C Block 50-style cockpit with HUD and camera housing, pitch
+  ladder, speed/altitude tapes, heading tape, 20-button tactical/engine MFDs,
+  data-entry display (DED), integrated control panel (ICP), standby ADI and
+  gauges, three-row caution/advisory panel, glareshield HUD/clock panels,
+  canopy lock and jettison handles, and a throttle/sidestick. The pilot wears an
+  olive flight suit and Nomex gloves; both gloved hands follow the cockpit
+  controls as they move. The chase view draws a procedural F-16 airframe and
+  afterburner plume.
 - Procedural audio only. No samples, images, or other external assets.
 - Embedded Silkscreen font (OFL 1.1, by Jason Kottke).
 
