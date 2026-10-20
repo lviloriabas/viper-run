@@ -67,6 +67,25 @@ body.paused, body.menu { cursor: default; }
 #world { z-index: 1; background: #283b4a; }
 #cockpit { z-index: 3; pointer-events: none; }
 
+#flight-controls[hidden] { display: none; }
+#flight-controls { position: absolute; z-index: 20; inset: 0 auto 0 0; width: min(380px, 94vw); overflow-y: auto; background: rgba(9, 16, 18, .97); border-right: 1px solid #788e7b; box-shadow: 18px 0 45px #0009; padding: 22px; color: #d8e1ce; font: 12px Consolas, monospace; user-select: text; }
+.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; letter-spacing: 1px; }
+#flight-controls button { background: #24382d; color: #dcebcf; padding: 8px; border: 1px solid #5b7562; cursor: pointer; font: inherit; }
+.drawer-intro { color: #bed58f; font-size: 10px; letter-spacing: 2px; margin: 20px 0 12px; }
+.control-list { margin: 0; }
+.control-list div { display: grid; grid-template-columns: 134px 1fr; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #25352e; }
+.control-list dd { margin: 0; color: #b3c3b7; }
+.control-list dt { white-space: nowrap; }
+#flight-controls kbd { display: inline-block; padding: 3px 5px; color: #e2e7d8; border: 1px solid #59695d; background: #17241c; font: 10px Consolas, monospace; }
+.drawer-settings { padding-top: 25px; }
+.drawer-settings label { display: block; color: #dfebd8; }
+.drawer-settings output { float: right; color: #c9e9a0; }
+.drawer-settings input[type="range"] { display: block; width: 100%; margin: 12px 0 22px; accent-color: #bedb8d; cursor: pointer; }
+.drawer-settings input[type="checkbox"] { accent-color: #bedb8d; }
+.drawer-settings p, .drawer-footnote { color: #91a18f; font: 11px/1.6 Consolas, monospace; }
+.drawer-settings p { margin: 8px 0 24px; }
+.drawer-footnote { margin-top: 24px; }
+
 .crt-wash {
   position: absolute;
   inset: 0;
@@ -542,17 +561,177 @@ kbd {
 </head>
 <body>
 <main id="app">
-  <canvas id="world" aria-hidden="true"></canvas>
+  <canvas id="world" aria-hidden="true" tabindex="-1"></canvas>
   <canvas id="cockpit" aria-hidden="true"></canvas>
   <div class="crt-wash" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
   <div id="ui" role="application" aria-label="Viper Run flight simulator"></div>
+  <aside id="flight-controls" aria-label="Flight controls and configuration" hidden></aside>
   <div id="boot" aria-live="polite">
     <span class="boot-mark">V//R</span>
     <span class="boot-text">INITIALIZING FLIGHT CONTROL COMPUTER</span>
   </div>
   <noscript><p class="noscript">VIPER RUN requires JavaScript and WebGL 2.</p></noscript>
 </main>
+<script>
+/* Smooth, dimensioned F-16 exterior. Body axes: right, up, aft. Metres. */
+(() => {
+  "use strict";
+  const TAU=Math.PI*2;
+  const add=(a,b)=>a.map((n,i)=>n+b[i]),sub=(a,b)=>a.map((n,i)=>n-b[i]),mul=(a,s)=>a.map(n=>n*s);
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const norm=a=>mul(a,1/(Math.hypot(...a)||1)),mix=(a,b,t)=>add(mul(a,1-t),mul(b,t));
+  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+  function buildGeometry(){
+    const exterior=[],canopy=[],flame=[],crew=[];
+    const gray=[.45,.49,.51],light=[.55,.59,.60],dark=[.23,.27,.29],seam=[.35,.39,.41];
+    const push=(out,p,n,c)=>out.push(...p,...n,...c);
+    const tri=(out,a,b,c,color,normal=null)=>{const n=normal||norm(cross(sub(b,a),sub(c,a)));for(const p of[a,b,c])push(out,p,n,color);};
+    const quad=(out,a,b,c,d,color,n)=>{tri(out,a,b,c,color,n);tri(out,a,c,d,color,n);};
+    const cylinder=(a,b,r,color,out=exterior,sides=12)=>{
+      const axis=norm(sub(b,a)),u=norm(cross(axis,Math.abs(axis[1])>.9?[1,0,0]:[0,1,0])),v=cross(axis,u);
+      const p=(c,i)=>add(c,add(mul(u,r*Math.cos(i*TAU/sides)),mul(v,r*Math.sin(i*TAU/sides))));
+      for(let i=0;i<sides;i++)quad(out,p(a,i),p(a,i+1),p(b,i+1),p(b,i),color);
+    };
+    // Catmull-Rom profiles give a continuous fuselage instead of visible rings.
+    const body=[[-7.55,.008,.008,.14],[-7.25,.10,.11,.14],[-6.65,.26,.27,.13],[-5.9,.45,.40,.10],[-5.15,.56,.48,.06],[-4.2,.63,.53,.04],[-3.1,.71,.59,.01],[-1.5,.83,.66,-.015],[.6,.85,.69,-.025],[2.5,.79,.67,-.025],[4.4,.69,.59,0],[5.75,.57,.50,.015],[6.6,.49,.43,.015]];
+    const profile=(z)=>{
+      let k=0;while(k<body.length-2&&z>body[k+1][0])k++;
+      const t=clamp((z-body[k][0])/(body[k+1][0]-body[k][0]),0,1);
+      const b=body[k],c=body[k+1],a=body[Math.max(0,k-1)],d=body[Math.min(body.length-1,k+2)];
+      return [z,...[1,2,3].map(i=>.5*((2*b[i])+(-a[i]+c[i])*t+(2*a[i]-5*b[i]+4*c[i]-d[i])*t*t+(-a[i]+3*b[i]-3*c[i]+d[i])*t*t*t))];
+    };
+    const bodyPoint=(z,angle,extra=0)=>{const p=profile(z);return [Math.cos(angle)*(p[1]+extra),p[3]+Math.sin(angle)*(p[2]+extra),z];};
+    const bodyNormal=(z,angle)=>{
+      const dz=sub(bodyPoint(Math.min(6.6,z+.005),angle),bodyPoint(Math.max(-7.55,z-.005),angle));
+      return norm(cross(sub(bodyPoint(z,angle+.003),bodyPoint(z,angle-.003)),dz));
+    };
+    for(let i=0;i<104;i++)for(let j=0;j<48;j++){
+      const z=-7.55+i*14.15/104,z2=-7.55+(i+1)*14.15/104,a=j*TAU/48,b=(j+1)*TAU/48;
+      const points=[[z,a],[z,b],[z2,b],[z2,a]],color=z<-5.7?[.34,.38,.40]:z<-.8?light:gray;
+      for(const k of[0,1,2,0,2,3]){const [v,t]=points[k];push(exterior,bodyPoint(v,t),bodyNormal(v,t),color);}
+    }
+    // Maintenance rings and dorsal service panels follow the curved skin.
+    for(const z of[-5.72,-4.7,-2.1,.9,3.5,5.75])for(let i=0;i<48;i++)cylinder(bodyPoint(z,i*TAU/48,.006),bodyPoint(z,(i+1)*TAU/48,.006),.005,seam);
+    for(const angle of[.35,Math.PI-.35,Math.PI*1.45,Math.PI*1.55])for(let z=-4.8;z<5.8;z+=.2)cylinder(bodyPoint(z,angle,.006),bodyPoint(z+.2,angle,.006),.004,seam,exterior,5);
+    // A broad blended forebody / leading-edge root extension is a defining F-16 feature.
+    for(const sign of[-1,1]){
+      const p=[[.52,.39,-4.85],[.83,.35,-3.45],[1.38,.20,-1.75],[1.45,.10,.25],[.78,.23,1.6]].map(v=>[v[0]*sign,v[1],v[2]]);
+      for(let i=1;i<p.length-1;i++)tri(exterior,p[0],p[i],p[i+1],light,[0,1,0]);
+      for(let i=0;i<p.length-1;i++)cylinder(p[i],p[i+1],.014,gray);
+    }
+    // D-shaped intake, rounded lip and recessed dark duct. No rectangular box.
+    const inlet=(z,scale,i)=>{
+      const a=i*TAU/48,c=Math.cos(a),s=Math.sin(a);
+      return [.62*scale*c,-.61+scale*(s>0?.24*s:.61*s),z];
+    };
+    for(let j=0;j<48;j++){
+      const a=inlet(-3.55,1,j),b=inlet(-3.55,1,j+1),c=inlet(-3.34,.94,j+1),d=inlet(-3.34,.94,j);
+      quad(exterior,a,b,c,d,light);
+      quad(exterior,d,c,inlet(-2.55,.74,j+1),inlet(-2.55,.74,j),[.07,.095,.10]);
+      tri(exterior,[0,-.61,-2.52],inlet(-2.55,.74,j),inlet(-2.55,.74,j+1),[.012,.019,.022]);
+      cylinder(a,b,.018,gray);
+      const aft=[a[0]*.92,a[1]*.68,-.1],aft2=[b[0]*.92,b[1]*.68,-.1];quad(exterior,a,aft,aft2,b,gray);
+    }
+    // Upper canopy, smooth tinted glass, a thin rubber sill and an internal pilot.
+    const canopyPoint=(u,v)=>{
+      const z=-5.12+u*3.02,width=.48*Math.pow(Math.sin(Math.PI*u),.65),height=.94*Math.pow(Math.sin(Math.PI*u),.85);
+      return [width*Math.cos(v*Math.PI),.60+height*Math.sin(v*Math.PI),z];
+    };
+    for(let i=0;i<48;i++)for(let j=0;j<32;j++){
+      const uv=[[i/48,j/32],[(i+1)/48,j/32],[(i+1)/48,(j+1)/32],[i/48,(j+1)/32]];
+      for(const k of[0,1,2,0,2,3]){
+        const [u,v]=uv[k],p=canopyPoint(u,v);
+        let n=norm(cross(sub(canopyPoint(Math.min(.99999,u+.0005),v),canopyPoint(Math.max(.00001,u-.0005),v)),sub(canopyPoint(u,Math.min(1,v+.0005)),canopyPoint(u,Math.max(0,v-.0005)))));
+        if(Math.hypot(...n)<.1)n=[0,1,0];if(n[1]<0)n=mul(n,-1);push(canopy,p,n,[.17,.30,.32]);
+      }
+    }
+    for(const v of[0,1])for(let i=0;i<48;i++)cylinder(canopyPoint(i/48,v),canopyPoint((i+1)/48,v),.018,[.12,.16,.17]);
+    const ball=(center,size,color,lat=12,lon=24,out=exterior)=>{
+      const p=(i,j)=>[center[0]+size[0]*Math.sin(i*Math.PI/lat)*Math.cos(j*TAU/lon),center[1]+size[1]*Math.cos(i*Math.PI/lat),center[2]+size[2]*Math.sin(i*Math.PI/lat)*Math.sin(j*TAU/lon)];
+      for(let i=0;i<lat;i++)for(let j=0;j<lon;j++){
+        const pts=[p(i,j),p(i+1,j),p(i+1,j+1),p(i,j+1)];
+        for(const k of[0,1,2,0,2,3])push(out,pts[k],norm(pts[k].map((n,l)=>(n-center[l])/(size[l]*size[l]))),color);
+      }
+    };
+    ball([0,.97,-3.38],[.24,.30,.18],[.20,.25,.16],12,24,crew);
+    ball([0,1.31,-3.30],[.135,.14,.14],[.57,.60,.56],12,24,crew);
+    ball([0,1.32,-3.428],[.113,.061,.024],[.035,.065,.072],8,20,crew);
+    // Blended spine joins the bubble to the base of the swept fin.
+    for(let z=-2.1;z<4.4;z+=.10){
+      const top=profile(z)[2]+profile(z)[3]+.12;
+      quad(exterior,[-.22,top-.06,z],[.22,top-.06,z],[.20,top-.04,z+.1],[-.20,top-.04,z+.1],gray,[0,1,0]);
+    }
+    // Thin smooth airfoil surfaces with 40-degree leading-edge sweep.
+    const wingPoint=(sign,u,v,upper)=>{
+      const x=(.72+3.99*u)*sign,le=-1.90+3.35*u,te=3.14-.16*u,chord=te-le;
+      const naca=5*(.052-.025*u)*(.2969*Math.sqrt(Math.max(v,0))-.126*v-.3516*v*v+.2843*v*v*v-.1036*v*v*v*v);
+      return [x,.075-.025*u+(upper?1:-1)*chord*naca,le+chord*v];
+    };
+    for(const sign of[-1,1])for(const upper of[true,false])for(let i=0;i<24;i++)for(let j=0;j<24;j++){
+      const uv=[[i/24,j/24],[(i+1)/24,j/24],[(i+1)/24,(j+1)/24],[i/24,(j+1)/24]];
+      for(const k of[0,1,2,0,2,3]){
+        const [u,v]=uv[k],p=wingPoint(sign,u,v,upper);
+        let n=norm(cross(sub(wingPoint(sign,Math.min(1,u+.001),v,upper),wingPoint(sign,Math.max(0,u-.001),v,upper)),sub(wingPoint(sign,u,Math.min(1,v+.001),upper),wingPoint(sign,u,Math.max(0,v-.001),upper))));
+        if((upper&&n[1]<0)||(!upper&&n[1]>0))n=mul(n,-1);
+        push(exterior,p,n,upper?gray:[.36,.40,.42]);
+      }
+    }
+    for(const sign of[-1,1]){
+      for(const chord of[.15,.74])for(let i=0;i<24;i++){
+        const p=wingPoint(sign,i/24,chord,true),q=wingPoint(sign,(i+1)/24,chord,true);p[1]+=.008;q[1]+=.008;cylinder(p,q,.006,seam,exterior,5);
+      }
+      for(const u of[.12,.5,.8])for(let j=0;j<20;j++){
+        const p=wingPoint(sign,u,j/20,true),q=wingPoint(sign,u,(j+1)/20,true);p[1]+=.007;q[1]+=.007;cylinder(p,q,.004,seam,exterior,5);
+      }
+      // Wing walk strips near the root.
+      for(const u of[.035,.14])for(let v=.2;v<.74;v+=.03){const p=wingPoint(sign,u,v,true),q=wingPoint(sign,u,v+.03,true);p[1]+=.01;q[1]+=.01;cylinder(p,q,.010,[.18,.22,.23],exterior,5);}
+    }
+    const thinFin=(points,thickness,color,axis=0)=>{
+      const a=points.map(p=>{const q=[...p];q[axis]-=thickness/2;return q;}),b=points.map(p=>{const q=[...p];q[axis]+=thickness/2;return q;});
+      for(let i=1;i<a.length-1;i++){tri(exterior,a[0],a[i],a[i+1],color);tri(exterior,b[0],b[i+1],b[i],color);}
+      for(let i=0;i<a.length;i++){let j=(i+1)%a.length;quad(exterior,a[i],b[i],b[j],a[j],light);}
+    };
+    for(const sign of[-1,1]){
+      thinFin([[.47,.04,4.55],[2.83,-.10,6.08],[2.75,-.10,7.22],[.47,.04,6.85]].map(p=>[p[0]*sign,p[1],p[2]]),.055,gray,1);
+      // Ventral strakes, swept and canted.
+      thinFin([[.73,-.42,4.8],[.83,-.48,6.7],[1.01,-1.02,6.3],[.91,-1.10,5.9]].map(p=>[p[0]*sign,p[1],p[2]]),.032,dark);
+      cylinder([sign*4.76,.04,1.35],[sign*4.76,.04,3.15],.038,dark);
+      ball([sign*4.72,.12,2.76],[.045,.034,.08],sign===1?[.04,.92,.25]:[.95,.06,.035],6,12);
+    }
+    thinFin([[0,.62,3.72],[0,3.32,5.20],[0,3.20,6.26],[0,.64,6.92]],.095,gray);
+    // Rudder hinge, fin cap and a restrained tail marking.
+    cylinder([-.052,.85,6.50],[-.052,3.19,6.02],.009,seam);
+    for(const sign of[-1,1]){
+      quad(exterior,[sign*.051,2.93,5.02],[sign*.051,3.27,5.20],[sign*.051,3.15,6.25],[sign*.051,2.81,6.35],[.20,.28,.34]);
+      cylinder([sign*.057,1.70,5.40],[sign*.057,2.35,5.58],.024,[.72,.75,.72]);
+      cylinder([sign*.057,2.35,5.58],[sign*.057,1.70,5.95],.024,[.72,.75,.72]);
+    }
+    // Circular, petalled nozzle with a dark interior and hot core.
+    for(let j=0;j<32;j++){
+      const a=j*TAU/32,b=(j+1)*TAU/32,p=(z,r,t)=>[Math.cos(t)*r,Math.sin(t)*r*.92+.015,z];
+      const metal=j%2?[.34,.35,.34]:[.25,.27,.27];
+      quad(exterior,p(6.50,.49,a),p(6.50,.49,b),p(7.48,.43,b),p(7.48,.43,a),metal);
+      quad(exterior,p(7.48,.43,a),p(7.48,.43,b),p(7.21,.34,b),p(7.21,.34,a),[.08,.085,.08]);
+      tri(exterior,[0,.015,7.17],p(7.21,.34,a),p(7.21,.34,b),[.035,.025,.018]);
+      const f=(z,r,t)=>[Math.cos(t)*r,Math.sin(t)*r*.92+.015,z];
+      quad(flame,f(7.49,.35,a),f(7.49,.35,b),f(10.7,.02,b),f(10.7,.02,a),[1,.38,.08]);
+    }
+    // Pitot, small dorsal aerials and underside pylons finish the silhouette.
+    cylinder([0,.14,-7.54],[0,.14,-8.0],.009,[.58,.62,.62],exterior,8);
+    for(const z of[-1.75,.6])thinFin([[0,.68,z],[0,1.02,z+.14],[0,.73,z+.45]],.018,dark);
+    for(const sign of[-1,1])for(const x of[1.65,2.95])thinFin([[x*sign,-.02,.4],[x*sign,-.40,1.0],[x*sign,-.38,2.1],[x*sign,-.03,2.65]],.10,gray);
+    const sx=9.96/9.596,sz=15.06/15.48;
+    for(const array of[exterior,canopy,flame,crew])for(let i=0;i<array.length;i+=9){
+      array[i]*=sx;array[i+2]*=sz;
+      const n=norm([array[i+3]/sx,array[i+4],array[i+5]/sz]);array[i+3]=n[0];array[i+4]=n[1];array[i+5]=n[2];
+    }
+    return {exterior,canopy,flame,crew,stats:{overallLength:15.06,wingspan:9.96,triangleCount:exterior.length/27}};
+  }
+  window.__VIPER_AIRFRAME={buildGeometry};
+})();
+
+</script>
 <script>
 /* =========================================================================
    VIPER RUN // F-16C COCKPIT SIMULATOR
@@ -847,13 +1026,14 @@ kbd {
   // Sampling the whole airframe means a banked wing can clip a canyon wall
   // before the centre of mass reaches the terrain.
   const COLLISION_POINTS = [
-    { name: "nose", local: [0, 0.02, -8.35], margin: 0.10 },
-    { name: "canopy", local: [0, 1.32, -3.0], margin: 0.16 },
-    { name: "tail", local: [0, 0.48, 7.4], margin: 0.15 },
-    { name: "left wing", local: [-4.92, -0.02, 1.1], margin: 0.08 },
-    { name: "right wing", local: [4.92, -0.02, 1.1], margin: 0.08 },
+    { name: "nose", local: [0, 0.14, -7.78], margin: 0.10 },
+    { name: "canopy", local: [0, 1.75, -3.51], margin: 0.10 },
+    { name: "tail", local: [0, 0.02, 7.28], margin: 0.15 },
+    { name: "left wing", local: [-4.98, 0.04, 2.30], margin: 0.08 },
+    { name: "right wing", local: [4.98, 0.04, 2.30], margin: 0.08 },
+    { name: "intake", local: [0, -1.22, -3.45], margin: 0.08 },
     { name: "belly", local: [0, -1.08, 0.2], margin: 0.10 },
-    { name: "fin", local: [0, 2.85, 6.7], margin: 0.10 },
+    { name: "fin", local: [0, 3.32, 5.06], margin: 0.10 },
   ];
 
   function terrainFloor(x, z) {
@@ -1717,6 +1897,10 @@ kbd {
       vec3 viewDir = normalize(u_camPos - vWorld);
       float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
       col += vec3(0.16, 0.2, 0.18) * rim * 0.35;
+      if (u_alpha < .9 && u_glow < .5) {
+        float shine = pow(max(dot(reflect(-normalize(u_sunDir), n), viewDir), 0.0), 34.0);
+        col = mix(col, vec3(.55,.68,.72), rim * .65) + shine * vec3(.65,.69,.65);
+      }
       if (u_glow > 0.5) col *= 1.8;
       float dist = length(vWorld - u_camPos);
       float fog = clamp(1.0 - exp(-dist * 0.000045), 0.0, 0.9);
@@ -1966,205 +2150,10 @@ kbd {
 
     createAircraft() {
       const gl = this.gl;
-      const verts = [];
-      const flameVerts = [];
-      const push = (arr, p, n, c) => {
-        arr.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2]);
-      };
-      const tri = (arr, a, b, c, color, normal) => {
-        let n = normal;
-        if (!n) {
-          n = normalize(cross(sub(b, a), sub(c, a)));
-          if (len(n) < 1e-5) n = [0, 1, 0];
-        }
-        push(arr, a, n, color);
-        push(arr, b, n, color);
-        push(arr, c, n, color);
-      };
-      const quad = (arr, a, b, c, d, color, normal) => {
-        tri(arr, a, b, c, color, normal);
-        tri(arr, a, c, d, color, normal);
-      };
-      const box = (arr, center, size, color, topColor) => {
-        const [x, y, z] = center;
-        const [sx, sy, sz] = size;
-        const x0 = x - sx / 2, x1 = x + sx / 2;
-        const y0 = y - sy / 2, y1 = y + sy / 2;
-        const z0 = z - sz / 2, z1 = z + sz / 2;
-        const p = [
-          [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-          [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
-        ];
-        quad(arr, p[0], p[1], p[2], p[3], color, [0, 0, -1]);
-        quad(arr, p[5], p[4], p[7], p[6], color, [0, 0, 1]);
-        quad(arr, p[4], p[0], p[3], p[7], color, [-1, 0, 0]);
-        quad(arr, p[1], p[5], p[6], p[2], color, [1, 0, 0]);
-        quad(arr, p[3], p[2], p[6], p[7], topColor || color, [0, 1, 0]);
-        quad(arr, p[4], p[5], p[1], p[0], color, [0, -1, 0]);
-      };
-      const addWing = (sign) => {
-        const xr = 0.68 * sign, xt = 4.96 * sign;
-        const yr = 0.03, yt = -0.035;
-        const tr = 0.14, tt = 0.045;
-        const rLE = [xr, yr + tr, -2.35], rTE = [xr, yr + tr, 3.72];
-        const tLE = [xt, yt + tt, 1.62], tTE = [xt, yt + tt, 3.42];
-        const rLEb = [xr, yr - tr, -2.35], rTEb = [xr, yr - tr, 3.72];
-        const tLEb = [xt, yt - tt, 1.62], tTEb = [xt, yt - tt, 3.42];
-        quad(verts, rLE, rTE, tTE, tLE, [0.47, 0.51, 0.46], [0, 1, 0]);
-        quad(verts, rLEb, tLEb, tTEb, rTEb, [0.31, 0.35, 0.32], [0, -1, 0]);
-        quad(verts, rTE, tTE, tTEb, rTEb, [0.39, 0.43, 0.39], [0, 0, 1]);
-        quad(verts, tLE, rLE, rLEb, tLEb, [0.35, 0.39, 0.35], [0, 0, -1]);
-        quad(verts, tLE, tTE, tTEb, tLEb, [0.39, 0.43, 0.39], [sign, 0, 0]);
-        quad(verts, rLE, tLE, tLEb, rLEb, [0.30, 0.34, 0.31], [sign, 0, 0]);
-        // Dark leading-edge strip.
-        const leIn = [xr, yr + tr + 0.004, -2.23], leTipIn = [xt, yt + tt + 0.004, 1.74];
-        quad(verts, rLE, leIn, leTipIn, tLE, [0.24, 0.28, 0.26], [0, 1, 0]);
-      };
-      const addStabilator = (sign) => {
-        const xr = 0.48 * sign, xt = 2.92 * sign;
-        const y = 0.08;
-        const p1 = [xr, y + 0.06, 5.35], p2 = [xr, y + 0.06, 7.62];
-        const p3 = [xt, y, 6.72], p4 = [xt, y, 7.68];
-        const p1b = [xr, y - 0.06, 5.35], p2b = [xr, y - 0.06, 7.62];
-        const p3b = [xt, y - 0.045, 6.72], p4b = [xt, y - 0.045, 7.68];
-        quad(verts, p1, p2, p4, p3, [0.44, 0.48, 0.44], [0, 1, 0]);
-        quad(verts, p1b, p3b, p4b, p2b, [0.30, 0.34, 0.31], [0, -1, 0]);
-        quad(verts, p2, p4, p4b, p2b, [0.36, 0.40, 0.36], [0, 0, 1]);
-        quad(verts, p1b, p3b, p3, p1, [0.36, 0.40, 0.36], [0, 0, -1]);
-        quad(verts, p3, p4, p4b, p3b, [0.37, 0.41, 0.37], [sign, 0, 0]);
-      };
-      const addFin = () => {
-        const x = 0.075;
-        const rLE = [-x, 0.72, 5.02], rTE = [-x, 0.82, 7.72];
-        const tLE = [-x, 3.02, 6.20], tTE = [-x, 2.86, 7.62];
-        const RLE = [x, 0.72, 5.02], RTE = [x, 0.82, 7.72];
-        const TLE = [x, 3.02, 6.20], TTE = [x, 2.86, 7.62];
-        quad(verts, rLE, rTE, tTE, tLE, [0.40, 0.44, 0.40], [-1, 0, 0]);
-        quad(verts, RLE, TLE, TTE, RTE, [0.46, 0.50, 0.45], [1, 0, 0]);
-        quad(verts, rLE, tLE, TLE, RLE, [0.31, 0.35, 0.32], [0, 0, -1]);
-        quad(verts, rTE, RTE, TTE, tTE, [0.33, 0.37, 0.33], [0, 0, 1]);
-        quad(verts, tLE, tTE, TTE, TLE, [0.37, 0.41, 0.37], [0, 1, 0]);
-        // Tail-code stripe.
-        quad(verts, [-x - 0.002, 1.58, 6.72], [-x - 0.002, 1.62, 7.42],
-          [-x - 0.002, 1.86, 7.39], [-x - 0.002, 1.82, 6.68], [0.16, 0.20, 0.18], [-1, 0, 0]);
-      };
-      const addVentralFin = (sign) => {
-        const x = 0.92 * sign;
-        const a = [x, -0.34, 5.6], b = [x, -0.34, 7.25];
-        const c = [x + 0.16 * sign, -1.02, 6.85], d = [x + 0.16 * sign, -0.55, 6.95];
-        quad(verts, a, b, d, c, [0.35, 0.39, 0.35], [sign, 0, 0]);
-      };
-      const addEllipsoid = (cx, cy, cz, rx, ry, rz, color, lat = 6, lon = 10) => {
-        const pt = (i, j) => {
-          const v = (i / lat) * Math.PI;
-          const u = (j / lon) * TAU;
-          return [cx + rx * Math.sin(v) * Math.cos(u), cy + ry * Math.cos(v), cz + rz * Math.sin(v) * Math.sin(u)];
-        };
-        for (let i = 0; i < lat; i++) {
-          for (let j = 0; j < lon; j++) {
-            const a = pt(i, j), b = pt(i, j + 1), c = pt(i + 1, j + 1), d = pt(i + 1, j);
-            tri(verts, a, b, c, color);
-            tri(verts, a, c, d, color);
-          }
-        }
-      };
-      const lathe = (stations, segments, color) => {
-        const ring = (i, j) => {
-          const st = stations[i];
-          const a = (j / segments) * TAU;
-          return [Math.cos(a) * st.rx, st.cy + Math.sin(a) * st.ry, st.z];
-        };
-        for (let i = 0; i < stations.length - 1; i++) {
-          for (let j = 0; j < segments; j++) {
-            const a = ring(i, j), b = ring(i, j + 1), c = ring(i + 1, j + 1), d = ring(i + 1, j);
-            const st = stations[i];
-            const col = st.color || color;
-            quad(verts, a, b, c, d, col);
-          }
-        }
-      };
-
-      const body = [0.46, 0.50, 0.45];
-      const dark = [0.30, 0.34, 0.31];
-      const belly = [0.38, 0.42, 0.38];
-      const radome = [0.18, 0.20, 0.19];
-      const canopy = [0.07, 0.15, 0.15];
-      const metal = [0.31, 0.34, 0.32];
-      const nozzle = [0.24, 0.25, 0.23];
-
-      // Fuselage and radome.
-      lathe([
-        { z: -8.55, rx: 0.015, ry: 0.015, cy: 0.28, color: radome },
-        { z: -8.15, rx: 0.16, ry: 0.13, cy: 0.28, color: radome },
-        { z: -7.55, rx: 0.33, ry: 0.28, cy: 0.25, color: radome },
-        { z: -6.9, rx: 0.52, ry: 0.40, cy: 0.20, color: body },
-        { z: -5.6, rx: 0.68, ry: 0.55, cy: 0.14, color: body },
-        { z: -3.2, rx: 0.82, ry: 0.66, cy: 0.08, color: body },
-        { z: 0.0, rx: 0.86, ry: 0.69, cy: 0.03, color: body },
-        { z: 2.6, rx: 0.82, ry: 0.66, cy: 0.0, color: body },
-        { z: 4.7, rx: 0.68, ry: 0.56, cy: 0.0, color: body },
-        { z: 6.3, rx: 0.53, ry: 0.45, cy: 0.0, color: body },
-        { z: 7.2, rx: 0.43, ry: 0.38, cy: 0.0, color: dark },
-      ], 14, body);
-      // Dorsal spine.
-      box(verts, [0, 0.57, 1.9], [0.42, 0.16, 7.0], dark, [0.36, 0.40, 0.36]);
-      // Intake.
-      box(verts, [0, -0.83, -0.25], [1.30, 0.62, 4.15], belly, [0.42, 0.46, 0.42]);
-      quad(verts, [-0.56, -1.11, -2.34], [0.56, -1.11, -2.34], [0.56, -0.57, -2.34], [-0.56, -0.57, -2.34], [0.035, 0.045, 0.04], [0, 0, -1]);
-      // The first-person mesh keeps the exterior but omits the opaque bubble.
-      const exteriorBeforeCanopy = verts.length;
-      // Canopy bubble and rails.
-      addEllipsoid(0, 0.90, -2.78, 0.55, 0.78, 1.50, canopy, 7, 12);
-      box(verts, [0, 1.16, -3.95], [1.04, 0.055, 0.10], metal);
-      box(verts, [0, 1.10, -1.58], [0.94, 0.05, 0.09], metal);
-      box(verts, [-0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
-      box(verts, [0.55, 0.62, -2.78], [0.045, 0.08, 2.5], dark);
-      const exteriorAfterCanopy = verts.length;
-      // Wings, tails and fin.
-      addWing(1);
-      addWing(-1);
-      addStabilator(1);
-      addStabilator(-1);
-      addFin();
-      addVentralFin(1);
-      addVentralFin(-1);
-      // Wingtip rails and navigation lights.
-      box(verts, [4.82, 0.02, 2.9], [0.11, 0.10, 1.55], metal);
-      box(verts, [-4.82, 0.02, 2.9], [0.11, 0.10, 1.55], metal);
-      quad(verts, [4.94, 0.05, 3.36], [4.94, 0.15, 3.36], [4.94, 0.15, 3.50], [4.94, 0.05, 3.50], [0.08, 1.0, 0.22], [1, 0, 0]);
-      quad(verts, [-4.94, 0.05, 3.36], [-4.94, 0.05, 3.50], [-4.94, 0.15, 3.50], [-4.94, 0.15, 3.36], [1.0, 0.08, 0.04], [-1, 0, 0]);
-      // Nozzle ring and exhaust disc.
-      lathe([
-        { z: 6.72, rx: 0.44, ry: 0.37, cy: 0.0, color: dark },
-        { z: 7.18, rx: 0.49, ry: 0.41, cy: 0.0, color: nozzle },
-        { z: 7.78, rx: 0.46, ry: 0.39, cy: 0.0, color: nozzle },
-      ], 14, nozzle);
-      const ex = 7.78, exr = 0.40;
-      for (let i = 0; i < 12; i++) {
-        const a0 = (i / 12) * TAU, a1 = ((i + 1) / 12) * TAU;
-        tri(verts, [0, 0, ex + 0.02], [Math.cos(a1) * exr, Math.sin(a1) * exr * 0.84, ex], [Math.cos(a0) * exr, Math.sin(a0) * exr * 0.84, ex], [0.025, 0.03, 0.028], [0, 0, 1]);
-      }
-
-      // Afterburner plume (drawn additively only in chase view).
-      const flameStations = [
-        { z: 7.84, rx: 0.40, ry: 0.33, cy: 0.0 },
-        { z: 8.45, rx: 0.36, ry: 0.30, cy: 0.0 },
-        { z: 9.5, rx: 0.22, ry: 0.18, cy: 0.0 },
-        { z: 10.9, rx: 0.035, ry: 0.03, cy: 0.0 },
-      ];
-      const flameRing = (i, j, segs = 10) => {
-        const st = flameStations[i];
-        const a = (j / segs) * TAU;
-        return [Math.cos(a) * st.rx, st.cy + Math.sin(a) * st.ry, st.z];
-      };
-      for (let i = 0; i < flameStations.length - 1; i++) {
-        for (let j = 0; j < 10; j++) {
-          const a = flameRing(i, j), b = flameRing(i, j + 1), c = flameRing(i + 1, j + 1), d = flameRing(i + 1, j);
-          const col = i === 0 ? [1.0, 0.66, 0.20] : i === 1 ? [1.0, 0.40, 0.06] : [0.95, 0.22, 0.02];
-          quad(flameVerts, a, b, c, d, col);
-        }
-      }
-
+      const geometry = window.__VIPER_AIRFRAME.buildGeometry();
+      const verts = geometry.exterior;
+      const flameVerts = geometry.flame;
+      this.airframeStats = geometry.stats;
       const setup = (arr) => {
         const vao = gl.createVertexArray();
         gl.bindVertexArray(vao);
@@ -2183,7 +2172,9 @@ kbd {
         return { vao, count: arr.length / 9 };
       };
       this.aircraftMesh = setup(verts);
-      this.cockpitExteriorMesh = setup([...verts.slice(0, exteriorBeforeCanopy), ...verts.slice(exteriorAfterCanopy)]);
+      this.cockpitExteriorMesh = this.aircraftMesh;
+      this.canopyMesh = setup(geometry.canopy);
+      this.crewMesh = setup(geometry.crew);
       this.flameMesh = setup(flameVerts);
     }
 
@@ -2208,6 +2199,16 @@ kbd {
       const mesh = sim.view === "cockpit" ? this.cockpitExteriorMesh : this.aircraftMesh;
       gl.bindVertexArray(mesh.vao);
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+
+      if (sim.view === "chase") {
+        gl.bindVertexArray(this.crewMesh.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, this.crewMesh.count);
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+        this.u(u, "u_alpha", .32, "f");
+        gl.bindVertexArray(this.canopyMesh.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, this.canopyMesh.count);
+        gl.depthMask(true); gl.disable(gl.BLEND);
+      }
 
       if (sim.view === "chase" && a.afterburnerVisual > 0.03) {
         gl.enable(gl.BLEND);
@@ -2335,7 +2336,7 @@ kbd {
       this.canvas.height = ch;
       this.canvas.style.width = cssW + "px";
       this.canvas.style.height = cssH + "px";
-      let targetW = Math.round(clamp(cssW * 0.58, 560, 1240));
+      let targetW = Math.round(clamp(cssW * 0.75, 640, 1440));
       let targetH = Math.max(1, Math.round(targetW * (cssH / cssW)));
       if (targetH > 900) {
         targetH = 900;
@@ -2578,7 +2579,7 @@ kbd {
 
 </script>
 <script>
-/* F-16C Block 50, procedural game cockpit. Metres in the exterior's body frame.
+/* Modernized F-16 Viper, procedural game cockpit. Metres in the exterior's body frame.
    Reference photographs and the limits of this model are in docs/F16-REFERENCES.md. */
 (() => {
   "use strict";
@@ -2600,7 +2601,8 @@ kbd {
   let ctx, W, H, focal, eye, right, up, forward, queue, textureClock=0;
   let raster=null,modelOffset=0;
   // The eye is aft of the hips, consistent with the reclined F-16 seat.
-  const EYE = [0,1.43,-2.05];
+  const BODY_OFFSET = -1.2;
+  const EYE = [0,1.43,-2.05 + BODY_OFFSET];
 
   function surface(name,w,h,draw) {
     if (!textures.has(name)) { const c=document.createElement("canvas");c.width=w;c.height=h;textures.set(name,c); }
@@ -2644,7 +2646,7 @@ kbd {
     }return out;
   }
   function polygon(points,color,texture=null,stroke=null) {
-    if(modelOffset)points=points.map(p=>[p[0],p[1],p[2]+modelOffset]);
+    points=points.map(p=>[p[0],p[1],p[2]+modelOffset+BODY_OFFSET]);
     const clipped=clipNear(points);if(clipped.length<3)return;
     const projected=clipped.map(project);
     if(projected.every(p=>p.x<0)||projected.every(p=>p.x>W)||projected.every(p=>p.y<0)||projected.every(p=>p.y>H))return;
@@ -2656,7 +2658,7 @@ kbd {
     const shades=[.8,.57,.7,.9,1.18,.5];
     faces.forEach((f,i)=>polygon(f.map(j=>v[j]),`rgb(${color.map(n=>Math.round(n*shades[i])).join(",")})`));
   }
-  function capsule(a,b,r1,r2,color=[85,95,67],sides=12) {
+  function capsule(a,b,r1,r2,color=[85,95,67],sides=24) {
     const axis=norm(sub(b,a)),r=norm(cross(axis,Math.abs(axis[1])>.9?[1,0,0]:[0,1,0])),u=cross(axis,r);
     const ring=(p,rad,i)=>add(p,add(mul(r,rad*Math.cos(i*TAU/sides)),mul(u,rad*Math.sin(i*TAU/sides))));
     for(let i=0;i<sides;i++) {
@@ -2665,11 +2667,20 @@ kbd {
     }
     polygon(Array.from({length:sides},(_,i)=>ring(b,r2,i)),`rgb(${color.join(",")})`);
   }
-  function ellipsoid(c,size,color) {
-    const point=(i,j)=>[c[0]+size[0]*Math.sin(i*Math.PI/8)*Math.cos(j*TAU/12),c[1]+size[1]*Math.cos(i*Math.PI/8),c[2]+size[2]*Math.sin(i*Math.PI/8)*Math.sin(j*TAU/12)];
-    for(let i=0;i<8;i++)for(let j=0;j<12;j++){
-      const shade=.65+.35*Math.max(0,Math.cos((i+.5)*Math.PI/8));
+  function ellipsoid(c,size,color,lean=0) {
+    const point=(i,j)=>[c[0]+size[0]*Math.sin(i*Math.PI/16)*Math.cos(j*TAU/32),c[1]+size[1]*Math.cos(i*Math.PI/16),c[2]+size[2]*Math.sin(i*Math.PI/16)*Math.sin(j*TAU/32)+size[1]*Math.cos(i*Math.PI/16)*lean];
+    for(let i=0;i<16;i++)for(let j=0;j<32;j++){
+      const shade=.68+.32*Math.max(0,Math.cos((i+.5)*Math.PI/16));
       polygon([point(i,j),point(i,j+1),point(i+1,j+1),point(i+1,j)],`rgb(${color.map(n=>Math.round(n*shade)).join(",")})`);
+    }
+  }
+  function roundedCase(x,y,z,w,h,r=.025,color=[45,49,51]) {
+    const corners=[[x+w/2-r,y+h/2-r,0],[x-w/2+r,y+h/2-r,Math.PI/2],[x-w/2+r,y-h/2+r,Math.PI],[x+w/2-r,y-h/2+r,Math.PI*1.5]],p=[];
+    for(const[cx,cy,a]of corners)for(let i=0;i<=7;i++){const t=a+i*Math.PI/14;p.push([cx+Math.cos(t)*r,cy+Math.sin(t)*r,z]);}
+    polygon(p,`rgb(${color.join(',')})`);
+    for(let i=0;i<p.length;i++){
+      const a=p[i],b=p[(i+1)%p.length],back=q=>[q[0],q[1],q[2]-.028];
+      polygon([a,b,back(b),back(a)],i<p.length/2?"#51575a":"#191e20");
     }
   }
 
@@ -2727,39 +2738,46 @@ kbd {
   function panel(x,y,z,w,h,texture) {
     polygon([[x-w/2,y+h/2,z],[x+w/2,y+h/2,z],[x+w/2,y-h/2,z],[x-w/2,y-h/2,z]],"#1a2020",texture);
   }
+  function hardware(t,w,h,label) {
+    const g=t.createLinearGradient(0,0,w,h);g.addColorStop(0,"#33393d");g.addColorStop(.4,"#171d21");g.addColorStop(1,"#2b3236");t.fillStyle=g;t.fillRect(0,0,w,h);
+    t.strokeStyle="#6a7276";t.lineWidth=2;t.strokeRect(2,2,w-4,h-4);t.strokeStyle="#070c10";t.strokeRect(7,7,w-14,h-14);
+    for(let i=0;i<230;i++){const x=(i*73.31)%w,y=(i*47.73)%h;t.fillStyle=i%3?"#d9e1d508":"#00000020";t.fillRect(x,y,1+(i%3),1);}
+    for(const[x,y]of[[12,12],[w-12,12],[12,h-12],[w-12,h-12]]){t.fillStyle="#101517";t.beginPath();t.arc(x,y,5,0,TAU);t.fill();line(t,[x-3,y],[x+3,y],"#77817b",1);}
+    if(label)text(t,label,w/2,h-15,11,"#b7c0ba","center");
+  }
   function mfdTexture(name,a,m,time) {
-    return surface(name,384,384,(t,w,h)=>{
-      t.fillStyle="#171e21";t.fillRect(0,0,w,h);t.strokeStyle="#626d6b";t.strokeRect(1,1,w-2,h-2);
-      t.fillStyle="#020907";t.fillRect(37,37,310,310);
-      for(let i=0;i<5;i++)for(let side=0;side<4;side++) {
-        const p=60+i*65;t.fillStyle="#343c3e";
-        if(side<2)t.fillRect(p-9,side?358:7,18,18);else t.fillRect(side===2?7:358,p-9,18,18);
+    return surface("display-"+name,384,512,(t,w,h)=>{
+      hardware(t,w,h,"");t.fillStyle="#01070a";t.fillRect(35,35,314,442);
+      for(let i=0;i<5;i++){
+        for(const y of[8,486]){t.fillStyle="#4b5253";t.fillRect(50+i*65,y,22,17);line(t,[55+i*65,y+2],[66+i*65,y+2],"#8f9791");}
+        for(const x of[8,359]){t.fillStyle="#434b4c";t.fillRect(x,75+i*82,17,22);line(t,[x+2,79+i*82],[x+2,91+i*82],"#8f9791");}
       }
-      text(t,name,192,53,15,green,"center");text(t,"OVRD",77,53,12);text(t,"CNTL",303,53,12,green,"center");
-      text(t,"SWAP",78,331,12);text(t,"FCR",145,331,12);text(t,"HSD",212,331,12);text(t,"DTE",289,331,12);
-      if(name==="HSD") {
-        const center=[192,222],range=9260;
-        for(const r of [55,110,145]){t.strokeStyle="#173e33";t.beginPath();t.arc(...center,r,0,TAU);t.stroke();}
-        text(t,"5 NM",321,83,12,green,"right");
-        const hdg=a.heading*D;
-        const nav=p=>{const d=sub(p,a.pos);return [center[0]+(d[0]*Math.cos(hdg)+d[2]*Math.sin(hdg))*145/range,center[1]-(d[0]*Math.sin(hdg)-d[2]*Math.cos(hdg))*145/range];};
-        t.save();t.beginPath();t.rect(40,70,304,240);t.clip();
+      text(t,name,192,53,16,green,"center");text(t,"OVRD",58,54,11,green);text(t,"CNTL",328,54,11,green,"right");
+      text(t,"SWAP",65,460,11,green);text(t,"FCR",148,460,11,green);text(t,"HSD",218,460,11,green);text(t,"DTE",311,460,11,green,"right");
+      if(name==="HSD"){
+        const center=[192,284],range=9260,heading=a.heading*D;
+        for(const r of[52,103,145]){t.strokeStyle="#183d38";t.beginPath();t.arc(...center,r,0,TAU);t.stroke();}
+        line(t,[192,120],[192,430],"#163631");line(t,[45,284],[339,284],"#163631");
+        const nav=p=>{const d=sub(p,a.pos);return[192+(d[0]*Math.cos(heading)+d[2]*Math.sin(heading))*145/range,284-(d[0]*Math.sin(heading)-d[2]*Math.cos(heading))*145/range];};
+        t.save();t.beginPath();t.rect(39,94,306,343);t.clip();
         for(let i=0;i<m.gates.length;i++){
-          const p=nav(m.gates[i].pos),next=m.gates[i+1];
-          if(next)line(t,p,nav(next.pos),"#345e9a",2);
-          t.strokeStyle=i===m.gateIndex?white:green;t.beginPath();t.arc(...p,i===m.gateIndex?7:4,0,TAU);t.stroke();text(t,String(i+1),p[0]+10,p[1],12);
+          const p=nav(m.gates[i].pos),q=m.gates[i+1];if(q)line(t,p,nav(q.pos),"#498ca9",2);
+          t.strokeStyle=i===m.gateIndex?"#f07ac9":"#7ac5b0";t.lineWidth=2;t.beginPath();t.arc(...p,i===m.gateIndex?7:4,0,TAU);t.stroke();text(t,String(i+1),p[0]+10,p[1],13,"#b6c8df");
         }t.restore();
-        line(t,[180,230],[192,212],green,2);line(t,[192,212],[204,230],green,2);line(t,[180,230],[204,230],green,2);
-        text(t,`${pad(a.heading)} HDG`,61,292,12);text(t,`STPT ${pad(Math.min(m.gateIndex+1,m.gates.length),2)}`,321,292,12,green,"right");
-      } else if(name==="FCR") {
-        text(t,"CRM  RWS  NORM",192,80,14,green,"center");text(t,"40",53,135,14);
-        for(let i=1;i<4;i++)line(t,[72,100+i*49],[322,100+i*49],"#153b2b");
-        line(t,[72,99],[72,294],green);line(t,[322,99],[322,294],green);
-        const sx=78+(time*.24%1)*238;line(t,[sx,103],[sx,288],"#4d9960");
-        text(t,"NO TRACK",192,195,16,green,"center");text(t,`${pad(a.airspeedKt)} C`,88,288,13);text(t,`${pad(ft(a.pos[1])/100,3)} ALT`,310,288,13,green,"right");
-      } else {
-        const rows=[["RPM",`${(a.rpm||0).toFixed(1)} %`],["FTIT",`${pad(a.ftit||0)} C`],["NOZZLE",`${pad(a.nozzle||0,2)} %`],["FUEL",`${pad(a.fuel*2.20462,4)} LB`],["FLOW",`${pad((a.fuelFlow||0)*7936.64,5)} PPH`],["G / AOA",`${a.gSmooth.toFixed(1)} / ${a.alphaDeg.toFixed(1)}`]];
-        rows.forEach((r,i)=>{text(t,r[0],58,106+i*32,16);text(t,r[1],328,106+i*32,16,green,"right");});
+        line(t,[178,294],[192,274],green,2);line(t,[192,274],[206,294],green,2);line(t,[178,294],[206,294],green,2);
+        text(t,"5 NM",323,82,13,green,"right");text(t,pad(a.heading)+" HDG",54,417,13,green);text(t,"STPT "+pad(Math.min(m.gateIndex+1,m.gates.length),2),329,417,13,green,"right");
+        text(t,"NAV   GPS   NORM",192,100,13,"#7cbcc2","center");
+        text(t,"VS "+Math.round(a.vs*196.85),54,438,11,"#a2b8b6");text(t,"AOA "+a.alphaDeg.toFixed(1),329,438,11,"#a2b8b6","right");
+      }else if(name==="FCR"){
+        text(t,"CRM  RWS  NORM",192,83,14,green,"center");text(t,"40",52,137,14,green);
+        for(let i=1;i<5;i++)line(t,[72,106+i*62],[322,106+i*62],"#153731");
+        line(t,[72,106],[72,411],green);line(t,[322,106],[322,411],green);
+        const sx=78+(time*.24%1)*238;line(t,[sx,110],[sx,405],"#397957");
+        text(t,"NO TRACK",192,255,16,"#80b791","center");text(t,pad(a.airspeedKt)+" C",82,420,13,green);text(t,pad(ft(a.pos[1])/100)+" ALT",319,420,13,green,"right");
+      }else{
+        const rows=[["RPM",(a.rpm||0).toFixed(1)+" %"],["FTIT",pad(a.ftit||0)+" C"],["NOZZLE",pad(a.nozzle||0,2)+" %"],["FUEL",pad(a.fuel*2.20462,4)+" LB"],["FLOW",pad((a.fuelFlow||0)*7936.64,5)+" PPH"],["G / AOA",a.gSmooth.toFixed(1)+" / "+a.alphaDeg.toFixed(1)]];
+        rows.forEach((r,i)=>{text(t,r[0],55,119+i*47,17,"#a2b8b6");text(t,r[1],329,119+i*47,17,green,"right");line(t,[54,140+i*47],[329,140+i*47],"#1c3431");});
+        text(t,a.ab?"AFTERBURNER":"FLCS NORM",192,418,15,a.ab?"#e6bc7a":green,"center");
       }
     });
   }
@@ -2771,39 +2789,32 @@ kbd {
       dial(t,110,396,65,a.nozzle||0,0,100,"NOZ","%",11);
       dial(t,110,554,65,a.oilPsi||0,0,100,"OIL","PSI",11);
     });
-    panel(.56,.52,-4.13,.15,.53,engine);
+    panel(.493,.73,-4.13,.112,.41,engine);
     const ded=surface("ded",510,180,(t)=>{
       t.fillStyle="#020804";t.fillRect(0,0,510,180);
       const gate=m.gates[Math.min(m.gateIndex,m.gates.length-1)];const distance=Math.hypot(...sub(gate.pos,a.pos))/1852;
       const lines=[`UHF  305.00    STPT ${pad(Math.min(m.gateIndex+1,m.gates.length),2)}`,"VHF  127.50    * *",`M ${a.mach.toFixed(2)}       ${pad(a.heading)} DEG`,`DIST ${distance.toFixed(1)} NM   GPS OK`,`TIME ${pad(Math.floor(m.elapsed/60),2)}:${pad(m.elapsed%60,2)}    FUEL ${pad(a.fuel*2.20462,4)}`];
       lines.forEach((s,i)=>text(t,s,10,18+i*35,24,green));
-    });panel(.325,1.075,-3.99,.28,.10,ded);
+    });panel(0,1.185,-3.99,.228,.060,ded);
     const icp=surface("icp",320,330,(t)=>{
       t.fillStyle="#30383b";t.fillRect(0,0,320,330);
       const labels=[["COM1","COM2","IFF","LIST"],["1 T-ILS","2 ALOW","3","RCL"],["4 STPT","5 CRUS","6 TIME","ENTR"],["7 MARK","8 FIX","9 A-CAL","DCS"],["A-A","0 M-SEL","A-G","DRIFT"]];
       labels.forEach((row,y)=>row.forEach((s,x)=>{t.fillStyle="#12191b";t.fillRect(10+x*78,10+y*60,68,48);t.strokeStyle="#707b74";t.strokeRect(10+x*78,10+y*60,68,48);text(t,s,44+x*78,34+y*60,11,white,"center");}));
       text(t,"BRT     SYM    RET DEPR",160,319,12,white,"center");
-    });panel(0,1.025,-3.99,.235,.24,icp);
-    const lower=surface("flight",620,420,(t)=>{
-      t.fillStyle="#333c3e";t.fillRect(0,0,620,420);
-      // ADI sphere: horizon follows attitude, no artificial upright clamp.
-      t.save();t.beginPath();t.arc(158,113,82,0,TAU);t.clip();t.translate(158,113);t.rotate(-a.bank*D);t.translate(0,a.pitch*2.2);
-      t.fillStyle="#547a8b";t.fillRect(-200,-400,400,400);t.fillStyle="#835c36";t.fillRect(-200,0,400,400);line(t,[-200,0],[200,0],white,3);
-      for(let p=-60;p<=60;p+=10)if(p){line(t,[-25,-p*2.2],[25,-p*2.2],white);text(t,String(Math.abs(p)),37,-p*2.2,12,white);}
-      t.restore();line(t,[102,113],[144,113],"#ffc14e",4);line(t,[172,113],[214,113],"#ffc14e",4);line(t,[158,108],[158,122],"#ffc14e",3);
-      t.strokeStyle="#8b9690";t.lineWidth=6;t.beginPath();t.arc(158,113,84,0,TAU);t.stroke();
-      dial(t,450,113,82,ft(a.pos[1])%10000,0,10000,"ALT","FT");
-      text(t,pad(ft(a.pos[1]),5),450,178,20,green,"center");
-      t.fillStyle="#030606";t.beginPath();t.arc(307,310,90,0,TAU);t.fill();
-      for(let b=0;b<360;b+=10){const r=(b-a.heading-90)*D;line(t,[307+Math.cos(r)*75,310+Math.sin(r)*75],[307+Math.cos(r)*86,310+Math.sin(r)*86],white,2);if(b%30===0)text(t,String(b/10),307+Math.cos(r)*62,310+Math.sin(r)*62,14,white,"center");}
-      line(t,[307,265],[307,350],"#ffc15a",3);line(t,[285,310],[329,310],"#ffc15a",3);text(t,"HSI",177,310,18);
-      text(t,`VVI ${Math.round(a.vs*196.85)}`,40,370,17);text(t,`AOA ${a.alphaDeg.toFixed(1)}`,475,310,17,green,"center");
-    });panel(0,.525,-4.14,.43,.29,lower);
+    });panel(0,1.055,-3.99,.228,.19,icp);
+    const lower=surface("standby",480,220,(t)=>{
+      hardware(t,480,220,"STANDBY");
+      dial(t,116,105,77,ft(a.pos[1])%10000,0,10000,"ALT","FT");
+      t.save();t.beginPath();t.roundRect(250,30,190,152,8);t.clip();t.translate(345,106);t.rotate(-a.bank*D);t.translate(0,a.pitch*2);
+      t.fillStyle="#466d83";t.fillRect(-220,-400,440,400);t.fillStyle="#866044";t.fillRect(-220,0,440,400);line(t,[-220,0],[220,0],white,2);
+      for(let n=-40;n<=40;n+=10)if(n)line(t,[-22,-n*2],[22,-n*2],white);
+      t.restore();line(t,[291,107],[331,107],"#e8b95c",3);line(t,[359,107],[400,107],"#e8b95c",3);text(t,pad(ft(a.pos[1]),5),116,163,16,green,"center");
+    });panel(0,.507,-4.105,.255,.117,lower);
     const warn=surface("warn",320,180,(t)=>{
       t.fillStyle="#202729";t.fillRect(0,0,320,180);
       const labels=[["FLCS",a.alphaDeg>25],["FUEL LOW",a.fuel<450],["ENGINE",a.fuel<=0],["OIL",(a.oilPsi||60)<20],["ALT LOW",a.agl<100],["SPEED BRK",a.brake>.1]];
       labels.forEach(([s,on],i)=>{const x=(i%2)*160,y=Math.floor(i/2)*60;t.fillStyle=on?"#d49638":"#0c1414";t.fillRect(x+3,y+3,154,54);text(t,s,x+80,y+30,16,on?"#1c1405":"#6b7569","center");});
-    });panel(.51,.875,-4.075,.22,.12,warn);
+    });panel(.486,.451,-4.075,.14,.10,warn);
     const rwr=surface("rwr",320,320,(t)=>{
       t.fillStyle="#232c2e";t.fillRect(0,0,320,320);
       t.fillStyle="#020805";t.beginPath();t.arc(160,148,126,0,TAU);t.fill();
@@ -2811,29 +2822,42 @@ kbd {
       line(t,[42,148],[278,148],"#466d50");line(t,[160,28],[160,268],"#466d50");
       text(t,"RWR",160,300,17,white,"center");text(t,"N",160,43,18,green,"center");
       text(t,"NO EMITTER",160,150,16,green,"center");
-    });panel(-.49,1.005,-4.075,.19,.19,rwr);
+    });panel(-.49,.98,-4.075,.10,.10,rwr);
     const aux=surface("aux",320,250,(t)=>{
       t.fillStyle="#333c3d";t.fillRect(0,0,320,250);
       dial(t,160,98,76,a.airspeedKt,0,800,"KCAS","KT");
       text(t,`FUEL ${pad(a.fuel*2.20462,4)} LB`,160,205,22,green,"center");
       text(t,`G ${a.gSmooth.toFixed(1)}   ${pad(a.heading)} HDG`,160,236,17,white,"center");
-    });panel(-.52,.625,-4.13,.18,.24,aux);
+    });panel(-.49,.746,-4.13,.105,.225,aux);
     // AOA indexer and master caution, placed beside the HUD rather than on it.
     const aoa=surface("indexer",80,240,t=>{
       t.fillStyle="#121b1c";t.fillRect(0,0,80,240);
       text(t,"V",40,40,48,a.alphaDeg>14?"#ff5f46":"#60382c","center");
       text(t,"O",40,120,40,a.alphaDeg>=11&&a.alphaDeg<=14?green:"#274534","center");
       text(t,"^",40,205,48,a.alphaDeg<11?"#e9ba53":"#5c4e2e","center");
-    });panel(-.20,1.285,-4.12,.042,.13,aoa);
+    });panel(-.20,1.34,-4.12,.037,.115,aoa);
   }
   function consoles(a,hands) {
-    for(const side of [-1,1]) {
-      box([side*.50,.24,-2.94],[.25,.27,1.75],[44,50,51]);
-      box([side*.65,.66,-2.93],[.075,.12,2.4],[31,39,39]);
+    for(const side of[-1,1]){
+      box([side*.49,.23,-2.94],[.245,.27,1.75],[29,34,37]);
+      capsule([side*.625,.42,-3.82],[side*.625,.42,-2.0],.016,.016,[69,74,73]);
+      const names=side===-1?["FUEL","EPU / JFS","UHF / VHF","AUDIO","EXT LIGHTS"]:["POWER","FLCS","SENSOR PWR","AVIONICS","ECS"];
       for(let j=0;j<5;j++){
         const z=-3.72+j*.29;
-        box([side*.51,.391,z],[.23,.016,.25],[52,60,61]);
-        for(let k=0;k<3;k++)capsule([side*.51+(k-1)*.055,.41,z],[side*.51+(k-1)*.055,.455,z-.018],.008,.006,[163,172,162],6);
+        const image=surface("console"+side+"-"+j,250,280,(t,w,h)=>{
+          hardware(t,w,h,names[j]);text(t,names[j],w/2,27,18,"#c7cfc5","center");
+          for(let k=0;k<3;k++){
+            const x=52+k*72;t.strokeStyle="#77837c";t.strokeRect(x-22,67,44,75);text(t,["ON","NORM","AUTO"][k],x,57,12,white,"center");text(t,"OFF",x,157,11,"#9daaa0","center");
+          }
+          if(j===2){t.fillStyle="#071410";t.fillRect(26,192,198,41);text(t,"305.000",125,213,28,green,"center");}
+          else{line(t,[28,202],[220,202],"#6f7b72");text(t,"TEST    RESET",125,224,13,"#afb9b0","center");}
+        });
+        polygon([[side*.49-.115,.382,z-.125],[side*.49+.115,.382,z-.125],[side*.49+.115,.382,z+.125],[side*.49-.115,.382,z+.125]],"#1c2429",image);
+        for(let k=0;k<2;k++){
+          const x=side*.49+(k-.5)*.065,za=z-.03+k*.045;
+          capsule([x,.389,za],[x,.42,za-.009],.008,.006,[168,175,165],12);
+          ellipsoid([x,.425,za-.012],[.009,.009,.009],[133,145,137]);
+        }
       }
     }
     const t=hands.throttle,throttle=[-.48,.53,-3.08-t*.20];
@@ -2844,7 +2868,7 @@ kbd {
     const stick=[.47+hands.roll*.008,.55,-3.04-hands.pitch*.009];
     box([.47,.42,-3.04],[.13,.03,.17],[17,23,24]);
     capsule([.47,.43,-3.04],stick,.025,.028,[39,47,48]);
-    box(add(stick,[0,.04,0]),[.07,.10,.073],[39,45,46]);
+    ellipsoid(add(stick,[0,.04,0]),[.043,.065,.043],[39,45,46]);
     box(add(stick,[-.038,.063,-.009]),[.024,.018,.025],[155,162,150]);
     box(add(stick,[.012,.096,0]),[.025,.012,.025],[187,64,41]);
     // Reclined ACES II seat. The pilot's head is deliberately omitted at the eye.
@@ -2852,7 +2876,8 @@ kbd {
     capsule([0,.20,-2.37],[0,.91,-2.03],.27,.245,[35,43,40]);
     for(const side of [-1,1])capsule([side*.29,.17,-2.43],[side*.29,.84,-2.12],.045,.045,[70,77,69]);
     const hip=[0,.27,-2.59],suit=[101,111,76],glove=[92,103,78];
-    capsule(hip,[0,.86,-2.22],.235,.25,suit);
+    ellipsoid([0,.55,-2.44],[.235,.35,.17],suit,.52);
+    for(const side of[-1,1])capsule([side*.17,.85,-2.31],[side*.13,.34,-2.71],.026,.026,[148,149,123],12);
     box([0,.64,-2.39],[.28,.28,.08],[69,83,57]);
     for(const side of [-1,1]){
       const knee=[side*.21,.42,-3.42],ankle=[side*.19,.10,-3.95+side*hands.rudder*.045];
@@ -2866,7 +2891,7 @@ kbd {
     }
     const kneeboard=surface("kneeboard",180,220,t=>{
       t.fillStyle="#b7bca0";t.fillRect(0,0,180,220);text(t,"COLD RIVER",90,24,17,"#283c30","center");
-      ["CHECK FUEL","10 STEERPOINTS","KCAS / AGL","F1 / F2 MFD","ALT + MOUSE","C CENTER VIEW"].forEach((s,i)=>text(t,s,10,58+i*25,12,"#283c30"));
+      ["CHECK FUEL","10 STEERPOINTS","H AIRBRAKE","K CONFIG","ALT + MOUSE","C CENTER VIEW"].forEach((s,i)=>text(t,s,10,58+i*25,12,"#283c30"));
     });
     polygon([[-.31,.575,-3.32],[-.10,.575,-3.32],[-.10,.540,-3.05],[-.31,.540,-3.05]],"#69745b",kneeboard);
     // Two shoulder-to-elbow-to-wrist chains remain attached to the controls.
@@ -2893,11 +2918,11 @@ kbd {
     }
   }
   function hud(a,m,cam) {
-    const glass=[[-.165,1.76,-3.35],[.165,1.76,-3.35],[.19,1.22,-3.25],[-.19,1.22,-3.25]];
+    const glass=[[-.125,1.60,-3.35],[.125,1.60,-3.35],[.140,1.28,-3.25],[-.140,1.28,-3.25]].map(p=>[p[0],p[1],p[2]+BODY_OFFSET]);
     const clipped=clipNear(glass);if(clipped.length<3)return;
     const p=clipped.map(project);
     ctx.save();ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);p.slice(1).forEach(v=>ctx.lineTo(v.x,v.y));ctx.closePath();ctx.clip();
-    const baseFocal=H*.5/Math.tan(cam.fov/2),s=clamp(baseFocal/480,.55,1.7);
+    const baseFocal=H*.5/Math.tan(cam.fov/2),s=clamp(baseFocal/750,.5,1.4);
     const ax=C.axisSet(a.q),worldDir=d=>{
       const z=dot(d,cam.forward);if(z<=.01)return null;
       return {x:W*.5+dot(d,cam.right)*focal/z,y:H*.5-dot(d,cam.up)*focal/z};
@@ -2906,7 +2931,7 @@ kbd {
     const at=(x,y)=>worldDir(norm(add(ax.forward,add(mul(ax.right,x/baseFocal),mul(ax.up,-y/baseFocal)))));
     const ht=(str,x,y,size=11,align="left")=>{const p=at(x*s,y*s);if(p)text(ctx,str,p.x,p.y,size*s,green,align);};
     const hl=(x,y,x2,y2)=>{const p=at(x*s,y*s),q=at(x2*s,y2*s);if(p&&q)line(ctx,[p.x,p.y],[q.x,q.y],green,1.05);};
-    const half=baseFocal*.137/s;
+    const half=baseFocal*.087/s;
     // NAV symbology: KCAS, MSL barometric altitude, Mach, G, alpha, steerpoint.
     ht(a.gSmooth.toFixed(1),-half+5,-92,11);
     ht(pad(a.airspeedKt),-half+5,0,14);ht("C",-half+8,18,9);
@@ -2949,42 +2974,56 @@ kbd {
     const inv=[-a.q[0],-a.q[1],-a.q[2],a.q[3]];
     eye=C.qRotate(inv,sub(cam.eye,a.pos));right=C.qRotate(inv,cam.right);up=C.qRotate(inv,cam.up);forward=C.qRotate(inv,cam.forward);
     focal=H*.5/Math.tan(cam.fov/2);queue=[];
-    // Tub, coaming and forward instrument panel; no opaque bubble in the sight line.
-    box([0,.03,-3.10],[1.28,.14,2.68],[30,37,38]);
+    box([0,.03,-3.10],[1.21,.10,2.68],[24,28,30]);
     modelOffset=.85;
-    polygon([[-.62,.25,-4.17],[.62,.25,-4.17],[.61,.91,-4.17],[.43,1.13,-4.17],[-.43,1.13,-4.17],[-.61,.91,-4.17]],"#343e40");
-    box([-.49,.99,-4.15],[.23,.30,.12],[48,56,58]);
-    box([.49,.99,-4.15],[.23,.30,.12],[48,56,58]);
-    for(const side of [-1,1])box([side*.42,1.14,-4.35],[.36,.06,.36],[25,31,31]);
-    box([0,1.15,-4.35],[.43,.05,.23],[25,31,31]);
-    modelOffset=0;
-    for(const side of [-1,1]){
-      capsule([side*.65,.74,-4.43],[side*.65,.74,-1.63],.034,.034,[49,56,55]);
-      capsule([side*.61,.75,-4.43],[side*.43,1.38,-4.89],.022,.018,[49,56,55]);
+    const outline=[[-.60,.73,-4.17],[-.155,.73,-4.17],[-.155,.40,-4.17],[.155,.40,-4.17],[.155,.73,-4.17],[.60,.73,-4.17],[.603,.88,-4.17],[.557,1.025,-4.17],[.369,1.253,-4.17],[-.369,1.253,-4.17],[-.557,1.025,-4.17],[-.603,.88,-4.17]];
+    polygon([[-.60,.73,-4.17],[-.155,.73,-4.17],[-.155,1.253,-4.17],[-.369,1.253,-4.17],[-.557,1.025,-4.17],[-.603,.88,-4.17]],"#282e33");
+    polygon([[.60,.73,-4.17],[.155,.73,-4.17],[.155,1.253,-4.17],[.369,1.253,-4.17],[.557,1.025,-4.17],[.603,.88,-4.17]],"#282e33");
+    polygon([[-.155,.4,-4.17],[.155,.4,-4.17],[.155,1.253,-4.17],[-.155,1.253,-4.17]],"#282e33");
+    for(let i=0;i<outline.length;i++){
+      const p=outline[i],q=outline[(i+1)%outline.length];
+      polygon([p,q,[q[0]*1.025,q[1],q[2]-.055],[p[0]*1.025,p[1],p[2]-.055]],"#131a1e");
+      capsule(p,q,.012,.012,[83,89,91],16);
     }
-    // Rear canopy bow is behind the pilot, leaving the bubble's forward view clear.
-    for(let i=0;i<18;i++){
-      const u=i*Math.PI/18,v=(i+1)*Math.PI/18;
-      capsule([.64*Math.cos(u),.76+.98*Math.sin(u),-1.60],[.64*Math.cos(v),.76+.98*Math.sin(v),-1.60],.027,.027,[55,62,60],6);
+    // The coaming follows the sloped panel shoulders, rather than a shelf.
+    for(const side of[-1,1]){
+      polygon([[side*.60,.56,-4.17],[side*.555,1.025,-4.17],[side*.37,1.25,-4.17],[side*.37,1.24,-4.48],[side*.56,.99,-4.48],[side*.61,.52,-4.48]],"#151b20");
+      capsule([side*.37,1.25,-4.17],[side*.13,1.25,-4.17],.013,.013,[43,48,51],20);
     }
-    const pages=game.mfdPages||["FCR","HSD"];
-    modelOffset=.85;
-    box([-.31,.755,-4.135],[.31,.31,.045],[25,30,31]);box([.31,.755,-4.135],[.31,.31,.045],[25,30,31]);
-    panel(-.31,.755,-4.105,.30,.30,mfdTexture(pages[0],a,m,game.time));
-    panel(.31,.755,-4.105,.30,.30,mfdTexture(pages[1],a,m,game.time));
+    roundedCase(0,1.083,-4.035,.262,.283,.025,[61,65,66]);
+    const pages=game.mfdPages||["FCR","ENG"];
+    for(const[side,page]of[[-1,pages[0]],[1,pages[1]]]){
+      roundedCase(side*.305,1.025,-4.12,.288,.382,.022,[54,59,62]);
+      panel(side*.305,1.025,-4.105,.267,.357,mfdTexture(page,a,m,game.time));
+    }
+    roundedCase(0,.780,-4.12,.293,.395,.026,[59,64,65]);
+    panel(0,.780,-4.105,.269,.369,mfdTexture("HSD",a,m,game.time));
+    roundedCase(0,.508,-4.12,.279,.135,.018,[52,58,61]);
     instruments(a,m,game.time);
+    const switches=surface("left-master",190,280,(t,w,h)=>{
+      hardware(t,w,h,"FLIGHT CONTROL");text(t,"MASTER ARM",95,32,13,white,"center");
+      for(let i=0;i<3;i++){text(t,["SAFE","SIM","ARM"][i],128,72+i*27,12,"#b6c6b5");line(t,[48,72+i*27],[68,72+i*27],white,3);}
+      text(t,"LASER ARM",95,187,13,white,"center");text(t,"ALT REL",95,231,13,"#96a5a0","center");
+    });panel(-.49,.464,-4.105,.105,.155,switches);
     modelOffset=0;
+    for(const side of[-1,1]){
+      capsule([side*.62,.70,-4.15],[side*.62,.70,-1.63],.025,.025,[45,49,52]);
+      capsule([side*.61,.72,-4.15],[side*.43,1.37,-4.86],.013,.013,[43,48,51]);
+    }
+    for(let i=0;i<40;i++){
+      const u=i*Math.PI/40,v=(i+1)*Math.PI/40;
+      capsule([.61*Math.cos(u),.72+.99*Math.sin(u),-1.60],[.61*Math.cos(v),.72+.99*Math.sin(v),-1.60],.020,.020,[50,54,57],12);
+    }
     consoles(a,game.hands);
-    // HUD combiner, metal edge and projector. Glass remains transparent.
     modelOffset=.85;
-    box([0,1.18,-4.12],[.25,.075,.20],[27,32,31]);
-    const glass=[[-.165,1.76,-4.20],[.165,1.76,-4.20],[.19,1.22,-4.10],[-.19,1.22,-4.10]];
-    polygon(glass,"rgba(111,174,141,.035)");
-    for(let i=0;i<4;i++)capsule(glass[i],glass[(i+1)%4],.004,.004,[116,139,125],5);
-    for(const side of [-1,1])capsule([side*.185,1.20,-4.10],[side*.165,1.62,-4.17],.013,.011,[30,37,36],6);
+    roundedCase(0,1.255,-4.10,.256,.062,.015,[35,41,44]);
+    const glass=[[-.125,1.60,-4.20],[.125,1.60,-4.20],[.140,1.28,-4.10],[-.140,1.28,-4.10]];
+    polygon(glass,"rgba(124,185,170,.03)");
+    for(let i=0;i<4;i++)capsule(glass[i],glass[(i+1)%4],.003,.003,[139,158,150],12);
+    for(const side of[-1,1])capsule([side*.139,1.28,-4.10],[side*.128,1.52,-4.175],.009,.008,[22,28,32],20);
     modelOffset=0;
     rasterize();hud(a,m,cam);
-    text(ctx,"ALT + MOUSE  LOOK    C  CENTER    F1 / F2  MFD",20,H-20,10,"#afc8b2");
+    text(ctx,"K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER",20,H-20,10,"#bfd0bf");
   }
   window.__VIPER_COCKPIT = {render,EYE,diagnostics:()=>({glError:raster?.gl.getError()??null,contextLost:raster?.gl.isContextLost()??true})};
 })();
@@ -3053,6 +3092,9 @@ kbd {
   const CYAN = "#7be8df";
   const CREAM = "#ece8cd";
   const STORE_KEY = "viperRun.best.v1";
+  const SETTINGS_KEY = "viperRun.settings.v1";
+  const DEFAULT_SETTINGS = { sensitivity: 2.8, invertY: false, fov: 58 };
+  const settings = loadSettings();
 
   const sound = new Sound();
   const keys = new Set();
@@ -3088,9 +3130,12 @@ kbd {
     best: loadBest(),
     lastResult: null,
     view: "cockpit",
-    mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 },
-    look: { yaw: 0, pitch: -10 * D2R },
-    mfdPages: ["FCR", "HSD"],
+    mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 * settings.sensitivity },
+    look: { yaw: 0, pitch: -12 * D2R },
+    chaseLook: { yaw: 0, pitch: 0 },
+    controlsOpen: false,
+    controlsWasFlying: false,
+    mfdPages: ["FCR", "ENG"],
     hands: { roll: 0, pitch: 0, throttle: 0.82, rudder: 0, brake: 0, ab: 0, grip: 0 },
   };
 
@@ -3102,6 +3147,92 @@ kbd {
       return { score: Number(parsed.score) || 0, time: Number(parsed.time) || 0 };
     } catch (err) {
       return { score: 0, time: 0 };
+    }
+  }
+
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+      return {
+        sensitivity: Number.isFinite(s.sensitivity) ? clamp(s.sensitivity, .5, 5) : DEFAULT_SETTINGS.sensitivity,
+        invertY: s.invertY === true,
+        fov: Number.isFinite(s.fov) ? clamp(s.fov, 45, 72) : DEFAULT_SETTINGS.fov,
+      };
+    } catch (_) { return { ...DEFAULT_SETTINGS }; }
+  }
+
+  function applySettings(values) {
+    if (Number.isFinite(values.sensitivity)) settings.sensitivity = clamp(values.sensitivity, .5, 5);
+    if (typeof values.invertY === "boolean") settings.invertY = values.invertY;
+    if (Number.isFinite(values.fov)) settings.fov = clamp(values.fov, 45, 72);
+    game.mouse.sensitivity = .0022 * settings.sensitivity;
+    game.mouse.x = 0; game.mouse.y = 0;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) {}
+  }
+
+  function toggleControls(force) {
+    const open = typeof force === "boolean" ? force : !game.controlsOpen;
+    if (open === game.controlsOpen) return;
+    const drawer = document.getElementById("flight-controls");
+    game.controlsOpen = open;
+    if (open) {
+      game.controlsWasFlying = game.state === "flying";
+      if (game.controlsWasFlying) {
+        game.state = "paused"; keys.clear(); game.mouse.x = 0; game.mouse.y = 0;
+        releaseMouseControl(); setBody("paused");
+        if (sound.ctx) sound.ctx.suspend().catch(() => {});
+      }
+      drawer.innerHTML = `
+        <div class="drawer-heading"><span>CONTROLS / CONFIG</span><button type="button" data-close-controls aria-label="Close controls">CLOSE <kbd>K</kbd></button></div>
+        <p class="drawer-intro">${game.controlsWasFlying ? "FLIGHT PAUSED" : "FLIGHT CONTROLS"}</p>
+        <dl class="control-list">
+          <div><dt><kbd>S</kbd></dt><dd>Pitch up, pull</dd></div>
+          <div><dt><kbd>W</kbd></dt><dd>Pitch down, push</dd></div>
+          <div><dt><kbd>MOUSE</kbd></dt><dd>Pitch / yaw</dd></div>
+          <div><dt><kbd>A</kbd> <kbd>D</kbd></dt><dd>Roll left / right</dd></div>
+          <div><dt><kbd>Q</kbd> <kbd>E</kbd></dt><dd>Rudder left / right</dd></div>
+          <div><dt><kbd>SHIFT</kbd> <kbd>CTRL</kbd></dt><dd>Throttle up / down</dd></div>
+          <div><dt><kbd>SPACE</kbd></dt><dd>Afterburner</dd></div>
+          <div><dt><kbd>H</kbd></dt><dd>Airbrake, hold</dd></div>
+          <div><dt><kbd>ALT + MOUSE</kbd></dt><dd>Look around</dd></div>
+          <div><dt><kbd>C</kbd></dt><dd>Center view / mouse</dd></div>
+          <div><dt><kbd>V</kbd></dt><dd>Cockpit / chase</dd></div>
+          <div><dt><kbd>F1</kbd> <kbd>F2</kbd></dt><dd>MFD pages</dd></div>
+          <div><dt><kbd>P</kbd> <kbd>ESC</kbd></dt><dd>Pause / resume</dd></div>
+          <div><dt><kbd>M</kbd></dt><dd>Audio on / off</dd></div>
+        </dl>
+        <div class="drawer-settings">
+          <label for="mouse-sensitivity">Mouse sensitivity <output id="sensitivity-value">${settings.sensitivity.toFixed(1)}x</output></label>
+          <input id="mouse-sensitivity" type="range" min="0.5" max="5" step="0.1" value="${settings.sensitivity}">
+          <label class="invert-option"><input id="invert-y" type="checkbox" ${settings.invertY ? "checked" : ""}> Invert mouse vertical axis</label>
+          <p>W and S always keep their labeled directions.</p>
+          <label for="cockpit-fov">Cockpit field of view <output id="fov-value">${settings.fov}°</output></label>
+          <input id="cockpit-fov" type="range" min="45" max="72" step="1" value="${settings.fov}">
+          <button type="button" id="reset-settings">RESTORE DEFAULTS</button>
+        </div><p class="drawer-footnote">Press K to close. Settings are saved on this browser.</p>`;
+      drawer.hidden = false;
+      drawer.querySelector("[data-close-controls]").onclick = () => toggleControls(false);
+      drawer.querySelector("#mouse-sensitivity").oninput = event => {
+        applySettings({ sensitivity: Number(event.target.value) });
+        drawer.querySelector("#sensitivity-value").textContent = settings.sensitivity.toFixed(1) + "x";
+      };
+      drawer.querySelector("#invert-y").onchange = event => applySettings({ invertY: event.target.checked });
+      drawer.querySelector("#cockpit-fov").oninput = event => {
+        applySettings({ fov: Number(event.target.value) });
+        drawer.querySelector("#fov-value").textContent = settings.fov + "°";
+      };
+      drawer.querySelector("#reset-settings").onclick = () => {
+        applySettings(DEFAULT_SETTINGS); toggleControls(false); toggleControls(true);
+      };
+      drawer.querySelector("[data-close-controls]").focus({ preventScroll: true });
+    } else {
+      drawer.hidden = true;
+      if (game.controlsWasFlying) {
+        game.state = "flying"; game.accumulator = 0; lastFrame = performance.now(); setBody("playing");
+        if (sound.ctx) sound.ctx.resume().catch(() => {});
+      }
+      game.controlsWasFlying = false;
+      canvas.focus({ preventScroll: true });
     }
   }
 
@@ -3142,14 +3273,14 @@ kbd {
       <section class="screen">
         <div class="menu-shell">
           <div class="menu-topline">
-            <span>// TACTICAL AIR COMMAND , 0715 ZULU</span>
+            <span>// TACTICAL AIR COMMAND, 0715 ZULU</span>
             <div class="lights"><i class="lamp"></i><i class="lamp dim"></i><i class="lamp red"></i><span>FLCS ONLINE</span></div>
           </div>
           <div class="menu-grid">
             <div>
-              <div class="kicker">F-16C BLOCK 50 , LOW LEVEL QUALIFICATION</div>
+              <div class="kicker">F-16 VIPER, MODERN COCKPIT</div>
               <h1 class="title">VIPER<span><span class="slash">/</span>RUN</span></h1>
-              <div class="title-rule">COLD RIVER GORGE , SECTOR 07</div>
+              <div class="title-rule">COLD RIVER GORGE, SECTOR 07</div>
               <p class="mission-copy">
                 You are already airborne, twenty clicks from the border, with
                 ten navigation gates strung down a black river gorge. Thread
@@ -3159,14 +3290,15 @@ kbd {
               <div class="cta-row">
                 <button class="btn" data-action="start" data-autofocus>ENGAGE <small>ENTER</small></button>
                 <button class="btn ghost" data-action="mute">${sound.muted ? "AUDIO OFF" : "AUDIO ON"}</button>
+                <button class="btn ghost" data-action="controls">CONTROLS / CONFIG <small>K</small></button>
               </div>
             </div>
             <aside class="briefing">
               <div class="briefing-label">Mission data // COLD RIVER</div>
               <div class="brief-row"><span class="k">AIRFRAME</span><span class="v"><strong>F-16C FIGHTING FALCON</strong><br>F110-GE-129 / FLCS NORM</span></div>
-              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong> , RIVER GORGE , COASTAL EGRESS</span></div>
+              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong>, RIVER GORGE, COASTAL EGRESS</span></div>
               <div class="brief-row"><span class="k">CLOCK</span><span class="v"><em>02:30</em> + 8 SEC PER GATE</span></div>
-              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em> , STALL , G-LIMIT</span></div>
+              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em>, STALL, G-LIMIT</span></div>
               <div class="controls-block">
                 <div class="controls-title"><span>Flight controls</span><span>Hybrid</span></div>
                 <div class="keys">
@@ -3178,15 +3310,15 @@ kbd {
                   <div><kbd>SPACE</kbd> AFTERBURNER</div>
                   <div><kbd>V</kbd> CHASE / COCKPIT</div>
                   <div><kbd>C</kbd> CENTER MOUSE</div>
-                  <div><kbd>B</kbd> AIRBRAKE</div>
-                  <div><kbd>P</kbd> PAUSE , <kbd>M</kbd> AUDIO</div>
+                  <div><kbd>H</kbd> AIRBRAKE</div>
+                  <div><kbd>P</kbd> PAUSE, <kbd>M</kbd> AUDIO</div>
                 </div>
               </div>
             </aside>
           </div>
           <div class="menu-footer">
             <span class="best">${best}</span>
-            <span>CLICK TO CAPTURE MOUSE , <kbd>V</kbd> CHASE VIEW , <kbd>P</kbd> PAUSE</span>
+            <span>CLICK TO CAPTURE MOUSE, <kbd>V</kbd> CHASE VIEW, <kbd>P</kbd> PAUSE</span>
             <span class="coords">37°14′N 081°06′E<br>ALT 2,140 FT</span>
           </div>
         </div>
@@ -3199,7 +3331,7 @@ kbd {
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// flight suspended , flcs hold</div>
+          <div class="status-kicker">// flight suspended, flcs hold</div>
           <h2 class="status-title">PAUSED</h2>
           <p class="status-sub">Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.</p>
           <div class="stats">
@@ -3212,8 +3344,9 @@ kbd {
             <button class="btn" data-action="resume" data-autofocus>RESUME <small>P</small></button>
             <button class="btn ghost" data-action="restart">RESTART RUN <small>R</small></button>
             <button class="btn ghost" data-action="menu">ABORT TO MENU</button>
+            <button class="btn ghost" data-action="controls">CONTROLS / CONFIG <small>K</small></button>
           </div>
-          <div class="small-print">P / ESC RESUME , R RESTART , M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
+          <div class="small-print">P / ESC RESUME, R RESTART, M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
         </div>
       </section>`;
   }
@@ -3224,7 +3357,7 @@ kbd {
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// route complete , cold river gorge</div>
+          <div class="status-kicker">// route complete, cold river gorge</div>
           <h2 class="status-title win">COURSE<br> COMPLETE</h2>
           <p class="status-sub">All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as <strong>${rank}</strong>.</p>
           <div class="stats">
@@ -3237,7 +3370,7 @@ kbd {
             <button class="btn" data-action="restart" data-autofocus>FLY AGAIN <small>R</small></button>
             <button class="btn ghost" data-action="menu">MISSION BOARD</button>
           </div>
-          <div class="small-print">${bestLine()} , R RESTART , ESC MENU</div>
+          <div class="small-print">${bestLine()}, R RESTART, ESC MENU</div>
         </div>
       </section>`;
   }
@@ -3247,7 +3380,7 @@ kbd {
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--red)">// flight terminated , airframe lost</div>
+          <div class="status-kicker" style="color:var(--red)">// flight terminated, airframe lost</div>
           <h2 class="status-title fail">TERRAIN<br> WINS</h2>
           <p class="status-sub">The gorge is unforgiving. The flight recorder shows ${pad(r.gates, 2)} gates cleared before impact.</p>
           <div class="stats">
@@ -3270,7 +3403,7 @@ kbd {
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--amber)">// clock expired , run invalid</div>
+          <div class="status-kicker" style="color:var(--amber)">// clock expired, run invalid</div>
           <h2 class="status-title fail" style="color:var(--amber)">RUN<br> EXPIRED</h2>
           <p class="status-sub">The coast is still out there. You cleared ${pad(r.gates, 2)} gates before the clock ran dry.</p>
           <div class="stats">
@@ -3289,7 +3422,10 @@ kbd {
   }
 
   function action(name) {
-    if (name === "start") {
+    if (game.controlsOpen && name !== "controls") return;
+    if (name === "controls") {
+      toggleControls();
+    } else if (name === "start") {
       sound.init();
       startMission(true);
     } else if (name === "resume") {
@@ -3329,7 +3465,8 @@ kbd {
     game.mouse.x = 0;
     game.mouse.y = 0;
     game.look.yaw = 0;
-    game.look.pitch = -10 * D2R;
+    game.look.pitch = -12 * D2R;
+    game.chaseLook.yaw = 0; game.chaseLook.pitch = 0;
     if (announce) flashToast("MOUSE STICK CENTERED", 1.1);
   }
 
@@ -3358,6 +3495,7 @@ kbd {
   }
 
   function startMission(fromGesture = true) {
+    if (game.controlsOpen) toggleControls(false);
     const mission = buildMission();
     game.mission = mission;
     game.aircraft = makeAircraft(mission);
@@ -3390,6 +3528,7 @@ kbd {
   }
 
   function resumeMission() {
+    if (game.controlsOpen) return;
     if (game.state !== "paused") return;
     game.state = "flying";
     keys.clear();
@@ -3475,6 +3614,7 @@ kbd {
 
   function readInput() {
     const mouse = game.mouse.locked ? game.mouse : { x: 0, y: 0 };
+    const keyboardPitch = keys.has("KeyS") || keys.has("KeyW") || keys.has("ArrowDown") || keys.has("ArrowUp");
     return {
       pitchUp: keys.has("KeyS") || keys.has("ArrowDown"),
       pitchDown: keys.has("KeyW") || keys.has("ArrowUp"),
@@ -3484,13 +3624,13 @@ kbd {
       yawRight: keys.has("KeyE"),
       // Mouse Y is pitch (down = pull) and mouse X is yaw, matching the
       // requested hybrid mouse/hands-on-stick layout. A/D remains roll.
-      pitchAxis: mouse.y,
+      pitchAxis: keyboardPitch ? 0 : mouse.y * (settings.invertY ? -1 : 1),
       yawAxis: mouse.x,
       rollAxis: 0,
       throttleUp: keys.has("ShiftLeft") || keys.has("ShiftRight"),
       throttleDown: keys.has("ControlLeft") || keys.has("ControlRight"),
       afterburner: keys.has("Space"),
-      airbrake: keys.has("KeyB"),
+      airbrake: keys.has("KeyH"),
     };
   }
 
@@ -3604,7 +3744,7 @@ kbd {
     // Wide cockpit field of view. The HUD symbology is projected with this
     // same cone, so a wider view keeps the ladder and flight-path marker tied
     // to the real horizon instead of drifting as a decorative overlay.
-    const fov = 78 * D2R;
+    const fov = settings.fov * D2R;
     return { eye, forward: qAx.forward, right: qAx.right, up: qAx.up, fov };
   }
 
@@ -3615,8 +3755,12 @@ kbd {
     const speedFactor = clamp(a.speed / 380, 0, 1);
     const velocityDir = a.speed > 5 ? norm(a.vel) : ax.forward;
     const viewDir = norm(add(mul(ax.forward, 0.55), mul(velocityDir, 0.45)));
-    const eye = add(a.pos, add(mul(ax.back, 17.5 + speedFactor * 4.5), mul(ax.up, 4.2)));
-    const look = add(a.pos, add(mul(viewDir, 15), mul(ax.up, 0.7)));
+    let offset = add(mul(ax.back, 14.5 + speedFactor * 3), mul(ax.up, 4.2));
+    offset = qRotate(qAxisAngle(ax.up, game.chaseLook.yaw), offset);
+    offset = qRotate(qAxisAngle(ax.right, game.chaseLook.pitch), offset);
+    const eye = add(a.pos, offset);
+    const orbiting = Math.abs(game.chaseLook.yaw) + Math.abs(game.chaseLook.pitch) > .001;
+    const look = orbiting ? add(a.pos, mul(ax.up, .35)) : add(a.pos, add(mul(viewDir, 10), mul(ax.up, 0.7)));
 
     // A partially stabilized up vector keeps the horizon readable during a
     // fast roll without making the chase view feel rigidly welded to the jet.
@@ -3652,7 +3796,7 @@ kbd {
       forward,
       right,
       up,
-      fov: (57.5 + speedFactor * 4.5) * D2R,
+      fov: (48 + speedFactor * 3) * D2R,
     };
   }
 
@@ -3904,7 +4048,7 @@ kbd {
     hText(game.mouse.locked ? "MOUSE CAPTURED  //  C CENTER" : "CLICK TO CAPTURE MOUSE  //  C CENTER", edge, H - 46 * s, 7.2 * s, game.mouse.locked ? HUD_SOFT : AMBER, "left", "top");
     hText(`FUEL ${pad(a.fuel * 2.20462, 4)} LB`, edge, H - 32 * s, 7 * s, a.fuel < 500 ? RED : HUD_DIM, "left", "top");
     hText("V  COCKPIT VIEW", W - edge, H - 46 * s, 7.6 * s, HUD_SOFT, "right", "top");
-    hText("A / D  ROLL   ,   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
+    hText("A / D  ROLL  ,   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
     hText("CHASE", W * 0.5, H - 18 * s, 6.2 * s, HUD_FAINT, "center", "top");
     ctx.restore();
   }
@@ -3956,7 +4100,7 @@ kbd {
 
   // --------------------------------------------------------------------- input
   const gameKeys = new Set([
-    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyB", "KeyV", "KeyC",
+    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyH", "KeyK", "KeyV", "KeyC",
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
     "AltLeft", "AltRight", "F1", "F2",
@@ -3973,6 +4117,13 @@ kbd {
   }
 
   window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyK" && !event.repeat) {
+      event.preventDefault(); toggleControls(); return;
+    }
+    if (game.controlsOpen) {
+      if (event.code === "Escape") { event.preventDefault(); toggleControls(false); }
+      return;
+    }
     if (gameKeys.has(event.code)) event.preventDefault();
     if ((event.code === "AltLeft" || event.code === "AltRight") && game.state === "flying") {
       // Changing head direction must not add a new flight-control demand.
@@ -4053,9 +4204,14 @@ kbd {
 
   window.addEventListener("mousemove", (event) => {
     if (game.state !== "flying") return;
-    if ((event.altKey || keys.has("AltLeft") || keys.has("AltRight")) && game.view === "cockpit") {
-      game.look.yaw = clamp(game.look.yaw + event.movementX * 0.003, -155 * D2R, 155 * D2R);
-      game.look.pitch = clamp(game.look.pitch - event.movementY * 0.003, -85 * D2R, 85 * D2R);
+    if (event.altKey || keys.has("AltLeft") || keys.has("AltRight")) {
+      if (game.view === "cockpit") {
+        game.look.yaw = clamp(game.look.yaw + event.movementX * 0.003, -155 * D2R, 155 * D2R);
+        game.look.pitch = clamp(game.look.pitch - event.movementY * 0.003, -85 * D2R, 85 * D2R);
+      } else {
+        game.chaseLook.yaw += event.movementX * .003;
+        game.chaseLook.pitch = clamp(game.chaseLook.pitch + event.movementY * .003, -65 * D2R, 65 * D2R);
+      }
       return;
     }
     if (!game.mouse.locked) return;
@@ -4240,8 +4396,12 @@ kbd {
       game.look.yaw = clamp(yaw * D2R, -155 * D2R, 155 * D2R);
       game.look.pitch = clamp(pitch * D2R, -85 * D2R, 85 * D2R);
     },
+    setChaseLook: (yaw, pitch) => { game.chaseLook.yaw = yaw * D2R; game.chaseLook.pitch = pitch * D2R; },
     readInput,
     stepSimulation,
+    settings,
+    applySettings,
+    toggleControls,
     snapshot: () => ({
       state: game.state,
       view: game.view,

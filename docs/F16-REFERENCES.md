@@ -1,12 +1,20 @@
 # Cabina y modelo de vuelo del F-16
 
-Revisión del 20 de octubre de 2026. La base elegida es el F-16C Block 50 con
-motor F110-GE-129 y pantallas multifunción en color. El modelado es procedural,
-con un acabado de juego de pocos polígonos. Las fotografías se usan como
+Revisión del 20 de octubre de 2026. La base de vuelo sigue siendo el F-16C
+Block 50 con motor F110-GE-129. La cabina se ha revisado siguiendo la imagen
+modernizada del usuario, con dos pantallas laterales verticales y una pantalla
+central CPD, como en la modernización F-16V. El modelado es procedural, con
+superficies suaves y acabado retro mediante resolución, color y texturas.
+Las fotografías se usan como
 referencia visual y no se incluyen como texturas ni se redistribuyen.
 
 ## Referencias visuales
 
+- Las cuatro imágenes proporcionadas por el usuario en esta conversación:
+  disposición de la cabina modernizada y vistas superior, frontal y lateral
+  del avión. No se convierten en texturas ni se incluyen como archivos del juego.
+- [Descripción del F-16V por Lockheed Martin](https://lockheedmartin.com/en-us/news/features/2016/meet-the-f-16v--the-most-technologically-advanced-4th-generation.html).
+  Confirma la pantalla central CPD de 6 por 8 pulgadas en la modernización.
 - [Galería de cabinas y HUD de f-16.net](https://www.f-16.net/g3/f-16-photos/album03/album72).
   Distribución general, proporciones, consolas y disposición de los controles.
 - [Vista frontal de F-16C/D Block 40, fotografía USAF](https://www.f-16.net/g3/f-16-photos/album03/album72/aaa).
@@ -21,13 +29,27 @@ referencia visual y no se incluyen como texturas ni se redistribuyen.
   muestra el HUD gran angular del Block 40/42; el juego usa una adaptación
   compacta, no una reproducción de ese equipo en un Block 50.
 - [Descripción del Block 50/52 en f-16.net](https://www.f-16.net/f-16_versions_article9.html).
-  Variante de motor, dos MFD y modernización con pantallas en color.
+  Variante de motor y parámetros de vuelo de referencia. La disposición del
+  panel actual se inspira en la modernización posterior, no en el panel básico de ese Block.
 
 La [ficha de la USAF sobre el F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirma el asiento inclinado 30 grados, la palanca lateral sensible a presión,
 la visibilidad de la cúpula y la capacidad de 9 G. La cámara se sitúa detrás de
 las caderas y sobre el torso, dentro de la cúpula exterior. Las coordenadas de
 la cabina son aproximadas; no proceden de un escaneo o plano dimensional.
+
+El FOV predeterminado baja de 78 a 58 grados, con ajuste entre 45 y 72. La
+sensibilidad predeterminada del mouse es 2,8 veces la original. K abre el panel
+izquierdo y pausa el vuelo mientras se configura; H mantiene el aerofreno.
+La inversión se aplica al eje vertical del mouse. S y W conservan sus
+direcciones y tienen prioridad sobre el mouse mientras se mantienen pulsadas.
+
+El exterior usa perfiles continuos y normales suaves. La geometría completa
+mide 15,06 metros de longitud y 9,96 metros de envergadura. Las pruebas miden
+las coordenadas reales de la malla, no solo los valores declarados. Los
+contactos de colisión se ajustaron al nuevo morro, cúpula, alas, toma y deriva.
+El acabado incluye líneas de panel, marcos, indicadores y bordes biselados.
+La cabina sigue siendo una adaptación visual para juego.
 
 ## Correspondencia con la simulación
 
@@ -96,6 +118,8 @@ cuando se supera Mach 2,05.
 - `tests/browser.html`: arranque WebGL, separación entre vista libre y mandos,
   páginas MFD, manos, pausa, reanudación, vista externa, diez puertas, victoria,
   tiempo agotado, colisión y reinicio.
+- `tests/airframe.mjs`: dimensiones medidas, geometría finita y normales
+  unitarias del fuselaje, cúpula, piloto exterior y postcombustión.
 - Inspección visual de frente, ambos laterales, piloto y cola. Alt más mouse
   permite girar la cabeza hasta 155 grados por lado y 85 grados en vertical.
   C devuelve la vista al frente. La cabina y el exterior comparten posición,

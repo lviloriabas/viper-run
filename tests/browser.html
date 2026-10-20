@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Viper Run cockpit verification</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#101916;color:#cae5d1;font:12px monospace}header{height:42px;display:flex;gap:10px;align-items:center;padding:6px 12px}button{background:#263c30;color:#dcf1d9;border:1px solid #547561;padding:5px 12px;cursor:pointer}iframe{display:block;width:100vw;height:calc(100vh - 42px);border:0}#result{margin-left:auto;color:#a4e59f}pre{display:none}body.details pre{display:block;position:fixed;top:45px;left:10px;background:#08130eee;padding:20px;z-index:3}</style>
-<header><b>VIPER RUN, QA</b><button data-look="0,-10">Front</button><button data-look="-105,-20">Left wing</button><button data-look="105,-20">Right wing</button><button data-look="0,-60">Pilot / controls</button><button data-look="150,-12">Tail</button><button id="details">Results</button><span id="result">Loading</span></header>
+<header><b>VIPER RUN, QA</b><button data-look="0,-12">Front</button><button data-look="-105,-20">Left wing</button><button data-look="105,-20">Right wing</button><button data-look="0,-60">Pilot / controls</button><button data-look="150,-12">Tail</button><button id="chase">Aircraft</button><button id="details">Results</button><span id="result">Loading</span></header>
 <iframe title="Game verification" src="../dist/viper-run.html?autostart=1"></iframe><pre id="log"></pre>
 <script>
 const frame=document.querySelector('iframe'),out=document.querySelector('#result'),log=document.querySelector('#log');let v,w;
@@ -10,9 +10,11 @@ const assert=(ok,name)=>{log.textContent+=(ok?'PASS ':'FAIL ')+name+'\n';if(!ok)
 async function start(){
   w=frame.contentWindow;for(let i=0;i<600&&!w.__viper?.game.camera;i++)await wait();v=w.__viper;
   const savedBest=w.localStorage.getItem('viperRun.best.v1');
+  const savedSettings=w.localStorage.getItem('viperRun.settings.v1');
   try{
     assert(!!v?.game.camera,'boot and WebGL');
     assert(!w.document.querySelector('.error-card'),'no boot failure');
+    v.applySettings({sensitivity:2.8,invertY:false,fov:58});
     v.startMission(false);v.game.toastTimer=0;v.game.state='flying';v.setMouseLocked(true);v.setMouse(.4,.3);
     w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'AltLeft',altKey:true,cancelable:true}));
     w.dispatchEvent(new w.MouseEvent('mousemove',{movementX:180,movementY:100,altKey:true}));
@@ -27,7 +29,38 @@ async function start(){
     v.pauseMission();assert(v.game.state==='paused','pause');v.resumeMission();assert(v.game.state==='flying','resume');
     w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyP',repeat:true}));assert(v.game.state==='flying','held pause key does not toggle repeatedly');
     v.setView('chase');assert(v.game.view==='chase','chase view');v.setView('cockpit');
-    const r=v.renderer();assert(r.cockpitExteriorMesh.count<r.aircraftMesh.count,'first-person exterior omits opaque canopy');
+    const r=v.renderer();assert(r.canopyMesh.count>0&&r.crewMesh.count>0,'canopy and external pilot are separate from first-person geometry');
+    assert(r.airframeStats.overallLength===15.06&&r.airframeStats.wingspan===9.96,'dimensioned F-16 exterior');
+    assert(v.game.camera.fov<65*Math.PI/180,'narrower cockpit field of view');
+    v.setKeys(['KeyS']);assert(v.readInput().pitchUp&&!v.readInput().pitchDown,'S pitches up');
+    v.setMouseLocked(true);v.setMouse(0,-1);assert(v.readInput().pitchAxis===0&&v.readInput().pitchUp,'S overrides an opposing mouse command');
+    v.setKeys(['KeyW']);assert(v.readInput().pitchDown&&!v.readInput().pitchUp,'W pitches down');
+    v.setMouse(0,1);assert(v.readInput().pitchAxis===0&&v.readInput().pitchDown,'W overrides an opposing mouse command');
+    v.setKeys(['KeyH']);assert(v.readInput().airbrake,'H operates the airbrake');v.setKeys(['KeyB']);assert(!v.readInput().airbrake,'B no longer operates the airbrake');v.clearKeys();
+    v.setMouseLocked(true);v.setMouse(0,.4);assert(v.readInput().pitchAxis>0,'normal vertical mouse');
+    v.applySettings({invertY:true});v.setMouse(0,.4);assert(v.readInput().pitchAxis<0,'inverted vertical mouse');
+    v.setKeys(['KeyS']);assert(v.readInput().pitchUp,'mouse inversion preserves keyboard directions');v.clearKeys();v.applySettings({invertY:false});
+    const sensitivity=v.game.mouse.sensitivity;assert(sensitivity>.006,'higher default mouse sensitivity');
+    w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyK',cancelable:true}));
+    const drawer=w.document.querySelector('#flight-controls');assert(v.game.controlsOpen&&v.game.state==='paused'&&!drawer.hidden,'K opens controls and pauses flight');
+    assert(drawer.getBoundingClientRect().left===0,'controls drawer is on the left');
+    const oldClock=v.mission().timeLeft;for(let i=0;i<3;i++)await wait();assert(v.mission().timeLeft===oldClock,'config pauses mission clock');
+    const slider=drawer.querySelector('#mouse-sensitivity');slider.value='3.5';slider.dispatchEvent(new w.Event('input',{bubbles:true}));assert(Math.abs(v.game.mouse.sensitivity-.0077)<1e-8,'sensitivity setting applies');
+    const invert=drawer.querySelector('#invert-y');invert.checked=true;invert.dispatchEvent(new w.Event('change',{bubbles:true}));assert(v.settings.invertY,'invert checkbox applies');
+    assert(JSON.parse(w.localStorage.getItem('viperRun.settings.v1')).sensitivity===3.5,'settings persist');
+    const fovSlider=drawer.querySelector('#cockpit-fov');fovSlider.value='52';fovSlider.dispatchEvent(new w.Event('input',{bubbles:true}));
+    for(let i=0;i<2;i++)await wait();assert(Math.abs(v.game.camera.fov-52*Math.PI/180)<1e-8,'FOV slider changes the cockpit camera');
+    drawer.querySelector('#reset-settings').click();assert(v.settings.fov===58&&v.settings.sensitivity===2.8&&!v.settings.invertY&&v.game.controlsOpen,'restore defaults keeps the configuration drawer open');
+    w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyK',cancelable:true}));assert(!v.game.controlsOpen&&v.game.state==='flying'&&drawer.hidden,'K closes controls and resumes flight');
+    v.applySettings({sensitivity:2.8,invertY:false,fov:58});v.setMouseLocked(true);
+    v.startMission(false);v.setMouseLocked(true);v.setMouse(0,-1);
+    w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyS',cancelable:true}));const beforePull=v.aircraft().pitch;
+    for(let i=0;i<30;i++)v.stepSimulation(1/120);assert(v.aircraft().pitch>beforePull,'S raises the aircraft nose with opposing mouse input');
+    w.dispatchEvent(new w.KeyboardEvent('keyup',{code:'KeyS'}));
+    v.startMission(false);v.setMouseLocked(true);v.setMouse(0,1);
+    w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyW',cancelable:true}));const beforePush=v.aircraft().pitch;
+    for(let i=0;i<30;i++)v.stepSimulation(1/120);assert(v.aircraft().pitch<beforePush,'W lowers the aircraft nose with opposing mouse input');
+    w.dispatchEvent(new w.KeyboardEvent('keyup',{code:'KeyW'}));v.centerMouseStick();
     assert(r.gl.getError()===0,'no WebGL error');
     v.setKeys(['ShiftLeft','Space','KeyS']);const fuel=v.aircraft().fuel;
     for(let i=0;i<12;i++)await wait();
@@ -47,12 +80,13 @@ async function start(){
     v.game.transitionTimer=.001;for(let i=0;i<3;i++)await wait();assert(v.game.state==='timedout','timeout screen');
     v.startMission(false);v.aircraft().pos[1]=0;v.stepSimulation(.01);assert(v.game.transitionKind==='crash','whole-airframe terrain collision');
     v.game.transitionTimer=.001;for(let i=0;i<3;i++)await wait();assert(v.game.state==='crashed','crash screen');
-    v.clearKeys();v.setMouseLocked(false);v.startMission(false);v.game.toastTimer=0;v.game.state='inspection';
-    assert(w.__VIPER_COCKPIT.EYE[2]>-2.59&&w.__VIPER_COCKPIT.EYE[2]<-1.6,'eye aft of hips inside the reclined-seat canopy');
+    v.clearKeys();v.setMouseLocked(false);v.startMission(false);v.game.mfdPages=['FCR','ENG'];v.game.toastTimer=0;v.game.state='inspection';
+    assert(w.__VIPER_COCKPIT.EYE[2]>-3.79&&w.__VIPER_COCKPIT.EYE[2]<-2.8,'eye aft of hips inside the reclined-seat canopy');
     out.textContent='All browser checks passed';
   }catch(e){out.textContent='FAIL: '+e.message;document.body.classList.add('details');}
-  finally{if(savedBest===null)w.localStorage.removeItem('viperRun.best.v1');else w.localStorage.setItem('viperRun.best.v1',savedBest);}
+  finally{if(savedBest===null)w.localStorage.removeItem('viperRun.best.v1');else w.localStorage.setItem('viperRun.best.v1',savedBest);if(savedSettings===null)w.localStorage.removeItem('viperRun.settings.v1');else w.localStorage.setItem('viperRun.settings.v1',savedSettings);}
 }
 frame.addEventListener('load',start);
-document.querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>{v.setLook(...b.dataset.look.split(',').map(Number));});
+document.querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>{v.setView('cockpit');v.setLook(...b.dataset.look.split(',').map(Number));});
+document.querySelector('#chase').onclick=()=>{v.setView('chase');v.setChaseLook(140,25);};
 </script></html>

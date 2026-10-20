@@ -60,6 +60,9 @@
   const CYAN = "#7be8df";
   const CREAM = "#ece8cd";
   const STORE_KEY = "viperRun.best.v1";
+  const SETTINGS_KEY = "viperRun.settings.v1";
+  const DEFAULT_SETTINGS = { sensitivity: 2.8, invertY: false, fov: 58 };
+  const settings = loadSettings();
 
   const sound = new Sound();
   const keys = new Set();
@@ -95,9 +98,12 @@
     best: loadBest(),
     lastResult: null,
     view: "cockpit",
-    mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 },
-    look: { yaw: 0, pitch: -10 * D2R },
-    mfdPages: ["FCR", "HSD"],
+    mouse: { x: 0, y: 0, locked: false, sensitivity: 0.0022 * settings.sensitivity },
+    look: { yaw: 0, pitch: -12 * D2R },
+    chaseLook: { yaw: 0, pitch: 0 },
+    controlsOpen: false,
+    controlsWasFlying: false,
+    mfdPages: ["FCR", "ENG"],
     hands: { roll: 0, pitch: 0, throttle: 0.82, rudder: 0, brake: 0, ab: 0, grip: 0 },
   };
 
@@ -109,6 +115,92 @@
       return { score: Number(parsed.score) || 0, time: Number(parsed.time) || 0 };
     } catch (err) {
       return { score: 0, time: 0 };
+    }
+  }
+
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+      return {
+        sensitivity: Number.isFinite(s.sensitivity) ? clamp(s.sensitivity, .5, 5) : DEFAULT_SETTINGS.sensitivity,
+        invertY: s.invertY === true,
+        fov: Number.isFinite(s.fov) ? clamp(s.fov, 45, 72) : DEFAULT_SETTINGS.fov,
+      };
+    } catch (_) { return { ...DEFAULT_SETTINGS }; }
+  }
+
+  function applySettings(values) {
+    if (Number.isFinite(values.sensitivity)) settings.sensitivity = clamp(values.sensitivity, .5, 5);
+    if (typeof values.invertY === "boolean") settings.invertY = values.invertY;
+    if (Number.isFinite(values.fov)) settings.fov = clamp(values.fov, 45, 72);
+    game.mouse.sensitivity = .0022 * settings.sensitivity;
+    game.mouse.x = 0; game.mouse.y = 0;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) {}
+  }
+
+  function toggleControls(force) {
+    const open = typeof force === "boolean" ? force : !game.controlsOpen;
+    if (open === game.controlsOpen) return;
+    const drawer = document.getElementById("flight-controls");
+    game.controlsOpen = open;
+    if (open) {
+      game.controlsWasFlying = game.state === "flying";
+      if (game.controlsWasFlying) {
+        game.state = "paused"; keys.clear(); game.mouse.x = 0; game.mouse.y = 0;
+        releaseMouseControl(); setBody("paused");
+        if (sound.ctx) sound.ctx.suspend().catch(() => {});
+      }
+      drawer.innerHTML = `
+        <div class="drawer-heading"><span>CONTROLS / CONFIG</span><button type="button" data-close-controls aria-label="Close controls">CLOSE <kbd>K</kbd></button></div>
+        <p class="drawer-intro">${game.controlsWasFlying ? "FLIGHT PAUSED" : "FLIGHT CONTROLS"}</p>
+        <dl class="control-list">
+          <div><dt><kbd>S</kbd></dt><dd>Pitch up, pull</dd></div>
+          <div><dt><kbd>W</kbd></dt><dd>Pitch down, push</dd></div>
+          <div><dt><kbd>MOUSE</kbd></dt><dd>Pitch / yaw</dd></div>
+          <div><dt><kbd>A</kbd> <kbd>D</kbd></dt><dd>Roll left / right</dd></div>
+          <div><dt><kbd>Q</kbd> <kbd>E</kbd></dt><dd>Rudder left / right</dd></div>
+          <div><dt><kbd>SHIFT</kbd> <kbd>CTRL</kbd></dt><dd>Throttle up / down</dd></div>
+          <div><dt><kbd>SPACE</kbd></dt><dd>Afterburner</dd></div>
+          <div><dt><kbd>H</kbd></dt><dd>Airbrake, hold</dd></div>
+          <div><dt><kbd>ALT + MOUSE</kbd></dt><dd>Look around</dd></div>
+          <div><dt><kbd>C</kbd></dt><dd>Center view / mouse</dd></div>
+          <div><dt><kbd>V</kbd></dt><dd>Cockpit / chase</dd></div>
+          <div><dt><kbd>F1</kbd> <kbd>F2</kbd></dt><dd>MFD pages</dd></div>
+          <div><dt><kbd>P</kbd> <kbd>ESC</kbd></dt><dd>Pause / resume</dd></div>
+          <div><dt><kbd>M</kbd></dt><dd>Audio on / off</dd></div>
+        </dl>
+        <div class="drawer-settings">
+          <label for="mouse-sensitivity">Mouse sensitivity <output id="sensitivity-value">${settings.sensitivity.toFixed(1)}x</output></label>
+          <input id="mouse-sensitivity" type="range" min="0.5" max="5" step="0.1" value="${settings.sensitivity}">
+          <label class="invert-option"><input id="invert-y" type="checkbox" ${settings.invertY ? "checked" : ""}> Invert mouse vertical axis</label>
+          <p>W and S always keep their labeled directions.</p>
+          <label for="cockpit-fov">Cockpit field of view <output id="fov-value">${settings.fov}°</output></label>
+          <input id="cockpit-fov" type="range" min="45" max="72" step="1" value="${settings.fov}">
+          <button type="button" id="reset-settings">RESTORE DEFAULTS</button>
+        </div><p class="drawer-footnote">Press K to close. Settings are saved on this browser.</p>`;
+      drawer.hidden = false;
+      drawer.querySelector("[data-close-controls]").onclick = () => toggleControls(false);
+      drawer.querySelector("#mouse-sensitivity").oninput = event => {
+        applySettings({ sensitivity: Number(event.target.value) });
+        drawer.querySelector("#sensitivity-value").textContent = settings.sensitivity.toFixed(1) + "x";
+      };
+      drawer.querySelector("#invert-y").onchange = event => applySettings({ invertY: event.target.checked });
+      drawer.querySelector("#cockpit-fov").oninput = event => {
+        applySettings({ fov: Number(event.target.value) });
+        drawer.querySelector("#fov-value").textContent = settings.fov + "°";
+      };
+      drawer.querySelector("#reset-settings").onclick = () => {
+        applySettings(DEFAULT_SETTINGS); toggleControls(false); toggleControls(true);
+      };
+      drawer.querySelector("[data-close-controls]").focus({ preventScroll: true });
+    } else {
+      drawer.hidden = true;
+      if (game.controlsWasFlying) {
+        game.state = "flying"; game.accumulator = 0; lastFrame = performance.now(); setBody("playing");
+        if (sound.ctx) sound.ctx.resume().catch(() => {});
+      }
+      game.controlsWasFlying = false;
+      canvas.focus({ preventScroll: true });
     }
   }
 
@@ -149,14 +241,14 @@
       <section class="screen">
         <div class="menu-shell">
           <div class="menu-topline">
-            <span>// TACTICAL AIR COMMAND , 0715 ZULU</span>
+            <span>// TACTICAL AIR COMMAND, 0715 ZULU</span>
             <div class="lights"><i class="lamp"></i><i class="lamp dim"></i><i class="lamp red"></i><span>FLCS ONLINE</span></div>
           </div>
           <div class="menu-grid">
             <div>
-              <div class="kicker">F-16C BLOCK 50 , LOW LEVEL QUALIFICATION</div>
+              <div class="kicker">F-16 VIPER, MODERN COCKPIT</div>
               <h1 class="title">VIPER<span><span class="slash">/</span>RUN</span></h1>
-              <div class="title-rule">COLD RIVER GORGE , SECTOR 07</div>
+              <div class="title-rule">COLD RIVER GORGE, SECTOR 07</div>
               <p class="mission-copy">
                 You are already airborne, twenty clicks from the border, with
                 ten navigation gates strung down a black river gorge. Thread
@@ -166,14 +258,15 @@
               <div class="cta-row">
                 <button class="btn" data-action="start" data-autofocus>ENGAGE <small>ENTER</small></button>
                 <button class="btn ghost" data-action="mute">${sound.muted ? "AUDIO OFF" : "AUDIO ON"}</button>
+                <button class="btn ghost" data-action="controls">CONTROLS / CONFIG <small>K</small></button>
               </div>
             </div>
             <aside class="briefing">
               <div class="briefing-label">Mission data // COLD RIVER</div>
               <div class="brief-row"><span class="k">AIRFRAME</span><span class="v"><strong>F-16C FIGHTING FALCON</strong><br>F110-GE-129 / FLCS NORM</span></div>
-              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong> , RIVER GORGE , COASTAL EGRESS</span></div>
+              <div class="brief-row"><span class="k">ROUTE</span><span class="v"><strong>10 GATES</strong>, RIVER GORGE, COASTAL EGRESS</span></div>
               <div class="brief-row"><span class="k">CLOCK</span><span class="v"><em>02:30</em> + 8 SEC PER GATE</span></div>
-              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em> , STALL , G-LIMIT</span></div>
+              <div class="brief-row"><span class="k">HAZARD</span><span class="v"><em>TERRAIN</em>, STALL, G-LIMIT</span></div>
               <div class="controls-block">
                 <div class="controls-title"><span>Flight controls</span><span>Hybrid</span></div>
                 <div class="keys">
@@ -185,15 +278,15 @@
                   <div><kbd>SPACE</kbd> AFTERBURNER</div>
                   <div><kbd>V</kbd> CHASE / COCKPIT</div>
                   <div><kbd>C</kbd> CENTER MOUSE</div>
-                  <div><kbd>B</kbd> AIRBRAKE</div>
-                  <div><kbd>P</kbd> PAUSE , <kbd>M</kbd> AUDIO</div>
+                  <div><kbd>H</kbd> AIRBRAKE</div>
+                  <div><kbd>P</kbd> PAUSE, <kbd>M</kbd> AUDIO</div>
                 </div>
               </div>
             </aside>
           </div>
           <div class="menu-footer">
             <span class="best">${best}</span>
-            <span>CLICK TO CAPTURE MOUSE , <kbd>V</kbd> CHASE VIEW , <kbd>P</kbd> PAUSE</span>
+            <span>CLICK TO CAPTURE MOUSE, <kbd>V</kbd> CHASE VIEW, <kbd>P</kbd> PAUSE</span>
             <span class="coords">37°14′N 081°06′E<br>ALT 2,140 FT</span>
           </div>
         </div>
@@ -206,7 +299,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// flight suspended , flcs hold</div>
+          <div class="status-kicker">// flight suspended, flcs hold</div>
           <h2 class="status-title">PAUSED</h2>
           <p class="status-sub">Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.</p>
           <div class="stats">
@@ -219,8 +312,9 @@
             <button class="btn" data-action="resume" data-autofocus>RESUME <small>P</small></button>
             <button class="btn ghost" data-action="restart">RESTART RUN <small>R</small></button>
             <button class="btn ghost" data-action="menu">ABORT TO MENU</button>
+            <button class="btn ghost" data-action="controls">CONTROLS / CONFIG <small>K</small></button>
           </div>
-          <div class="small-print">P / ESC RESUME , R RESTART , M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
+          <div class="small-print">P / ESC RESUME, R RESTART, M AUDIO ${sound.muted ? "OFF" : "ON"}</div>
         </div>
       </section>`;
   }
@@ -231,7 +325,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker">// route complete , cold river gorge</div>
+          <div class="status-kicker">// route complete, cold river gorge</div>
           <h2 class="status-title win">COURSE<br> COMPLETE</h2>
           <p class="status-sub">All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as <strong>${rank}</strong>.</p>
           <div class="stats">
@@ -244,7 +338,7 @@
             <button class="btn" data-action="restart" data-autofocus>FLY AGAIN <small>R</small></button>
             <button class="btn ghost" data-action="menu">MISSION BOARD</button>
           </div>
-          <div class="small-print">${bestLine()} , R RESTART , ESC MENU</div>
+          <div class="small-print">${bestLine()}, R RESTART, ESC MENU</div>
         </div>
       </section>`;
   }
@@ -254,7 +348,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--red)">// flight terminated , airframe lost</div>
+          <div class="status-kicker" style="color:var(--red)">// flight terminated, airframe lost</div>
           <h2 class="status-title fail">TERRAIN<br> WINS</h2>
           <p class="status-sub">The gorge is unforgiving. The flight recorder shows ${pad(r.gates, 2)} gates cleared before impact.</p>
           <div class="stats">
@@ -277,7 +371,7 @@
     return `
       <section class="screen">
         <div class="menu-shell panel-narrow">
-          <div class="status-kicker" style="color:var(--amber)">// clock expired , run invalid</div>
+          <div class="status-kicker" style="color:var(--amber)">// clock expired, run invalid</div>
           <h2 class="status-title fail" style="color:var(--amber)">RUN<br> EXPIRED</h2>
           <p class="status-sub">The coast is still out there. You cleared ${pad(r.gates, 2)} gates before the clock ran dry.</p>
           <div class="stats">
@@ -296,7 +390,10 @@
   }
 
   function action(name) {
-    if (name === "start") {
+    if (game.controlsOpen && name !== "controls") return;
+    if (name === "controls") {
+      toggleControls();
+    } else if (name === "start") {
       sound.init();
       startMission(true);
     } else if (name === "resume") {
@@ -336,7 +433,8 @@
     game.mouse.x = 0;
     game.mouse.y = 0;
     game.look.yaw = 0;
-    game.look.pitch = -10 * D2R;
+    game.look.pitch = -12 * D2R;
+    game.chaseLook.yaw = 0; game.chaseLook.pitch = 0;
     if (announce) flashToast("MOUSE STICK CENTERED", 1.1);
   }
 
@@ -365,6 +463,7 @@
   }
 
   function startMission(fromGesture = true) {
+    if (game.controlsOpen) toggleControls(false);
     const mission = buildMission();
     game.mission = mission;
     game.aircraft = makeAircraft(mission);
@@ -397,6 +496,7 @@
   }
 
   function resumeMission() {
+    if (game.controlsOpen) return;
     if (game.state !== "paused") return;
     game.state = "flying";
     keys.clear();
@@ -482,6 +582,7 @@
 
   function readInput() {
     const mouse = game.mouse.locked ? game.mouse : { x: 0, y: 0 };
+    const keyboardPitch = keys.has("KeyS") || keys.has("KeyW") || keys.has("ArrowDown") || keys.has("ArrowUp");
     return {
       pitchUp: keys.has("KeyS") || keys.has("ArrowDown"),
       pitchDown: keys.has("KeyW") || keys.has("ArrowUp"),
@@ -491,13 +592,13 @@
       yawRight: keys.has("KeyE"),
       // Mouse Y is pitch (down = pull) and mouse X is yaw, matching the
       // requested hybrid mouse/hands-on-stick layout. A/D remains roll.
-      pitchAxis: mouse.y,
+      pitchAxis: keyboardPitch ? 0 : mouse.y * (settings.invertY ? -1 : 1),
       yawAxis: mouse.x,
       rollAxis: 0,
       throttleUp: keys.has("ShiftLeft") || keys.has("ShiftRight"),
       throttleDown: keys.has("ControlLeft") || keys.has("ControlRight"),
       afterburner: keys.has("Space"),
-      airbrake: keys.has("KeyB"),
+      airbrake: keys.has("KeyH"),
     };
   }
 
@@ -611,7 +712,7 @@
     // Wide cockpit field of view. The HUD symbology is projected with this
     // same cone, so a wider view keeps the ladder and flight-path marker tied
     // to the real horizon instead of drifting as a decorative overlay.
-    const fov = 78 * D2R;
+    const fov = settings.fov * D2R;
     return { eye, forward: qAx.forward, right: qAx.right, up: qAx.up, fov };
   }
 
@@ -622,8 +723,12 @@
     const speedFactor = clamp(a.speed / 380, 0, 1);
     const velocityDir = a.speed > 5 ? norm(a.vel) : ax.forward;
     const viewDir = norm(add(mul(ax.forward, 0.55), mul(velocityDir, 0.45)));
-    const eye = add(a.pos, add(mul(ax.back, 17.5 + speedFactor * 4.5), mul(ax.up, 4.2)));
-    const look = add(a.pos, add(mul(viewDir, 15), mul(ax.up, 0.7)));
+    let offset = add(mul(ax.back, 14.5 + speedFactor * 3), mul(ax.up, 4.2));
+    offset = qRotate(qAxisAngle(ax.up, game.chaseLook.yaw), offset);
+    offset = qRotate(qAxisAngle(ax.right, game.chaseLook.pitch), offset);
+    const eye = add(a.pos, offset);
+    const orbiting = Math.abs(game.chaseLook.yaw) + Math.abs(game.chaseLook.pitch) > .001;
+    const look = orbiting ? add(a.pos, mul(ax.up, .35)) : add(a.pos, add(mul(viewDir, 10), mul(ax.up, 0.7)));
 
     // A partially stabilized up vector keeps the horizon readable during a
     // fast roll without making the chase view feel rigidly welded to the jet.
@@ -659,7 +764,7 @@
       forward,
       right,
       up,
-      fov: (57.5 + speedFactor * 4.5) * D2R,
+      fov: (48 + speedFactor * 3) * D2R,
     };
   }
 
@@ -911,7 +1016,7 @@
     hText(game.mouse.locked ? "MOUSE CAPTURED  //  C CENTER" : "CLICK TO CAPTURE MOUSE  //  C CENTER", edge, H - 46 * s, 7.2 * s, game.mouse.locked ? HUD_SOFT : AMBER, "left", "top");
     hText(`FUEL ${pad(a.fuel * 2.20462, 4)} LB`, edge, H - 32 * s, 7 * s, a.fuel < 500 ? RED : HUD_DIM, "left", "top");
     hText("V  COCKPIT VIEW", W - edge, H - 46 * s, 7.6 * s, HUD_SOFT, "right", "top");
-    hText("A / D  ROLL   ,   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
+    hText("A / D  ROLL  ,   MOUSE PITCH / YAW", W - edge, H - 32 * s, 6.6 * s, HUD_DIM, "right", "top");
     hText("CHASE", W * 0.5, H - 18 * s, 6.2 * s, HUD_FAINT, "center", "top");
     ctx.restore();
   }
@@ -963,7 +1068,7 @@
 
   // --------------------------------------------------------------------- input
   const gameKeys = new Set([
-    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyB", "KeyV", "KeyC",
+    "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyH", "KeyK", "KeyV", "KeyC",
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
     "AltLeft", "AltRight", "F1", "F2",
@@ -980,6 +1085,13 @@
   }
 
   window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyK" && !event.repeat) {
+      event.preventDefault(); toggleControls(); return;
+    }
+    if (game.controlsOpen) {
+      if (event.code === "Escape") { event.preventDefault(); toggleControls(false); }
+      return;
+    }
     if (gameKeys.has(event.code)) event.preventDefault();
     if ((event.code === "AltLeft" || event.code === "AltRight") && game.state === "flying") {
       // Changing head direction must not add a new flight-control demand.
@@ -1060,9 +1172,14 @@
 
   window.addEventListener("mousemove", (event) => {
     if (game.state !== "flying") return;
-    if ((event.altKey || keys.has("AltLeft") || keys.has("AltRight")) && game.view === "cockpit") {
-      game.look.yaw = clamp(game.look.yaw + event.movementX * 0.003, -155 * D2R, 155 * D2R);
-      game.look.pitch = clamp(game.look.pitch - event.movementY * 0.003, -85 * D2R, 85 * D2R);
+    if (event.altKey || keys.has("AltLeft") || keys.has("AltRight")) {
+      if (game.view === "cockpit") {
+        game.look.yaw = clamp(game.look.yaw + event.movementX * 0.003, -155 * D2R, 155 * D2R);
+        game.look.pitch = clamp(game.look.pitch - event.movementY * 0.003, -85 * D2R, 85 * D2R);
+      } else {
+        game.chaseLook.yaw += event.movementX * .003;
+        game.chaseLook.pitch = clamp(game.chaseLook.pitch + event.movementY * .003, -65 * D2R, 65 * D2R);
+      }
       return;
     }
     if (!game.mouse.locked) return;
@@ -1247,8 +1364,12 @@
       game.look.yaw = clamp(yaw * D2R, -155 * D2R, 155 * D2R);
       game.look.pitch = clamp(pitch * D2R, -85 * D2R, 85 * D2R);
     },
+    setChaseLook: (yaw, pitch) => { game.chaseLook.yaw = yaw * D2R; game.chaseLook.pitch = pitch * D2R; },
     readInput,
     stepSimulation,
+    settings,
+    applySettings,
+    toggleControls,
     snapshot: () => ({
       state: game.state,
       view: game.view,

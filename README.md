@@ -21,9 +21,10 @@ step is required to play.
 | `C` or right-click | Center the mouse stick and the head view |
 | `V` | Toggle cockpit / chase view |
 | `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
+| `K` | Open / close left controls and configuration drawer |
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
-| `B` | Airbrake |
+| `H` | Airbrake, hold |
 | `P` / `Esc` | Pause / resume |
 | `R` | Restart from pause or a result screen |
 | `M` | Audio on / off |
@@ -38,6 +39,14 @@ movement stays where you leave it; C restores the forward view. Free look also
 works without pointer lock while the mouse is inside the game window. The
 physical cockpit and HUD combiner move in perspective with the head. The HUD
 is visible only through its glass, rather than following the head around.
+Alt and mouse also orbit the external camera in chase view. C restores it.
+
+The default cockpit FOV is 58 degrees, adjustable from 45 to 72 in the left
+drawer. Mouse sensitivity starts at 2.8 times the original response and can
+be adjusted from 0.5x to 5x. The invert setting reverses mouse pitch; S always
+pulls up and W always pushes down. Keyboard pitch overrides an opposing mouse
+command while a key is held. Opening the drawer during flight pauses the jet
+and mission clock; K resumes. Settings persist in localStorage when available.
 
 Hold a pull rather than tapping it. The F-16 is fly-by-wire, but it still carries
 energy and alpha. Roll into the turn first, then pull through the valley. Watch
@@ -75,12 +84,20 @@ running out of margin. Best score and time are kept in `localStorage`.
   around the left throttle and right pressure sidestick. Throttle, hands and
   rudder pedals follow the live controls. The sidestick has deliberately tiny
   travel, consistent with its pressure-sensing role.
-- F-16C-inspired panel: central ICP below the HUD, separate DED to its right,
-  two square MFDs, upper-left RWR, right-hand RPM / FTIT / nozzle / oil gauges,
-  standby ADI, altimeter, airspeed, HSI, vertical speed and caution indications.
+- Modernized F-16V-inspired panel following the supplied reference: combined
+  central DED and ICP below a smaller HUD, two portrait side displays and a
+  large center pedestal HSD. Rounded housings, a sloped coaming and knee
+  cutouts replace the old solid panel. RWR, RPM / FTIT / nozzle / oil gauges,
+  standby ADI, altimeter, airspeed, HSD heading, vertical speed and caution indications.
   FCR and RWR show no contacts because the navigation mission has no enemies.
   HSD plots the actual route in heading-up orientation; ENG reads simulation
   telemetry. Decorative ICP keys and console switches are not clickable.
+- Smooth exterior with measured 15.06 m overall length and 9.96 m span,
+  continuous fuselage profiles, airfoil wings, blended leading-edge root
+  extensions, rounded intake, separate transparent canopy and pilot, swept
+  fin, stabilators, ventral fins, pylons, wingtip rails and petalled nozzle.
+  Panel seams and restrained shading keep the retro finish without using
+  box-shaped geometry for the main silhouette.
 - Green NAV HUD with inertial pitch ladder, velocity-vector flight-path marker,
   KCAS, barometric MSL altitude, radar-style terrain AGL, heading, Mach, alpha,
   current / maximum G, steerpoint cue and warnings. AGL assumes flat terrain
@@ -124,12 +141,14 @@ Checks, with no third-party test dependencies:
 ```bash
 node tests/physics.mjs
 node tests/performance.mjs
+node tests/airframe.mjs
 ```
 
 Serve the repository root with any local static HTTP server and open
 `tests/browser.html`. It verifies boot, Alt/mouse isolation, MFD pages, pilot
 animation, pause/resume, chase mode, gate crossings, win, timeout, crash and
-restart. The view buttons freeze the mission for visual inspection. Keep
+restart, plus W/S override, H airbrake, K drawer, sensitivity, inversion, FOV
+and settings persistence. The view buttons freeze the mission for visual inspection. Keep
 the harness on HTTP; the shipped single-file game also works from a local file.
 
 ## Project layout
@@ -142,6 +161,7 @@ viper-run/
 │   └── index.html          # same file for hosting
 └── src/
     ├── game.js             # physics, terrain, mission, WebGL renderer, audio
+    ├── airframe.js         # smooth dimensioned exterior geometry
     ├── app.js              # game states, camera, UI screens, input
     ├── cockpit.js          # 3D cockpit, pilot, instruments and NAV HUD
     ├── style.css           # menu and CRT presentation

@@ -59,6 +59,25 @@ body.paused, body.menu { cursor: default; }
 #world { z-index: 1; background: #283b4a; }
 #cockpit { z-index: 3; pointer-events: none; }
 
+#flight-controls[hidden] { display: none; }
+#flight-controls { position: absolute; z-index: 20; inset: 0 auto 0 0; width: min(380px, 94vw); overflow-y: auto; background: rgba(9, 16, 18, .97); border-right: 1px solid #788e7b; box-shadow: 18px 0 45px #0009; padding: 22px; color: #d8e1ce; font: 12px Consolas, monospace; user-select: text; }
+.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; letter-spacing: 1px; }
+#flight-controls button { background: #24382d; color: #dcebcf; padding: 8px; border: 1px solid #5b7562; cursor: pointer; font: inherit; }
+.drawer-intro { color: #bed58f; font-size: 10px; letter-spacing: 2px; margin: 20px 0 12px; }
+.control-list { margin: 0; }
+.control-list div { display: grid; grid-template-columns: 134px 1fr; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #25352e; }
+.control-list dd { margin: 0; color: #b3c3b7; }
+.control-list dt { white-space: nowrap; }
+#flight-controls kbd { display: inline-block; padding: 3px 5px; color: #e2e7d8; border: 1px solid #59695d; background: #17241c; font: 10px Consolas, monospace; }
+.drawer-settings { padding-top: 25px; }
+.drawer-settings label { display: block; color: #dfebd8; }
+.drawer-settings output { float: right; color: #c9e9a0; }
+.drawer-settings input[type="range"] { display: block; width: 100%; margin: 12px 0 22px; accent-color: #bedb8d; cursor: pointer; }
+.drawer-settings input[type="checkbox"] { accent-color: #bedb8d; }
+.drawer-settings p, .drawer-footnote { color: #91a18f; font: 11px/1.6 Consolas, monospace; }
+.drawer-settings p { margin: 8px 0 24px; }
+.drawer-footnote { margin-top: 24px; }
+
 .crt-wash {
   position: absolute;
   inset: 0;
