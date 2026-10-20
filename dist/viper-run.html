@@ -3194,7 +3194,7 @@ kbd {
           <div><dt><kbd>SHIFT</kbd> <kbd>CTRL</kbd></dt><dd>Throttle up / down</dd></div>
           <div><dt><kbd>SPACE</kbd></dt><dd>Afterburner</dd></div>
           <div><dt><kbd>H</kbd></dt><dd>Airbrake, hold</dd></div>
-          <div><dt><kbd>ALT + MOUSE</kbd></dt><dd>Look around</dd></div>
+          <div><dt><kbd>ALT + MOUSE</kbd></dt><dd>Hold Alt to look around</dd></div>
           <div><dt><kbd>C</kbd></dt><dd>Center view / mouse</dd></div>
           <div><dt><kbd>V</kbd></dt><dd>Cockpit / chase</dd></div>
           <div><dt><kbd>F1</kbd> <kbd>F2</kbd></dt><dd>MFD pages</dd></div>
@@ -3302,7 +3302,7 @@ kbd {
               <div class="controls-block">
                 <div class="controls-title"><span>Flight controls</span><span>Hybrid</span></div>
                 <div class="keys">
-                  <div><kbd>MOUSE</kbd> PITCH / YAW</div><div><kbd>ALT + MOUSE</kbd> LOOK AROUND</div><div><kbd>F1</kbd><kbd>F2</kbd> MFD PAGES</div>
+                  <div><kbd>MOUSE</kbd> PITCH / YAW</div><div><kbd>ALT + MOUSE</kbd> HOLD TO LOOK AROUND</div><div><kbd>F1</kbd><kbd>F2</kbd> MFD PAGES</div>
                   <div><kbd>A</kbd><kbd>D</kbd> ROLL</div>
                   <div><kbd>W</kbd><kbd>S</kbd> BACKUP PITCH</div>
                   <div><kbd>Q</kbd><kbd>E</kbd> RUDDER</div>
@@ -4183,6 +4183,10 @@ kbd {
   window.addEventListener("keyup", (event) => {
     if (gameKeys.has(event.code)) event.preventDefault();
     keys.delete(event.code);
+    if ((event.code === "AltLeft" || event.code === "AltRight") &&
+        !keys.has("AltLeft") && !keys.has("AltRight")) {
+      centerMouseStick(false);
+    }
   });
 
   canvas.addEventListener("mousedown", (event) => {

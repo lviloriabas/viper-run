@@ -122,5 +122,6 @@ cuando se supera Mach 2,05.
   unitarias del fuselaje, cúpula, piloto exterior y postcombustión.
 - Inspección visual de frente, ambos laterales, piloto y cola. Alt más mouse
   permite girar la cabeza hasta 155 grados por lado y 85 grados en vertical.
-  C devuelve la vista al frente. La cabina y el exterior comparten posición,
+  Al soltar Alt, la vista vuelve al frente y la cámara externa recupera su
+  posición normal. C también centra la vista. La cabina y el exterior comparten posición,
   escala y actitud; la cúpula opaca del modelo externo se omite en primera persona.

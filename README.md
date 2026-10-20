@@ -34,12 +34,13 @@ stick. Mouse X commands yaw, while A/D rolls the jet. The pointer is captured by
 clicking the canvas; release it with `Esc`. If pointer lock is unavailable, the
 keyboard controls still work.
 
-Hold Alt to inspect the pilot, consoles, wings and tail from the seat. Head
-movement stays where you leave it; C restores the forward view. Free look also
+Hold Alt to inspect the pilot, consoles, wings and tail from the seat. Releasing
+Alt restores the forward view and centers the mouse stick. Free look also
 works without pointer lock while the mouse is inside the game window. The
 physical cockpit and HUD combiner move in perspective with the head. The HUD
 is visible only through its glass, rather than following the head around.
-Alt and mouse also orbit the external camera in chase view. C restores it.
+Hold Alt and move the mouse to orbit the external camera in chase view;
+releasing Alt restores the normal chase camera. C also centers either view.
 
 The default cockpit FOV is 58 degrees, adjustable from 45 to 72 in the left
 drawer. Mouse sensitivity starts at 2.8 times the original response and can
