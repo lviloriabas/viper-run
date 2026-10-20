@@ -226,7 +226,7 @@
       <section class="screen">
         <div class="menu-shell panel-narrow">
           <div class="status-kicker">// route complete · cold river gorge</div>
-          <h2 class="status-title win">COURSE<br>COMPLETE</h2>
+          <h2 class="status-title win">COURSE<br> COMPLETE</h2>
           <p class="status-sub">All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as <strong>${rank}</strong>.</p>
           <div class="stats">
             <div class="stat"><div class="k">RUN TIME</div><div class="v green">${formatTime(r.time)}</div></div>
@@ -249,7 +249,7 @@
       <section class="screen">
         <div class="menu-shell panel-narrow">
           <div class="status-kicker" style="color:var(--red)">// flight terminated · airframe lost</div>
-          <h2 class="status-title fail">TERRAIN<br>WINS</h2>
+          <h2 class="status-title fail">TERRAIN<br> WINS</h2>
           <p class="status-sub">The gorge is unforgiving. The flight recorder shows ${pad(r.gates, 2)} gates cleared before impact.</p>
           <div class="stats">
             <div class="stat"><div class="k">GATE</div><div class="v red">${pad(r.gates, 2)} / 10</div></div>
@@ -272,7 +272,7 @@
       <section class="screen">
         <div class="menu-shell panel-narrow">
           <div class="status-kicker" style="color:var(--amber)">// clock expired · run invalid</div>
-          <h2 class="status-title fail" style="color:var(--amber)">RUN<br>EXPIRED</h2>
+          <h2 class="status-title fail" style="color:var(--amber)">RUN<br> EXPIRED</h2>
           <p class="status-sub">The coast is still out there. You cleared ${pad(r.gates, 2)} gates before the clock ran dry.</p>
           <div class="stats">
             <div class="stat"><div class="k">GATE</div><div class="v amber">${pad(r.gates, 2)} / 10</div></div>
@@ -2199,7 +2199,7 @@
     const a = game.aircraft;
     const m = game.mission;
     if (!a || !m) return;
-    const s = clamp(Math.min(W / 1440, H / 810), 1.0, 1.35);
+    const s = clamp(Math.min(W / 1280, H / 720), 1.0, 1.35);
     const edge = 20 * s;
     const topH = 76 * s;
     const bottomH = 70 * s;
@@ -2239,7 +2239,7 @@
       const bearing = Math.atan2(rel[0], -rel[2]) * R2D;
       const diff = wrap180(bearing - a.heading);
       const elevation = Math.atan2(rel[1], Math.hypot(rel[0], rel[2])) * R2D;
-      hText(`TGT ${diff >= 0 ? "R" : "L"} ${pad(Math.abs(diff), 2)}°   EL ${elevation >= 0 ? "+" : "−"}${pad(Math.abs(elevation), 2)}°`, edge, H - 48 * s, 7.2 * s, AMBER, "left", "top");
+      hText(`TGT ${diff >= 0 ? "R" : "L"} ${pad(Math.abs(diff), 2)}°   EL ${elevation >= 0 ? "+" : "−"}${pad(Math.abs(elevation), 2)}°`, edge, H - 62 * s, 7.2 * s, AMBER, "left", "top");
     }
 
     // Warnings and transient messages.
