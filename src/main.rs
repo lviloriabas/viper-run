@@ -15,6 +15,7 @@ mod gfx;
 mod icon;
 mod math;
 mod mesh;
+mod physio;
 mod png;
 mod settings;
 mod sim;
@@ -29,6 +30,7 @@ use cockpit::{Cockpit, Hands, Page};
 use gamepad::Gamepad;
 use math::*;
 use miniquad::*;
+use physio::Pilot;
 use settings::{Best, PitchSource, Settings};
 use sim::{gate_crossed, Aircraft, Input, Mission, FIXED_DT, GATE_BONUS};
 use std::collections::HashSet;
@@ -64,6 +66,8 @@ struct Opts {
     sim_seconds: f64,
     input: Input,
     screen: Option<String>,
+    /// Pilot state for screenshots: retinal oxygen, redout, G-LOC seconds left.
+    vision: Option<[f64; 3]>,
     controls: bool,
     fov: Option<f64>,
     bench: Option<f64>,
@@ -112,6 +116,10 @@ fn parse_opts() -> Opts {
                 }
             }
             "--screen" => o.screen = Some(next(&mut i)),
+            "--vision" => {
+                let v: Vec<f64> = next(&mut i).split(',').filter_map(|s| s.parse().ok()).collect();
+                o.vision = Some([v.first().copied().unwrap_or(1.0), v.get(1).copied().unwrap_or(0.0), v.get(2).copied().unwrap_or(0.0)]);
+            }
             "--controls" => o.controls = true,
             "--fov" => o.fov = next(&mut i).parse().ok(),
             "--bench" => o.bench = next(&mut i).parse().ok(),
@@ -122,7 +130,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--vision RETINA,RED,GLOC] [--controls]");
                 std::process::exit(0);
             }
             _ => {}
@@ -149,6 +157,8 @@ struct App {
     mission: Mission,
     preview: Mission,
     aircraft: Option<Aircraft>,
+    /// The pilot's G tolerance and consciousness.
+    pilot: Pilot,
     camera: Camera,
     time: f64,
     attract_time: f64,
@@ -164,6 +174,8 @@ struct App {
     result: Option<RunResult>,
     /// Afterburner lit at the last check, to catch the light-off.
     ab_lit: bool,
+    /// AGSM breaths already voiced.
+    breaths: u32,
     /// Decaying jolt added to the camera shake by a light-off or an impact.
     kick: f64,
     crash_time: f64,
@@ -261,6 +273,7 @@ impl App {
             mission,
             preview,
             aircraft: None,
+            pilot: Pilot::default(),
             camera: Camera { eye: V3::ZERO, forward: -V3::Z, right: V3::X, up: V3::Y, fov: 1.0 },
             time: 0.0,
             attract_time: 0.0,
@@ -275,6 +288,7 @@ impl App {
             warn_clock: 0.0,
             result: None,
             ab_lit: false,
+            breaths: 0,
             kick: 0.0,
             crash_time: 0.0,
             keys: HashSet::new(),
@@ -337,6 +351,11 @@ impl App {
         }
         // A burner lit during the scripted run is not a fresh light-off.
         self.ab_lit = self.aircraft.as_ref().is_some_and(burner_lit);
+        if let Some([retina, red, gloc]) = self.opts.vision {
+            self.pilot.retina = retina;
+            self.pilot.red = red;
+            self.pilot.gloc = gloc;
+        }
         match self.opts.screen.as_deref() {
             Some("pause") => self.pause(),
             Some("freeze") => self.toggle_freeze(),
@@ -388,6 +407,8 @@ impl App {
         }
         self.mission = Mission::new();
         self.aircraft = Some(Aircraft::new(&self.mission));
+        self.pilot = Pilot::default();
+        self.breaths = 0;
         self.state = State::Flying;
         self.accumulator = 0.0;
         self.transition_timer = 0.0;
@@ -719,7 +740,17 @@ impl App {
         let a = self.aircraft.as_mut().unwrap();
         m.elapsed += dt;
         m.time_left = (m.time_left - dt).max(0.0);
+        let input = self.pilot.controls(a, input);
         a.update(dt, &input);
+        let (glocs, gcas) = (self.pilot.glocs, self.pilot.gcas);
+        self.pilot.update(dt, a);
+        if self.pilot.glocs > glocs {
+            self.flash_toast("G-LOC // PILOT UNCONSCIOUS", 3.0);
+        } else if self.pilot.gcas && !gcas {
+            self.flash_toast("AUTO GCAS // FLY UP", 2.4);
+        }
+        let m = &mut self.mission;
+        let a = self.aircraft.as_mut().unwrap();
         m.score = m.final_score();
         if m.gate_index < m.gates.len() {
             let gi = m.gate_index;
@@ -754,7 +785,7 @@ impl App {
         let active = self.state == State::Flying && self.aircraft.as_ref().is_some_and(|a| !a.crashed);
         let (mut roll, mut pitch, mut rudder) = (0.0, 0.0, 0.0);
         if active {
-            let i = input.unwrap_or_else(|| self.read_input());
+            let i = self.pilot.controls(self.aircraft.as_ref().unwrap(), input.unwrap_or_else(|| self.read_input()));
             roll = i.roll();
             pitch = i.pitch();
             rudder = i.yaw();
@@ -905,6 +936,10 @@ impl App {
             p.whine_freq = 620.0 + thr * 560.0 + ab * 250.0;
         }
         p.master = if self.settings.muted || !active && self.state != State::Result { 0.0 } else { 0.5 };
+        // Out cold, the world goes quiet.
+        if self.pilot.gloc > 0.0 {
+            p.master *= 1.0 - 0.8 * self.pilot.vision().black as f32;
+        }
         self.audio.set(p);
     }
 }
@@ -969,6 +1004,10 @@ impl EventHandler for App {
                         self.kick = self.kick.max(0.14);
                     }
                     self.ab_lit = lit;
+                    if self.pilot.breaths != self.breaths {
+                        self.breaths = self.pilot.breaths;
+                        self.audio.breath();
+                    }
                     let (pu, st) = (ui::pull_up(a), ui::stall(a));
                     self.warn_clock -= dt;
                     if self.warn_clock <= 0.0 && (pu || st) {
@@ -1033,7 +1072,9 @@ impl EventHandler for App {
         // Composite to the window (or an offscreen target for screenshots).
         let out_pass = self.output.as_ref().map(|t| t.pass);
         self.ctx.begin_pass(out_pass, PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
-        let gloc = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Frozen | State::Paused | State::Transition)).map(|a| clamp((a.g_smooth - 7.4) / 2.7, 0.0, 1.0)).unwrap_or(0.0);
+        // What the pilot sees through G: only from the seat.
+        let vision = if cockpit_view && matches!(self.state, State::Flying | State::Frozen | State::Paused | State::Transition) { self.pilot.vision() } else { physio::Vision::default() };
+        let gloc = vision.grey;
         self.world.post(&mut *self.ctx, &self.scene, w, h, gloc as f32, (self.time * 60.0).floor() as f32 % 997.0);
         // Instrument faces carry information, so they skip the pixelation.
         if cockpit_view {
@@ -1055,6 +1096,9 @@ impl EventHandler for App {
                     let focal = h as f64 * 0.5 / (cam.fov / 2.0).tan();
                     let body = cockpit::BodyProjector { eye: cam_b.eye, right: cam_b.right, up: cam_b.up, fwd: cam_b.forward, focal, w: w as f64, h: h as f64 };
                     cockpit::draw_hud(cv, a, &self.mission, &cam, &body);
+                    // Light loss covers the HUD too, not the game's own read-outs.
+                    cv.flush(&mut *self.ctx, w, h);
+                    self.world.vision(&mut *self.ctx, &self.scene, w, h, &vision);
                     ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue);
                 } else {
                     ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue);

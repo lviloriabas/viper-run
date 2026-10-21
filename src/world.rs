@@ -6,6 +6,7 @@ use crate::fx::{Fx, Layer};
 use crate::gfx::{self, Target};
 use crate::math::*;
 use crate::mesh::Mesh;
+use crate::physio::Vision;
 use crate::sim::{Aircraft, Mission, GATE_RADIUS};
 use crate::terrain::{self, CHUNKS, CHUNK_M, X0, Z0};
 use crate::texture;
@@ -402,12 +403,34 @@ void main() {
     float l = dot(col, vec3(0.299, 0.587, 0.114));
     col = mix(vec3(l), col, 1.12);
     col = (col - 0.5) * 1.04 + 0.5;
+    // Grey-out as the retina starves: colour and light drain from the view
+    // (physio::Vision); the tunnel, blackout and redout go on in FS_VISION.
+    l = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(col, vec3(l) * 0.72, u_gloc);
     col = floor(clamp(col, 0.0, 1.0) * 31.0 + bayer4(px)) / 31.0;
-    // Grey-out under sustained G: a dark red ring that closes toward the centre.
-    vec2 g = (v_uv - vec2(0.5, 0.58)) * vec2(u_res.x / u_res.y, 1.0);
-    float ring = smoothstep(0.16, 0.75, length(g));
-    col = mix(col, vec3(0.20, 0.0, 0.0), u_gloc * ring * 0.75);
     frag = vec4(clamp(col, 0.0, 1.0), 1.0);
+}"#;
+
+/// The pilot's vision over everything in front of the eyes, HUD included:
+/// light loss closing in from the edge, central blackout and the redout
+/// veil, screen-doored on the scene's low-resolution pixels.
+const FS_VISION: &str = r#"
+in vec2 v_uv;
+uniform vec2 u_res;
+uniform vec2 u_src;
+uniform vec4 u_vision;
+out vec4 frag;
+DITHER
+void main() {
+    vec2 px = floor(v_uv * u_src);
+    // The eyes rest a little above the middle of the screen.
+    float r = length((v_uv - vec2(0.5, 0.56)) * vec2(u_res.x / u_res.y, 1.0));
+    float edge = mix(1.3, -0.1, u_vision.x);
+    float dark = max(smoothstep(edge - 0.25, edge + 0.05, r) * step(0.002, u_vision.x), u_vision.z);
+    float red = u_vision.w * (1.0 - dark);
+    float a = max(dark, red * 0.7);
+    a = clamp(floor(a * 8.0 + bayer4(px)) / 8.0, 0.0, 1.0);
+    frag = vec4(vec3(0.40, 0.02, 0.02) * red / max(a, 0.001), a);
 }"#;
 
 fn src(s: &str) -> String {
@@ -477,6 +500,12 @@ struct PostU {
     gloc: f32,
     seed: f32,
 }
+#[repr(C)]
+struct VisionU {
+    res: [f32; 2],
+    src: [f32; 2],
+    vision: [f32; 4],
+}
 
 struct Chunk {
     vbs: [Option<BufferId>; 4],
@@ -542,6 +571,7 @@ pub struct World {
     rudder: Part,
     brakes: [Part; 4],
     post: Pipeline,
+    vision: Pipeline,
     post_bind: Bindings,
     /// Afterburner plume and crash effects.
     pub fx: Fx,
@@ -688,6 +718,8 @@ impl World {
 
         let s = gfx::shader(ctx, VS_FULL, &src(FS_POST), &["u_tex"], &[("u_res", Float2), ("u_src", Float2), ("u_gloc", Float1), ("u_seed", Float1)]);
         let post = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, PipelineParams::default());
+        let s = gfx::shader(ctx, VS_FULL, &src(FS_VISION), &[], &[("u_res", Float2), ("u_src", Float2), ("u_vision", Float4)]);
+        let vision = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, PipelineParams { color_blend: Some(gfx::alpha_blend()), ..Default::default() });
 
         let mut skinned = |m: &Mesh| {
             let mut p = part(ctx, m);
@@ -730,6 +762,7 @@ impl World {
             rudder,
             brakes,
             post,
+            vision,
             fx: Fx::new(ctx),
             drawn_chunks: 0,
         }
@@ -924,6 +957,18 @@ impl World {
         ctx.apply_pipeline(&self.post);
         ctx.apply_bindings(&Bindings { images: vec![scene.color], ..self.post_bind.clone() });
         ctx.apply_uniforms(UniformsSource::table(&PostU { res: [w, h], src: [scene.w as f32, scene.h as f32], gloc, seed }));
+        ctx.draw(0, 3, 1);
+    }
+
+    /// The pilot's light loss and redout over the current pass.
+    pub fn vision(&self, ctx: &mut dyn RenderingBackend, scene: &Target, w: f32, h: f32, v: &Vision) {
+        if v.tunnel < 0.002 && v.black < 0.002 && v.red < 0.002 {
+            return;
+        }
+        ctx.apply_pipeline(&self.vision);
+        ctx.apply_bindings(&self.post_bind);
+        let vision = [v.tunnel as f32, v.grey as f32, v.black as f32, v.red as f32];
+        ctx.apply_uniforms(UniformsSource::table(&VisionU { res: [w, h], src: [scene.w as f32, scene.h as f32], vision }));
         ctx.draw(0, 3, 1);
     }
 }

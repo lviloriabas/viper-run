@@ -272,6 +272,13 @@ impl Audio {
         self.burst(0.35, 0.7, 2600.0, 380.0, 0.02);
     }
 
+    /// The AGSM's quick breath through the mask: a sharp exhale, then the
+    /// snatched inhale before the next strain.
+    pub fn breath(&self) {
+        self.burst(0.16, 0.5, 2400.0, 900.0, 0.0);
+        self.burst(0.32, 0.32, 1500.0, 420.0, 0.14);
+    }
+
     pub fn gate(&self) {
         self.tone(660.0, 0.1, 0.045, Wave::Square, 0.0);
         self.tone(990.0, 0.17, 0.04, Wave::Square, 0.09);
