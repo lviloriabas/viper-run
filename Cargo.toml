@@ -24,3 +24,8 @@ opt-level = 2
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already pulled in by miniquad; used to dlopen PulseAudio/ALSA at runtime.
 libc = "0.2"
+
+[lints.rust]
+# rustc always passes -Wl,-O1 to GNU-style linkers in release builds, and the
+# Zig linker used by cargo-zigbuild reports it as deprecated on every link.
+linker_messages = "allow"

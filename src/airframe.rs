@@ -20,7 +20,8 @@ const DARK_METAL: Rgb = Rgb(0.18, 0.17, 0.16);
 /// Pilot design eye. The seat is reclined 30 degrees, so the eye sits aft of the hips.
 pub const EYE: V3 = v3(0.0, 1.25, -3.24);
 /// Ground under the wheels with the gear down and the jet at rest.
-pub const GROUND_Y: f64 = -1.24;
+#[cfg(test)]
+const GROUND_Y: f64 = -1.24;
 
 // ------------------------------------------------------------------ fuselage
 // z, half width, centre height, upper and lower half heights, superellipse exponents.

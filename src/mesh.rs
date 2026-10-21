@@ -381,21 +381,6 @@ impl Mesh {
         let inner: Vec<(f64, f64)> = outer.iter().map(|&(x, y)| (x * r_in / r_out, y * r_in / r_out)).collect();
         self.bezel(f, &outer, &inner, depth, depth * 0.6, col);
     }
-
-    /// Thin ribbon along a polyline, offset along per-point normals.
-    pub fn ribbon(&mut self, pts: &[(V3, V3)], half_width: f64, col: Rgb) {
-        for k in 0..pts.len().saturating_sub(1) {
-            let (p0, n0) = pts[k];
-            let (p1, n1) = pts[k + 1];
-            let t = (p1 - p0).norm();
-            let (w0, w1) = (t.cross(n0).norm() * half_width, t.cross(n1).norm() * half_width);
-            let (p0, p1) = (p0 + n0 * 0.004, p1 + n1 * 0.004);
-            let (a, b, c, d) = (p0 - w0, p0 + w0, p1 + w1, p1 - w1);
-            for (p, n) in [(a, n0), (b, n0), (c, n1), (a, n0), (c, n1), (d, n1)] {
-                self.vert(p, n, col, NO_UV);
-            }
-        }
-    }
 }
 
 /// Rounded rectangle outline centred on the origin.
