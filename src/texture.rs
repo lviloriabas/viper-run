@@ -62,9 +62,9 @@ pub fn terrain() -> Vec<Vec<u8>> {
     });
     let rock = tile(|x, y| {
         // Strata: bands that wander a little, broken by cracks.
-        let band = ((y as f32 + noise(x, y, 4, 31) * 9.0) / 7.0).fract();
+        let band = ((y as f32 + noise(x, y, 4, 31) * 9.0) / 16.0).fract();
         let v = fbm(x, y, 33) * 0.6 + band * 0.35 + hash(x as i32, y as i32, 8) * 0.2;
-        if band < 0.12 && hash(x as i32 / 2, y as i32, 9) > 0.35 {
+        if band < 0.08 && hash(x as i32 / 2, y as i32, 9) > 0.5 {
             [70, 58, 46]
         } else {
             shade(&[[96, 80, 62], [114, 96, 74], [132, 112, 86], [150, 128, 100]], v - 0.05)

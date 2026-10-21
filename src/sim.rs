@@ -71,16 +71,16 @@ pub struct ContactPoint {
 /// Body-space contact points sampled against the terrain every step, so a
 /// banked wing can clip a canyon wall before the centre of mass gets there.
 pub const COLLISION_POINTS: [ContactPoint; 10] = [
-    ContactPoint { name: "nose", local: v3(0.0, 0.08, -6.95), margin: 0.10 },
-    ContactPoint { name: "canopy", local: v3(0.0, 1.58, -3.35), margin: 0.10 },
-    ContactPoint { name: "tail", local: v3(0.0, 0.03, 7.30), margin: 0.15 },
-    ContactPoint { name: "left wing", local: v3(-4.98, 0.0, 2.45), margin: 0.08 },
-    ContactPoint { name: "right wing", local: v3(4.98, 0.0, 2.45), margin: 0.08 },
-    ContactPoint { name: "intake", local: v3(0.0, -1.24, -3.40), margin: 0.08 },
-    ContactPoint { name: "belly", local: v3(0.0, -1.08, 0.0), margin: 0.10 },
-    ContactPoint { name: "fin", local: v3(0.0, 3.34, 6.70), margin: 0.10 },
-    ContactPoint { name: "left stabilator", local: v3(-2.79, -0.31, 7.25), margin: 0.06 },
-    ContactPoint { name: "right stabilator", local: v3(2.79, -0.31, 7.25), margin: 0.06 },
+    ContactPoint { name: "nose", local: v3(0.0, 0.31, -7.09), margin: 0.10 },
+    ContactPoint { name: "canopy", local: v3(0.0, 1.58, -3.06), margin: 0.10 },
+    ContactPoint { name: "tail", local: v3(0.0, 0.55, 6.73), margin: 0.15 },
+    ContactPoint { name: "left wing", local: v3(-4.86, 0.33, 2.40), margin: 0.08 },
+    ContactPoint { name: "right wing", local: v3(4.86, 0.33, 2.40), margin: 0.08 },
+    ContactPoint { name: "intake", local: v3(0.0, -0.43, -3.06), margin: 0.08 },
+    ContactPoint { name: "belly", local: v3(0.0, -0.45, 0.40), margin: 0.10 },
+    ContactPoint { name: "fin", local: v3(0.0, 3.64, 6.55), margin: 0.10 },
+    ContactPoint { name: "left stabilator", local: v3(-2.79, 0.25, 6.20), margin: 0.06 },
+    ContactPoint { name: "right stabilator", local: v3(2.79, 0.25, 6.20), margin: 0.06 },
 ];
 
 #[derive(Clone, Copy, Debug, Default)]

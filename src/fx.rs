@@ -1,6 +1,7 @@
 //! Low-poly effects drawn in the world pass: the afterburner plume with its
 //! shock diamonds, and the crash fireball, debris, sparks, smoke and spray.
 //! Every puff is a handful of flat-shaded facets, like the rest of the art.
+use crate::airframe;
 use crate::gfx;
 use crate::math::*;
 use crate::sim::Aircraft;
@@ -35,8 +36,8 @@ void main() {
 const MAX_PARTICLES: usize = 720;
 const MAX_VERTS: usize = 36000;
 const FLOATS: usize = 7;
-/// Nozzle exit in body axes (x right, y up, z aft).
-const NOZZLE: V3 = v3(0.0, 0.02, 7.30);
+/// Nozzle exit in body axes (x right, y up, z aft), from the airframe.
+const NOZZLE: V3 = airframe::NOZZLE_EXIT;
 /// Drift of smoke columns.
 const WIND: V3 = v3(3.2, 0.0, -1.6);
 

@@ -142,7 +142,7 @@ void main() {
 
     // Every material is sampled up front so the mip selection stays valid.
     vec2 uv = v_world.xz / 128.0;
-    vec2 cliff = vec2((v_world.x + v_world.z) / 96.0, h / 72.0);
+    vec2 cliff = vec2((v_world.x + v_world.z) / 64.0, h / 64.0);
     vec2 fp = mat2(0.94, -0.34, 0.34, 0.94) * v_world.xz;
     vec2 field = fp / vec2(300.0, 210.0);
     float k = hash21(floor(field));
@@ -325,12 +325,18 @@ out vec3 v_rel;
 out vec3 v_normal;
 out vec3 v_color;
 out vec3 v_local;
+out vec2 v_uv;
+out float v_light;
 void main() {
     vec4 rel = u_model * vec4(pos, 1.0);
     v_rel = rel.xyz;
     v_local = pos;
-    v_normal = mat3(u_model) * normal;
+    vec3 n = normalize(mat3(u_model) * normal);
+    v_normal = n;
     v_color = color;
+    v_uv = uv;
+    // Gouraud: one light value per vertex, interpolated across the polygon.
+    v_light = 0.36 + 0.16 * n.y + 0.80 * max(dot(n, normalize(u_sun)), 0.0);
     gl_Position = u_vp * rel;
 }"#;
 
@@ -339,6 +345,8 @@ in vec3 v_rel;
 in vec3 v_normal;
 in vec3 v_color;
 in vec3 v_local;
+in vec2 v_uv;
+in float v_light;
 uniform mat4 u_vp;
 uniform mat4 u_model;
 uniform vec3 u_sun;
@@ -346,35 +354,28 @@ uniform vec3 u_fog;
 uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
+uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
     // From the seat, the cockpit model replaces the skin inside the canopy.
-    if (u_cutout > 0.5 && v_local.z > -4.75 && v_local.z < -1.90 && abs(v_local.x) < 0.53 && v_local.y > 0.30) discard;
-    vec3 view_dir = normalize(-v_rel);
-    vec3 n = normalize(v_normal);
-    if (dot(n, view_dir) < 0.0) n = -n;
-    vec3 sun = normalize(u_sun);
-    float lit = max(dot(n, sun), 0.0);
-    // Sky/ground hemisphere plus a soft fill from the viewer, so neighbouring
-    // flat facets always read as distinct shades, even against the sun.
-    float head = max(dot(n, view_dir), 0.0);
-    vec3 col = v_color * (0.30 + 0.14 * n.y + 0.22 * head + 0.62 * lit);
-    float rim = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0);
-    col += vec3(0.16, 0.2, 0.18) * rim * 0.30;
-    float shine = pow(max(dot(reflect(-sun, n), view_dir), 0.0), 24.0);
-    col += shine * 0.10;
+    if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
+    vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
+    vec3 col = base * v_light;
     float a = u_alpha;
     if (u_alpha < 0.9 && u_glow < 0.5) {
-        // Gold-tinted canopy: tint, Fresnel reflection of the sky and a sun glint.
-        // Upward panes reflect more sky, so each flat pane reads separately.
+        // Tinted canopy: Fresnel reflection of the sky and a sun glint.
+        vec3 view_dir = normalize(-v_rel);
+        vec3 n = normalize(v_normal);
+        if (dot(n, view_dir) < 0.0) n = -n;
+        vec3 sun = normalize(u_sun);
         float fres = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0);
-        float glint = pow(max(dot(reflect(-sun, n), view_dir), 0.0), 60.0);
+        float glint = step(0.985, max(dot(reflect(-sun, n), view_dir), 0.0));
         float sky_ref = 0.35 * max(n.y, 0.0);
-        col = mix(v_color, vec3(0.62, 0.68, 0.66), fres * 0.7 + sky_ref) + glint * vec3(1.0, 0.95, 0.8);
+        col = mix(v_color, vec3(0.62, 0.72, 0.82), fres * 0.7 + sky_ref) + glint * vec3(1.0, 0.95, 0.8);
         a = clamp(u_alpha + fres * 0.55 + sky_ref * 0.4 + glint, 0.0, 0.92);
     }
     if (u_glow > 0.5) col = v_color * 1.8;
-    float fog = clamp(1.0 - exp(-length(v_rel) * 0.000045), 0.0, 0.9);
+    float fog = clamp(1.0 - exp(-length(v_rel) * 0.00005), 0.0, 0.9);
     col = mix(col, u_fog, fog);
     frag = vec4(col, a * (1.0 - fog * 0.8));
 }"#;
@@ -660,7 +661,10 @@ impl World {
 
         // Exterior aircraft.
         let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1)];
-        let s = gfx::shader(ctx, VS_AIR, FS_AIR, &[], &air_u);
+        let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
+        let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
+        let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
+        ctx.texture_generate_mipmaps(skin);
         let air = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, depth);
         let glass = |cull| PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::alpha_blend()), cull_face: cull, ..Default::default() };
         let glass_back = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, glass(CullFace::Back));
@@ -670,6 +674,15 @@ impl World {
         let s = gfx::shader(ctx, VS_FULL, &src(FS_POST), &["u_tex"], &[("u_res", Float2), ("u_src", Float2), ("u_gloc", Float1), ("u_seed", Float1)]);
         let post = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, PipelineParams::default());
 
+        let mut skinned = |m: &Mesh| {
+            let mut p = part(ctx, m);
+            p.bind.images = vec![skin];
+            p
+        };
+        let (exterior, canopy, crew, flame) = (skinned(&airframe.exterior), skinned(&airframe.canopy), skinned(&airframe.crew), skinned(&airframe.flame));
+        let stab = [skinned(&airframe.stab[0]), skinned(&airframe.stab[1])];
+        let rudder = skinned(&airframe.rudder);
+        let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         World {
             post_bind: fullscreen.clone(),
             fullscreen,
@@ -694,13 +707,13 @@ impl World {
             glass_back,
             glass_front,
             flame_pip,
-            exterior: part(ctx, &airframe.exterior),
-            canopy: part(ctx, &airframe.canopy),
-            crew: part(ctx, &airframe.crew),
-            flame: part(ctx, &airframe.flame),
-            stab: [part(ctx, &airframe.stab[0]), part(ctx, &airframe.stab[1])],
-            rudder: part(ctx, &airframe.rudder),
-            brakes: [part(ctx, &airframe.brakes[0]), part(ctx, &airframe.brakes[1]), part(ctx, &airframe.brakes[2]), part(ctx, &airframe.brakes[3])],
+            exterior,
+            canopy,
+            crew,
+            flame,
+            stab,
+            rudder,
+            brakes,
             post,
             fx: Fx::new(ctx),
             drawn_chunks: 0,
@@ -800,13 +813,14 @@ impl World {
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
             let roll = clamp(a.surf_roll, -1.0, 1.0);
             for (i, side) in [-1.0, 1.0].iter().enumerate() {
-                let angle = clamp(-pitch * 14.0 * DEG + side * -roll * 5.0 * DEG, -21.0 * DEG, 21.0 * DEG);
+                // True stabilator deflection, plus the differential the FLCS mixes in for roll.
+                let angle = clamp(-pitch * 25.0 * DEG + side * -roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
                 let pivot = v3(side * airframe::STAB_PIVOT.x, airframe::STAB_PIVOT.y, airframe::STAB_PIVOT.z);
                 let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
                 self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
             }
             let (hinge, axis) = airframe::rudder_axis();
-            let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 22.0 * DEG));
+            let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
             self.draw_part(ctx, &self.rudder, &base, &mat_mul(&model, &local));
             for (i, b) in self.brakes.iter().enumerate() {
                 let up = i % 2 == 0;
