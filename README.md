@@ -19,11 +19,11 @@ at start-up in about half a second.
 
 | Input | Action |
 | --- | --- |
-| Mouse | Pitch / yaw (captured automatically while flying) |
+| Mouse | Pitch (when selected) and yaw; captured automatically while flying |
 | Hold `Alt` and move mouse | Look around the cockpit without steering |
 | `A` / `D` or left / right arrows | Roll left / right |
-| `S` / down arrow | Backup pull (pitch up) |
-| `W` / up arrow | Backup push (pitch down) |
+| `S` / down arrow | Pull, pitch up (when W/S pitch is selected) |
+| `W` / up arrow | Push, pitch down (when W/S pitch is selected) |
 | `Q` / `E` | Rudder left / right |
 | `C` or right-click | Center the mouse stick and the head view |
 | `V` | Toggle cockpit / chase view |
@@ -31,16 +31,27 @@ at start-up in about half a second.
 | `K` | Open / close the controls and configuration drawer |
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
-| `H` | Airbrake, hold |
+| `H` | Speedbrake out / in (toggle) |
 | `P` / `Esc` | Pause / resume |
 | `R` | Restart from pause or a result screen |
 | `M` | Audio on / off |
 | `F11` | Fullscreen |
 | `Enter`, `Tab`, arrows, mouse | Menu navigation; `Ctrl+Q` quits from a menu |
 
-Moving the mouse down pulls the nose up, matching a conventional flight-sim
-stick. Mouse X commands yaw, while A/D rolls the jet. Keyboard pitch overrides
-an opposing mouse command while a key is held.
+Pitch comes from one input at a time, chosen in the K drawer: the mouse
+(default) or W/S. The other one does nothing, so a resting mouse offset can
+never fight a held key. Moving the mouse down pulls the nose up, like a
+flight-sim stick; a small dead band around centre makes neutral easy to find,
+and C or right-click recentres it. W/S reach full deflection after 0.15 s held
+and return in under 0.1 s, so a tap is a small correction. Mouse X works the
+rudder and springs back to centre when the mouse stops; A/D roll the jet. A
+small box at the bottom right shows the stick position, the pitch input in
+use and SPD BRK while the speedbrake is out.
+
+The flight control system commands load factor: a full pull reaches about
+6 g in 0.4 s and 9 g in under a second at the start speed, and releasing the
+stick unloads to 1 g in about half a second instead of letting the jet keep
+pulling.
 
 Hold Alt to inspect the pilot, consoles, wings and tail from the seat; release
 it to return to the forward view. In chase view Alt and the mouse orbit the

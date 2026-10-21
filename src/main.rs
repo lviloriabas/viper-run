@@ -21,7 +21,7 @@ use canvas::{rgba, Canvas};
 use cockpit::{Cockpit, Hands, Page};
 use math::*;
 use miniquad::*;
-use settings::{Best, Settings};
+use settings::{Best, PitchSource, Settings};
 use sim::{gate_crossed, Aircraft, Input, Mission, FIXED_DT, GATE_BONUS};
 use std::collections::HashSet;
 use ui::{Action, Button, Outcome, RunResult, Ui};
@@ -151,6 +151,9 @@ struct App {
 
     keys: HashSet<KeyCode>,
     mouse: (f64, f64),
+    /// Keyboard pitch, ramped so a tap gives a partial pull and a hold a full one.
+    key_pitch: f64,
+    airbrake: bool,
     mouse_pos: (f32, f32),
     grabbed: bool,
     look: (f64, f64),
@@ -166,6 +169,13 @@ struct App {
     opts: Opts,
     frame: u32,
     bench_frames: Vec<f64>,
+}
+
+/// Mouse stick shaping: a small dead band makes neutral easy to find, and the
+/// rest of the travel is rescaled so there is no jump at its edge.
+fn stick_curve(v: f64) -> f64 {
+    const DEAD: f64 = 0.04;
+    v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
 }
 
 fn render_size(w: f32, h: f32) -> (u32, u32) {
@@ -232,6 +242,8 @@ impl App {
             result: None,
             keys: HashSet::new(),
             mouse: (0.0, 0.0),
+            key_pitch: 0.0,
+            airbrake: false,
             mouse_pos: (0.0, 0.0),
             grabbed: false,
             look: (0.0, -12.0 * DEG),
@@ -267,6 +279,7 @@ impl App {
                 self.chase_look = (y * DEG, p * DEG);
             }
         }
+        self.airbrake = self.opts.input.airbrake;
         if self.opts.sim_seconds > 0.0 && self.state == State::Flying {
             let steps = (self.opts.sim_seconds / FIXED_DT).round() as usize;
             for _ in 0..steps {
@@ -333,6 +346,8 @@ impl App {
         self.transition_timer = 0.0;
         self.flash = 0.0;
         self.hands = Hands { throttle: self.mission.start_throttle, ..Default::default() };
+        self.airbrake = false;
+        self.key_pitch = 0.0;
         self.keys.clear();
         self.center_stick();
         self.grab(true);
@@ -404,7 +419,7 @@ impl App {
     }
 
     fn act(&mut self, a: Action) {
-        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Invert | Action::Fullscreen | Action::Reset) {
+        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Fullscreen | Action::Reset) {
             return;
         }
         match a {
@@ -418,6 +433,10 @@ impl App {
             Action::SensUp => self.settings.sensitivity = clamp(((self.settings.sensitivity + 0.1) * 10.0).round() / 10.0, 0.5, 5.0),
             Action::FovDown => self.settings.fov = clamp(self.settings.fov - 1.0, 45.0, 72.0),
             Action::FovUp => self.settings.fov = clamp(self.settings.fov + 1.0, 45.0, 72.0),
+            Action::Pitch => {
+                self.settings.pitch = if self.settings.pitch == PitchSource::Mouse { PitchSource::Keys } else { PitchSource::Mouse };
+                self.key_pitch = 0.0;
+            }
             Action::Invert => self.settings.invert_y = !self.settings.invert_y,
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Reset => {
@@ -426,7 +445,7 @@ impl App {
                 self.settings = Settings { fullscreen: fs, muted, ..Settings::default() };
             }
         }
-        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Invert | Action::Reset) {
+        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Reset) {
             self.mouse = (0.0, 0.0);
             self.save();
         }
@@ -513,23 +532,37 @@ impl App {
     fn read_input(&self) -> Input {
         let k = |c: KeyCode| self.keys.contains(&c);
         let mouse = if self.grabbed { self.mouse } else { (0.0, 0.0) };
-        let keyboard_pitch = k(KeyCode::S) || k(KeyCode::W) || k(KeyCode::Down) || k(KeyCode::Up);
+        // Exactly one pitch source is live: mouse Y (down = pull) or W/S.
+        let pitch_axis = match self.settings.pitch {
+            PitchSource::Mouse => stick_curve(mouse.1) * if self.settings.invert_y { -1.0 } else { 1.0 },
+            PitchSource::Keys => self.key_pitch,
+        };
         Input {
-            pitch_up: k(KeyCode::S) || k(KeyCode::Down),
-            pitch_down: k(KeyCode::W) || k(KeyCode::Up),
             roll_left: k(KeyCode::A) || k(KeyCode::Left),
             roll_right: k(KeyCode::D) || k(KeyCode::Right),
             yaw_left: k(KeyCode::Q),
             yaw_right: k(KeyCode::E),
-            // Mouse Y is pitch (down = pull), mouse X is yaw; A/D roll.
-            pitch_axis: if keyboard_pitch { 0.0 } else { mouse.1 * if self.settings.invert_y { -1.0 } else { 1.0 } },
-            yaw_axis: mouse.0,
-            roll_axis: 0.0,
+            pitch_axis,
+            yaw_axis: stick_curve(mouse.0),
             throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift),
             throttle_down: k(KeyCode::LeftControl) || k(KeyCode::RightControl),
             afterburner: k(KeyCode::Space),
-            airbrake: k(KeyCode::H),
+            airbrake: self.airbrake,
+            ..Default::default()
         }
+    }
+
+    /// Ramps the keyboard pitch: full deflection after 0.15 s held, back to
+    /// neutral in under 0.1 s, so taps make small corrections.
+    fn ramp_key_pitch(&mut self, dt: f64) {
+        let k = |c: KeyCode| self.keys.contains(&c);
+        let want = if self.settings.pitch == PitchSource::Keys {
+            (k(KeyCode::S) || k(KeyCode::Down)) as i32 as f64 - (k(KeyCode::W) || k(KeyCode::Up)) as i32 as f64
+        } else {
+            0.0
+        };
+        let rate = if want != 0.0 && want * self.key_pitch >= 0.0 { 6.5 } else { 12.0 };
+        self.key_pitch = approach(self.key_pitch, want, rate * dt);
     }
 
     fn step(&mut self, dt: f64, input: Input) {
@@ -736,7 +769,10 @@ impl EventHandler for App {
             State::Flying => {
                 self.accumulator = (self.accumulator + dt).min(0.12);
                 let mut steps = 0;
+                // Mouse X works the rudder pedals, which spring back to centre.
+                self.mouse.0 *= (-dt / 0.35).exp();
                 while self.accumulator >= FIXED_DT && steps < 8 && self.state == State::Flying {
+                    self.ramp_key_pitch(FIXED_DT);
                     let input = self.read_input();
                     self.step(FIXED_DT, input);
                     self.accumulator -= FIXED_DT;
@@ -809,6 +845,8 @@ impl EventHandler for App {
 
         // 2D overlays at native resolution.
         let mut buttons = Vec::new();
+        let i = if self.state == State::Flying { self.read_input() } else { Input { airbrake: self.airbrake, ..Default::default() } };
+        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, brake: self.airbrake };
         {
             let cv = &mut self.overlay;
             if flying_view {
@@ -818,9 +856,9 @@ impl EventHandler for App {
                     let focal = h as f64 * 0.5 / (cam.fov / 2.0).tan();
                     let body = cockpit::BodyProjector { eye: cam_b.eye, right: cam_b.right, up: cam_b.up, fwd: cam_b.forward, focal, w: w as f64, h: h as f64 };
                     cockpit::draw_hud(cv, a, &self.mission, &cam, &body);
-                    ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer);
+                    ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue);
                 } else {
-                    ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying);
+                    ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue);
                 }
             }
             if self.flash > 0.005 {
@@ -831,7 +869,7 @@ impl EventHandler for App {
             let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos };
             if !self.controls_open {
                 match self.state {
-                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time),
+                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));
                         u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted);
@@ -993,6 +1031,10 @@ impl EventHandler for App {
             KeyCode::C if self.state == State::Flying => {
                 self.center_stick();
                 self.flash_toast("MOUSE STICK CENTERED", 1.1);
+            }
+            KeyCode::H if self.state == State::Flying => {
+                self.airbrake = !self.airbrake;
+                self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT // H RETRACT" } else { "SPEEDBRAKE IN" }, 1.4);
             }
             KeyCode::P | KeyCode::Escape => match self.state {
                 State::Flying => self.pause(),

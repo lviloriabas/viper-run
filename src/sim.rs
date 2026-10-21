@@ -397,31 +397,33 @@ impl Aircraft {
         let g_available = lift_capacity / (self.mass * G0);
         self.g_avail = G_LIMIT.min(g_available.max(0.0));
 
-        // FBW pitch: command a load factor, convert it to a pitch rate for the
-        // current speed. The alpha limiter protects the jet at low speed.
-        let mut pitch_target = 0.0;
-        if pitch_in != 0.0 {
-            if pitch_in > 0.0 {
-                let n_limit = 1.12f64.max(G_LIMIT.min(g_available));
-                let n_demand = 1.0 + pitch_in * (n_limit - 1.0);
-                let base_rate = G0 * (n_demand - 1.0) / speed.max(70.0);
-                let alpha_margin = clamp((ALPHA_LIMIT - alpha.max(0.0)) / 0.07, 0.0, 1.0);
-                pitch_target = base_rate * alpha_margin;
-                if self.g_load > G_LIMIT + 0.12 {
-                    pitch_target = pitch_target.min(0.0);
-                }
-            } else {
-                let n_demand = 1.0 + pitch_in * 2.2;
-                let base_rate = G0 * (n_demand - 1.0) / speed.max(70.0);
-                let alpha_margin = clamp((alpha + 0.38) / 0.08, 0.0, 1.0);
-                pitch_target = base_rate * alpha_margin;
-                if self.g_load < NEG_G_LIMIT - 0.1 {
-                    pitch_target = pitch_target.max(0.0);
-                }
+        // FBW pitch: the stick commands a load factor. The feed-forward rate
+        // turns the flight path as fast as that load factor does; the alpha
+        // term builds (or sheds) the lift for it in about 0.3 s instead of
+        // waiting for the airframe's own one-second alpha response, so the G
+        // follows the stick both on the pull and on the release. With the
+        // stick centred the steady state is the same path hold as before.
+        let n_limit = 1.12f64.max(G_LIMIT.min(g_available));
+        let n_demand = if pitch_in >= 0.0 { 1.0 + pitch_in * (n_limit - 1.0) } else { 1.0 + pitch_in * 2.2 };
+        let n_target = clamp(n_demand - 1.0 + ax.up.y, NEG_G_LIMIT, n_limit);
+        let lift_per_alpha = qbar * WING_AREA * ground_effect * cl_max_eff / ALPHA_STALL;
+        // Centred, the jet never pitches itself into buffet to hold the path.
+        let alpha_cap = mix(0.62 * ALPHA_STALL, ALPHA_LIMIT, pitch_in.max(0.0));
+        let alpha_cmd = clamp(n_target * self.mass * G0 / lift_per_alpha.max(1.0), -0.38, alpha_cap);
+        let mut pitch_target = G0 * (n_demand - 1.0) / speed.max(70.0) + 4.0 * (alpha_cmd - alpha);
+        if pitch_target > 0.0 {
+            pitch_target *= clamp((ALPHA_LIMIT - alpha.max(0.0)) / 0.07, 0.0, 1.0);
+            if self.g_load > G_LIMIT + 0.12 {
+                pitch_target = 0.0;
             }
-            pitch_target *= 1.0 - 0.18 * smoothstep(0.9, 1.6, mach);
-            pitch_target = clamp(pitch_target, -0.9, 0.9);
+        } else {
+            pitch_target *= clamp((alpha + 0.38) / 0.08, 0.0, 1.0);
+            if self.g_load < NEG_G_LIMIT - 0.1 {
+                pitch_target = 0.0;
+            }
         }
+        pitch_target *= 1.0 - 0.18 * smoothstep(0.9, 1.6, mach);
+        pitch_target = clamp(pitch_target, -0.9, 0.9);
 
         let q_ref = 0.5 * 1.225 * 200.0 * 200.0;
         let roll_authority = clamp((qbar.max(0.0) / q_ref).sqrt(), MIN_ROLL_AUTHORITY, 1.18);
@@ -666,6 +668,24 @@ mod tests {
         a.q = a.q.mul(Quat::axis_angle(V3::Z, PI));
         let a = run(a, DT, Input::default());
         assert!(a.bank.abs() > 170.0);
+    }
+
+    #[test]
+    fn load_factor_follows_the_stick_quickly() {
+        let mut a = Aircraft::new(&Mission::new());
+        let pull = Input { pitch_up: true, ..Default::default() };
+        for _ in 0..48 {
+            a.update(DT, &pull);
+        }
+        assert!(a.g_load > 5.5, "0.4 s into a full pull: {:.2} g", a.g_load);
+        for _ in 0..72 {
+            a.update(DT, &pull);
+        }
+        assert!(a.g_load > 8.0 && a.g_load < G_LIMIT + 0.3, "sustained pull: {:.2} g", a.g_load);
+        for _ in 0..60 {
+            a.update(DT, &Input::default());
+        }
+        assert!(a.g_load < 2.0, "0.5 s after release: {:.2} g", a.g_load);
     }
 
     #[test]

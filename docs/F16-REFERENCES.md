@@ -49,9 +49,20 @@ de un escaneo o plano dimensional.
 
 El FOV predeterminado baja de 78 a 58 grados, con ajuste entre 45 y 72. La
 sensibilidad predeterminada del mouse es 2,8 veces la original. K abre el panel
-izquierdo y pausa el vuelo mientras se configura; H mantiene el aerofreno.
-La inversión se aplica al eje vertical del mouse. S y W conservan sus
-direcciones y tienen prioridad sobre el mouse mientras se mantienen pulsadas.
+izquierdo y pausa el vuelo mientras se configura; H saca o recoge el
+aerofreno. El cabeceo sale de una sola entrada, elegida en ese panel: el mouse
+(por defecto) o W/S; la otra queda inactiva. La inversión se aplica al eje
+vertical del mouse; S tira y W empuja siempre. El eje X del mouse mueve el
+timón y vuelve solo al centro.
+
+La ley de cabeceo del FLCS manda factor de carga: además de la velocidad de
+cabeceo que ese factor produce, añade un término de ángulo de ataque que
+construye la sustentación en unos 0,3 s, en vez de esperar la respuesta propia
+del avión, de alrededor de 1 s. Con tirón completo a la velocidad inicial se
+llega a unos 6 G en 0,4 s y a 9 G en menos de un segundo; al soltar, vuelve a
+1 G en medio segundo. Con la palanca centrada el estado estacionario es el
+mismo mantenimiento de trayectoria de antes, y el mando no lleva el avión por
+sí solo más allá de unos 16 grados de AOA.
 
 El exterior es un fuselaje de secciones superelípticas con radomo ojival, toma
 ventral en D con su separador de capa límite, LERX fundidos con el ala, ala de
