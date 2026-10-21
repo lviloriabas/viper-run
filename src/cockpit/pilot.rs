@@ -105,8 +105,8 @@ impl Grip {
 /// Gloved hand closed round a grip of half extents `rx` across and `rf` fore
 /// and aft, centred on `k.o`: one mitten piece from the wrist along the
 /// outboard side and round the front, the palm heel behind the grip, and the
-/// thumb through the points `thumb`. Returns the wrist.
-fn fist(m: &mut Mesh, k: &Grip, rx: f64, rf: f64, thumb: [V3; 3]) -> V3 {
+/// thumb through the points `thumb_at`. Returns the wrist.
+fn fist(m: &mut Mesh, k: &Grip, rx: f64, rf: f64, thumb_at: [V3; 4]) -> V3 {
     let wrist = k.p(-0.072, -0.004, rx + 0.009);
     let ring = |deg: f64, pad: f64| {
         let t = deg * DEG;
@@ -114,13 +114,29 @@ fn fist(m: &mut Mesh, k: &Grip, rx: f64, rf: f64, thumb: [V3; 3]) -> V3 {
     };
     loft(m, &[St(wrist, 0.030, 0.018, GLOVE), St(k.p(-0.036, 0.0, rx + 0.016), 0.043, 0.016, GLOVE), St(k.p(0.004, 0.0, rx + 0.015), 0.046, 0.015, GLOVE), St(ring(35.0, 0.015), 0.046, 0.015, GLOVE), St(ring(-15.0, 0.014), 0.045, 0.014, GLOVE), St(ring(-65.0, 0.013), 0.043, 0.013, GLOVE), St(ring(-100.0, 0.012), 0.040, 0.012, GLOVE)], k.g, &OCT);
     m.block(&k.frame(-rf - 0.010, -0.006, 0.004), v3(0.012, 0.034, rx * 0.9), GLOVE);
-    thumb_loft(m, thumb, k.out);
+    thumb(m, thumb_at, k.out);
     wrist
 }
 
-/// Tapering gloved thumb through three points.
-fn thumb_loft(m: &mut Mesh, t: [V3; 3], side: V3) {
-    loft(m, &[St(t[0], 0.013, 0.012, GLOVE), St(t[1], 0.011, 0.010, GLOVE), St(t[2], 0.0085, 0.008, GLOVE)], side, &OCT);
+/// Gloved thumb through its ball at the palm, the knuckle and the joint to
+/// the tip: it narrows from the base, swells a little at the joint, bends
+/// with the points and closes over a rounded tip, so it reads as a finger.
+fn thumb(m: &mut Mesh, t: [V3; 4], side: V3) {
+    let tip = t[3] + (t[3] - t[2]).norm() * 0.007;
+    loft(
+        m,
+        &[
+            St(t[0], 0.017, 0.012, GLOVE),
+            St(t[1], 0.0115, 0.0105, GLOVE),
+            St(t[1].lerp(t[2], 0.5), 0.0102, 0.0094, GLOVE),
+            St(t[2], 0.0108, 0.0098, GLOVE),
+            St(t[2].lerp(t[3], 0.6), 0.0094, 0.0084, GLOVE),
+            St(t[3], 0.0078, 0.0070, GLOVE),
+            St(tip, 0.0035, 0.0032, GLOVE),
+        ],
+        side,
+        &OCT,
+    );
 }
 
 /// Middle joint of a two-bone limb from `root` to `end` with bone lengths
@@ -351,7 +367,7 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     let at = |s: f64, y: f64| c + hf * s + V3::Y * y;
     let wrist = at(-0.078, -0.012);
     loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.036, -0.008), 0.046, 0.013, GLOVE), St(at(0.054, -0.032), 0.044, 0.012, GLOVE), St(at(0.058, -0.058), 0.040, 0.011, GLOVE)], hs, &OCT);
-    thumb_loft(m, [k.p(-0.046, -0.046, 0.012), k.p(-0.050, -0.010, 0.006), k.p(-0.046, 0.026, 0.008)], k.out);
+    thumb(m, [k.p(-0.044, -0.004, 0.030), k.p(-0.054, 0.020, 0.016), k.p(-0.054, 0.042, 0.006), k.p(-0.046, 0.058, 0.002)], k.out);
     wrist
 }
 
@@ -363,7 +379,7 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
     let (rx, rf) = (0.019, 0.025);
-    let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.006, 0.026, -rx * 0.5), k.p(-0.027, 0.058, -rx - 0.003), k.p(-0.02, 0.078, -0.015)]);
+    let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.012, 0.004, -rx * 0.1), k.p(-rf - 0.008, 0.030, -rx * 0.75), k.p(-0.028, 0.054, -rx - 0.003), k.p(-0.020, 0.074, -0.016)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
     let wrist = throttle(m, h);
     arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.018));
