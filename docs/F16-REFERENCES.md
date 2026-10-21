@@ -113,48 +113,76 @@ incluye el haz, los límites de actitud o las averías de un radioaltímetro rea
 
 ## Parámetros y calibración
 
-La ficha del Block 50/52 de f-16.net proporciona empuje seco de 17.155 lbf y
-postcombustión de 28.984 lbf para el F110-GE-129, superficie alar de 300 pies
-cuadrados, masa vacía de 18.238 lb y velocidad máxima de corta duración de
-Mach 2,05 a 40.000 pies. En el código se usan aproximadamente 76.300 N,
-128.922 N, 27,87 metros cuadrados y 8.273 kg, respectivamente.
+### Modelo de vuelo
 
-Se mantienen masa variable con combustible, sustentación dependiente de
-presión dinámica y AOA, resistencia inducida, resistencia transónica, efecto
-suelo, pérdida, límites de mando, retardo del motor y reducción del empuje con
-altura. Los coeficientes y curvas son ajustes de juego; no se han extraído las
-tablas aerodinámicas completas de una variante real. El límite de AOA de unos
-26 grados y los consumos son aproximaciones de esta implementación.
+El modelo sigue al F-16 de FlightGear (repositorio NikolaiVChr/f16, JSBSim):
 
-`cargo test --release equilibrium -- --nocapture` calcula equilibrio ideal de
-fuerzas a 1 G y plena postcombustión, con el peso inicial de la misión. El port
-a Rust reproduce exactamente los valores de la versión web:
+- Aerodinámica: tablas de NASA TP-1538 (Nguyen et al., 1979) en la forma
+  reducida de Stevens y Lewis, *Aircraft Control and Simulation*: CX, CZ y Cm
+  frente a AOA y estabilizador; Cl y Cn frente a AOA y derrape; efectos de
+  flaperón y timón; derivadas de amortiguamiento. Es el mismo conjunto de datos
+  que JSBSim usa en forma completa. Las tablas se comprobaron contra la
+  transcripción pública de AeroBenchVV.
+- De FlightGear (`Systems/jsb-aerodynamics-block15-subtle.xml`): resistencia de
+  onda frente a Mach, desplazamiento transónico del centro aerodinámico
+  (estimación de Nikolai V. Chr.) y efecto suelo.
+- Masa e inercias del Block 50 (`Systems/jsb-mass-50.xml`): 19.200 lb vacío,
+  Ixx 9.007, Iyy 49.956, Izz 56.770 e Ixz 198 slug·ft²; se añaden piloto,
+  misiles de punta de ala y combustible (7.000 lb internas), que se consume.
+- Motor F110-GE-129 (`Engines/F110-GE-129.xml`): 17.000 lbf militar y 29.000
+  lbf con postcombustión, tablas de empuje frente a Mach y altitud, TSFC 0,661
+  y 1,9. La dinámica de potencia es la de Stevens y Lewis. Se añade la
+  recuperación de presión de una toma de choque normal fija, que es lo que
+  limita al F-16 cerca de Mach 2.
+- FLCS: mismas rutas de mando que `Systems/jsb-controls.xml` (gradiente de
+  fuerza en palanca a G, límites +9/-3 G, limitador de AOA a partir de 22,5°
+  con tope cerca de 25°, mando de régimen de alabeo de hasta 308 °/s reducido
+  con AOA, interconexión alerón-timón, amortiguador de guiñada) con actuadores
+  limitados en recorrido y velocidad. Los lazos internos de cabeceo y alabeo
+  invierten las propias tablas aerodinámicas en lugar de reproducir la red de
+  ganancias analógica, para que la respuesta sea estable de 120 nudos a Mach 2.
 
-| Altitud | Mach de equilibrio del modelo |
+`cargo test --release level_speed -- --nocapture` resuelve el equilibrio de
+vuelo nivelado con plena postcombustión y media carga de combustible:
+
+| Altitud | Mach máximo nivelado |
 | --- | --- |
-| 10.000 pies | 1,653 |
-| 20.000 pies | 1,740 |
-| 30.000 pies | 1,869 |
-| 40.000 pies | 2,019 |
+| Nivel del mar | 1,24 |
+| 10.000 pies | 1,47 |
+| 20.000 pies | 1,68 |
+| 30.000 pies | 1,90 |
+| 40.000 pies | 2,02 |
 
-La coincidencia aproximada con Mach 2,05 a 40.000 pies es una comprobación de
-escala, no una validación de toda la envolvente. No se modelan límites térmicos,
-restricciones por cargas externas, protección completa FLCS, daños progresivos,
-viento ni tablas medidas de motor y aerodinámica. No se limita artificialmente
-la velocidad a ese valor: las fuerzas determinan la aceleración y el HUD avisa
-cuando se supera Mach 2,05.
+Limitaciones: no hay programa de flaps de borde de ataque ni tablas de
+pérdida más allá de 45° de AOA (se añade un momento de picado de placa plana),
+el centro de gravedad del modelo visual está algo adelantado respecto al real,
+y no se modelan límites térmicos, cargas externas, daños ni viento.
+
+### Proporciones del modelo exterior
+
+Las estaciones se midieron en el dibujo de tres vistas de Wikimedia Commons
+(*General Dynamics F-16 Fighting Falcon 3-view line drawing*), escalado a
+15,06 m: parabrisas al 17,8 % de la longitud del fuselaje, final de la cúpula
+al 41 %, labio de la toma al 29 %, borde de salida del ala al 75 %, y una
+profundidad de cúpula a fondo de toma de 0,15 veces la longitud. El eje del
+motor, los estabilizadores y la deriva quedan por encima de la línea del morro.
+La envergadura y la altura usan las cifras publicadas (9,96 m con AIM-9 y
+4,88 m), porque el dibujo no está a escala exacta en esas cotas.
 
 ## Verificación
 
-- `cargo test --release`, en `src/sim.rs`: ISA, velocidad calibrada subsónica
-  y supersónica, diferencias por velocidad y altitud, combustible agotado,
-  retardo de postcombustión, vuelo invertido, aerofreno, instrumentos,
-  estabilidad numérica, equilibrio a Mach 2,05, cruce de puertas y puntuación.
+- `cargo test --release`, en `src/sim.rs` y `src/aero.rs`: signos de las
+  superficies, interpolación de tablas, empuje y dinámica del motor, trimado
+  a 1 G sin manos, 9 G en un segundo sin sobrepasar el límite, limitador de
+  AOA a 25°, G negativo, alabeo coordinado de unos 300 °/s, combustible
+  agotado, postcombustión, aerofreno, estabilidad numérica en la envolvente,
+  velocidad máxima nivelada, cruce de puertas y puntuación.
 - `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
   vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
   triángulos que se dibujan.
-- `src/airframe.rs`: dimensiones medidas, geometría finita, normales unitarias
-  y ojo de diseño dentro de la cúpula.
+- `src/airframe.rs`: dimensiones y proporciones medidas, geometría finita,
+  normales unitarias, coordenadas de textura válidas y ojo de diseño dentro de
+  la cúpula.
 - Capturas con `--shot`, `--screen` y `--look` del menú, pausa, resultados,
   cabina y vista externa, y `--bench` para medir el tiempo por fotograma.
 - Inspección visual de frente, ambos laterales, piloto y cola. Alt más mouse

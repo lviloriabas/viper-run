@@ -70,10 +70,12 @@ rudder and springs back to centre when the mouse stops; A/D roll the jet. A
 small box at the bottom right shows the stick position, the pitch input in
 use and SPD BRK while the speedbrake is out.
 
-The flight control system commands load factor: a full pull reaches about
-6 g in 0.4 s and 9 g in under a second at the start speed, and releasing the
-stick unloads to 1 g in about half a second instead of letting the jet keep
-pulling.
+The flight control system works like the real F-16 FLCS: the stick commands
+load factor (+9 / -3 g) and roll rate (up to 308 degrees per second), and with
+the stick centred the jet holds 1 g. Wings level that flies a straight line;
+in a bank it is still 1 g, so the nose drops unless you pull. A full pull
+reaches 8.5 g in about a second at the start speed; when the speed is not
+there, the AoA limiter trades g for AoA and holds the jet near 25 degrees.
 
 Hold Alt to inspect the pilot, consoles, wings and tail from the seat; release
 it to return to the forward view. In chase view Alt and the mouse orbit the
@@ -104,15 +106,23 @@ out of margin.
 
 ## The jet
 
-- Fixed-step 120 Hz simulation, independent of the frame rate, ported line by
-  line from the original model: quaternion attitude, ISA density and speed of
-  sound, compressible calibrated airspeed (including the supersonic pitot
-  relation), lift-dependent drag, Mach wave drag, ground effect, stall, FBW
-  alpha/G limiting, engine spool and afterburner lag, altitude thrust lapse, ram
-  effect, fuel mass and airbrake. Full-afterburner level-flight equilibrium is
-  Mach 1.653 / 1.740 / 1.869 / 2.019 at 10,000 / 20,000 / 30,000 / 40,000 ft,
-  identical to the previous version.
-- F-16C Block 50 / F110-GE-129 scale and limits: about 9 g, 26 degrees AoA.
+- Six-degree-of-freedom flight model after the JSBSim F-16 that FlightGear
+  flies, integrated at 480 Hz inside a fixed 120 Hz step: forces and moments
+  from the NASA TP-1538 wind-tunnel tables (AoA -10 to 45 degrees, sideslip,
+  stabilator, flaperon and rudder, rate damping), FlightGear's Mach wave drag,
+  transonic aerodynamic-centre shift and ground effect, body-axis moment
+  equations with the inertia tensor, the roll-yaw product of inertia and the
+  engine's gyroscopic moment. Mass and inertia follow the FlightGear Block 50
+  model plus missiles and fuel, which burns off as you fly.
+- F110-GE-129 thrust from FlightGear's tables (17,000 / 29,000 lbf), lapse with
+  altitude and Mach, normal-shock inlet recovery, slow core spool and quick
+  afterburner light-off, fuel flow from TSFC. Full-afterburner level speed is
+  Mach 1.24 at sea level and Mach 2.02 at 40,000 ft.
+- FLCS with the F-16 command paths: stick-force g command, AoA limiter,
+  roll-rate command reduced at high AoA, aileron-rudder interconnect, yaw
+  damper and sideslip feedback, driving rate- and travel-limited stabilator,
+  flaperon and rudder actuators. The start is trimmed for 1 g.
+- F-16C Block 50 limits: +9 / -3 g, about 25 degrees AoA at full aft stick.
 - Stall: each wing panel separates on its own local AoA against a critical
   angle of about 27 degrees in slow, smooth air. Mach (shock-induced
   separation), altitude, ground effect and sideslip lower it; a quick pull
@@ -124,13 +134,15 @@ out of margin.
   towards it (DEPARTURE). The limiter keeps a straight full pull just short
   of it in smooth air, but high and fast, slow in the gusts near the ground,
   or with rudder at full aft stick, the wing stalls.
-- Exterior measured from the mesh by the test suite: 15.06 m overall length,
-  9.96 m span over the wingtip AIM-9s and 5.09 m height. Lofted fuselage with
-  an ogive radome, D-shaped chin intake with its diverter, blended leading-edge
-  root extensions, 40-degree cropped-delta wing with a NACA 4 % section, swept
-  fin with drag-chute housing, all-moving stabilators with 10 degrees of
-  anhedral, canted ventral fins, petalled nozzle and gold-tinted bubble canopy.
-  Stabilators, rudder and the clamshell speedbrakes move with the controls.
+- Exterior proportioned from a scale three-view (the shapes the War Thunder
+  model reproduces) and measured by the test suite: 15.06 m overall length,
+  9.96 m span over the wingtip AIM-9s, 4.88 m height, canopy, intake and wing
+  stations along the body and the forebody depth. Long radome, D-shaped chin
+  intake flush with the lower fuselage, blended leading-edge root extensions,
+  40-degree cropped-delta wing with a NACA 4 % section, swept fin with
+  drag-chute housing, all-moving stabilators with 10 degrees of anhedral,
+  canted ventral fins, petalled nozzle and tinted bubble canopy. Stabilators,
+  rudder and the clamshell speedbrakes show their true deflections.
 - Collision against ten airframe points: nose, canopy, tail, both wingtips,
   intake, belly, fin and both stabilator tips.
 - Depth-buffered 3D cockpit at realistic distances from the design eye: the
@@ -140,23 +152,28 @@ out of margin.
   caution panel, AOA indexer, master caution, labelled side consoles, throttle
   and pressure sidestick, a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
-- Jet and cockpit are flat-shaded low-polygon models in the style of early-90s
-  3D flight sims: 16-sided fuselage sections, 8-panel airfoils, hexagonal
-  limbs, 16-sided gauges and chamfered bezels. Each quad takes one shade, and a
-  fill light keeps neighbouring facets distinct even against the sun.
+- Art in the style of Tiny Combat Arena: the jet is a few hundred Gouraud-
+  shaded polygons wearing a small hand-painted texture (FS 36270 / 36375
+  greys, panel lines, low-vis star-and-bars, AV tail code, green fin band),
+  sampled with nearest filtering; the cockpit is low-poly with chunky gauges.
 - The canopy is a single convex glass layer with a faint tint, Fresnel sheen
   and sun glints, drawn once per pixel, so it never washes out the view.
 - Green NAV HUD clipped to the physical combiner glass: inertial pitch ladder,
   flight-path marker, boxed KCAS and barometric altitude, radar altitude,
   heading tape, Mach, alpha, current and maximum G, steerpoint cue and warnings.
-- Retro presentation: the world renders at a reduced resolution and goes
-  through a CRT pass (barrel, scanlines, chroma, grain, vignette, G grey-out);
-  the HUD and menus are drawn crisp at native resolution in a 5x7 pixel font.
+- Retro presentation: the world renders at a low internal resolution (320 to
+  480 lines) shown as crisp blocks, quantised to 15-bit colour with a 4x4
+  ordered dither; the terrain wears pixel tiles (grass, scrub, rock strata,
+  snow, sand, patchwork farmland with hedgerows and the Cold River) with
+  Gouraud lighting and dithered material borders, under a clear blue sky
+  with screen-door clouds. The HUD and menus are drawn crisp at native
+  resolution in a 5x7 pixel font; sustained g greys out the view.
 - Procedural audio synthesised on its own thread: engine, wind, rumble and
   turbine whine follow throttle, speed and afterburner, plus warning tones.
 
-The aerodynamic coefficients, engine lapse and instrument conversions are game
-approximations, not a full F-16 aerodynamic database or avionics suite. Sources,
+The aerodynamic data is the reduced TP-1538 set (no leading-edge flap
+schedule or post-stall tables beyond 45 degrees), and the avionics are a game
+subset, not a full F-16 database or avionics suite. Sources,
 calibration and omissions are in [F16-REFERENCES.md](docs/F16-REFERENCES.md).
 
 ## Performance
@@ -209,10 +226,12 @@ viper-run/
 ├── docs/F16-REFERENCES.md
 └── src/
     ├── main.rs         # game states, input, cameras, frame composition
-    ├── sim.rs          # flight model, atmosphere, collision, mission
+    ├── sim.rs          # 6-DOF rigid body, FLCS, engine, collision, mission
+    ├── aero.rs         # F-16 aerodynamic tables and F110 thrust tables
     ├── terrain.rs      # analytic terrain, height grid, LOD chunk meshes
-    ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, CRT pass
-    ├── airframe.rs     # dimensioned F-16 exterior and moving surfaces
+    ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, pixel pass
+    ├── texture.rs      # procedural pixel-art terrain and cloud textures
+    ├── airframe.rs     # F-16 exterior, moving surfaces and painted skin
     ├── cockpit.rs      # 3D cockpit, instrument pages and NAV HUD
     ├── ui.rs           # menus, controls drawer, flight overlays
     ├── canvas.rs       # GPU 2D batcher with convex clipping
