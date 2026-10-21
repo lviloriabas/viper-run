@@ -258,7 +258,10 @@ void main() {
     vec4 t = texture(u_tex, v_uv);
     // Screen-door transparency: whole pixels are either cloud or sky.
     if (smoothstep(0.30, 0.55, t.a) * v_alpha < bayer4(gl_FragCoord.xy)) discard;
-    float fog = clamp(1.0 - exp(-length(v_rel) * 0.00005), 0.0, 0.85);
+    // Same haze as the terrain, so a distant cloud never looks crisper (and
+    // so nearer) than the mountains in front of it.
+    float dist = length(v_rel);
+    float fog = max(1.0 - exp(-dist * 0.000075), smoothstep(20000.0, 36000.0, dist));
     frag = vec4(mix(t.rgb, u_fog, fog), 1.0);
 }"#;
 
@@ -643,6 +646,17 @@ impl World {
                 let ground = terrain::terrain_at(x, z);
                 let y = (ground + 420.0).max(1250.0) + rnd.next() * 1600.0;
                 let size = 1000.0 + rnd.next() * 2100.0;
+                // The billboard turns to face the camera, so the puff (reaching about
+                // 0.45 size below centre) must clear every peak within one size of
+                // it, or a ridge would slice it along a line that moves as you turn.
+                let mut peak = ground;
+                for k in 0..32 {
+                    let a = k as f64 * TAU / 32.0;
+                    for r in [0.35, 0.7, 1.0] {
+                        peak = peak.max(terrain::terrain_at(x + a.cos() * size * r, z + a.sin() * size * r));
+                    }
+                }
+                let y = y.max(peak + 0.45 * size + 150.0);
                 let alpha = 0.8 + rnd.next() * 0.2;
                 Cloud { pos: v3(x, y, z), size, alpha }
             })
@@ -803,6 +817,15 @@ impl World {
             }
         }
 
+        // Clouds are screen-door cutouts that write depth, so they go in with the
+        // opaque geometry: plume, flame and particles drawn later without depth
+        // writes would otherwise be painted over by a cloud behind them.
+        self.update_clouds(ctx, cam);
+        ctx.apply_pipeline(&self.cloud);
+        ctx.apply_bindings(&self.cloud_bind);
+        ctx.apply_uniforms(UniformsSource::table(&CloudU { vp, eye, right: cam.right.f32(), up: cam.up.f32(), fog: FOG }));
+        ctx.draw(0, (self.clouds.len() * 6) as i32, 1);
+
         // Exterior aircraft, shared by both views; first person omits canopy and crew.
         self.fx.prepare(ctx, cam, time, aircraft);
         if let Some(a) = aircraft {
@@ -864,13 +887,6 @@ impl World {
         }
 
         self.fx.draw(ctx, vp, Layer::Particles);
-
-        // Clouds after opaque geometry, sorted back to front.
-        self.update_clouds(ctx, cam);
-        ctx.apply_pipeline(&self.cloud);
-        ctx.apply_bindings(&self.cloud_bind);
-        ctx.apply_uniforms(UniformsSource::table(&CloudU { vp, eye, right: cam.right.f32(), up: cam.up.f32(), fog: FOG }));
-        ctx.draw(0, (self.clouds.len() * 6) as i32, 1);
 
         // Chase canopy: back faces first, then front faces, for correct layering.
         if let (Some(a), false) = (aircraft, cockpit) {
