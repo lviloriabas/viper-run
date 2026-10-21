@@ -136,6 +136,36 @@ out of margin.
   towards it (DEPARTURE). The limiter keeps a straight full pull just short
   of it in smooth air, but high and fast, slow in the gusts near the ground,
   or with rudder at full aft stick, the wing stalls.
+- Pilot G tolerance from eye-level blood pressure: a hydrostatic column of
+  about 22 mmHg per g, the anti-G suit, COMBAT EDGE pressure breathing, an
+  AGSM that tires within a minute at 9 G, and the baroreflex, which after a
+  push leaves the pilot less tolerant of the next pull. The retina and the
+  brain hold a few seconds of oxygen. Relaxed and unprotected the view closes
+  near 4.7 G, blacks out near 5.5 G and the pilot goes out near 6.9 G; a
+  trained, protected pilot holds a 9 G break for 15 s with a narrowed view.
+  The view greys, closes into a tunnel and blacks out over the HUD too, and
+  negative g reddens it. G-LOC takes the controls away for 12 s and gives
+  them back over 12 s more; meanwhile Auto-GCAS rolls level and pulls 5 G if
+  the terrain is close.
+- Aeroelastic wing: the 40-degree swept wing washes out under load, losing
+  lift outboard and flaperon power as the dynamic pressure climbs (the FLCS
+  compensates). Its 8 Hz antisymmetric bending-torsion mode loses damping
+  towards the flutter speed (920 KEAS, 15 % past the 800 KCAS placard, with a
+  transonic dip and lower with heavy underwing stores) and past it grows into
+  a limit cycle that breaks the wing; torsional divergence and 1.5 times the
+  +9 / -3 g limits break it outright. The wings bend and flutter on the
+  model, the cockpit shakes, the HUD warns FLUTTER.
+- Condensation where the expanding flow cools the air past saturation (60 to
+  70 % humidity under the cumulus, drier above): the LERX vortices stream
+  over the wings at high AoA and burst past 25 degrees, the wingtip vortices
+  leave trails in hard pulls, and the vapor cone fills the supersonic pocket
+  from Mach 0.86 and ends at the terminating shock. Above about 7 km, below
+  -40 C, the exhaust leaves a contrail.
+- Mach effects: wave drag and the transonic aerodynamic-centre shift (the
+  tables), transonic buffet from a lift-coefficient boundary that sags
+  towards Mach 0.95, the altimeter's Mach jump as the bow shock passes the
+  static ports, faint bow and tail shock cones past Mach 1, and the double
+  crack of the sonic boom when the Mach cone sweeps over an outside camera.
 - Exterior proportioned from a scale three-view (the shapes the War Thunder
   model reproduces) and measured by the test suite: 15.06 m overall length,
   9.96 m span over the wingtip AIM-9s, 4.88 m height, canopy, intake and wing
@@ -169,7 +199,7 @@ out of margin.
   snow, sand, patchwork farmland with hedgerows and the Cold River) with
   Gouraud lighting and dithered material borders, under a clear blue sky
   with screen-door clouds. The HUD and menus are drawn crisp at native
-  resolution in a 5x7 pixel font; sustained g greys out the view.
+  resolution in a 5x7 pixel font.
 - Procedural audio synthesised on its own thread: engine, wind, rumble and
   turbine whine follow throttle, speed and afterburner, plus warning tones.
 
@@ -232,6 +262,8 @@ viper-run --shot out.png --sim 3 --chase   # simulate 3 s, save a screenshot, ex
 viper-run --shot out.png --look 120,-20    # cockpit free look (yaw, pitch degrees)
 viper-run --shot out.png --screen pause    # pause | freeze | win | crash | timeout
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
+viper-run --shot out.png --mach 0.98       # start at a Mach number (vapor cone, shocks)
+viper-run --shot out.png --vision 0.5,0,0  # pilot state: retinal oxygen, redout, G-LOC s
 ```
 
 ## Project layout
@@ -245,6 +277,9 @@ viper-run/
 └── src/
     ├── main.rs         # game states, input, cameras, frame composition
     ├── sim.rs          # 6-DOF rigid body, FLCS, engine, collision, mission
+    ├── physio.rs       # pilot G tolerance, G-LOC, redout, Auto-GCAS
+    ├── structure.rs    # wing aeroelasticity, flutter, divergence, load limits
+    ├── vapor.rs        # condensation, vapor cone, shock cones, sonic boom
     ├── aero.rs         # F-16 aerodynamic tables and F110 thrust tables
     ├── terrain.rs      # analytic terrain, height grid, LOD chunk meshes
     ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, pixel pass

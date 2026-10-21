@@ -159,7 +159,7 @@ vuelo nivelado con plena postcombustión y media carga de combustible:
 Limitaciones: no hay programa de flaps de borde de ataque ni tablas de
 pérdida más allá de 45° de AOA (se añade un momento de picado de placa plana),
 el centro de gravedad del modelo visual está algo adelantado respecto al real,
-y no se modelan límites térmicos, cargas externas, daños ni viento.
+y no se modelan límites térmicos ni viento.
 
 ### Proporciones del modelo exterior
 
@@ -172,6 +172,89 @@ motor, los estabilizadores y la deriva quedan por encima de la línea del morro.
 La envergadura y la altura usan las cifras publicadas (9,96 m con AIM-9 y
 4,88 m), porque el dibujo no está a escala exacta en esas cotas.
 
+### Tolerancia del piloto a la G
+
+`src/physio.rs` calcula la presión arterial a la altura de los ojos con una
+columna hidrostática: con el asiento reclinado 30 grados el ojo queda unos
+28 cm por encima del corazón, y cada G resta unos 22 mmHg (sangre de
+1.060 kg/m³) a una presión media de 100 mmHg en el corazón. Suman protección
+el traje anti-G CSU-13B/P (unos 30 mmHg, 1,4 G, que empieza a inflarse a
+2 G), la respiración a presión COMBAT EDGE (25 mmHg, 1,1 G, a partir de 4 G),
+la maniobra de esfuerzo AGSM (65 mmHg, 3 G, que el piloto agota en unos
+50 s de esfuerzo máximo y recupera en un minuto de descanso) y el barorreflejo
+(+20 mmHg en unos 6 s; -30 mmHg en 2 s tras G negativa, el efecto
+push-pull). La retina deja de perfundirse entre 30 y 0 mmHg y el cerebro
+entre -5 y -25 mmHg; cada uno guarda oxígeno para 3 y 5 s. Con los datos de
+centrífuga de Burton y Whinnery como referencia, el piloto relajado y sin
+protección pierde visión periférica a unos 4,7 G con instauración gradual
+(0,1 G/s), se queda a oscuras a 5,5 G y pierde la conciencia a 6,9 G; con
+instauración rápida a una meseta, la visión se cierra medio G antes. El
+piloto entrenado aguanta 9 G durante 15 s con la vista algo estrechada, y se
+desmaya si los mantiene más de un minuto. El G-LOC dura 12 s de
+incapacidad absoluta y 12 s de relativa, en los que los mandos vuelven poco a
+poco. Mientras el piloto no puede volar, el Auto-GCAS (en servicio en el F-16
+desde 2014) predice una recuperación (medio segundo de reacción, alabeo a
+180 grados por segundo hasta alas niveladas y tirón de 5 G) y la ejecuta si su
+trayectoria pasaría a menos de 60 m del terreno. La G negativa enrojece la
+vista desde -1,5 G y del todo a -3 G. El juego dibuja el gris, el túnel, el
+apagón y el velo rojo sobre la escena y el HUD, tramados en los píxeles de la
+escena; el sonido se apaga durante el G-LOC y se oye la respiración del AGSM
+cada 3 s.
+
+### Aeroelasticidad y límites estructurales
+
+`src/structure.rs` usa la placa del F-16C limpio, 800 KCAS (iguales a KEAS a
+nivel del mar) o Mach 2,05, y los márgenes de MIL-A-8870. Las cifras reales
+no son públicas; estas son estimaciones coherentes:
+
+| Fenómeno | Velocidad equivalente |
+| --- | --- |
+| Límite de la placa | 800 KEAS |
+| Flameo (15 % sobre el límite) | 920 KEAS, con caída transónica del 14 % entre Mach 0,9 y 1,1 y un 28 % menos con 1.500 kg bajo las alas |
+| Inversión del flaperón | 1.100 KEAS |
+| Divergencia torsional del ala | 1.280 KEAS, menos por compresibilidad (factor de Prandtl-Glauert con el Mach normal a la flecha) |
+
+El ala en flecha de 40 grados se dobla hacia arriba con la carga y la flecha
+convierte esa flexión en torsión de picado (wash-out): a la presión dinámica
+del límite pierde un 8 % de sustentación, sobre todo en los paneles
+exteriores, y el centro de sustentación avanza. El flaperón pierde eficacia
+hasta invertirse a 1.100 KEAS, pero la mitad del alabeo lo da el
+estabilizador diferencial, así que el mando no se invierte. El FLCS, que
+invierte las mismas tablas, compensa estos efectos como haría su
+programación de ganancias con la presión dinámica. El modo antisimétrico de
+flexión y torsión del ala con su misil de punta (8 Hz) pierde amortiguamiento
+al acercarse a la velocidad de flameo y crece más allá, hasta un ciclo límite
+que daña la estructura y rompe el ala en segundos; la turbulencia y el
+buffet lo excitan. La punta del ala se dobla unos 20 cm a 9 G y el flameo se
+ve en el modelo exterior. Más allá de 1,5 veces los límites de +9 y -3 G el
+ala se rompe; por encima del límite se acumula daño. El HUD avisa FLUTTER y la
+vista externa también OVERSPEED y STRUCT DAMAGE.
+
+### Condensación y efectos de Mach
+
+`src/vapor.rs` enfría el aire de forma adiabática donde el flujo se acelera,
+con un coeficiente de presión para cada zona: el núcleo del vórtice del LERX
+(unos -12 sen²(alfa), succión de vórtice al estilo de Polhamus), el núcleo
+del vórtice de punta de ala (un núcleo de Rankine de 0,6 m con la
+circulación L / (rho V b') de un ala elíptica) y la bolsa supersónica sobre el
+avión cerca de Mach 1 (unos -0,45). La humedad relativa es del 60 al 70 % bajo
+la base de los cúmulos, cerca de 1.500 m, y baja con la altitud; la presión
+de saturación sigue la fórmula de Magnus, y la densidad visible de la niebla
+sigue el agua que condensa (gramos por kilo de aire), así que arriba, con aire
+frío y seco, apenas se ve. El vórtice del LERX es un tubo de niebla sobre cada
+raíz alar que revienta y se hincha por delante del borde de salida a partir de
+unos 25 grados de AOA. Los vórtices de punta dejan estelas en tirones fuertes.
+El cono de vapor llena la bolsa supersónica entre Mach 0,86 y 1,04 y termina
+en el choque, que se desplaza hacia atrás al acercarse a Mach 1. Por debajo de
+unos -40 °C (criterio de Schmidt-Appleman) el escape deja estela de
+condensación. Pasado Mach 1, los choques de proa y cola se dibujan como conos
+tenues al ángulo de Mach, y la cámara externa oye el doble estampido cuando el
+cono de Mach la barre; el piloto, que va por delante, no lo oye. El buffet
+transónico sigue una frontera de coeficiente de sustentación que baja hacia
+Mach 0,95, más el movimiento de los choques sobre el ala al pasar Mach 1, y el
+altímetro da el salto de Mach cuando el choque de proa pasa por las tomas
+estáticas.
+
 ## Verificación
 
 - `cargo test --release`, en `src/sim.rs` y `src/aero.rs`: signos de las
@@ -180,6 +263,17 @@ La envergadura y la altura usan las cifras publicadas (9,96 m con AIM-9 y
   AOA a 25°, G negativo, alabeo coordinado de unos 300 °/s, combustible
   agotado, postcombustión, aerofreno, estabilidad numérica en la envolvente,
   velocidad máxima nivelada, cruce de puertas y puntuación.
+- `src/physio.rs`: umbrales del piloto relajado con instauración gradual y
+  rápida, 9 G durante 15 s sin G-LOC y G-LOC tras un minuto, efecto
+  push-pull, redout, duración de la incapacidad y Auto-GCAS en picado.
+- `src/structure.rs` y `src/sim.rs`: pérdida de sustentación y de alabeo con
+  la presión dinámica, divergencia siempre más allá del flameo, caída
+  transónica, amortiguamiento por debajo del flameo y rotura del ala por
+  encima, carga última; con 1.500 kg bajo las alas el avión flamea a Mach 1 a
+  1.500 m y el limpio no.
+- `src/vapor.rs`: niebla en un tirón fuerte a baja altura y no en crucero ni
+  en aire seco alto, cono de vapor solo cerca de Mach 1, estela de motor solo
+  en aire frío, y estampido solo dentro del cono de Mach.
 - `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
   vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
   triángulos que se dibujan.
