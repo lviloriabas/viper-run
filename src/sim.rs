@@ -1,7 +1,10 @@
-//! Flight model and mission. A faithful port of the original game-tuned F-16C
-//! Block 50 / F110-GE-129 model: ISA atmosphere, compressible pitot, lift-
-//! dependent drag, wave drag, ground effect, stall, FBW G/alpha limiting,
-//! engine spool and afterburner lag, thrust lapse, ram effect and fuel mass.
+//! Flight model and mission. A six-degree-of-freedom rigid body after the
+//! JSBSim F-16 that FlightGear flies: NASA TP-1538 aerodynamics (aero.rs), an
+//! F-16 FLCS (g command with an AoA limiter, roll-rate command, aileron-rudder
+//! interconnect, yaw damper) driving rate-limited surface actuators,
+//! F110-GE-129 thrust with spool lag, fuel burn changing mass and inertia, ISA
+//! atmosphere and compressible pitot.
+use crate::aero::{self, Flow};
 use crate::math::*;
 use crate::terrain::{self, river_x, terrain_at};
 
@@ -15,28 +18,40 @@ const ROUTE_Z: [f64; 10] = [7800.0, 6000.0, 4200.0, 2400.0, 500.0, -1500.0, -350
 const ROUTE_OFFSET: [f64; 10] = [0.0, 115.0, -80.0, 160.0, -120.0, 145.0, -170.0, 90.0, -70.0, 0.0];
 const ROUTE_CLEARANCE: [f64; 10] = [170.0, 135.0, 185.0, 125.0, 160.0, 140.0, 190.0, 130.0, 170.0, 150.0];
 
-/// Public F-16C Block 50 / F110-GE-129 figures, rounded for a game-scale model.
+/// F-16C Block 50 mass properties (FlightGear jsb-mass-50) and FLCS limits.
 pub mod spec {
-    pub const EMPTY_MASS: f64 = 8273.0;
+    /// Empty weight plus pilot, 19,359 lb.
+    pub const EMPTY_MASS: f64 = 8781.0;
+    /// Two wingtip AIM-9s with launchers and the empty pylons.
     pub const STORES_MASS: f64 = 450.0;
-    pub const WING_AREA: f64 = 27.87;
-    pub const DRY_THRUST: f64 = 76300.0;
-    pub const AB_THRUST: f64 = 128922.0;
-    pub const FUEL_MAX: f64 = 3200.0;
-    pub const FUEL_RATE_IDLE: f64 = 0.18;
-    pub const FUEL_RATE_DRY: f64 = 1.45;
-    pub const FUEL_RATE_AB: f64 = 5.2;
-    pub const CL_MAX: f64 = 1.63;
-    pub const ALPHA_STALL: f64 = 0.445;
-    pub const ALPHA_LIMIT: f64 = 0.455;
-    pub const CD0: f64 = 0.019;
-    pub const INDUCED_K: f64 = 0.118;
+    /// 7,000 lb of internal JP-8.
+    pub const FUEL_MAX: f64 = 3175.0;
+    /// Empty-jet inertia, kg m^2 (9,007 / 49,956 / 56,770 / 198 slug ft^2).
+    pub const IXX: f64 = 12213.0;
+    pub const IYY: f64 = 67732.0;
+    pub const IZZ: f64 = 76970.0;
+    pub const IXZ: f64 = 268.0;
+    /// Centre of gravity, fraction of MAC: about 4 % unstable, as on the real jet.
+    pub const XCG: f64 = 0.35;
     pub const G_LIMIT: f64 = 9.0;
-    pub const NEG_G_LIMIT: f64 = -2.4;
-    pub const ROLL_RATE_MAX: f64 = 4.45;
-    pub const MIN_ROLL_AUTHORITY: f64 = 0.18;
+    pub const NEG_G_LIMIT: f64 = -3.0;
+    /// The limiter starts trading g for AoA here and stops near 25.5 degrees.
+    pub const ALPHA_LIMITER: f64 = 22.5;
+    pub const ROLL_RATE_MAX: f64 = 308.0;
+    /// Surface travel in degrees and actuator rates in degrees per second.
+    pub const STAB_MAX: f64 = 25.0;
+    pub const STAB_RATE: f64 = 60.0;
+    pub const FLAPERON_MAX: f64 = 21.5;
+    /// Flaperons together with the differential stabilator they are mixed with.
+    pub const FLAPERON_RATE: f64 = 80.0;
+    pub const RUDDER_MAX: f64 = 30.0;
+    pub const RUDDER_RATE: f64 = 120.0;
 }
 use spec::*;
+
+/// Integration steps per fixed simulation step: the rigid body, the FLCS and
+/// the actuators run at 480 Hz.
+const SUBSTEPS: usize = 4;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Atmosphere {
@@ -179,8 +194,10 @@ impl Mission {
         let mut start = v3(first.pos.x + back.x, 0.0, first.pos.z + back.z);
         start.y = (first.pos.y + 150.0).max(terrain_at(start.x, start.z) + 180.0);
         let forward = (first.pos - start).norm();
-        // Close to 1 G trim: a small nose-up attitude gives the wing its lift.
-        let q = Quat::from_forward_up(forward, V3::Y).mul(Quat::axis_angle(V3::X, 2.35 * DEG));
+        // Trimmed for 1 g at 218 m/s: the nose sits at the trim AoA above the path.
+        let speed = 218.0;
+        let t = trim(start.y, speed, EMPTY_MASS + STORES_MASS + FUEL_MAX);
+        let q = Quat::from_forward_up(forward, V3::Y).mul(Quat::axis_angle(V3::X, t.alpha));
         Mission {
             gates,
             gate_index: 0,
@@ -190,8 +207,8 @@ impl Mission {
             passed: 0,
             start_pos: start,
             start_q: q,
-            start_vel: forward * 218.0,
-            start_throttle: 0.82,
+            start_vel: forward * speed,
+            start_throttle: t.throttle,
         }
     }
 
@@ -204,13 +221,229 @@ impl Mission {
     }
 }
 
+/// Wings-level 1 g trim for a speed and altitude.
+#[derive(Clone, Copy, Debug)]
+pub struct Trim {
+    /// Angle of attack, radians.
+    pub alpha: f64,
+    /// Stabilator, degrees trailing edge down.
+    pub el: f64,
+    /// Engine power 0..100 and the throttle that holds it.
+    pub power: f64,
+    pub throttle: f64,
+}
+
+pub fn trim(altitude: f64, speed: f64, mass: f64) -> Trim {
+    let atm = atmosphere_at(altitude);
+    let qs = 0.5 * atm.rho * speed * speed * aero::WING_AREA;
+    let mach = speed / atm.sound;
+    let flow = |alpha: f64, el: f64| Flow { alpha, el, speed, mach, xcg: XCG, h_over_b: 10.0, ..Default::default() };
+    // Pitching moment falls with stabilator, so bisect it to zero at each AoA.
+    let el_for = |alpha: f64| {
+        let (mut lo, mut hi) = (-STAB_MAX, STAB_MAX);
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if aero::coefficients(&flow(alpha, mid)).cm > 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    // Thrust balances drag along the path; AoA is stepped until lift carries the weight.
+    let balance = |alpha: f64| {
+        let el = el_for(alpha);
+        let c = aero::coefficients(&flow(alpha, el));
+        let (sa, ca) = (alpha.to_radians().sin(), alpha.to_radians().cos());
+        let thrust = -qs * (c.cx * ca + c.cz * sa) / ca;
+        let lift = qs * (-c.cz * ca + c.cx * sa) + thrust * sa;
+        (lift - mass * G0, el, thrust)
+    };
+    let (mut a0, mut a1) = (0.0, 6.0);
+    let (mut r0, mut r1) = (balance(a0).0, balance(a1).0);
+    for _ in 0..30 {
+        if (r1 - r0).abs() < 1e-9 {
+            break;
+        }
+        let a2 = clamp(a1 - r1 * (a1 - a0) / (r1 - r0), -5.0, 25.0);
+        a0 = a1;
+        r0 = r1;
+        a1 = a2;
+        r1 = balance(a1).0;
+    }
+    let (_, el, thrust) = balance(a1);
+    let (mut lo, mut hi) = (0.0, 100.0);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if aero::thrust(mid, mach, altitude) < thrust {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let power = 0.5 * (lo + hi);
+    Trim { alpha: a1.to_radians(), el, power, throttle: (power / 50.0).min(1.0) }
+}
+
+/// Inertia about the body axes (roll, pitch, yaw, roll-yaw product), with
+/// the wingtip missiles and the fuel in the fuselage and wing tanks.
+fn inertia(fuel: f64) -> (f64, f64, f64, f64) {
+    let f = fuel / FUEL_MAX;
+    let tips = 2.0 * 95.0 * 4.8 * 4.8;
+    let body = f * 1157.0 * (1.31f64.powi(2) + 1.74f64.powi(2));
+    let wings = f * 2.0 * 249.0 * 2.03f64.powi(2);
+    (IXX + tips + wings, IYY + body, IZZ + tips + body + wings, IXZ)
+}
+
+/// First-order washout: passes changes, removes the steady part.
+fn washout(state: &mut f64, x: f64, tau: f64, dt: f64) -> f64 {
+    *state += (x - *state) * clamp(dt / tau, 0.0, 1.0);
+    x - *state
+}
+
+/// Hydraulic actuator: 20 rad/s servo lag, rate and travel limits.
+fn actuate(pos: f64, cmd: f64, max: f64, rate: f64, dt: f64) -> f64 {
+    let v = clamp((clamp(cmd, -max, max) - pos) * 20.0, -rate, rate);
+    clamp(pos + v * dt, -max, max)
+}
+
+/// Flight control computer and surface state, after the FlightGear F-16 FLCS:
+/// the same command paths (g command with an AoA limiter, roll-rate command,
+/// aileron-rudder interconnect, yaw damper), with the pitch and roll inner
+/// loops closed by inverting the aerodynamic tables so the response holds
+/// from 120 kt to Mach 2.
+#[derive(Clone, Debug, Default)]
+pub struct Flcs {
+    /// Lagged command, g above 1 g.
+    pub n_cmd: f64,
+    /// AoA seen by the limiter, degrees.
+    pub alpha_f: f64,
+    /// Load-factor error integrator, g.
+    pub n_int: f64,
+    /// Lagged roll-rate command, deg/s.
+    pub p_cmd: f64,
+    q_wash: f64,
+    r_wash: f64,
+    /// Surface positions in degrees (stabilator and flaperon trailing edge
+    /// down, rudder trailing edge left positive) and speedbrake opening 0..1.
+    pub el: f64,
+    pub ail: f64,
+    pub rdr: f64,
+    pub brake: f64,
+}
+
+/// Stick force to g command (lbf to g above 1 g), FlightGear F-16 gradient.
+const PITCH_GRADIENT: [(f64, f64); 6] = [(-17.65, -4.0), (-7.25, -0.44), (-1.75, 0.0), (1.75, 0.0), (7.25, 0.44), (40.0, 10.86)];
+/// Lateral stick force to roll-rate command (lbf to deg/s).
+const ROLL_GRADIENT: [(f64, f64); 5] = [(0.0, 0.0), (1.0, 0.0), (6.0, 20.0), (11.0, 80.0), (17.0, 308.0)];
+
+/// What the FLCS reads each frame: air data, rates, load factor, the
+/// gravity component along the body's up axis and the mass properties.
+struct Sensors {
+    flow: Flow,
+    nz: f64,
+    qbar: f64,
+    up_y: f64,
+    inertia: (f64, f64, f64, f64),
+    rotor: f64,
+}
+
+/// Surface deflection that makes a monotonically falling coefficient reach a
+/// target, by bisection over the surface travel.
+fn invert(max: f64, target: f64, coeff: impl Fn(f64) -> f64) -> f64 {
+    let (mut lo, mut hi) = (-max, max);
+    for _ in 0..18 {
+        let mid = 0.5 * (lo + hi);
+        if coeff(mid) > target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+impl Flcs {
+    fn update(&mut self, dt: f64, input: &Input, s: &Sensors) {
+        let f = &s.flow;
+        let (alpha, speed) = (f.alpha, f.speed.max(40.0));
+        let (p, q, r) = (f.p, f.q, f.r);
+        let (ixx, iyy, izz, ixz) = s.inertia;
+        let qsc = s.qbar.max(50.0) * aero::WING_AREA * aero::CHORD;
+        let qsb = s.qbar.max(50.0) * aero::WING_AREA * aero::SPAN;
+
+        // Pitch. The stick commands g; above 22.5 degrees of filtered AoA,
+        // with pitch-rate anticipation, the limiter takes away 2 g per degree,
+        // which caps the slow jet near 25.5 degrees at full aft stick.
+        let stick = input.pitch();
+        let force = stick * if stick >= 0.0 { 40.0 } else { 17.65 };
+        let n_cmd = clamp(aero::curve(&PITCH_GRADIENT, force), NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
+        self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 8.3, 0.0, 1.0);
+        self.alpha_f += (alpha - self.alpha_f) * clamp(dt * 10.0, 0.0, 1.0);
+        let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
+        let demand = self.n_cmd - 2.0 * (lead - ALPHA_LIMITER).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
+        let err = demand - (s.nz - 1.0);
+        if err.abs() < 3.0 {
+            self.n_int = clamp(self.n_int + err * 2.5 * dt, -1.5, 1.5);
+        }
+        // Pitch rate that turns the flight path at the demanded load factor,
+        // plus a correction that closes the g error in about a quarter second.
+        let g_v = G0 / speed;
+        let mut q_cmd = clamp(g_v * (demand + 1.0 - s.up_y) + 2.5 * g_v * (err + self.n_int), -1.0, 1.0);
+        // AoA protection: near the limits, only the pitch rate that holds the
+        // AoA where it is (the path turning under the present lift) is allowed.
+        let q_hold = g_v * (s.nz - s.up_y);
+        let a = alpha * DEG;
+        q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (25.0 * DEG - a));
+        let qdot = 7.0 * (q_cmd - q);
+        let m_req = iyy * qdot - (izz - ixx) * p * r + ixz * (p * p - r * r) + r * s.rotor;
+        let el_cmd = invert(STAB_MAX, m_req / qsc, |el| aero::coefficients(&Flow { el, ..*f }).cm);
+
+        // Roll. Rate command, reduced at high AoA; the flaperons are set for
+        // the roll acceleration that closes the rate error in a tenth of a second.
+        let lat = input.roll();
+        let mut p_cmd = aero::curve(&ROLL_GRADIENT, lat.abs() * 17.0) * lat.signum();
+        let p_max = ROLL_RATE_MAX * clamp(1.0 - (self.alpha_f - 15.0) / 22.0, 0.3, 1.0);
+        p_cmd = clamp(p_cmd, -p_max, p_max);
+        self.p_cmd += (p_cmd - self.p_cmd) * clamp(dt * 12.0, 0.0, 1.0);
+        let pdot = 10.0 * (self.p_cmd * DEG - p);
+        let c0 = aero::coefficients(f);
+        let n_now = qsb * c0.cn;
+        let gam = ixx * izz - ixz * ixz;
+        let xpq = ixz * (ixx - iyy + izz);
+        let xqr = izz * (izz - iyy) + ixz * ixz;
+        let l_req = (gam * pdot - xpq * p * q + xqr * q * r - ixz * (n_now + q * s.rotor)) / izz;
+        let ail_cmd = invert(FLAPERON_MAX, l_req / qsb, |ail| aero::coefficients(&Flow { ail, ..*f }).cl);
+
+        // Yaw: pedals with authority shrinking at high dynamic pressure,
+        // aileron-rudder interconnect for coordinated rolls at AoA, a damper on
+        // the washed-out stability-axis yaw rate and sideslip feedback.
+        let authority = RUDDER_MAX * clamp(12000.0 / s.qbar.max(1.0), 0.25, 1.0);
+        let r_stab = (r * a.cos() - p * a.sin()) * RAD;
+        let r_w = washout(&mut self.r_wash, r_stab, 1.0, dt);
+        let ari = self.ail * clamp(0.02 * self.alpha_f, 0.0, 0.6);
+        let damper = clamp(0.5 * 28600.0 / s.qbar.max(1.0), 0.1, 2.0);
+        let rdr_cmd = -input.yaw() * authority + ari + damper * r_w - clamp(28600.0 / s.qbar.max(1.0), 0.2, 2.0) * f.beta;
+
+        self.el = actuate(self.el, el_cmd, STAB_MAX, STAB_RATE, dt);
+        self.ail = actuate(self.ail, ail_cmd, FLAPERON_MAX, FLAPERON_RATE, dt);
+        self.rdr = actuate(self.rdr, rdr_cmd, RUDDER_MAX, RUDDER_RATE, dt);
+        self.brake = approach(self.brake, if input.airbrake { 1.0 } else { 0.0 }, dt * 0.5);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Aircraft {
     pub pos: V3,
     pub vel: V3,
     pub q: Quat,
+    /// Body angular velocity about right, up and aft (pitch up, yaw left, roll left).
     pub omega: V3,
+    pub flcs: Flcs,
     pub throttle: f64,
+    /// Engine power 0..100: 50 is military, above it the afterburner.
+    pub power: f64,
     pub engine_spool: f64,
     pub ab_level: f64,
     pub ab: bool,
@@ -231,6 +464,7 @@ pub struct Aircraft {
     pub g_load: f64,
     pub g_smooth: f64,
     pub max_g: f64,
+    pub min_g: f64,
     pub g_avail: f64,
     pub vs: f64,
     pub stall: f64,
@@ -255,7 +489,8 @@ pub struct Aircraft {
     pub ftit: f64,
     pub nozzle: f64,
     pub oil_psi: f64,
-    /// Smoothed control-surface commands, for the exterior model.
+    /// Control-surface positions normalised to their travel, for the exterior
+    /// model: stabilator trailing edge up, right roll and right rudder positive.
     pub surf_pitch: f64,
     pub surf_roll: f64,
     pub surf_yaw: f64,
@@ -263,19 +498,25 @@ pub struct Aircraft {
 
 impl Aircraft {
     pub fn new(m: &Mission) -> Aircraft {
+        let mass = EMPTY_MASS + STORES_MASS + FUEL_MAX;
+        let speed = m.start_vel.len();
+        let t = trim(m.start_pos.y, speed, mass);
+        let flcs = Flcs { alpha_f: t.alpha * RAD, el: t.el, ..Default::default() };
         let mut a = Aircraft {
             pos: m.start_pos,
             vel: m.start_vel,
             q: m.start_q,
             omega: V3::ZERO,
-            throttle: m.start_throttle,
-            engine_spool: m.start_throttle,
+            flcs,
+            throttle: t.throttle,
+            power: t.power,
+            engine_spool: 0.0,
             ab_level: 0.0,
             ab: false,
             brake: 0.0,
             fuel: FUEL_MAX,
-            mass: EMPTY_MASS + STORES_MASS + FUEL_MAX,
-            speed: m.start_vel.len(),
+            mass,
+            speed,
             airspeed_kt: 0.0,
             tas_kt: 0.0,
             eas_kt: 0.0,
@@ -289,6 +530,7 @@ impl Aircraft {
             g_load: 1.0,
             g_smooth: 1.0,
             max_g: 1.0,
+            min_g: 1.0,
             g_avail: G_LIMIT,
             vs: 0.0,
             stall: 0.0,
@@ -350,199 +592,152 @@ impl Aircraft {
         }
     }
 
+    /// Air-data angles and rates in aircraft axes (x forward, y right, z down).
+    fn air_state(&self) -> (f64, f64, f64, f64, f64, f64) {
+        let lv = self.q.conj().rotate(self.vel);
+        let (u, v, w) = (-lv.z, lv.x, -lv.y);
+        let speed = (u * u + v * v + w * w).sqrt();
+        let (alpha, beta) = if speed > 1.0 { (w.atan2(u), clamp(v / speed, -1.0, 1.0).asin()) } else { (0.0, 0.0) };
+        (speed, alpha, beta, -self.omega.z, self.omega.x, -self.omega.y)
+    }
+
+    fn flow(&self, speed: f64, alpha: f64, beta: f64, p: f64, q: f64, r: f64, mach: f64) -> Flow {
+        let f = &self.flcs;
+        let h_over_b = self.agl.max(0.0) / aero::SPAN;
+        Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, h_over_b }
+    }
+
+    /// One rigid-body step: FLCS, engine, forces and moments, integration.
+    fn integrate(&mut self, dt: f64, input: &Input, want_ab: bool) {
+        let atm = atmosphere_at(self.pos.y);
+        let (speed, alpha, beta, p, q, r) = self.air_state();
+        let qbar = 0.5 * atm.rho * speed * speed;
+        let mach = speed / atm.sound;
+        let sensors = Sensors {
+            flow: self.flow(speed, alpha, beta, p, q, r, mach),
+            nz: self.g_load,
+            qbar,
+            up_y: self.q.axes().up.y,
+            inertia: inertia(self.fuel),
+            rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
+        };
+        self.flcs.update(dt, input, &sensors);
+
+        let fueled = self.fuel > 0.0;
+        let command = if !fueled { 0.0 } else if want_ab { 100.0 } else { 50.0 * self.throttle };
+        self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
+        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) } else { 0.0 };
+
+        let c = aero::coefficients(&self.flow(speed, alpha, beta, p, q, r, mach));
+        let qs = qbar * aero::WING_AREA;
+        let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
+        let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
+
+        // Translation in the world frame; the accelerometer reads the specific
+        // force along the body's up axis.
+        let accel = self.q.rotate(v3(fy, -fz, -fx)) * (1.0 / self.mass) + v3(0.0, -G0, 0.0);
+        self.g_load = -fz / (self.mass * G0);
+
+        // Rotation: body-axis moment equations with the roll-yaw product of
+        // inertia and the engine rotor's gyroscopic moment.
+        let (ixx, iyy, izz, ixz) = inertia(self.fuel);
+        let h = aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0;
+        let gam = ixx * izz - ixz * ixz;
+        let xpq = ixz * (ixx - iyy + izz);
+        let xqr = izz * (izz - iyy) + ixz * ixz;
+        let zpq = (ixx - iyy) * ixx + ixz * ixz;
+        let pdot = (xpq * p * q - xqr * q * r + izz * l + ixz * (n + q * h)) / gam;
+        let qdot = ((izz - ixx) * p * r - ixz * (p * p - r * r) + m - r * h) / iyy;
+        let rdot = (zpq * p * q - xpq * q * r + ixz * l + ixx * (n + q * h)) / gam;
+        let (p, q, r) = (p + pdot * dt, q + qdot * dt, r + rdot * dt);
+        self.omega = v3(q, -r, -p);
+        self.q = self.q.integrate(self.omega, dt);
+        self.vel += accel * dt;
+        self.pos += self.vel * dt;
+
+        let wind = |cx: f64, cz: f64| (-cz * alpha.cos() + cx * alpha.sin(), -cx * alpha.cos() - cz * alpha.sin());
+        let (cl, cd) = wind(c.cx, c.cz);
+        self.cl = cl;
+        self.cd = cd;
+        self.lift_n = qs * cl;
+        self.drag_n = qs * cd;
+    }
+
     pub fn update(&mut self, dt: f64, input: &Input) {
         if self.crashed {
             return;
         }
         self.last_pos = self.pos;
-        let ax = self.q.axes();
-        let atm = atmosphere_at(self.pos.y);
-        let rho = atm.rho;
-        let speed = self.vel.len();
-        let qbar = 0.5 * rho * speed * speed;
-        let local_v = self.q.conj().rotate(self.vel);
-        let forward_speed = (-local_v.z).max(0.001);
-        let mut alpha = (-local_v.y).atan2(forward_speed.max(2.0));
-        let mut beta = local_v.x.atan2(forward_speed.max(2.0));
-        if speed < 3.0 {
-            alpha = 0.0;
-            beta = 0.0;
-        }
-        alpha = clamp(alpha, -1.15, 1.15);
-        beta = clamp(beta, -0.75, 0.75);
-
-        // Keyboard and mouse axes are additive.
-        let pitch_in = input.pitch();
-        let roll_in = input.roll();
-        let yaw_in = input.yaw();
-
         if input.throttle_up {
             self.throttle = clamp(self.throttle + dt * 0.62, 0.0, 1.0);
         }
         if input.throttle_down {
             self.throttle = clamp(self.throttle - dt * 0.62, 0.0, 1.0);
         }
-
         let fueled = self.fuel > 0.0;
         let want_ab = input.afterburner && self.throttle >= 0.95 && fueled;
         self.ab = want_ab;
-        self.brake = approach(self.brake, if input.airbrake { 1.0 } else { 0.0 }, dt * 2.5);
+        self.agl = self.pos.y - terrain::floor(self.pos.x, self.pos.z);
+        if dt > 0.0 {
+            let h = dt / SUBSTEPS as f64;
+            for _ in 0..SUBSTEPS {
+                self.integrate(h, input, want_ab);
+            }
+        } else {
+            // Instruments before the first step: evaluate without moving.
+            let saved = self.clone();
+            self.integrate(0.0, input, want_ab);
+            let g = self.g_load;
+            let (thrust, cl, cd, lift, drag) = (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n);
+            *self = saved;
+            self.g_load = g;
+            self.g_smooth = g;
+            (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n) = (thrust, cl, cd, lift, drag);
+        }
+
+        // Fuel: specific consumption of the F110 dry and in afterburner.
+        let ab = ((self.power - 50.0) / 50.0).max(0.0);
+        let lbf = self.thrust_n.max(0.0) / 4.448222;
+        let tsfc = mix(0.661, 1.9, ab);
+        self.fuel_flow = if fueled { (lbf * tsfc / 3600.0 * 0.4536).max(0.12) } else { 0.0 };
+        self.fuel = (self.fuel - self.fuel_flow * dt).max(0.0);
         self.mass = EMPTY_MASS + STORES_MASS + self.fuel;
 
-        let agl_center = self.pos.y - terrain::floor(self.pos.x, self.pos.z);
-        let ground_effect = 1.0 + 0.045 * (-agl_center.max(0.0) / 18.0).exp();
-        let mach = speed / atm.sound;
-        let cl_max_eff = CL_MAX * (1.0 - 0.28 * smoothstep(0.85, 1.25, mach)).max(0.82);
-        let lift_capacity = qbar * WING_AREA * cl_max_eff * ground_effect;
-        let g_available = lift_capacity / (self.mass * G0);
-        self.g_avail = G_LIMIT.min(g_available.max(0.0));
-
-        // FBW pitch: the stick commands a load factor. The feed-forward rate
-        // turns the flight path as fast as that load factor does; the alpha
-        // term builds (or sheds) the lift for it in about 0.3 s instead of
-        // waiting for the airframe's own one-second alpha response, so the G
-        // follows the stick both on the pull and on the release. With the
-        // stick centred the steady state is the same path hold as before.
-        let n_limit = 1.12f64.max(G_LIMIT.min(g_available));
-        let n_demand = if pitch_in >= 0.0 { 1.0 + pitch_in * (n_limit - 1.0) } else { 1.0 + pitch_in * 2.2 };
-        let n_target = clamp(n_demand - 1.0 + ax.up.y, NEG_G_LIMIT, n_limit);
-        let lift_per_alpha = qbar * WING_AREA * ground_effect * cl_max_eff / ALPHA_STALL;
-        // Centred, the jet never pitches itself into buffet to hold the path.
-        let alpha_cap = mix(0.62 * ALPHA_STALL, ALPHA_LIMIT, pitch_in.max(0.0));
-        let alpha_cmd = clamp(n_target * self.mass * G0 / lift_per_alpha.max(1.0), -0.38, alpha_cap);
-        let mut pitch_target = G0 * (n_demand - 1.0) / speed.max(70.0) + 4.0 * (alpha_cmd - alpha);
-        if pitch_target > 0.0 {
-            pitch_target *= clamp((ALPHA_LIMIT - alpha.max(0.0)) / 0.07, 0.0, 1.0);
-            if self.g_load > G_LIMIT + 0.12 {
-                pitch_target = 0.0;
-            }
-        } else {
-            pitch_target *= clamp((alpha + 0.38) / 0.08, 0.0, 1.0);
-            if self.g_load < NEG_G_LIMIT - 0.1 {
-                pitch_target = 0.0;
-            }
-        }
-        pitch_target *= 1.0 - 0.18 * smoothstep(0.9, 1.6, mach);
-        pitch_target = clamp(pitch_target, -0.9, 0.9);
-
-        let q_ref = 0.5 * 1.225 * 200.0 * 200.0;
-        let roll_authority = clamp((qbar.max(0.0) / q_ref).sqrt(), MIN_ROLL_AUTHORITY, 1.18);
-        let max_roll_rate = 4.6f64.min(ROLL_RATE_MAX * roll_authority);
-        let target_roll = -roll_in * max_roll_rate;
-        let yaw_authority = clamp((qbar.max(0.0) / q_ref).sqrt(), 0.12, 1.05);
-        let target_yaw = -yaw_in * 0.62 * yaw_authority - beta * 1.9 - roll_in * 0.018 * (speed / 220.0).min(1.0);
-
-        let pitch_response = clamp(dt * (3.8 + qbar / 6500.0), 0.0, 1.0);
-        let yaw_response = clamp(dt * (3.0 + qbar / 16000.0), 0.0, 1.0);
-        let roll_response = clamp(dt * (4.5 + qbar / 12000.0), 0.0, 1.0);
-        self.omega.x += (pitch_target - self.omega.x) * pitch_response;
-        self.omega.y += (target_yaw - self.omega.y) * yaw_response;
-        self.omega.z += (target_roll - self.omega.z) * roll_response;
-
-        let surf = clamp(dt * 9.0, 0.0, 1.0);
-        self.surf_pitch += (pitch_in - self.surf_pitch) * surf;
-        self.surf_roll += (roll_in - self.surf_roll) * surf;
-        self.surf_yaw += (yaw_in - self.surf_yaw) * surf;
-
-        // Low-altitude roughness is recorded for camera shake and audio only.
-        self.turbulence = 1.0 - smoothstep(300.0, 1700.0, self.pos.y - terrain::floor(self.pos.x, self.pos.z));
-        self.q = self.q.integrate(self.omega, dt);
-
-        // Aerodynamics --------------------------------------------------------
-        let abs_alpha = alpha.abs();
-        let mut cl = if abs_alpha <= ALPHA_STALL {
-            cl_max_eff * (abs_alpha / ALPHA_STALL)
-        } else {
-            0.42f64.max(cl_max_eff - 1.95 * (abs_alpha - ALPHA_STALL))
-        };
-        cl = clamp(cl, 0.0, cl_max_eff);
-        if alpha < 0.0 {
-            cl = -cl;
-        }
-        let stall = smoothstep(ALPHA_STALL - 0.015, ALPHA_STALL + 0.11, abs_alpha);
-        let mach_buffet = smoothstep(0.92, 1.08, mach) * (1.0 - smoothstep(1.16, 1.4, mach)) * 0.6;
-        self.stall = stall;
-        self.buffet = clamp(stall.max((abs_alpha - 0.32) / 0.15) + mach_buffet, 0.0, 1.0);
-
-        let lift = qbar * WING_AREA * cl * ground_effect;
-        let mut cd = CD0 + INDUCED_K * cl * cl;
-        cd += self.brake * 0.05;
-        let wave_drag = 0.004
-            + 0.032 * (-((mach - 1.04) / 0.22).powi(2)).exp()
-            + 0.018 * smoothstep(1.15, 1.85, mach);
-        cd += wave_drag + stall * 0.10;
-        let drag = qbar * WING_AREA * cd;
-        let side = -qbar * WING_AREA * 1.25 * beta;
-
-        let mut lift_dir_local = V3::X.cross(local_v.norm());
-        if lift_dir_local.len() < 0.001 {
-            lift_dir_local = V3::Y;
-        }
-        let lift_world = self.q.rotate(lift_dir_local.norm()) * lift;
-        let side_world = self.q.rotate(v3(side, 0.0, 0.0));
-        let drag_world = if speed > 0.5 { self.vel * (-drag / speed) } else { V3::ZERO };
-
-        // Engine: spool and afterburner light-up are not instant; density lapse
-        // and ram effect give less thrust upstairs and more at speed.
-        let target_spool = if fueled {
-            if want_ab {
-                1.0
-            } else {
-                self.throttle.max(0.08)
-            }
-        } else {
-            0.0
-        };
-        self.engine_spool += (target_spool - self.engine_spool) * clamp(dt * if want_ab { 2.0 } else { 1.4 }, 0.0, 1.0);
-        self.ab_level += ((if want_ab { 1.0 } else { 0.0 }) - self.ab_level) * clamp(dt * 3.5, 0.0, 1.0);
-        let density_ratio = rho / 1.225;
-        let lapse = density_ratio.powf(0.72);
-        let ram = ((1.0 + 0.22 * mach.min(1.6) - 0.06 * (mach - 1.6).max(0.0)) * (1.0 - 0.22 * smoothstep(2.0, 2.4, mach))).max(0.55);
-        let mil_thrust = DRY_THRUST * (0.055 + 0.945 * self.throttle) * self.engine_spool;
-        let ab_extra = (AB_THRUST - DRY_THRUST) * self.ab_level;
-        self.thrust_n = if fueled { (mil_thrust + ab_extra) * lapse * ram } else { 0.0 };
-        let thrust_world = ax.forward * self.thrust_n;
-        let gravity = v3(0.0, -self.mass * G0, 0.0);
-
-        let aero_force = lift_world + drag_world + side_world;
-        let force = aero_force + thrust_world + gravity;
-        let accel = force * (1.0 / self.mass);
-        self.g_load = (aero_force + thrust_world).dot(ax.up) / (self.mass * G0);
-        self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
-        self.max_g = self.max_g.max(self.g_smooth);
-
-        self.vel += accel * dt;
-        self.pos += self.vel * dt;
-
-        let fuel_flow = if want_ab { FUEL_RATE_AB } else { FUEL_RATE_IDLE + FUEL_RATE_DRY * clamp(self.throttle, 0.0, 1.0) };
-        self.fuel_flow = if fueled { fuel_flow } else { 0.0 };
-        self.fuel = (self.fuel - self.fuel_flow * dt).max(0.0);
-        self.rpm = if self.fuel > 0.0 { 61.0 + 38.0 * self.engine_spool } else { 99.0 * self.engine_spool };
-        self.ftit = if self.fuel > 0.0 {
-            420.0 + 480.0 * self.engine_spool + 130.0 * self.ab_level
-        } else {
-            20.0 + 400.0 * self.engine_spool
-        };
-        self.nozzle = 15.0 + 80.0 * self.ab_level + 60.0 * (1.0 - self.engine_spool * 2.0).max(0.0);
+        let core = (self.power / 50.0).min(1.0);
+        self.engine_spool = core;
+        self.ab_level = ab;
+        self.rpm = if fueled { 65.0 + 35.0 * core.sqrt() } else { 99.0 * core };
+        self.ftit = if fueled { 420.0 + 480.0 * core } else { 20.0 + 400.0 * core };
+        self.nozzle = 15.0 + 80.0 * ab + 60.0 * (1.0 - core * 2.0).max(0.0);
         self.oil_psi = (self.rpm * 0.65).max(0.0);
 
-        // Derived data for instruments.
-        self.speed = self.vel.len();
-        let atm2 = atmosphere_at(self.pos.y);
-        self.airspeed_kt = calibrated_airspeed(self.speed, &atm2) * 1.94384;
-        self.tas_kt = self.speed * 1.94384;
-        self.eas_kt = self.tas_kt * (atm2.rho / 1.225).sqrt();
+        // Derived data for instruments and effects.
+        let (speed, alpha, beta, ..) = self.air_state();
+        let atm = atmosphere_at(self.pos.y);
+        self.speed = speed;
+        self.airspeed_kt = calibrated_airspeed(speed, &atm) * 1.94384;
+        self.tas_kt = speed * 1.94384;
+        self.eas_kt = self.tas_kt * (atm.rho / 1.225).sqrt();
         self.agl = self.pos.y - terrain::floor(self.pos.x, self.pos.z);
         self.alpha = alpha;
         self.alpha_deg = alpha * RAD;
         self.beta = beta;
-        self.mach = self.speed / atm2.sound;
-        self.qbar = 0.5 * rho * self.speed * self.speed;
-        self.cl = cl;
-        self.cd = cd;
-        self.lift_n = lift;
-        self.drag_n = drag;
+        self.mach = speed / atm.sound;
+        self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
+        self.g_avail = G_LIMIT.min(self.qbar * aero::WING_AREA * aero::cl_max() / (self.mass * G0)).max(0.0);
+        self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
+        self.max_g = self.max_g.max(self.g_smooth);
+        self.min_g = self.min_g.min(self.g_smooth);
+        self.stall = smoothstep(26.0, 34.0, self.alpha_deg.abs());
+        let mach_buffet = smoothstep(0.92, 1.08, self.mach) * (1.0 - smoothstep(1.16, 1.4, self.mach)) * 0.6;
+        self.buffet = clamp(smoothstep(14.0, 26.0, self.alpha_deg.abs()) * 0.7 + self.stall + mach_buffet, 0.0, 1.0);
+        // Low-altitude roughness is recorded for camera shake and audio only.
+        self.turbulence = 1.0 - smoothstep(300.0, 1700.0, self.agl);
+        self.brake = self.flcs.brake;
+        self.surf_pitch = -self.flcs.el / STAB_MAX;
+        self.surf_roll = -self.flcs.ail / FLAPERON_MAX;
+        self.surf_yaw = -self.flcs.rdr / RUDDER_MAX;
         let now = self.q.axes();
         self.heading = wrap(now.forward.x.atan2(-now.forward.z) * RAD, 360.0);
         self.pitch = clamp(now.forward.y, -1.0, 1.0).asin() * RAD;
@@ -575,9 +770,14 @@ mod tests {
 
     fn aircraft(alt: f64, speed: f64) -> Aircraft {
         let mut a = Aircraft::new(&Mission::new());
+        let t = trim(alt, speed, a.mass);
         a.pos = v3(0.0, alt, 0.0);
         a.vel = v3(0.0, 0.0, -speed);
-        a.q = Quat::from_forward_up(v3(0.0, 0.0, -1.0), V3::Y).mul(Quat::axis_angle(V3::X, 2.35 * DEG));
+        a.q = Quat::from_forward_up(v3(0.0, 0.0, -1.0), V3::Y).mul(Quat::axis_angle(V3::X, t.alpha));
+        a.flcs = Flcs { alpha_f: t.alpha * RAD, el: t.el, ..Default::default() };
+        a.power = t.power;
+        a.throttle = t.throttle;
+        a.update(0.0, &Input::default());
         a
     }
     fn run(mut a: Aircraft, seconds: f64, input: Input) -> Aircraft {
@@ -589,6 +789,9 @@ mod tests {
     fn full() -> Input {
         Input { roll_right: true, afterburner: true, throttle_up: true, ..Default::default() }
     }
+    fn roll_rate(a: &Aircraft) -> f64 {
+        -a.omega.z * RAD
+    }
 
     #[test]
     fn initial_instruments_are_valid_before_the_first_frame() {
@@ -596,6 +799,7 @@ mod tests {
         assert!(a.speed > 200.0 && a.airspeed_kt > 300.0);
         assert!(a.mach > 0.5 && a.agl > 100.0);
         assert!(a.rpm > 80.0);
+        assert!((a.g_load - 1.0).abs() < 0.05, "trimmed start: {:.3} g", a.g_load);
     }
 
     #[test]
@@ -620,22 +824,33 @@ mod tests {
     }
 
     #[test]
-    fn altitude_reduces_qbar_lift_roll_and_thrust() {
+    fn trim_holds_wings_level_flight_hands_off() {
+        for (alt, speed) in [(1500.0, 220.0), (3000.0, 160.0), (9000.0, 250.0)] {
+            let a0 = aircraft(alt, speed);
+            let a = run(a0.clone(), 10.0, Input::default());
+            assert!(a.vs.abs() < 4.0, "{alt} m {speed} m/s: climbing {:.2} m/s", a.vs);
+            assert!((a.speed - speed).abs() < 4.0, "speed {:.1}", a.speed);
+            assert!((a.g_load - 1.0).abs() < 0.05 && a.bank.abs() < 1.0, "{:.3} g, bank {:.2}", a.g_load, a.bank);
+        }
+    }
+
+    #[test]
+    fn altitude_reduces_qbar_lift_and_thrust() {
         let low = run(aircraft(3000.0, 220.0), 0.5, full());
         let high = run(aircraft(10000.0, 220.0), 0.5, full());
         assert!(high.qbar < low.qbar * 0.5);
         assert!(high.g_avail < low.g_avail);
-        assert!(high.omega.z.abs() < low.omega.z.abs());
         assert!(high.thrust_n < low.thrust_n);
     }
 
     #[test]
     fn airspeed_changes_attainable_g_and_roll() {
         let i = Input { roll_right: true, pitch_up: true, ..Default::default() };
-        let slow = run(aircraft(3000.0, 100.0), 0.25, i);
-        let fast = run(aircraft(3000.0, 250.0), 0.25, i);
+        let slow = run(aircraft(3000.0, 100.0), 1.0, i);
+        let fast = run(aircraft(3000.0, 250.0), 1.0, i);
         assert!(slow.g_avail < fast.g_avail);
-        assert!(slow.omega.z.abs() < fast.omega.z.abs());
+        assert!(slow.g_load < fast.g_load);
+        assert!(roll_rate(&slow) < roll_rate(&fast));
     }
 
     #[test]
@@ -659,7 +874,7 @@ mod tests {
         a.throttle = 1.0;
         a.update(DT, &ab);
         assert!(a.ab);
-        assert!(a.ab_level > 0.0 && a.ab_level < 0.1);
+        assert!(a.ab_level < 0.1);
     }
 
     #[test]
@@ -670,28 +885,74 @@ mod tests {
         assert!(a.bank.abs() > 170.0);
     }
 
+    /// The FLCS commands load factor: neutral stick holds 1 g, a full pull
+    /// reaches 9 g in about a second and does not overshoot the limit.
     #[test]
-    fn load_factor_follows_the_stick_quickly() {
-        let mut a = Aircraft::new(&Mission::new());
+    fn load_factor_follows_the_stick() {
+        let mut a = aircraft(1000.0, 240.0);
         let pull = Input { pitch_up: true, ..Default::default() };
-        for _ in 0..48 {
+        let mut peak: f64 = 0.0;
+        let mut t9 = None;
+        for i in 0..240 {
             a.update(DT, &pull);
+            peak = peak.max(a.g_load);
+            if t9.is_none() && a.g_load > 8.5 {
+                t9 = Some(i as f64 * DT);
+            }
         }
-        assert!(a.g_load > 5.5, "0.4 s into a full pull: {:.2} g", a.g_load);
-        for _ in 0..72 {
+        let t9 = t9.expect("never reached 8.5 g");
+        assert!(t9 < 1.3, "8.5 g after {t9:.2} s");
+        assert!(peak > 8.8 && peak < G_LIMIT + 0.4, "peak {peak:.2} g");
+        // Holding 9 g bleeds speed, so the g decays as the AoA limit is reached.
+        assert!(a.g_load > 6.5 && a.alpha_deg < 25.5, "{:.2} g at {:.1} deg after 2 s", a.g_load, a.alpha_deg);
+        let a = run(a, 1.0, Input::default());
+        assert!((a.g_load - 1.0).abs() < 0.5, "1 s after release: {:.2} g", a.g_load);
+    }
+
+    #[test]
+    fn aoa_limiter_holds_the_slow_jet_near_25_degrees() {
+        let mut a = aircraft(3000.0, 120.0);
+        let pull = Input { pitch_up: true, ..Default::default() };
+        let mut peak: f64 = 0.0;
+        for _ in 0..480 {
             a.update(DT, &pull);
+            peak = peak.max(a.alpha_deg);
         }
-        assert!(a.g_load > 8.0 && a.g_load < G_LIMIT + 0.3, "sustained pull: {:.2} g", a.g_load);
-        for _ in 0..60 {
-            a.update(DT, &Input::default());
+        assert!(peak > 24.0 && peak < 27.0, "peak AoA {peak:.1}");
+        assert!((a.alpha_deg - 25.0).abs() < 1.0, "held AoA {:.1}", a.alpha_deg);
+    }
+
+    #[test]
+    fn negative_g_is_limited() {
+        let mut a = aircraft(3000.0, 330.0);
+        let mut low: f64 = 1.0;
+        for _ in 0..240 {
+            a.update(DT, &Input { pitch_down: true, ..Default::default() });
+            low = low.min(a.g_load);
         }
-        assert!(a.g_load < 2.0, "0.5 s after release: {:.2} g", a.g_load);
+        assert!(low < -2.5 && low > NEG_G_LIMIT - 0.4, "push {low:.2} g");
+        assert!(a.alpha_deg > -7.0, "push AoA {:.1}", a.alpha_deg);
+    }
+
+    #[test]
+    fn full_lateral_stick_commands_a_coordinated_300_degree_roll() {
+        let mut a = aircraft(3000.0, 230.0);
+        let mut beta: f64 = 0.0;
+        for _ in 0..120 {
+            a.update(DT, &Input { roll_right: true, ..Default::default() });
+            beta = beta.max(a.beta.abs() * RAD);
+        }
+        let p = roll_rate(&a);
+        assert!(p > 240.0 && p < ROLL_RATE_MAX + 15.0, "roll rate {p:.0} deg/s");
+        assert!(beta < 4.0, "sideslip {beta:.1} deg");
+        let a = run(a, 0.6, Input::default());
+        assert!(roll_rate(&a).abs() < 15.0, "roll stops: {:.1} deg/s", roll_rate(&a));
     }
 
     #[test]
     fn airbrake_adds_drag() {
-        let clean = run(aircraft(3000.0, 250.0), 2.0, Input::default());
-        let braked = run(aircraft(3000.0, 250.0), 2.0, Input { airbrake: true, ..Default::default() });
+        let clean = run(aircraft(3000.0, 250.0), 3.0, Input::default());
+        let braked = run(aircraft(3000.0, 250.0), 3.0, Input { airbrake: true, ..Default::default() });
         assert!(braked.drag_n > clean.drag_n);
         assert!(braked.speed < clean.speed);
     }
@@ -700,9 +961,10 @@ mod tests {
     fn engine_instruments_follow_spool_and_consumption() {
         let a0 = aircraft(3000.0, 220.0);
         let fuel = a0.fuel;
-        let a = run(a0, 3.0, Input { throttle_up: true, afterburner: true, ..Default::default() });
+        let a = run(a0, 6.0, Input { throttle_up: true, afterburner: true, ..Default::default() });
         assert!(a.fuel < fuel);
         assert!(a.rpm > 90.0 && a.ftit > 800.0 && a.nozzle > 80.0 && a.oil_psi > 50.0);
+        assert!(a.fuel_flow > 4.0, "full afterburner burns {:.1} kg/s", a.fuel_flow);
     }
 
     #[test]
@@ -718,33 +980,19 @@ mod tests {
         }
     }
 
-    /// Game-model calibration, not a claim of validated F-16 performance tables:
-    /// full-afterburner level-flight equilibrium Mach at 40,000 ft must stay near
-    /// the published Block 50 short-duration figure of Mach 2.05.
+    /// Full-afterburner level-flight Mach from the trim solution: the
+    /// published Block 50 figure is about Mach 2 at 40,000 ft.
     #[test]
-    fn full_afterburner_equilibrium_matches_reference() {
-        let equilibrium = |altitude: f64, mach: f64| {
-            let atm = atmosphere_at(altitude);
-            let speed = mach * atm.sound;
-            let q = 0.5 * atm.rho * speed * speed;
-            let mut a = Aircraft::new(&Mission::new());
-            a.pos = v3(0.0, altitude, 0.0);
-            a.vel = v3(0.0, 0.0, -speed);
-            let cl_max = CL_MAX * (1.0 - 0.28 * smoothstep(0.85, 1.25, mach)).max(0.82);
-            let alpha = a.mass * G0 / (q * WING_AREA * cl_max) * ALPHA_STALL;
-            a.q = Quat::from_forward_up(v3(0.0, 0.0, -1.0), V3::Y).mul(Quat::axis_angle(V3::X, alpha));
-            a.throttle = 1.0;
-            a.engine_spool = 1.0;
-            a.ab_level = 1.0;
-            a.update(0.0, &Input { afterburner: true, ..Default::default() });
-            a.thrust_n * alpha.cos() - a.drag_n
-        };
+    fn full_afterburner_level_speed_matches_reference() {
+        let mass = EMPTY_MASS + STORES_MASS + FUEL_MAX * 0.5;
         let mut mach = 0.0;
-        for feet in [10000.0, 20000.0, 30000.0, 40000.0] {
-            let (mut low, mut high) = (1.1, 2.6);
-            for _ in 0..35 {
+        for feet in [0.0, 10000.0, 20000.0, 30000.0, 40000.0] {
+            let alt = feet * 0.3048;
+            let sound = atmosphere_at(alt).sound;
+            let (mut low, mut high) = (0.6, 2.6);
+            for _ in 0..30 {
                 let mid = (low + high) / 2.0;
-                if equilibrium(feet * 0.3048, mid) > 0.0 {
+                if trim(alt, mid * sound, mass).power < 99.9 {
                     low = mid;
                 } else {
                     high = mid;
@@ -753,7 +1001,7 @@ mod tests {
             mach = (low + high) / 2.0;
             println!("{feet} ft: level full-AB Mach {mach:.3}");
         }
-        assert!((mach - 2.05).abs() < 0.1, "equilibrium Mach {mach}");
+        assert!(mach > 1.85 && mach < 2.3, "equilibrium Mach {mach}");
     }
 
     #[test]

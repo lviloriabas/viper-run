@@ -414,7 +414,8 @@ pub fn pull_up(a: &Aircraft) -> bool {
 }
 
 pub fn stall(a: &Aircraft) -> bool {
-    a.stall > 0.06 || a.alpha_deg > 20.5 || a.speed < 92.0
+    // The FLCS holds about 25 degrees at full aft stick; beyond that the jet is departing.
+    a.stall > 0.06 || a.speed < 80.0
 }
 
 fn gate_geometry(a: &Aircraft, m: &Mission) -> Option<(f64, f64, f64)> {
