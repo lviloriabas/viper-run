@@ -6,6 +6,7 @@ use crate::gfx;
 use crate::math::*;
 use crate::sim::Aircraft;
 use crate::terrain;
+use crate::vapor::Vapor;
 use crate::world::{sun_dir, Camera, FOG};
 use miniquad::*;
 
@@ -34,7 +35,7 @@ void main() {
 }"#;
 
 const MAX_PARTICLES: usize = 720;
-const MAX_VERTS: usize = 36000;
+const MAX_VERTS: usize = 48000;
 const FLOATS: usize = 7;
 /// Nozzle exit in body axes (x right, y up, z aft), from the airframe.
 const NOZZLE: V3 = airframe::NOZZLE_EXIT;
@@ -120,6 +121,8 @@ pub struct Fx {
     order: Vec<(f64, usize)>,
     /// Vertex ranges of the blended particles, plume core, plume sheath and glowing particles.
     ranges: [(usize, usize); 4],
+    /// Condensation trails and fog, and the shock cones.
+    pub vapor: Vapor,
 }
 
 impl Fx {
@@ -133,12 +136,13 @@ impl Fx {
         let add = ctx.new_pipeline(&[BufferLayout::default()], &attrs, s, params(gfx::additive()));
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(MAX_VERTS * FLOATS));
         let bind = Bindings { vertex_buffers: vec![vb], index_buffer: gfx::sequential_ib(ctx, MAX_VERTS), images: vec![] };
-        Fx { parts: Vec::new(), emitters: Vec::new(), rnd: Lcg(7919), blend, add, bind, data: Vec::with_capacity(MAX_VERTS * FLOATS), order: Vec::new(), ranges: [(0, 0); 4] }
+        Fx { parts: Vec::new(), emitters: Vec::new(), rnd: Lcg(7919), blend, add, bind, data: Vec::with_capacity(MAX_VERTS * FLOATS), order: Vec::new(), ranges: [(0, 0); 4], vapor: Vapor::default() }
     }
 
     pub fn clear(&mut self) {
         self.parts.clear();
         self.emitters.clear();
+        self.vapor.clear();
     }
 
     fn r(&mut self, a: f64, b: f64) -> f64 {
@@ -433,6 +437,7 @@ impl Fx {
                 emit(&mut self.data, p, eye, sun);
             }
         }
+        self.vapor.emit(&mut self.data, aircraft, eye, time);
         let mut ends = [self.data.len() / FLOATS; 4];
         if let Some(a) = aircraft {
             plume_core(&mut self.data, a, eye, time);

@@ -23,6 +23,7 @@ mod structure;
 mod terrain;
 mod texture;
 mod ui;
+mod vapor;
 mod world;
 
 use audio::{Audio, Params, Wave};
@@ -69,6 +70,8 @@ struct Opts {
     screen: Option<String>,
     /// Pilot state for screenshots: retinal oxygen, redout, G-LOC seconds left.
     vision: Option<[f64; 3]>,
+    /// Start speed as a Mach number, for screenshots of transonic effects.
+    mach: Option<f64>,
     controls: bool,
     fov: Option<f64>,
     bench: Option<f64>,
@@ -117,6 +120,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--screen" => o.screen = Some(next(&mut i)),
+            "--mach" => o.mach = next(&mut i).parse().ok(),
             "--vision" => {
                 let v: Vec<f64> = next(&mut i).split(',').filter_map(|s| s.parse().ok()).collect();
                 o.vision = Some([v.first().copied().unwrap_or(1.0), v.get(1).copied().unwrap_or(0.0), v.get(2).copied().unwrap_or(0.0)]);
@@ -131,7 +135,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--vision RETINA,RED,GLOC] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--vision RETINA,RED,GLOC] [--mach M] [--controls]");
                 std::process::exit(0);
             }
             _ => {}
@@ -175,6 +179,9 @@ struct App {
     result: Option<RunResult>,
     /// Afterburner lit at the last check, to catch the light-off.
     ab_lit: bool,
+    /// The external camera sits inside the jet's Mach cone, where its boom
+    /// has already passed.
+    in_cone: bool,
     /// AGSM breaths already voiced.
     breaths: u32,
     /// Decaying jolt added to the camera shake by a light-off or an impact.
@@ -289,6 +296,7 @@ impl App {
             warn_clock: 0.0,
             result: None,
             ab_lit: false,
+            in_cone: false,
             breaths: 0,
             kick: 0.0,
             crash_time: 0.0,
@@ -334,11 +342,18 @@ impl App {
             }
         }
         self.airbrake = self.opts.input.airbrake;
+        if let (Some(mach), Some(a)) = (self.opts.mach, self.aircraft.as_mut()) {
+            a.vel = a.vel.norm() * mach * sim::atmosphere_at(a.pos.y).sound;
+            a.update(0.0, &Input::default());
+        }
         if self.opts.sim_seconds > 0.0 && self.state == State::Flying {
             let steps = (self.opts.sim_seconds / FIXED_DT).round() as usize;
             for _ in 0..steps {
                 match self.state {
-                    State::Flying => self.step(FIXED_DT, self.opts.input),
+                    State::Flying => {
+                        self.step(FIXED_DT, self.opts.input);
+                        self.advance_effects(FIXED_DT);
+                    }
                     // Let an impact play out, so a screenshot can show it.
                     State::Transition => {
                         self.advance_effects(FIXED_DT);
@@ -835,6 +850,8 @@ impl App {
 
     fn advance_effects(&mut self, dt: f64) {
         self.world.fx.update(dt);
+        let flying = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Transition));
+        self.world.fx.vapor.update(dt, flying);
         self.kick *= (-dt * 2.2).exp();
     }
 
@@ -1041,6 +1058,15 @@ impl EventHandler for App {
             self.update_hands(dt, None);
         }
         self.camera = self.current_camera();
+        // The boom is heard where the Mach cone sweeps over the camera: from
+        // outside the jet only; the pilot rides ahead of it.
+        if let Some(a) = &self.aircraft {
+            let inside = (self.view == View::Chase || a.crashed) && vapor::inside_mach_cone(a, self.camera.eye);
+            if inside && !self.in_cone && self.state == State::Flying {
+                self.audio.sonic_boom();
+            }
+            self.in_cone = inside;
+        }
         self.update_audio();
     }
 
@@ -1274,6 +1300,8 @@ impl EventHandler for App {
             KeyCode::M => self.toggle_mute(),
             KeyCode::V if matches!(self.state, State::Flying | State::Frozen | State::Transition) => {
                 self.view = if self.view == View::Chase { View::Cockpit } else { View::Chase };
+                // Cutting to a camera already inside the cone is no boom.
+                self.in_cone = true;
                 self.flash_toast(if self.view == View::Chase { "CHASE VIEW // V COCKPIT" } else { "COCKPIT VIEW // V CHASE" }, 1.8);
             }
             KeyCode::C if matches!(self.state, State::Flying | State::Frozen) => {

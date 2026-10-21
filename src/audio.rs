@@ -272,6 +272,14 @@ impl Audio {
         self.burst(0.35, 0.7, 2600.0, 380.0, 0.02);
     }
 
+    /// Sonic boom: the N-wave's two pressure jumps, bow shock then tail
+    /// shock a tenth of a second apart, over a rolling low rumble.
+    pub fn sonic_boom(&self) {
+        self.burst(0.32, 5.0, 1400.0, 80.0, 0.0);
+        self.burst(0.38, 4.2, 1100.0, 60.0, 0.11);
+        self.burst(1.6, 2.2, 160.0, 30.0, 0.02);
+    }
+
     /// The AGSM's quick breath through the mask: a sharp exhale, then the
     /// snatched inhale before the next strain.
     pub fn breath(&self) {
