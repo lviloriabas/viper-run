@@ -49,6 +49,62 @@ impl Mesh {
         self.v.clear();
     }
 
+    fn pos(&self, i: usize) -> V3 {
+        let c = &self.v[i * STRIDE..];
+        v3(c[0] as f64, c[1] as f64, c[2] as f64)
+    }
+    fn normal(&self, i: usize) -> V3 {
+        let c = &self.v[i * STRIDE + 3..];
+        v3(c[0] as f64, c[1] as f64, c[2] as f64)
+    }
+    fn set_normal(&mut self, i: usize, n: V3) {
+        self.v[i * STRIDE + 3..i * STRIDE + 6].copy_from_slice(&n.f32());
+    }
+
+    /// Face normal of triangle `t`, turned to agree with the normals it replaces.
+    fn face(&self, t: usize) -> Option<V3> {
+        let (a, b, c) = (self.pos(3 * t), self.pos(3 * t + 1), self.pos(3 * t + 2));
+        let n = (b - a).cross(c - a);
+        if n.len() < 1e-14 {
+            return None;
+        }
+        let n = n.norm();
+        let was = self.normal(3 * t) + self.normal(3 * t + 1) + self.normal(3 * t + 2);
+        Some(if n.dot(was) < 0.0 { -n } else { n })
+    }
+
+    /// Flat shading for the polygon look: every triangle, and every quad
+    /// emitted as two triangles on a shared diagonal, takes one normal.
+    /// Quads that fold more than ~28 degrees keep a normal per triangle.
+    pub fn facet(&mut self) {
+        let tris = self.count() / 3;
+        let mut t = 0;
+        while t < tris {
+            let n1 = self.face(t);
+            let paired = t + 1 < tris && self.pos(3 * t + 3) == self.pos(3 * t) && self.pos(3 * t + 4) == self.pos(3 * t + 2);
+            if paired {
+                let n = match (n1, self.face(t + 1)) {
+                    (Some(a), Some(b)) if a.dot(b) > 0.88 => Some((a + b).norm()),
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    _ => None,
+                };
+                if let Some(n) = n {
+                    for i in 3 * t..3 * t + 6 {
+                        self.set_normal(i, n);
+                    }
+                    t += 2;
+                    continue;
+                }
+            }
+            if let Some(n) = n1 {
+                for i in 3 * t..3 * t + 3 {
+                    self.set_normal(i, n);
+                }
+            }
+            t += 1;
+        }
+    }
+
     pub fn vert(&mut self, p: V3, n: V3, c: Rgb, uv: (f64, f64)) {
         self.v.extend_from_slice(&[
             p.x as f32, p.y as f32, p.z as f32, n.x as f32, n.y as f32, n.z as f32,
@@ -78,7 +134,8 @@ impl Mesh {
 
     /// Parametric surface over [0,1]^2 with smooth finite-difference normals.
     /// `outward` orients each normal away from the given reference point
-    /// function; pass `None` to keep the parametric orientation.
+    /// function; pass `None` to keep the parametric orientation. Each cell
+    /// takes one colour, sampled at its centre, so facets keep clean edges.
     pub fn surface<F, C>(&mut self, nu: usize, nv: usize, f: F, color: C, outward: Option<&dyn Fn(V3) -> V3>)
     where
         F: Fn(f64, f64) -> V3,
@@ -108,16 +165,16 @@ impl Mesh {
         for i in 0..=nu {
             for j in 0..=nv {
                 let (u, v) = (i as f64 / nu as f64, j as f64 / nv as f64);
-                let p = f(u, v);
-                let n = normal(u, v);
-                grid.push((p, n, color(p, n)));
+                grid.push((f(u, v), normal(u, v)));
             }
         }
         let at = |i: usize, j: usize| grid[i * (nv + 1) + j];
         for i in 0..nu {
             for j in 0..nv {
+                let (uc, vc) = ((i as f64 + 0.5) / nu as f64, (j as f64 + 0.5) / nv as f64);
+                let col = color(f(uc, vc), normal(uc, vc));
                 let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
-                for (p, n, col) in [a, b, c, a, c, d] {
+                for (p, n) in [a, b, c, a, c, d] {
                     self.vert(p, n, col, NO_UV);
                 }
             }
@@ -150,16 +207,16 @@ impl Mesh {
         }
     }
 
-    /// Tapered cylinder with rounded caps.
+    /// Tapered prism with chamfered caps.
     pub fn capsule(&mut self, a: V3, b: V3, r1: f64, r2: f64, col: Rgb, sides: usize) {
         let axis = b - a;
         let l = axis.len();
         if l < 1e-6 {
-            self.ellipsoid(a, v3(r1, r1, r1), col, 6, sides);
+            self.ellipsoid(a, v3(r1, r1, r1), col, 4, sides);
             return;
         }
         let mut prof = Vec::new();
-        let caps = 4;
+        let caps = 2;
         for i in 0..=caps {
             let t = (i as f64 / caps as f64) * PI * 0.5;
             prof.push((-r1 * t.cos(), r1 * t.sin()));

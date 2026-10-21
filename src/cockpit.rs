@@ -1,4 +1,4 @@
-//! Modernised F-16 Viper cockpit: depth-buffered 3D geometry in body metres,
+//! Modernised F-16 Viper cockpit: flat-shaded, low-polygon 3D geometry in body metres,
 //! live instrument pages rendered into a texture atlas, and the collimated
 //! NAV HUD clipped to the physical combiner glass.
 use crate::airframe::{self, EYE};
@@ -69,6 +69,9 @@ const GLOVE: Rgb = Rgb(0.21, 0.21, 0.17);
 const BOOT: Rgb = Rgb(0.09, 0.09, 0.085);
 const HARNESS: Rgb = Rgb(0.55, 0.52, 0.40);
 const METALC: Rgb = Rgb(0.55, 0.57, 0.56);
+
+/// Round gauges are 16-sided, like the polygon cockpits of early-90s sims.
+const GAUGE_SIDES: usize = 16;
 
 // Main instrument panel: tilted 8.5 degrees, its base 0.4 m above the datum.
 const TILT: f64 = 8.5 * DEG;
@@ -147,7 +150,10 @@ void main() {
     vec3 view = normalize(-v_rel);
     if (dot(n, view) < 0.0) n = -n;
     float diffuse = max(dot(n, u_sun), 0.0) * u_sun_vis;
-    float sky = 0.30 + 0.22 * (0.5 + 0.5 * n.y);
+    // Fixed key light from above the left shoulder: flat facets keep distinct
+    // shades even when the sun is behind the jet.
+    float key = max(dot(n, vec3(-0.30, 0.84, 0.45)), 0.0);
+    float sky = 0.22 + 0.34 * key + 0.06 * n.y;
     if (u_alpha < 0.99) {
         // Glass: faint tint, Fresnel sheen and a sun glint, never a solid wash.
         float fres = pow(1.0 - max(dot(n, view), 0.0), 5.0);
@@ -263,7 +269,7 @@ fn screen(m: &mut Mesh, f: &Frame, w: f64, h: f64, rect: R) {
 /// Rounded bezel around a recessed screen, with optional option-select buttons.
 fn display(m: &mut Mesh, f: &Frame, bw: f64, bh: f64, sw: f64, sh: f64, rect: R, osb: bool) {
     let front = f.at(0.0, 0.0, 0.016);
-    m.bezel(&front, &rounded_rect(bw, bh, 0.014, 4), &rounded_rect(sw + 0.006, sh + 0.006, 0.004, 4), 0.016, 0.010, BEZEL);
+    m.bezel(&front, &rounded_rect(bw, bh, 0.016, 1), &rounded_rect(sw + 0.006, sh + 0.006, 0.005, 1), 0.016, 0.010, BEZEL);
     screen(m, &f.at(0.0, 0.0, 0.006), sw, sh, rect);
     if osb {
         for i in 0..5 {
@@ -279,11 +285,11 @@ fn display(m: &mut Mesh, f: &Frame, bw: f64, bh: f64, sw: f64, sh: f64, rect: R,
 }
 
 fn gauge(m: &mut Mesh, f: &Frame, radius: f64, rect: R) {
-    m.ring(&f.at(0.0, 0.0, 0.014), radius, radius + 0.008, 0.014, BEZEL.scale(1.1), 40);
-    m.disc_uv(&f.at(0.0, 0.0, 0.004), radius, uv(rect), 40);
+    m.ring(&f.at(0.0, 0.0, 0.014), radius, radius + 0.008, 0.014, BEZEL.scale(1.1), GAUGE_SIDES);
+    m.disc_uv(&f.at(0.0, 0.0, 0.004), radius, uv(rect), GAUGE_SIDES);
     // Square mounting flange with four screws, as on the real gauges.
     let flange = f.at(0.0, 0.0, 0.002);
-    m.bezel(&flange, &rounded_rect(radius * 2.0 + 0.026, radius * 2.0 + 0.026, 0.006, 2), &rounded_rect(radius * 2.0 + 0.012, radius * 2.0 + 0.012, 0.004, 2), 0.002, 0.0, BEZEL.scale(0.8));
+    m.bezel(&flange, &rounded_rect(radius * 2.0 + 0.026, radius * 2.0 + 0.026, 0.006, 1), &rounded_rect(radius * 2.0 + 0.012, radius * 2.0 + 0.012, 0.004, 1), 0.002, 0.0, BEZEL.scale(0.8));
     for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
         let c = radius + 0.007;
         m.block(&f.at(sx * c, sy * c, 0.004), v3(0.0025, 0.0025, 0.002), METALC.scale(0.6));
@@ -313,7 +319,7 @@ fn build_static(m: &mut Mesh) {
             let (t0, t1) = (s as f64 / 4.0, (s + 1) as f64 / 4.0);
             m.quad(shield(a.0, a.1, t0), shield(b.0, b.1, t0), shield(b.0, b.1, t1), shield(a.0, a.1, t1), GLARE);
         }
-        m.capsule(shield(a.0, a.1, 0.0), shield(b.0, b.1, 0.0), 0.011, 0.011, GLARE.scale(1.6), 8);
+        m.capsule(shield(a.0, a.1, 0.0), shield(b.0, b.1, 0.0), 0.011, 0.011, GLARE.scale(1.6), 6);
         m.quad(p.p(a.0, a.1, 0.0), p.p(b.0, b.1, 0.0), shield(b.0, b.1, 0.0), shield(a.0, a.1, 0.0), GLARE.scale(1.2));
     }
 
@@ -336,7 +342,7 @@ fn build_static(m: &mut Mesh) {
     m.block(&Frame { o: v3(0.0, 1.074, -4.04), ..hud_body }, v3(0.095, 0.004, 0.035), GLARE.scale(2.2));
     for &s in &[-1.0, 1.0] {
         let (b, t) = (v3(s * 0.104, 1.07, -4.02), v3(s * 0.104, 1.352, -3.958));
-        m.capsule(b, t, 0.0045, 0.004, GLARE.scale(2.0), 8);
+        m.capsule(b, t, 0.0045, 0.004, GLARE.scale(2.0), 6);
     }
     m.capsule(v3(-0.104, 1.352, -3.958), v3(0.104, 1.352, -3.958), 0.0025, 0.0025, GLARE.scale(2.0), 6);
 
@@ -371,17 +377,15 @@ fn build_static(m: &mut Mesh) {
     m.quad(v3(-0.47, 0.22, -4.40), v3(0.47, 0.22, -4.40), v3(0.47, 0.22, -2.40), v3(-0.47, 0.22, -2.40), WALL.scale(0.55));
     m.quad(v3(-0.47, 0.22, -4.40), v3(0.47, 0.22, -4.40), v3(0.47, 0.42, -4.12), v3(-0.47, 0.42, -4.12), WALL.scale(0.45));
     for &s in &[-1.0, 1.0] {
-        let n = 24;
+        let n = 12;
         for k in 0..n {
             let (z0, z1) = (mix(-4.30, -2.30, k as f64 / n as f64), mix(-4.30, -2.30, (k + 1) as f64 / n as f64));
             let (b0, b1) = (airframe::canopy_profile(z0).1, airframe::canopy_profile(z1).1);
             let (w0, w1) = (airframe::canopy_profile(z0).0.max(0.47), airframe::canopy_profile(z1).0.max(0.47));
             m.quad(v3(s * 0.47, 0.22, z0), v3(s * 0.47, 0.22, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL);
             m.quad(v3(s * 0.47, b0 - 0.03, z0), v3(s * 0.47, b1 - 0.03, z1), v3(s * w1, b1, z1), v3(s * w0, b0, z0), WALL.scale(1.15));
-            m.capsule(v3(s * w0, b0, z0), v3(s * w1, b1, z1), 0.02, 0.02, Rgb(0.12, 0.13, 0.14), 8);
+            m.capsule(v3(s * w0, b0, z0), v3(s * w1, b1, z1), 0.02, 0.02, Rgb(0.12, 0.13, 0.14), 6);
         }
-        // Canopy handholds and the sill-mounted mirrors frame.
-        m.capsule(v3(s * 0.44, 0.86, -3.70), v3(s * 0.44, 0.86, -3.40), 0.012, 0.012, Rgb(0.22, 0.24, 0.24), 8);
 
         // Side consoles with labelled panels.
         let base = Frame { o: v3(s * 0.38, 0.52, -3.20), x: V3::X, y: V3::Y, z: V3::Z };
@@ -397,7 +401,7 @@ fn build_static(m: &mut Mesh) {
                 for k in 0..2 {
                     let x = s * 0.38 + (k as f64 - 0.5) * 0.055;
                     m.capsule(v3(x, 0.645, z + 0.03), v3(x, 0.67, z + 0.022), 0.004, 0.003, METALC, 6);
-                    m.ellipsoid(v3(x, 0.672, z + 0.021), v3(0.006, 0.006, 0.006), METALC.scale(0.9), 4, 8);
+                    m.ellipsoid(v3(x, 0.672, z + 0.021), v3(0.006, 0.006, 0.006), METALC.scale(0.9), 3, 6);
                 }
             }
         }
@@ -416,24 +420,21 @@ fn build_static(m: &mut Mesh) {
     m.block(&Frame { o: v3(0.0, 0.47, -3.40), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.23, 0.06, 0.24), SEAT.scale(0.8));
     m.block(&seat(hip + up * 0.36 + back * 0.17), v3(0.23, 0.40, 0.05), SEAT);
     m.block(&seat(hip + up * 0.82 + back * 0.21), v3(0.155, 0.13, 0.07), SEAT.scale(1.1));
-    for &s in &[-1.0, 1.0] {
-        m.capsule(v3(s * 0.25, 0.45, -3.25) , v3(s * 0.25, 0.45, -3.25) + up * 0.95, 0.025, 0.025, Rgb(0.20, 0.22, 0.21), 8);
-    }
     // Yellow and black ejection handle on the seat bucket, between the thighs.
-    for i in 0..14 {
-        let (t0, t1) = (i as f64 * PI / 14.0, (i + 1) as f64 * PI / 14.0);
+    for i in 0..8 {
+        let (t0, t1) = (i as f64 * PI / 8.0, (i + 1) as f64 * PI / 8.0);
         let p = |t: f64| v3(0.06 * t.cos(), 0.535 + 0.045 * t.sin(), -3.655);
         m.capsule(p(t0), p(t1), 0.0085, 0.0085, if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) }, 6);
     }
 
     // Pilot torso, harness and thighs. The head sits at the eye and is omitted.
-    m.ellipsoid_basis(hip + up * 0.27 + back * 0.05, V3::X * 0.20, up * 0.30, back * 0.13, SUIT, 10, 18);
+    m.ellipsoid_basis(hip + up * 0.27 + back * 0.05, V3::X * 0.20, up * 0.30, back * 0.13, SUIT, 6, 10);
     for &s in &[-1.0, 1.0] {
         m.capsule(v3(s * 0.11, 1.00, -3.32), v3(s * 0.08, 0.66, -3.56), 0.022, 0.022, HARNESS, 6);
         m.capsule(v3(s * 0.20, 0.64, -3.44), v3(0.0, 0.66, -3.60), 0.02, 0.02, HARNESS, 6);
         let knee = v3(s * 0.17, 0.66, -3.95);
-        m.capsule(v3(s * 0.12, 0.58, -3.50), knee, 0.088, 0.072, SUIT, 12);
-        m.ellipsoid(knee, v3(0.074, 0.074, 0.08), SUIT, 8, 12);
+        m.capsule(v3(s * 0.12, 0.58, -3.50), knee, 0.088, 0.072, SUIT, 8);
+        m.ellipsoid(knee, v3(0.074, 0.074, 0.08), SUIT, 4, 8);
         // G-suit bladder seam along the thigh.
         m.capsule(v3(s * 0.18, 0.66, -3.58), v3(s * 0.20, 0.70, -3.86), 0.012, 0.012, SUIT.scale(0.8), 6);
     }
@@ -443,32 +444,34 @@ fn build_static(m: &mut Mesh) {
     m.block(&kb.at(0.0, 0.0, -0.006), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
     screen(m, &kb, 0.12, 0.15, R_KNEE);
 
-    // Canopy aft bow and bulkhead behind the seat.
-    for k in 0..24 {
-        let (a, b) = (airframe::canopy_point(0.985, k as f64 / 24.0), airframe::canopy_point(0.985, (k + 1) as f64 / 24.0));
-        m.capsule(a, b, 0.03, 0.03, Rgb(0.13, 0.15, 0.16), 8);
+    // Canopy aft bow and bulkhead behind the seat, on the canopy's facet lines.
+    let nv = airframe::CANOPY_NV;
+    for k in 0..nv {
+        let (a, b) = (airframe::canopy_point(0.985, k as f64 / nv as f64), airframe::canopy_point(0.985, (k + 1) as f64 / nv as f64));
+        m.capsule(a, b, 0.03, 0.03, Rgb(0.13, 0.15, 0.16), 6);
     }
-    let bulk: Vec<V3> = (0..=24).map(|k| airframe::canopy_point(0.995, k as f64 / 24.0)).collect();
+    let bulk: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.995, k as f64 / nv as f64)).collect();
     m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));
+    m.facet();
 }
 
 fn hand(m: &mut Mesh, h: V3, side: f64) {
-    m.ellipsoid(h + v3(0.0, 0.035, 0.006), v3(0.048, 0.036, 0.052), GLOVE, 8, 12);
+    m.ellipsoid(h + v3(0.0, 0.035, 0.006), v3(0.048, 0.036, 0.052), GLOVE, 4, 6);
     for i in 0..4 {
         let x = h.x + (i as f64 - 1.5) * 0.02;
-        m.capsule(v3(x, h.y + 0.055, h.z + 0.028), v3(x, h.y + 0.054, h.z - 0.022), 0.011, 0.010, GLOVE, 6);
-        m.capsule(v3(x, h.y + 0.054, h.z - 0.022), v3(x, h.y + 0.008, h.z - 0.034), 0.010, 0.009, GLOVE, 6);
+        m.capsule(v3(x, h.y + 0.055, h.z + 0.028), v3(x, h.y + 0.054, h.z - 0.022), 0.011, 0.010, GLOVE, 5);
+        m.capsule(v3(x, h.y + 0.054, h.z - 0.022), v3(x, h.y + 0.008, h.z - 0.034), 0.010, 0.009, GLOVE, 5);
     }
-    m.capsule(h + v3(-side * 0.042, 0.025, 0.01), h + v3(-side * 0.03, 0.035, -0.032), 0.015, 0.013, GLOVE, 6);
+    m.capsule(h + v3(-side * 0.042, 0.025, 0.01), h + v3(-side * 0.03, 0.035, -0.032), 0.015, 0.013, GLOVE, 5);
 }
 
 fn arm(m: &mut Mesh, shoulder: V3, elbow: V3, hand_at: V3, side: f64) {
     let wrist = hand_at + v3(0.0, 0.015, 0.072);
-    m.capsule(shoulder, elbow, 0.075, 0.062, SUIT, 10);
-    m.ellipsoid(elbow, v3(0.063, 0.064, 0.064), SUIT, 6, 10);
-    m.capsule(elbow, wrist, 0.060, 0.044, SUIT, 10);
-    m.capsule(wrist, hand_at + v3(0.0, 0.026, 0.005), 0.045, 0.047, GLOVE, 8);
-    m.capsule(wrist + v3(0.0, 0.004, 0.022), wrist + v3(0.0, 0.004, 0.045), 0.05, 0.05, Rgb(0.21, 0.24, 0.17), 8);
+    m.capsule(shoulder, elbow, 0.075, 0.062, SUIT, 6);
+    m.ellipsoid(elbow, v3(0.063, 0.064, 0.064), SUIT, 4, 8);
+    m.capsule(elbow, wrist, 0.060, 0.044, SUIT, 6);
+    m.capsule(wrist, hand_at + v3(0.0, 0.026, 0.005), 0.045, 0.047, GLOVE, 6);
+    m.capsule(wrist + v3(0.0, 0.004, 0.022), wrist + v3(0.0, 0.004, 0.045), 0.05, 0.05, Rgb(0.21, 0.24, 0.17), 6);
     hand(m, hand_at, side);
 }
 
@@ -476,8 +479,8 @@ fn build_dynamic(m: &mut Mesh, h: &Hands) {
     // Pressure sidestick: deliberately tiny travel.
     let pivot = v3(0.40, 0.655, -3.42);
     let grip = pivot + v3(h.roll * 0.009, 0.12, h.pitch * 0.010);
-    m.capsule(pivot, grip, 0.016, 0.022, Rgb(0.10, 0.11, 0.11), 8);
-    m.ellipsoid(grip + v3(0.0, 0.035, 0.0), v3(0.024, 0.05, 0.03), Rgb(0.13, 0.14, 0.14), 8, 12);
+    m.capsule(pivot, grip, 0.016, 0.022, Rgb(0.10, 0.11, 0.11), 6);
+    m.ellipsoid(grip + v3(0.0, 0.035, 0.0), v3(0.024, 0.05, 0.03), Rgb(0.13, 0.14, 0.14), 4, 6);
     m.block(&Frame { o: grip + v3(0.0, 0.088, -0.008), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.012, 0.006, 0.013), Rgb(0.6, 0.22, 0.14));
     m.block(&Frame { o: grip + v3(-0.02, 0.064, -0.012), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.007, 0.008), METALC);
     arm(m, v3(0.20, 1.01, -3.26), v3(0.32, 0.765, -3.13), grip + v3(0.0, 0.004, 0.0), 1.0);
@@ -486,7 +489,7 @@ fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let z = -3.34 - h.throttle * 0.17;
     let base = v3(-0.40, 0.65, z + 0.02);
     let top = v3(-0.40, 0.745, z);
-    m.capsule(base, top, 0.018, 0.02, Rgb(0.20, 0.22, 0.22), 8);
+    m.capsule(base, top, 0.018, 0.02, Rgb(0.20, 0.22, 0.22), 6);
     m.block(&Frame { o: top + v3(0.0, 0.02, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.032, 0.026, 0.04), Rgb(0.13, 0.15, 0.16));
     m.block(&Frame { o: top + v3(0.036, 0.026, -0.01), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.009, 0.012), METALC);
     arm(m, v3(-0.20, 1.01, -3.26), v3(-0.33, 0.775, -3.17), top + v3(0.0, 0.01, 0.0), -1.0);
@@ -495,10 +498,11 @@ fn build_dynamic(m: &mut Mesh, h: &Hands) {
     for &s in &[-1.0, 1.0] {
         let knee = v3(s * 0.17, 0.66, -3.95);
         let ankle = v3(s * 0.17, 0.30, -4.25 - s * h.rudder * 0.04);
-        m.capsule(knee, ankle, 0.068, 0.048, SUIT, 10);
-        m.capsule(ankle, ankle + v3(0.0, -0.02, -0.17), 0.055, 0.045, BOOT, 8);
+        m.capsule(knee, ankle, 0.068, 0.048, SUIT, 6);
+        m.capsule(ankle, ankle + v3(0.0, -0.02, -0.17), 0.055, 0.045, BOOT, 6);
         m.block(&Frame { o: ankle + v3(0.0, -0.07, -0.12), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.06, 0.012, 0.09), Rgb(0.24, 0.26, 0.26));
     }
+    m.facet();
 }
 
 // ================================================================ pages

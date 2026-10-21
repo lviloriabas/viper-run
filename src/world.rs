@@ -327,8 +327,10 @@ void main() {
     if (dot(n, view_dir) < 0.0) n = -n;
     vec3 sun = normalize(u_sun);
     float lit = max(dot(n, sun), 0.0);
-    float sky = max(n.y, 0.0);
-    vec3 col = v_color * (0.50 + 0.62 * lit + 0.10 * sky);
+    // Sky/ground hemisphere plus a soft fill from the viewer, so neighbouring
+    // flat facets always read as distinct shades, even against the sun.
+    float head = max(dot(n, view_dir), 0.0);
+    vec3 col = v_color * (0.30 + 0.14 * n.y + 0.22 * head + 0.62 * lit);
     float rim = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0);
     col += vec3(0.16, 0.2, 0.18) * rim * 0.30;
     float shine = pow(max(dot(reflect(-sun, n), view_dir), 0.0), 24.0);
@@ -336,10 +338,12 @@ void main() {
     float a = u_alpha;
     if (u_alpha < 0.9 && u_glow < 0.5) {
         // Gold-tinted canopy: tint, Fresnel reflection of the sky and a sun glint.
+        // Upward panes reflect more sky, so each flat pane reads separately.
         float fres = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0);
         float glint = pow(max(dot(reflect(-sun, n), view_dir), 0.0), 60.0);
-        col = mix(v_color, vec3(0.62, 0.68, 0.66), fres * 0.7) + glint * vec3(1.0, 0.95, 0.8);
-        a = clamp(u_alpha + fres * 0.55 + glint, 0.0, 0.92);
+        float sky_ref = 0.35 * max(n.y, 0.0);
+        col = mix(v_color, vec3(0.62, 0.68, 0.66), fres * 0.7 + sky_ref) + glint * vec3(1.0, 0.95, 0.8);
+        a = clamp(u_alpha + fres * 0.55 + sky_ref * 0.4 + glint, 0.0, 0.92);
     }
     if (u_glow > 0.5) col = v_color * 1.8;
     float fog = clamp(1.0 - exp(-length(v_rel) * 0.000045), 0.0, 0.9);
@@ -811,7 +815,7 @@ impl World {
         if let (Some(a), false) = (aircraft, cockpit) {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.30, glow: 0.0, cutout: 0.0 };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0 };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, &self.canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);

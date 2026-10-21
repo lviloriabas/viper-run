@@ -1,7 +1,8 @@
 //! Smooth, dimensioned F-16C exterior. Body axes: right (+x), up (+y), aft (+z), metres.
 //! 15.06 m overall from pitot tip to stabilator tips, 9.96 m span over the
 //! wingtip missiles, 5.09 m from the gear line to the fin cap. Lofted sections
-//! and NACA thickness distributions keep the retro finish free of box shapes.
+//! and NACA thickness distributions are sampled coarsely and flat shaded, so
+//! the jet reads as clean early-90s polygons rather than boxes or blobs.
 use crate::math::*;
 use crate::mesh::{Mesh, Rgb};
 
@@ -23,12 +24,12 @@ const FUSE: [[f64; 7]; 16] = [
     [-6.70, 0.17, 0.09, 0.17, 0.165, 2.0, 2.0],
     [-6.30, 0.31, 0.10, 0.31, 0.30, 2.0, 2.0],
     [-5.80, 0.43, 0.10, 0.43, 0.42, 2.05, 2.05],
-    [-5.30, 0.50, 0.10, 0.50, 0.50, 2.1, 2.15],
-    [-4.80, 0.58, 0.10, 0.56, 0.56, 2.3, 2.5],
-    [-4.20, 0.65, 0.11, 0.63, 0.63, 2.5, 2.8],
-    [-3.50, 0.71, 0.12, 0.68, 0.68, 2.6, 3.0],
-    [-2.50, 0.77, 0.12, 0.72, 0.70, 2.7, 3.2],
-    [-1.00, 0.83, 0.10, 0.70, 0.66, 2.8, 3.3],
+    [-5.30, 0.47, 0.10, 0.50, 0.50, 2.1, 2.15],
+    [-4.80, 0.54, 0.10, 0.56, 0.56, 2.3, 2.5],
+    [-4.20, 0.59, 0.11, 0.63, 0.63, 2.5, 2.8],
+    [-3.50, 0.64, 0.12, 0.68, 0.68, 2.6, 3.0],
+    [-2.50, 0.72, 0.12, 0.72, 0.70, 2.7, 3.2],
+    [-1.00, 0.80, 0.10, 0.70, 0.66, 2.8, 3.3],
     [0.50, 0.86, 0.08, 0.64, 0.62, 2.8, 3.3],
     [2.00, 0.82, 0.06, 0.60, 0.58, 2.7, 3.1],
     [3.50, 0.74, 0.05, 0.57, 0.53, 2.5, 2.7],
@@ -36,14 +37,20 @@ const FUSE: [[f64; 7]; 16] = [
     [6.20, 0.56, 0.03, 0.49, 0.47, 2.0, 2.0],
     [6.70, 0.51, 0.02, 0.48, 0.46, 2.0, 2.0],
 ];
+// Facets of the fuselage loft: stations along the body and sides around it.
+const FUSE_NZ: usize = 40;
+const FUSE_NTH: usize = 16;
+const FUSE_Z: (f64, f64) = (-6.95, 6.70);
+const INTAKE_NTH: usize = 16;
 // Ventral inlet duct, from the D-shaped mouth back into the lower fuselage.
+// About as wide as the forebody above it, so it reads as the belly, not a pod.
 const INTAKE: [[f64; 7]; 8] = [
-    [-3.75, 0.50, -0.93, 0.31, 0.31, 4.0, 2.4],
-    [-3.20, 0.52, -0.88, 0.36, 0.35, 3.5, 2.4],
-    [-2.00, 0.55, -0.80, 0.40, 0.36, 3.0, 2.5],
-    [-0.50, 0.58, -0.70, 0.42, 0.36, 3.0, 2.6],
-    [1.00, 0.60, -0.58, 0.40, 0.34, 3.0, 2.6],
-    [2.50, 0.60, -0.42, 0.36, 0.28, 3.0, 2.6],
+    [-3.75, 0.54, -0.93, 0.31, 0.31, 4.0, 2.4],
+    [-3.20, 0.56, -0.88, 0.36, 0.35, 3.5, 2.4],
+    [-2.00, 0.61, -0.80, 0.40, 0.36, 3.0, 2.5],
+    [-0.50, 0.65, -0.70, 0.42, 0.36, 3.0, 2.6],
+    [1.00, 0.66, -0.58, 0.40, 0.34, 3.0, 2.6],
+    [2.50, 0.62, -0.42, 0.36, 0.28, 3.0, 2.6],
     [3.80, 0.55, -0.30, 0.30, 0.20, 3.0, 2.6],
     [4.50, 0.50, -0.22, 0.25, 0.20, 3.0, 2.6],
 ];
@@ -134,6 +141,9 @@ pub const CANOPY_FRONT: f64 = -5.10;
 pub const CANOPY_PEAK: f64 = -3.35;
 pub const CANOPY_AFT: f64 = -1.95;
 const CANOPY_TOP: f64 = 1.58;
+/// Canopy facets, front to aft and from sill to sill.
+const CANOPY_NU: usize = 14;
+pub const CANOPY_NV: usize = 10;
 
 /// Canopy half width, base height and top height at a station.
 pub fn canopy_profile(z: f64) -> (f64, f64, f64) {
@@ -180,15 +190,21 @@ fn wing_le40(x: f64) -> f64 {
 const WING_TE: f64 = 2.90;
 const WING_TIP: f64 = 4.72;
 const WING_Y: f64 = 0.06;
+const WING_NU: usize = 12;
+const WING_NV: usize = 8;
 
-/// Leading edge including the blended leading-edge root extension.
+/// Leading edge including the blended leading-edge root extension: a slender
+/// strake from beside the windscreen that curves out to meet the 40-degree
+/// edge about a third of the way to the tip.
+const LERX_ROOT: (f64, f64) = (0.50, -4.95);
+const LERX_JOIN: f64 = 1.65;
 fn wing_le(x: f64) -> f64 {
     let le40 = wing_le40(x);
-    if x >= 1.30 {
+    if x >= LERX_JOIN {
         return le40;
     }
-    let s = (clamp(x - 0.60, 0.0, 0.70) / 0.70).powf(1.0 / 1.35);
-    (-4.80 + 3.73 * s).min(le40)
+    let t = clamp(x - LERX_ROOT.0, 0.0, LERX_JOIN - LERX_ROOT.0) / (LERX_JOIN - LERX_ROOT.0);
+    (LERX_ROOT.1 + (wing_le40(LERX_JOIN) - LERX_ROOT.1) * t.powf(1.0 / 1.6)).min(le40)
 }
 
 fn wing_point(side: f64, u: f64, v: f64, upper: bool) -> V3 {
@@ -201,7 +217,7 @@ fn wing_point(side: f64, u: f64, v: f64, upper: bool) -> V3 {
     let half = 5.0 * t * chord40 * naca(w) * (chord40 / chord).sqrt();
     let z = le + chord * w;
     // The strake surface curls up slightly toward the forebody chine.
-    let lift = 0.10 * clamp((wing_le40(x) - z) / (wing_le40(x) + 4.8), 0.0, 1.0).powf(1.5);
+    let lift = 0.10 * clamp((wing_le40(x) - z) / (wing_le40(x) - LERX_ROOT.1), 0.0, 1.0).powf(1.5);
     v3(side * x, WING_Y + lift + if upper { half } else { -half }, z)
 }
 
@@ -275,13 +291,17 @@ pub fn build() -> Airframe {
 
     // Fuselage loft.
     let axis_out = |p: V3| v3(0.0, section(p.z).yc + if p.y > 0.9 { 0.5 } else { 0.0 }, p.z);
-    ext.surface(150, 64, |u, v| fuselage_point(mix(-6.95, 6.70, u), v * TAU), fuselage_color, Some(&axis_out));
+    ext.surface(FUSE_NZ, FUSE_NTH, |u, v| fuselage_point(mix(FUSE_Z.0, FUSE_Z.1, u), v * TAU), fuselage_color, Some(&axis_out));
 
-    // Panel lines: frame rings and two longitudinal joints per side.
+    // Panel lines on facet edges: frame rings and two longitudinal joints per side.
+    let dz = (FUSE_Z.1 - FUSE_Z.0) / FUSE_NZ as f64;
+    let station = |z: f64| ((z - FUSE_Z.0) / dz).round() as usize;
+    let dth = TAU / FUSE_NTH as f64;
     for &z in &[-5.27, -4.62, -1.85, 0.95, 3.45, 5.70] {
-        let pts: Vec<(V3, V3)> = (0..=64)
+        let z = FUSE_Z.0 + station(z) as f64 * dz;
+        let pts: Vec<(V3, V3)> = (0..=FUSE_NTH)
             .map(|k| {
-                let th = k as f64 * TAU / 64.0;
+                let th = k as f64 * dth;
                 let p = fuselage_point(z, th);
                 let n = (fuselage_point(z, th + 0.01) - fuselage_point(z, th - 0.01)).cross(V3::Z).norm();
                 (p, -n)
@@ -289,10 +309,11 @@ pub fn build() -> Airframe {
             .collect();
         ext.ribbon(&pts, 0.006, SEAM);
     }
-    for &th in &[0.42, PI - 0.42, PI * 1.12, PI * 1.88] {
-        let pts: Vec<(V3, V3)> = (0..=40)
-            .map(|k| {
-                let z = -1.8 + k as f64 * (5.6 / 40.0);
+    for k in [1, FUSE_NTH / 2 - 1, FUSE_NTH / 2 + 1, FUSE_NTH - 1] {
+        let th = k as f64 * dth;
+        let pts: Vec<(V3, V3)> = (station(-1.8)..=station(3.8))
+            .map(|i| {
+                let z = FUSE_Z.0 + i as f64 * dz;
                 let p = fuselage_point(z, th);
                 let a = fuselage_point(z, th + 0.01) - fuselage_point(z, th - 0.01);
                 let n = a.cross(V3::Z).norm();
@@ -303,7 +324,7 @@ pub fn build() -> Airframe {
     }
 
     // Pitot boom ahead of the radome.
-    ext.lathe(v3(0.0, 0.08, -6.93), v3(0.0, 0.0, -1.0), &[(0.0, 0.022), (0.25, 0.014), (0.58, 0.008), (0.60, 0.0)], 8, Rgb(0.6, 0.62, 0.62));
+    ext.lathe(v3(0.0, 0.08, -6.93), v3(0.0, 0.0, -1.0), &[(0.0, 0.022), (0.25, 0.014), (0.58, 0.008), (0.60, 0.0)], 6, Rgb(0.6, 0.62, 0.62));
 
     // Ventral intake: duct fairing, rounded lip and dark interior.
     let intake_point = |u: f64, v: f64| {
@@ -313,14 +334,14 @@ pub fn build() -> Airframe {
         v3(x, y, z)
     };
     let intake_out = |p: V3| v3(0.0, catmull(&INTAKE, p.z).yc, p.z);
-    ext.surface(60, 48, intake_point, |p, n| if p.z < -3.68 { LIGHT } else { fuselage_color(p, n) }, Some(&intake_out));
+    ext.surface(16, INTAKE_NTH, intake_point, |p, n| if p.z < -3.68 { LIGHT } else { fuselage_color(p, n) }, Some(&intake_out));
     let mouth = catmull(&INTAKE, -3.75);
     let ring = |scale: f64, z: f64, th: f64| {
         let (x, y) = superellipse(&mouth, th);
         v3(x * scale, mouth.yc + (y - mouth.yc) * scale, z)
     };
-    for k in 0..48 {
-        let (t0, t1) = (k as f64 * TAU / 48.0, (k + 1) as f64 * TAU / 48.0);
+    for k in 0..INTAKE_NTH {
+        let (t0, t1) = (k as f64 * TAU / INTAKE_NTH as f64, (k + 1) as f64 * TAU / INTAKE_NTH as f64);
         ext.quad(ring(1.0, -3.75, t0), ring(1.0, -3.75, t1), ring(0.90, -3.62, t1), ring(0.90, -3.62, t0), LIGHT.scale(0.85));
         ext.quad(ring(0.90, -3.62, t0), ring(0.90, -3.62, t1), ring(0.80, -2.70, t1), ring(0.80, -2.70, t0), DUCT);
         ext.tri(v3(0.0, mouth.yc, -2.68), ring(0.80, -2.70, t1), ring(0.80, -2.70, t0), Rgb(0.015, 0.02, 0.022));
@@ -333,28 +354,30 @@ pub fn build() -> Airframe {
     for &side in &[-1.0, 1.0] {
         for &upper in &[true, false] {
             let out = move |p: V3| v3(p.x, if upper { p.y - 1.0 } else { p.y + 1.0 }, p.z);
-            ext.surface(56, 30, move |u, v| wing_point(side, u, v, upper), move |p, _| if upper { if p.x.abs() < 1.2 && p.z < -1.2 { DARK } else { MED } } else { LIGHT }, Some(&out));
+            ext.surface(WING_NU, WING_NV, move |u, v| wing_point(side, u, v, upper), move |p, _| if upper { if p.x.abs() < 1.2 && p.z < -1.2 { DARK } else { MED } } else { LIGHT }, Some(&out));
         }
-        for k in 0..30 {
-            let (v0, v1) = (k as f64 / 30.0, (k + 1) as f64 / 30.0);
+        for k in 0..WING_NV {
+            let (v0, v1) = (k as f64 / WING_NV as f64, (k + 1) as f64 / WING_NV as f64);
             ext.quad(wing_point(side, 1.0, v0, true), wing_point(side, 1.0, v1, true), wing_point(side, 1.0, v1, false), wing_point(side, 1.0, v0, false), MED);
         }
-        // Leading-edge flap and flaperon hinge lines.
+        // Leading-edge flap and flaperon hinge lines; the flaperon follows facet edges.
         let on_wing = |u: f64, v: f64| (wing_point(side, u, v, true), V3::Y);
-        let line_v = |v: f64, u0: f64, u1: f64| -> Vec<(V3, V3)> { (0..=24).map(|k| on_wing(mix(u0, u1, k as f64 / 24.0), v)).collect() };
-        let flap_edge = |u: f64| -> Vec<(V3, V3)> { (0..=8).map(|k| on_wing(u, mix(0.80, 1.0, k as f64 / 8.0))).collect() };
+        let (gu, gv) = (|i: usize| i as f64 / WING_NU as f64, |j: usize| j as f64 / WING_NV as f64);
+        let (flap_in, flap_out, hinge) = (2, WING_NU / 2 + 1, WING_NV - 2);
+        let flap_hinge: Vec<(V3, V3)> = (flap_in..=flap_out).map(|i| on_wing(gu(i), gv(hinge))).collect();
+        let flap_edge = |i: usize| -> Vec<(V3, V3)> { (hinge..=WING_NV).map(|j| on_wing(gu(i), gv(j))).collect() };
         let le_line: Vec<(V3, V3)> = (0..=24)
             .map(|k| {
-                let u = mix(0.18, 1.0, k as f64 / 24.0);
+                let u = mix((LERX_JOIN - 0.40) / (WING_TIP - 0.40), 1.0, k as f64 / 24.0);
                 let x = 0.40 + (WING_TIP - 0.40) * u;
                 let v = ((wing_le40(x) + 0.42 - wing_le(x)) / (WING_TE - wing_le(x))).clamp(0.0, 1.0);
                 on_wing(u, v.sqrt())
             })
             .collect();
         ext.ribbon(&le_line, 0.006, SEAM);
-        ext.ribbon(&line_v(0.80f64.sqrt(), 0.12, 0.56), 0.006, SEAM);
-        ext.ribbon(&flap_edge(0.12), 0.005, SEAM);
-        ext.ribbon(&flap_edge(0.56), 0.005, SEAM);
+        ext.ribbon(&flap_hinge, 0.006, SEAM);
+        ext.ribbon(&flap_edge(flap_in), 0.005, SEAM);
+        ext.ribbon(&flap_edge(flap_out), 0.005, SEAM);
 
         // Wingtip launcher with an AIM-9.
         let rail = crate::mesh::Frame { o: v3(side * 4.76, 0.04, 2.30), x: V3::X, y: V3::Y, z: V3::Z };
@@ -362,8 +385,8 @@ pub fn build() -> Airframe {
         let mx = side * 4.80;
         let my = -0.03;
         let white = Rgb(0.78, 0.78, 0.74);
-        ext.lathe(v3(mx, my, 0.65), V3::Z, &[(0.0, 0.0), (0.06, 0.035), (0.16, 0.058), (0.24, 0.064), (2.80, 0.064), (2.86, 0.05), (2.87, 0.0)], 14, white);
-        ext.lathe(v3(mx, my, 0.65), V3::Z, &[(-0.001, 0.0), (0.055, 0.033), (0.07, 0.0)], 10, Rgb(0.08, 0.09, 0.08));
+        ext.lathe(v3(mx, my, 0.65), V3::Z, &[(0.0, 0.0), (0.06, 0.035), (0.16, 0.058), (0.24, 0.064), (2.80, 0.064), (2.86, 0.05), (2.87, 0.0)], 8, white);
+        ext.lathe(v3(mx, my, 0.65), V3::Z, &[(-0.001, 0.0), (0.055, 0.033), (0.07, 0.0)], 8, Rgb(0.08, 0.09, 0.08));
         for f in 0..4 {
             let a = PI / 4.0 + f as f64 * PI / 2.0;
             let d = v3(a.cos(), a.sin(), 0.0);
@@ -387,10 +410,10 @@ pub fn build() -> Airframe {
         };
         for &upper in &[true, false] {
             let out = move |p: V3| v3(p.x, if upper { p.y - 1.0 } else { p.y + 1.0 }, p.z);
-            ext.surface(10, 24, move |u, v| boom_point(u, v, upper), move |_, n| if n.y > 0.0 { MED } else { LIGHT }, Some(&out));
+            ext.surface(3, 6, move |u, v| boom_point(u, v, upper), move |_, n| if n.y > 0.0 { MED } else { LIGHT }, Some(&out));
         }
-        for k in 0..10 {
-            let (u0, u1) = (k as f64 / 10.0, (k + 1) as f64 / 10.0);
+        for k in 0..3 {
+            let (u0, u1) = (k as f64 / 3.0, (k + 1) as f64 / 3.0);
             ext.quad(boom_point(u0, 1.0, true), boom_point(u1, 1.0, true), boom_point(u1, 1.0, false), boom_point(u0, 1.0, false), MED.scale(0.7));
         }
 
@@ -402,26 +425,27 @@ pub fn build() -> Airframe {
     // Vertical fin: main box, dark cap; the rudder is a separate moving surface.
     for &side in &[-1.0, 1.0] {
         let out = move |p: V3| v3(p.x - side, p.y, p.z);
-        ext.surface(26, 22, move |u, v| fin_point(u * RUDDER_TOP, v * RUDDER_HINGE, side), |_, _| MED, Some(&out));
-        ext.surface(4, 22, move |u, v| fin_point(mix(RUDDER_TOP, 1.0, u), v, side), |_, _| Rgb(0.16, 0.18, 0.20), Some(&out));
+        ext.surface(6, 5, move |u, v| fin_point(u * RUDDER_TOP, v * RUDDER_HINGE, side), |_, _| MED, Some(&out));
+        ext.surface(1, 7, move |u, v| fin_point(mix(RUDDER_TOP, 1.0, u), v, side), |_, _| Rgb(0.16, 0.18, 0.20), Some(&out));
     }
-    for k in 0..22 {
-        let (v0, v1) = (k as f64 / 22.0, (k + 1) as f64 / 22.0);
+    for k in 0..7 {
+        let (v0, v1) = (k as f64 / 7.0, (k + 1) as f64 / 7.0);
         ext.quad(fin_point(1.0, v0, -1.0), fin_point(1.0, v1, -1.0), fin_point(1.0, v1, 1.0), fin_point(1.0, v0, 1.0), Rgb(0.16, 0.18, 0.20));
     }
-    for k in 0..26 {
-        let (u0, u1) = (k as f64 / 26.0 * RUDDER_TOP, (k + 1) as f64 / 26.0 * RUDDER_TOP);
+    for k in 0..6 {
+        let (u0, u1) = (k as f64 / 6.0 * RUDDER_TOP, (k + 1) as f64 / 6.0 * RUDDER_TOP);
         ext.quad(fin_point(u0, RUDDER_HINGE, -1.0), fin_point(u1, RUDDER_HINGE, -1.0), fin_point(u1, RUDDER_HINGE, 1.0), fin_point(u0, RUDDER_HINGE, 1.0), SEAM);
     }
-    // Drag-chute housing at the fin root, and two dorsal blade aerials.
-    ext.lathe(v3(0.0, 0.80, 6.05), V3::Z, &[(0.0, 0.10), (0.6, 0.15), (1.2, 0.15), (1.36, 0.10), (1.38, 0.0)], 14, MED);
+    // Drag-chute housing at the fin root, sunk into the spine so it fairs the
+    // fin trailing edge instead of floating above it, and two dorsal aerials.
+    ext.lathe(v3(0.0, 0.70, 6.05), V3::Z, &[(0.0, 0.10), (0.6, 0.14), (1.2, 0.14), (1.36, 0.09), (1.38, 0.0)], 8, MED);
     for &z in &[-1.2, 0.8] {
         thin_plate(&mut ext, &[v3(0.0, 0.90, z), v3(0.0, 1.10, z + 0.16), v3(0.0, 1.08, z + 0.24), v3(0.0, 0.88, z + 0.40)], v3(0.012, 0.0, 0.0), Rgb(0.2, 0.22, 0.24));
     }
 
     // Nozzle: petalled outer shell, lip and dark core.
-    for j in 0..36 {
-        let (a, b) = (j as f64 * TAU / 36.0, (j + 1) as f64 * TAU / 36.0);
+    for j in 0..16 {
+        let (a, b) = (j as f64 * TAU / 16.0, (j + 1) as f64 * TAU / 16.0);
         let p = |z: f64, r: f64, t: f64| v3(t.cos() * r, t.sin() * r * 0.96 + 0.02, z);
         let metal = if j % 2 == 1 { METAL } else { METAL.scale(0.8) };
         ext.quad(p(6.62, 0.51, a), p(6.62, 0.51, b), p(7.30, 0.445, b), p(7.30, 0.445, a), metal);
@@ -435,24 +459,24 @@ pub fn build() -> Airframe {
     }
 
     // Canopy glass, sill rails, aft bow and bulkhead.
-    canopy.surface(56, 36, canopy_point, |_, _| Rgb(0.34, 0.30, 0.16), Some(&|p: V3| v3(0.0, 0.6, p.z)));
+    canopy.surface(CANOPY_NU, CANOPY_NV, canopy_point, |_, _| Rgb(0.52, 0.42, 0.17), Some(&|p: V3| v3(0.0, 0.6, p.z)));
     for &v in &[0.0, 1.0] {
-        let pts: Vec<V3> = (0..=40).map(|k| canopy_point(0.06 + 0.94 * k as f64 / 40.0, v)).collect();
-        for k in 0..40 {
+        let pts: Vec<V3> = (1..=CANOPY_NU).map(|k| canopy_point(k as f64 / CANOPY_NU as f64, v)).collect();
+        for k in 0..pts.len() - 1 {
             ext.capsule(pts[k], pts[k + 1], 0.022, 0.022, Rgb(0.13, 0.15, 0.16), 6);
         }
     }
-    for k in 0..24 {
-        let (a, b) = (canopy_point(0.985, k as f64 / 24.0), canopy_point(0.985, (k + 1) as f64 / 24.0));
+    for k in 0..CANOPY_NV {
+        let (a, b) = (canopy_point(0.985, k as f64 / CANOPY_NV as f64), canopy_point(0.985, (k + 1) as f64 / CANOPY_NV as f64));
         ext.capsule(a, b, 0.03, 0.03, Rgb(0.13, 0.15, 0.16), 6);
     }
-    let bulk: Vec<V3> = (0..=24).map(|k| canopy_point(0.995, k as f64 / 24.0)).collect();
+    let bulk: Vec<V3> = (0..=CANOPY_NV).map(|k| canopy_point(0.995, k as f64 / CANOPY_NV as f64)).collect();
     ext.polygon(&bulk, Rgb(0.10, 0.11, 0.12));
 
     // Pilot for the chase view: helmet, visor, shoulders and ACES II headrest.
-    crew.ellipsoid(v3(0.0, 1.28, -3.14), v3(0.135, 0.145, 0.155), Rgb(0.70, 0.71, 0.68), 12, 20);
-    crew.ellipsoid(v3(0.0, 1.27, -3.235), v3(0.112, 0.06, 0.06), Rgb(0.05, 0.06, 0.07), 8, 16);
-    crew.ellipsoid(v3(0.0, 0.98, -3.18), v3(0.25, 0.24, 0.17), Rgb(0.26, 0.30, 0.20), 10, 18);
+    crew.ellipsoid(v3(0.0, 1.28, -3.14), v3(0.135, 0.145, 0.155), Rgb(0.70, 0.71, 0.68), 6, 10);
+    crew.ellipsoid(v3(0.0, 1.27, -3.235), v3(0.112, 0.06, 0.06), Rgb(0.05, 0.06, 0.07), 4, 8);
+    crew.ellipsoid(v3(0.0, 0.98, -3.18), v3(0.25, 0.24, 0.17), Rgb(0.26, 0.30, 0.20), 5, 10);
     let (c30, s30) = ((30.0 * DEG).cos(), (30.0 * DEG).sin());
     let rest = crate::mesh::Frame { o: v3(0.0, 1.18, -2.90), x: V3::X, y: v3(0.0, c30, s30), z: v3(0.0, -s30, c30) };
     crew.block(&rest, v3(0.17, 0.22, 0.07), Rgb(0.18, 0.2, 0.19));
@@ -462,17 +486,17 @@ pub fn build() -> Airframe {
     for (i, &side) in [-1.0, 1.0].iter().enumerate() {
         for &upper in &[true, false] {
             let out = move |p: V3| v3(p.x, if upper { p.y - 1.0 } else { p.y + 1.0 }, p.z);
-            stab[i].surface(20, 18, move |u, v| stab_point(side, u, v, upper), move |_, _| if upper { MED } else { LIGHT }, Some(&out));
+            stab[i].surface(5, 6, move |u, v| stab_point(side, u, v, upper), move |_, _| if upper { MED } else { LIGHT }, Some(&out));
         }
-        for k in 0..18 {
-            let (v0, v1) = (k as f64 / 18.0, (k + 1) as f64 / 18.0);
+        for k in 0..6 {
+            let (v0, v1) = (k as f64 / 6.0, (k + 1) as f64 / 6.0);
             stab[i].quad(stab_point(side, 1.0, v0, true), stab_point(side, 1.0, v1, true), stab_point(side, 1.0, v1, false), stab_point(side, 1.0, v0, false), MED);
         }
     }
     let mut rudder = Mesh::new();
     for &side in &[-1.0, 1.0] {
         let out = move |p: V3| v3(p.x - side, p.y, p.z);
-        rudder.surface(24, 8, move |u, v| fin_point(u * RUDDER_TOP, mix(RUDDER_HINGE, 1.0, v), side), |_, _| MED, Some(&out));
+        rudder.surface(6, 2, move |u, v| fin_point(u * RUDDER_TOP, mix(RUDDER_HINGE, 1.0, v), side), |_, _| MED, Some(&out));
     }
     let mut brakes = [Mesh::new(), Mesh::new(), Mesh::new(), Mesh::new()];
     for (i, &side) in [-1.0, 1.0].iter().enumerate() {
@@ -482,6 +506,9 @@ pub fn build() -> Airframe {
         }
     }
 
+    for m in [&mut ext, &mut canopy, &mut crew, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()) {
+        m.facet();
+    }
     Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes }
 }
 

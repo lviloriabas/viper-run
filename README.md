@@ -106,6 +106,10 @@ out of margin.
   caution panel, AOA indexer, master caution, labelled side consoles, throttle
   and pressure sidestick, a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
+- Jet and cockpit are flat-shaded low-polygon models in the style of early-90s
+  3D flight sims: 16-sided fuselage sections, 8-panel airfoils, hexagonal
+  limbs, 16-sided gauges and chamfered bezels. Each quad takes one shade, and a
+  fill light keeps neighbouring facets distinct even against the sun.
 - The canopy is a single convex glass layer with a faint tint, Fresnel sheen
   and sun glints, drawn once per pixel, so it never washes out the view.
 - Green NAV HUD clipped to the physical combiner glass: inertial pitch ladder,
