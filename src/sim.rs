@@ -6,7 +6,9 @@
 //! atmosphere and compressible pitot. On top of the tables, each wing panel
 //! stalls on its own, so a stall can drop a wing and start a departure.
 use crate::aero::{self, Coeffs, Flow};
+use crate::air::{KT, RHO0};
 use crate::math::*;
+use crate::structure::Structure;
 use crate::terrain::{self, river_x, terrain_at};
 
 pub const G0: f64 = 9.80665;
@@ -200,7 +202,7 @@ pub fn trim(altitude: f64, speed: f64, mass: f64) -> Trim {
     let atm = atmosphere_at(altitude);
     let qs = 0.5 * atm.rho * speed * speed * aero::WING_AREA;
     let mach = speed / atm.sound;
-    let flow = |alpha: f64, el: f64| Flow { alpha, el, speed, mach, xcg: XCG, h_over_b: 10.0, ..Default::default() };
+    let flow = |alpha: f64, el: f64| Flow { alpha, el, speed, mach, xcg: XCG, h_over_b: 10.0, qbar: qs / aero::WING_AREA, ..Default::default() };
     // Pitching moment falls with stabilator, so bisect it to zero at each AoA.
     let el_for = |alpha: f64| {
         let (mut lo, mut hi) = (-STAB_MAX, STAB_MAX);
@@ -300,6 +302,9 @@ pub struct Flcs {
 const PITCH_GRADIENT: [(f64, f64); 6] = [(-17.65, -4.0), (-7.25, -0.44), (-1.75, 0.0), (1.75, 0.0), (7.25, 0.44), (40.0, 10.86)];
 /// Lateral stick force to roll-rate command (lbf to deg/s).
 const ROLL_GRADIENT: [(f64, f64); 5] = [(0.0, 0.0), (1.0, 0.0), (6.0, 20.0), (11.0, 80.0), (17.0, 308.0)];
+/// Lift coefficient at which shock-induced buffet starts, against Mach: a
+/// typical fighter buffet boundary, lowest just below Mach 1.
+const BUFFET_ONSET: [(f64, f64); 6] = [(0.5, 1.2), (0.7, 0.95), (0.85, 0.7), (0.95, 0.5), (1.05, 0.6), (1.2, 0.9)];
 
 /// What the FLCS reads each frame: air data, rates, load factor, the
 /// gravity component along the body's up axis and the mass properties.
@@ -462,6 +467,10 @@ pub struct Aircraft {
     pub stall_right: f64,
     /// Critical AoA for the present flight condition, degrees.
     pub alpha_crit: f64,
+    /// Wing flutter, elastic bending and structural damage (structure.rs).
+    pub structure: Structure,
+    /// Stores hung under the wings (kg), which lower the flutter speed.
+    pub wing_stores: f64,
     /// Uncommanded roll and yaw while stalled (a wing drop or spin entry), 0..1.
     pub departure: f64,
 }
@@ -532,6 +541,8 @@ impl Aircraft {
             stall_right: 0.0,
             alpha_crit: ALPHA_CRIT,
             departure: 0.0,
+            structure: Structure::default(),
+            wing_stores: 0.0,
         };
         a.update(0.0, &Input::default());
         a
@@ -575,10 +586,10 @@ impl Aircraft {
         (speed, alpha, beta, -self.omega.z, self.omega.x, -self.omega.y)
     }
 
-    fn flow(&self, speed: f64, alpha: f64, beta: f64, p: f64, q: f64, r: f64, mach: f64) -> Flow {
+    fn flow(&self, speed: f64, alpha: f64, beta: f64, p: f64, q: f64, r: f64, mach: f64, qbar: f64) -> Flow {
         let f = &self.flcs;
         let h_over_b = self.agl.max(0.0) / aero::SPAN;
-        Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, h_over_b }
+        Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, qbar, h_over_b }
     }
 
     /// Critical AoA for the present condition, degrees. Shock-induced
@@ -636,7 +647,7 @@ impl Aircraft {
         let qbar = 0.5 * atm.rho * speed * speed;
         let mach = speed / atm.sound;
         let sensors = Sensors {
-            flow: self.flow(speed, alpha, beta, p, q, r, mach),
+            flow: self.flow(speed, alpha, beta, p, q, r, mach, qbar),
             nz: self.g_load,
             qbar,
             up_y: self.q.axes().up.y,
@@ -650,9 +661,13 @@ impl Aircraft {
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
         self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) } else { 0.0 };
 
-        let flow = self.flow(speed, alpha, beta, p, q, r, mach);
+        let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
         let mut c = aero::coefficients(&flow);
         self.separation(&flow, &mut c, dt);
+        // The wing's antisymmetric mode, shaken by gusts and buffet, rolls the jet.
+        let keas = speed * (atm.rho / RHO0).sqrt() * KT;
+        self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet, self.wing_stores);
+        c.cl += self.structure.roll();
         let qs = qbar * aero::WING_AREA;
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
@@ -723,6 +738,15 @@ impl Aircraft {
             (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n, self.alpha_crit) = (thrust, cl, cd, lift, drag, crit);
         }
 
+        // A wing that breaks ends the flight where it is.
+        if let Some(what) = self.structure.failed {
+            self.crashed = true;
+            self.impact_speed = self.vel.len();
+            self.impact_water = false;
+            self.collision_label = what;
+            return;
+        }
+
         // Fuel: specific consumption of the F110 dry and in afterburner.
         let ab = ((self.power - 50.0) / 50.0).max(0.0);
         let lbf = self.thrust_n.max(0.0) / 4.448222;
@@ -758,7 +782,13 @@ impl Aircraft {
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
         self.stall = self.stall_left.max(self.stall_right);
-        let mach_buffet = smoothstep(0.92, 1.08, self.mach) * (1.0 - smoothstep(1.16, 1.4, self.mach)) * 0.6;
+        // Transonic buffet: shock-induced separation once the lift coefficient
+        // passes the buffet-onset boundary, which sags towards Mach 0.95, and
+        // the shocks shuffling over the wing through Mach 1 at any lift.
+        let onset_cl = aero::curve(&BUFFET_ONSET, self.mach);
+        let shock = smoothstep(onset_cl, onset_cl + 0.4, self.cl.abs()) * (1.0 - smoothstep(1.1, 1.3, self.mach));
+        let shuffle = smoothstep(0.93, 0.98, self.mach) * (1.0 - smoothstep(1.02, 1.08, self.mach));
+        let mach_buffet = 0.6 * shock + 0.25 * shuffle;
         let onset = smoothstep(self.alpha_crit - 14.0, self.alpha_crit - 2.0, self.alpha_deg.abs());
         self.buffet = clamp(onset * 0.7 + self.stall + mach_buffet, 0.0, 1.0);
         let uncommanded = (p - self.flcs.p_cmd * DEG).abs() + 1.5 * r.abs();
@@ -1114,6 +1144,26 @@ mod tests {
         assert!(a.stall > 0.3 && a.buffet > 0.6, "stall {:.2}, buffet {:.2} at {:.1} deg", a.stall, a.buffet, a.alpha_deg);
         let a = run(a, 4.0, Input::default());
         assert!(a.stall < 0.05, "still stalled after release: {:.2} at {:.1} deg", a.stall, a.alpha_deg);
+    }
+
+    /// Heavy stores under the wings bring the flutter speed, sagging in the
+    /// transonic dip, down into reach: the clean jet shrugs off Mach 1 at
+    /// 1,500 m, the loaded one flutters until the wing breaks.
+    #[test]
+    fn loaded_wings_flutter_through_mach_one_low_down() {
+        let burner = Input { afterburner: true, throttle_up: true, ..Default::default() };
+        let mut clean = aircraft(1500.0, 330.0);
+        // Over the low ground west of the gorge.
+        clean.pos = v3(-2000.0, 1500.0, -3000.0);
+        clean.update(0.0, &Input::default());
+        let mut loaded = clean.clone();
+        loaded.wing_stores = 1500.0;
+        for _ in 0..(20.0 / DT) as usize {
+            clean.update(DT, &burner);
+            loaded.update(DT, &burner);
+        }
+        assert!(!clean.crashed && clean.structure.amplitude < 0.02, "clean: {:.3} m, {}", clean.structure.amplitude, clean.collision_label);
+        assert!(loaded.crashed && loaded.collision_label == "wing flutter", "loaded: margin {:.2}, {:.3} m", loaded.structure.margin, loaded.structure.amplitude);
     }
 
     #[test]

@@ -401,6 +401,15 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if stall(a) {
         w.push(Warn { text: "STALL", color: RED });
     }
+    // The wing buzzing towards its flutter boundary, or past the placard.
+    if a.structure.amplitude > 0.03 || a.structure.margin > 0.97 {
+        w.push(Warn { text: "FLUTTER", color: RED });
+    } else if a.structure.margin > 0.87 {
+        w.push(Warn { text: "OVERSPEED", color: AMBER });
+    }
+    if a.structure.damage > 0.25 {
+        w.push(Warn { text: "STRUCT DAMAGE", color: AMBER });
+    }
     if a.g_smooth > 9.15 {
         w.push(Warn { text: "G LIMIT", color: AMBER });
     }

@@ -325,6 +325,7 @@ uniform vec3 u_fog;
 uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
+uniform vec2 u_flex;
 out vec3 v_rel;
 out vec3 v_normal;
 out vec3 v_color;
@@ -332,7 +333,12 @@ out vec3 v_local;
 out vec2 v_uv;
 out float v_light;
 void main() {
-    vec4 rel = u_model * vec4(pos, 1.0);
+    // Elastic wing: bent up under load, the tips swapping in the flutter
+    // mode, the root and everything inboard or aft of the wing held still.
+    vec3 p = pos;
+    float span = clamp((abs(pos.x) - 1.2) / 3.6, 0.0, 1.0) * step(pos.z, 3.6);
+    p.y += (u_flex.x - sign(pos.x) * u_flex.y) * span * span;
+    vec4 rel = u_model * vec4(p, 1.0);
     v_rel = rel.xyz;
     v_local = pos;
     vec3 n = normalize(mat3(u_model) * normal);
@@ -492,6 +498,8 @@ pub struct AirU {
     pub alpha: f32,
     pub glow: f32,
     pub cutout: f32,
+    /// Static wingtip bend and the antisymmetric flutter deflection, m.
+    pub flex: [f32; 2],
 }
 #[repr(C)]
 struct PostU {
@@ -705,7 +713,7 @@ impl World {
         let gate_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &gv)], index_buffer: gfx::immutable_ib(ctx, &gi), images: vec![] };
 
         // Exterior aircraft.
-        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1)];
+        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float2)];
         let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
@@ -864,7 +872,7 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 } };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32] };
             ctx.apply_pipeline(&self.air);
             self.draw_part(ctx, &self.exterior, &base, &model);
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
@@ -925,7 +933,7 @@ impl World {
         if let (Some(a), false) = (aircraft, cockpit) {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0 };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2] };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, &self.canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);

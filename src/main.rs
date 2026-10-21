@@ -19,6 +19,7 @@ mod physio;
 mod png;
 mod settings;
 mod sim;
+mod structure;
 mod terrain;
 mod texture;
 mod ui;
@@ -774,6 +775,9 @@ impl App {
         }
         if self.aircraft.as_ref().unwrap().crashed {
             self.begin_finish(Outcome::Crash);
+            if let Some(what) = self.aircraft.as_ref().unwrap().structure.failed {
+                self.flash_toast(&format!("{} // STRUCTURAL FAILURE", what.to_uppercase()), 2.6);
+            }
             return;
         }
         if self.mission.time_left <= 0.0 {
@@ -821,7 +825,8 @@ impl App {
     }
 
     fn shake(&self, a: &Aircraft) -> f64 {
-        let mut s = 0.00055 + a.turbulence * 0.0012 + a.buffet * 0.004 + a.afterburner_visual * 0.0007;
+        // The wing mode shakes the whole airframe, the seat included.
+        let mut s = 0.00055 + a.turbulence * 0.0012 + a.buffet * 0.004 + a.afterburner_visual * 0.0007 + a.structure.amplitude * 0.05;
         if a.mach > 0.92 {
             s += 0.0007;
         }

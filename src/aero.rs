@@ -9,6 +9,7 @@
 //! and thrust follows its F110-GE-129 tables. Engine power dynamics are the
 //! Stevens & Lewis power-lag model.
 use crate::math::{clamp, smoothstep};
+use crate::structure;
 
 pub const WING_AREA: f64 = 27.87; // 300 ft^2
 pub const SPAN: f64 = 9.144; // 30 ft
@@ -193,6 +194,8 @@ pub struct Flow {
     pub brake: f64,
     /// Centre of gravity, fraction of MAC.
     pub xcg: f64,
+    /// Dynamic pressure (Pa) bending the wing (structure.rs); zero for a rigid jet.
+    pub qbar: f64,
     /// Height of the wing above the ground over the span.
     pub h_over_b: f64,
 }
@@ -214,10 +217,13 @@ pub fn coefficients(f: &Flow) -> Coeffs {
     let d: [f64; 9] = std::array::from_fn(|i| lerp1(&DAMP[i], -10.0, 5.0, a));
     let v = f.speed.max(30.0);
     let (cq, bv) = (CHORD / (2.0 * v), SPAN / (2.0 * v));
+    // The elastic wing sheds lift outboard and the flaperons lose power.
+    let (e_lift, shift, e_roll) = structure::effectiveness(f.qbar, f.mach);
+    let ail = f.ail * e_roll;
 
     let mut cx = lerp2(&CX, -24.0, 12.0, el, a) + cq * d[0] * f.q;
-    let cy = -0.02 * b + 0.021 * (f.ail / 20.0) + 0.086 * (f.rdr / 30.0) + bv * (d[1] * f.r + d[2] * f.p);
-    let mut cz = lerp1(&CZ, -10.0, 5.0, a) * (1.0 - (b / 57.3).powi(2)) - 0.19 * (el / 25.0) + cq * d[3] * f.q;
+    let cy = -0.02 * b + 0.021 * (ail / 20.0) + 0.086 * (f.rdr / 30.0) + bv * (d[1] * f.r + d[2] * f.p);
+    let mut cz = lerp1(&CZ, -10.0, 5.0, a) * (1.0 - (b / 57.3).powi(2)) * e_lift - 0.19 * (el / 25.0) + cq * d[3] * f.q;
 
     // Wind-axis drag and lift increments resolved into body axes.
     let (sa, ca) = (f.alpha.to_radians().sin(), f.alpha.to_radians().cos());
@@ -226,17 +232,17 @@ pub fn coefficients(f: &Flow) -> Coeffs {
     cx += -drag * ca + lift * sa;
     cz += -drag * sa - lift * ca;
 
-    let arm = XCG_REF - f.xcg + curve(&AC_SHIFT, f.mach);
+    let arm = XCG_REF - f.xcg + curve(&AC_SHIFT, f.mach) - shift;
     let sb = b.signum();
     let cl = lerp2(&CL, 0.0, 5.0, b.abs(), a) * sb
-        + lerp2(&DLDA, -30.0, 10.0, b, a) * (f.ail / 20.0)
+        + lerp2(&DLDA, -30.0, 10.0, b, a) * (ail / 20.0)
         + lerp2(&DLDR, -30.0, 10.0, b, a) * (f.rdr / 30.0)
         + bv * (d[4] * f.r + d[5] * f.p);
     let cm = lerp2(&CM, -24.0, 12.0, el, a) + cz * arm + cq * d[6] * f.q - 0.02 * f.brake
         // Beyond the data the jet pitches out of a deep stall like a flat plate.
         - 0.4 * smoothstep(50.0, 80.0, f.alpha.abs()) * f.alpha.signum();
     let cn = lerp2(&CN, 0.0, 5.0, b.abs(), a) * sb
-        + lerp2(&DNDA, -30.0, 10.0, b, a) * (f.ail / 20.0)
+        + lerp2(&DNDA, -30.0, 10.0, b, a) * (ail / 20.0)
         + lerp2(&DNDR, -30.0, 10.0, b, a) * (f.rdr / 30.0)
         + bv * (d[7] * f.r + d[8] * f.p)
         - cy * (XCG_REF - f.xcg) * CHORD / SPAN;

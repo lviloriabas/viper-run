@@ -2,6 +2,7 @@
 //! a sea-level QNH), the altitudes an air-data computer derives from static
 //! pressure and density, pitot-static airspeeds, and the readings the HUD and
 //! the panel gauges show. The flight model breathes the same air.
+use crate::aero::curve;
 use crate::math::*;
 use crate::sim::{Aircraft, G0};
 
@@ -29,6 +30,10 @@ pub const PA_PER_INHG: f64 = 3386.389;
 /// Published F-16 limits: 800 KCAS or Mach 2.05, whichever comes first.
 pub const VMAX_KCAS: f64 = 800.0;
 pub const MACH_MAX: f64 = 2.05;
+/// Static-source position error of the nose-boom probe, as a fraction of
+/// the static pressure against Mach: the bow shock sweeping back over the
+/// static ports through Mach 1 makes the altimeter jump (the "Mach jump").
+const STATIC_ERROR: [(f64, f64); 6] = [(0.0, 0.0), (0.85, 0.0), (0.96, -0.006), (1.0, 0.003), (1.06, 0.001), (1.2, 0.0)];
 
 /// Day conditions: sea-level pressure (QNH) and a uniform deviation from the
 /// ISA temperature, the "ISA + dT" model of performance manuals.
@@ -234,10 +239,12 @@ impl AirData {
         let atm = atmosphere_at(a.pos.y);
         let tas = a.vel.len();
         let mach = tas / atm.sound;
+        // The static ports read a little off the free stream near Mach 1.
+        let ports = Atmosphere { pressure_alt: pressure_altitude(atm.pressure * (1.0 + curve(&STATIC_ERROR, mach))), ..atm };
         AirData {
             atm,
-            baro_ft: DAY.altimeter(&atm) * FT,
-            pressure_alt_ft: atm.pressure_alt * FT,
+            baro_ft: DAY.altimeter(&ports) * FT,
+            pressure_alt_ft: ports.pressure_alt * FT,
             density_alt_ft: atm.density_alt * FT,
             radar_ft: a.agl * FT,
             qnh_inhg: DAY.qnh / PA_PER_INHG,
