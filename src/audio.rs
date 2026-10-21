@@ -76,6 +76,17 @@ impl Biquad {
     }
 }
 
+/// Filtered noise hit; its low pass sweeps from `f0` down to `f1` as it decays.
+struct Burst {
+    delay: u32,
+    t: u32,
+    len: u32,
+    vol: f32,
+    f0: f32,
+    f1: f32,
+    lp: Biquad,
+}
+
 struct Synth {
     target: Params,
     cur: Params,
@@ -90,6 +101,7 @@ struct Synth {
     whine_phase: f32,
     voices: Vec<Voice>,
     crash: Option<u32>,
+    bursts: Vec<Burst>,
 }
 
 impl Synth {
@@ -108,6 +120,7 @@ impl Synth {
             whine_phase: 0.0,
             voices: Vec::new(),
             crash: None,
+            bursts: Vec::new(),
         }
     }
 
@@ -170,6 +183,22 @@ impl Synth {
             v += self.tone_lp.run(tones);
             self.voices.retain(|vc| vc.t < vc.len);
 
+            let noise = self.white();
+            for b in self.bursts.iter_mut() {
+                if b.delay > 0 {
+                    b.delay -= 1;
+                    continue;
+                }
+                let u = b.t as f32 / b.len as f32;
+                if b.t % 64 == 0 {
+                    b.lp.set(true, b.f0 * (b.f1 / b.f0).powf(u), 0.8);
+                }
+                let attack = (b.t as f32 / (RATE as f32 * 0.004)).min(1.0);
+                v += b.lp.run(noise * attack * (1.0 - u) * (1.0 - u)) * b.vol;
+                b.t += 1;
+            }
+            self.bursts.retain(|b| b.t < b.len);
+
             if let Some(n) = self.crash {
                 let total = (RATE as f32 * 1.4) as u32;
                 let t = n as f32 / total as f32;
@@ -214,10 +243,33 @@ impl Audio {
         }
     }
 
-    pub fn crash(&self) {
+    pub fn burst(&self, duration: f32, volume: f32, f0: f32, f1: f32, delay: f32) {
+        if let Ok(mut s) = self.synth.lock() {
+            let b = Burst { delay: (delay * RATE as f32) as u32, t: 0, len: (duration * RATE as f32) as u32, vol: volume, f0, f1, lp: Biquad::default() };
+            s.bursts.push(b);
+        }
+    }
+
+    /// Impact: the noise sweep, a deep boom and two secondary blasts; a
+    /// hissing splash instead on water.
+    pub fn crash(&self, water: bool) {
         if let Ok(mut s) = self.synth.lock() {
             s.crash = Some(0);
         }
+        if water {
+            self.burst(1.4, 1.1, 6000.0, 500.0, 0.0);
+            self.burst(0.9, 3.0, 260.0, 40.0, 0.0);
+            return;
+        }
+        self.burst(1.8, 5.0, 320.0, 32.0, 0.0);
+        self.burst(0.9, 2.4, 1100.0, 90.0, 0.42);
+        self.burst(1.1, 2.0, 900.0, 70.0, 0.95);
+    }
+
+    /// Afterburner light-off: a low thump and a short crackle.
+    pub fn afterburner(&self) {
+        self.burst(0.55, 3.2, 230.0, 48.0, 0.0);
+        self.burst(0.35, 0.7, 2600.0, 380.0, 0.02);
     }
 
     pub fn gate(&self) {

@@ -44,7 +44,7 @@ then list its bindings:
 
 | Controller | Action |
 | --- | --- |
-| Left stick | Pitch and roll; pull back to raise the nose |
+| Left stick | Pitch and roll; pull back to raise the nose (push, with INVERT PITCH on) |
 | Right stick | Look around the cockpit, or orbit the chase camera; springs back |
 | `RT` / `LT` | Throttle up / down; `RT` pulled to the stop lights the afterburner at full throttle |
 | `LB` / `RB` | Rudder left / right |
@@ -78,8 +78,9 @@ pulling.
 Hold Alt to inspect the pilot, consoles, wings and tail from the seat; release
 it to return to the forward view. In chase view Alt and the mouse orbit the
 external camera. The default cockpit FOV is 58 degrees (45 to 72 in the
-drawer), mouse sensitivity starts at 2.8x (0.5x to 5x) and the vertical axis
-can be inverted. Opening the drawer pauses the flight. Settings and the best
+drawer), mouse sensitivity starts at 2.8x (0.5x to 5x) and INVERT PITCH flips
+every pitch input at once: mouse Y, W / S and the controller's left stick.
+Opening the drawer pauses the flight. Settings and the best
 run are saved to `%APPDATA%\viper-run\settings.txt` on Windows and
 `~/.config/viper-run/settings.txt` on Linux.
 

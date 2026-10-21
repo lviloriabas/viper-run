@@ -8,6 +8,7 @@ mod audio;
 mod canvas;
 mod cockpit;
 mod font;
+mod fx;
 mod gamepad;
 mod gfx;
 mod math;
@@ -152,6 +153,11 @@ struct App {
     flash_color: [u8; 3],
     warn_clock: f64,
     result: Option<RunResult>,
+    /// Afterburner lit at the last check, to catch the light-off.
+    ab_lit: bool,
+    /// Decaying jolt added to the camera shake by a light-off or an impact.
+    kick: f64,
+    crash_time: f64,
 
     keys: HashSet<KeyCode>,
     pad: Gamepad,
@@ -189,6 +195,11 @@ fn stick_curve(v: f64) -> f64 {
 /// still reaching full deflection at the stop.
 fn pad_curve(v: f64) -> f64 {
     v * (0.45 + 0.55 * v * v)
+}
+
+/// Afterburner alight, for the light-off thump and torch.
+fn burner_lit(a: &Aircraft) -> bool {
+    a.ab_level > 0.05
 }
 
 fn render_size(w: f32, h: f32) -> (u32, u32) {
@@ -253,6 +264,9 @@ impl App {
             flash_color: [180, 255, 190],
             warn_clock: 0.0,
             result: None,
+            ab_lit: false,
+            kick: 0.0,
+            crash_time: 0.0,
             keys: HashSet::new(),
             pad: Gamepad::new(),
             pad_look: (0.0, 0.0),
@@ -298,14 +312,21 @@ impl App {
         if self.opts.sim_seconds > 0.0 && self.state == State::Flying {
             let steps = (self.opts.sim_seconds / FIXED_DT).round() as usize;
             for _ in 0..steps {
-                if self.state != State::Flying {
-                    break;
+                match self.state {
+                    State::Flying => self.step(FIXED_DT, self.opts.input),
+                    // Let an impact play out, so a screenshot can show it.
+                    State::Transition => {
+                        self.advance_effects(FIXED_DT);
+                        self.flash = (self.flash - FIXED_DT * 2.4).max(0.0);
+                    }
+                    _ => break,
                 }
-                self.step(FIXED_DT, self.opts.input);
                 self.time += FIXED_DT;
                 self.update_hands(FIXED_DT, Some(self.opts.input));
             }
         }
+        // A burner lit during the scripted run is not a fresh light-off.
+        self.ab_lit = self.aircraft.as_ref().is_some_and(burner_lit);
         match self.opts.screen.as_deref() {
             Some("pause") => self.pause(),
             Some("win") | Some("crash") | Some("timeout") => {
@@ -360,6 +381,9 @@ impl App {
         self.accumulator = 0.0;
         self.transition_timer = 0.0;
         self.flash = 0.0;
+        self.world.fx.clear();
+        self.ab_lit = false;
+        self.kick = 0.0;
         self.hands = Hands { throttle: self.mission.start_throttle, ..Default::default() };
         self.airbrake = false;
         self.key_pitch = 0.0;
@@ -452,7 +476,10 @@ impl App {
                 self.settings.pitch = if self.settings.pitch == PitchSource::Mouse { PitchSource::Keys } else { PitchSource::Mouse };
                 self.key_pitch = 0.0;
             }
-            Action::Invert => self.settings.invert_y = !self.settings.invert_y,
+            Action::Invert => {
+                self.settings.invert_pitch = !self.settings.invert_pitch;
+                self.key_pitch = 0.0;
+            }
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Reset => {
                 let fs = self.settings.fullscreen;
@@ -497,7 +524,8 @@ impl App {
         self.transition_kind = kind;
         self.transition_timer = match kind {
             Outcome::Win => 1.35,
-            Outcome::Crash => 1.05,
+            // Long enough to watch the fireball from the wreck camera.
+            Outcome::Crash => 2.6,
             Outcome::Timeout => 0.85,
         };
         self.state = State::Transition;
@@ -514,10 +542,14 @@ impl App {
                 self.audio.tone(1040.0, 0.36, 0.035, Wave::Square, 0.37);
             }
             Outcome::Crash => {
-                self.flash_color = [255, 100, 58];
+                let a = self.aircraft.as_ref().unwrap();
+                self.flash_color = if a.impact_water { [200, 232, 255] } else { [255, 100, 58] };
                 self.flash = 1.0;
                 self.toast_timer = 0.0;
-                self.audio.crash();
+                self.kick = 1.0;
+                self.crash_time = self.time;
+                self.audio.crash(a.impact_water);
+                self.world.fx.explode(a);
             }
             Outcome::Timeout => {
                 self.flash_color = [255, 170, 70];
@@ -549,19 +581,20 @@ impl App {
         let mouse = if self.grabbed { self.mouse } else { (0.0, 0.0) };
         // Exactly one pitch source is live: mouse Y (down = pull) or W/S.
         let pitch_axis = match self.settings.pitch {
-            PitchSource::Mouse => stick_curve(mouse.1) * if self.settings.invert_y { -1.0 } else { 1.0 },
+            PitchSource::Mouse => stick_curve(mouse.1),
             PitchSource::Keys => self.key_pitch,
         };
         // The controller adds to the keyboard and mouse and reads zero at
         // rest. Pulling the left stick back pulls the nose up; RT pulled to
-        // the stop asks for afterburner.
+        // the stop asks for afterburner. Invert pitch flips all of them.
         let pad = &self.pad;
+        let invert = if self.settings.invert_pitch { -1.0 } else { 1.0 };
         Input {
             roll_left: k(KeyCode::A) || k(KeyCode::Left),
             roll_right: k(KeyCode::D) || k(KeyCode::Right),
             yaw_left: k(KeyCode::Q) || pad.held(gamepad::LB),
             yaw_right: k(KeyCode::E) || pad.held(gamepad::RB),
-            pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
+            pitch_axis: (pitch_axis - pad_curve(pad.state.left.1)) * invert,
             roll_axis: pad_curve(pad.state.left.0),
             yaw_axis: stick_curve(mouse.0),
             throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift) || pad.state.rt > 0.3,
@@ -708,10 +741,30 @@ impl App {
         if a.mach > 0.92 {
             s += 0.0007;
         }
-        if self.state == State::Transition && self.transition_kind == Outcome::Crash {
-            s += self.transition_timer.max(0.0) * 0.02;
-        }
-        s
+        s + self.kick * 0.02
+    }
+
+    fn advance_effects(&mut self, dt: f64) {
+        self.world.fx.update(dt);
+        self.kick *= (-dt * 2.2).exp();
+    }
+
+    /// After an impact the cockpit is gone: an external camera backs away
+    /// from the wreck and slowly circles it.
+    fn wreck_camera(&self, a: &Aircraft) -> Camera {
+        let t = (self.time - self.crash_time).max(0.0);
+        let course = v3(a.vel.x, 0.0, a.vel.z);
+        let back = if course.len() > 1e-6 { -course.norm() } else { a.q.axes().back };
+        let pull_out = smoothstep(0.0, 2.5, t);
+        let around = Quat::axis_angle(V3::Y, 0.55 + t * 0.12).rotate(back);
+        let target = a.pos + V3::Y * (5.0 + 10.0 * pull_out);
+        let mut eye = target + around * (60.0 + 55.0 * pull_out) + V3::Y * (14.0 + 18.0 * pull_out);
+        let shake = self.kick * 9.0;
+        eye = eye + v3((t * 31.1).sin(), (t * 26.3 + 1.7).sin(), (t * 18.3).sin()) * shake;
+        eye.y = eye.y.max(terrain::floor(eye.x, eye.z) + 3.0);
+        let f = (target - eye).norm();
+        let r = f.cross(V3::Y).norm();
+        Camera { eye, forward: f, right: r, up: r.cross(f).norm(), fov: 55.0 * DEG }
     }
 
     fn flight_camera(&self, a: &Aircraft) -> Camera {
@@ -771,6 +824,7 @@ impl App {
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
             (_, State::Attract) | (None, _) => self.attract_camera(self.attract_time),
+            (Some(a), _) if a.crashed => self.wreck_camera(a),
             (Some(a), _) => {
                 if self.view == View::Chase {
                     self.chase_camera(a)
@@ -788,10 +842,12 @@ impl App {
             let (thr, speed, ab) = (a.throttle as f32, a.speed as f32, a.afterburner_visual as f32);
             p.eng_gain = (0.025 + thr * 0.07 + ab * 0.075).clamp(0.0, 0.2);
             p.eng_freq = 280.0 + speed * 5.0 + thr * 600.0 + ab * 800.0;
-            p.wind_gain = (speed / 330.0 * 0.055).clamp(0.0, 0.07);
+            // Separated flow roars and shudders through the airframe.
+            let buffet = a.buffet as f32;
+            p.wind_gain = (speed / 330.0 * 0.055).clamp(0.0, 0.07) + buffet * 0.03;
             p.wind_freq = 500.0 + speed * 14.0;
-            p.rumble_gain = 0.008 + thr * 0.012 + ab * 0.015;
-            p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0;
+            p.rumble_gain = 0.008 + thr * 0.012 + ab * 0.015 + buffet * 0.035;
+            p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0 - buffet * 12.0;
             p.whine_gain = 0.0015 + thr * 0.003;
             p.whine_freq = 620.0 + thr * 560.0 + ab * 250.0;
         }
@@ -853,6 +909,13 @@ impl EventHandler for App {
                     self.accumulator = 0.0;
                 }
                 if let Some(a) = &self.aircraft {
+                    let lit = burner_lit(a);
+                    if lit && !self.ab_lit {
+                        self.audio.afterburner();
+                        self.world.fx.ab_light(a);
+                        self.kick = self.kick.max(0.14);
+                    }
+                    self.ab_lit = lit;
                     let (pu, st) = (ui::pull_up(a), ui::stall(a));
                     self.warn_clock -= dt;
                     if self.warn_clock <= 0.0 && (pu || st) {
@@ -873,6 +936,9 @@ impl EventHandler for App {
             }
             _ => {}
         }
+        if self.state != State::Paused {
+            self.advance_effects(dt);
+        }
         if self.opts.shot.is_none() {
             self.update_hands(dt, None);
         }
@@ -883,7 +949,9 @@ impl EventHandler for App {
     fn draw(&mut self) {
         let (w, h) = self.win;
         let flying_view = self.state != State::Attract && self.aircraft.is_some();
-        let cockpit_view = flying_view && self.view == View::Cockpit;
+        // A wrecked jet leaves only the fireball and debris, seen from outside.
+        let wrecked = self.aircraft.as_ref().is_some_and(|a| a.crashed);
+        let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked;
         let cam = self.camera;
 
         // Instrument pages refresh at 30 Hz.
@@ -897,7 +965,7 @@ impl EventHandler for App {
         let aspect = (w / h) as f64;
         self.ctx.begin_pass(Some(self.scene.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
         let mission = if flying_view { Some(&self.mission) } else { Some(&self.preview) };
-        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, if flying_view { self.aircraft.as_ref() } else { None }, cockpit_view);
+        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, if flying_view && !wrecked { self.aircraft.as_ref() } else { None }, cockpit_view);
         self.ctx.end_render_pass();
         if cockpit_view {
             let a = self.aircraft.as_ref().unwrap();

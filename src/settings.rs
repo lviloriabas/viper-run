@@ -15,7 +15,8 @@ pub enum PitchSource {
 pub struct Settings {
     pub sensitivity: f64,
     pub pitch: PitchSource,
-    pub invert_y: bool,
+    /// Flips every pitch input: mouse, W / S and the controller.
+    pub invert_pitch: bool,
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
@@ -23,7 +24,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_y: false, fov: 58.0, muted: false, fullscreen: false }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, fov: 58.0, muted: false, fullscreen: false }
     }
 }
 
@@ -56,7 +57,8 @@ pub fn load() -> (Settings, Best) {
             ("sensitivity", Some(n)) => s.sensitivity = clamp(n, 0.5, 5.0),
             ("fov", Some(n)) => s.fov = clamp(n, 45.0, 72.0),
             ("pitch", _) => s.pitch = if v == "keys" { PitchSource::Keys } else { PitchSource::Mouse },
-            ("invert_y", _) => s.invert_y = v == "true",
+            // Older versions saved "invert_y", when only the mouse flipped.
+            ("invert_pitch", _) | ("invert_y", _) => s.invert_pitch = v == "true",
             ("muted", _) => s.muted = v == "true",
             ("fullscreen", _) => s.fullscreen = v == "true",
             ("best_score", Some(n)) => b.score = n.max(0.0),
@@ -73,8 +75,8 @@ pub fn save(s: &Settings, b: &Best) {
         return;
     }
     let text = format!(
-        "sensitivity={:.1}\npitch={}\ninvert_y={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
-        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_y, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
+        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
+        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
     );
     let _ = std::fs::write(d.join("settings.txt"), text);
 }

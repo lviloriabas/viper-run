@@ -45,6 +45,14 @@ pub fn additive() -> BlendState {
     BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::One)
 }
 
+/// Turns depth writes off (or back on) while keeping a depth-writing
+/// pipeline's depth test, for glows and sorted translucent effects that must
+/// hide behind terrain without hiding each other. miniquad never sets the
+/// mask itself, so always switch it back on before the next clear.
+pub fn depth_writes(on: bool) {
+    unsafe { miniquad::gl::glDepthMask(on as u8) }
+}
+
 /// Colour + depth render target.
 pub struct Target {
     pub pass: RenderPass,

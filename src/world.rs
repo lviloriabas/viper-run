@@ -2,6 +2,7 @@
 //! the exterior aircraft and the CRT post pass. All world geometry is drawn
 //! relative to the eye so f32 precision holds anywhere on the map.
 use crate::airframe::{self, Airframe};
+use crate::fx::{Fx, Layer};
 use crate::gfx::{self, Target};
 use crate::math::*;
 use crate::mesh::Mesh;
@@ -516,6 +517,8 @@ pub struct World {
     brakes: [Part; 4],
     post: Pipeline,
     post_bind: Bindings,
+    /// Afterburner plume and crash effects.
+    pub fx: Fx,
     pub drawn_chunks: usize,
 }
 
@@ -666,6 +669,7 @@ impl World {
             rudder: part(ctx, &airframe.rudder),
             brakes: [part(ctx, &airframe.brakes[0]), part(ctx, &airframe.brakes[1]), part(ctx, &airframe.brakes[2]), part(ctx, &airframe.brakes[3])],
             post,
+            fx: Fx::new(ctx),
             drawn_chunks: 0,
         }
     }
@@ -752,6 +756,7 @@ impl World {
         }
 
         // Exterior aircraft, shared by both views; first person omits canopy and crew.
+        self.fx.prepare(ctx, cam, time, aircraft);
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
@@ -779,11 +784,16 @@ impl World {
             if !cockpit {
                 self.draw_part(ctx, &self.crew, &base, &model);
             }
+            // The flame sits between the plume's shock diamonds and its sheath.
+            self.fx.draw(ctx, vp, Layer::PlumeCore);
             if !cockpit && a.afterburner_visual > 0.03 {
                 ctx.apply_pipeline(&self.flame_pip);
-                let u = AirU { alpha: (0.26 + 0.48 * a.afterburner_visual) as f32, glow: 1.0, ..base };
+                let u = AirU { alpha: (0.18 + 0.30 * a.afterburner_visual) as f32, glow: 1.0, ..base };
+                gfx::depth_writes(false);
                 self.draw_part(ctx, &self.flame, &u, &model);
+                gfx::depth_writes(true);
             }
+            self.fx.draw(ctx, vp, Layer::PlumeSheath);
         }
 
         if let Some(m) = mission {
@@ -803,6 +813,8 @@ impl World {
                 ctx.draw(0, self.gate_count, 1);
             }
         }
+
+        self.fx.draw(ctx, vp, Layer::Particles);
 
         // Clouds after opaque geometry, sorted back to front.
         self.update_clouds(ctx, cam);

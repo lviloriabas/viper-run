@@ -326,10 +326,13 @@ impl<'a> Ui<'a> {
         };
         self.cv.text(heading, m, y, sm, rgba(0xbe, 0xd5, 0x8f, 1.0), Align::Left);
         y += 12.0 * s;
-        let pitch_rows: &[(&str, &str)] = match (self.pad, st.pitch) {
-            (true, _) => &[("L STICK", "Pitch / roll, back pulls")],
-            (false, PitchSource::Mouse) => &[("MOUSE Y", "Pitch, down pulls")],
-            (false, PitchSource::Keys) => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
+        let pitch_rows: &[(&str, &str)] = match (self.pad, st.pitch, st.invert_pitch) {
+            (true, _, false) => &[("L STICK", "Pitch / roll, back pulls")],
+            (true, _, true) => &[("L STICK", "Pitch / roll, back pushes")],
+            (false, PitchSource::Mouse, false) => &[("MOUSE Y", "Pitch, down pulls")],
+            (false, PitchSource::Mouse, true) => &[("MOUSE Y", "Pitch, up pulls")],
+            (false, PitchSource::Keys, false) => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
+            (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
         };
         let rest: &[(&str, &str)] = if self.pad {
             &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("D-PAD", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Pause / resume"), ("BACK", "This drawer")]
@@ -360,11 +363,11 @@ impl<'a> Ui<'a> {
         y += 30.0 * s;
         self.button(if st.pitch == PitchSource::Mouse { "PITCH INPUT: MOUSE" } else { "PITCH INPUT: W / S" }, "", m, y, false, Action::Pitch);
         y += 18.0 * s;
-        self.button(if st.invert_y { "[X] INVERT MOUSE Y" } else { "[ ] INVERT MOUSE Y" }, "", m, y, false, Action::Invert);
+        self.button(if st.invert_pitch { "[X] INVERT PITCH" } else { "[ ] INVERT PITCH" }, "", m, y, false, Action::Invert);
         y += 18.0 * s;
         self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
         y += 18.0 * s;
-        self.cv.paragraph("Only the selected input pitches the jet. Invert applies to the mouse.", m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        self.cv.paragraph("Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller.", m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
         y += 16.0 * s;
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
         self.cv.paragraph(if self.pad { "Press K or BACK to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
