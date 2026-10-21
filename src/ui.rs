@@ -61,6 +61,8 @@ pub struct Ui<'a> {
     pub buttons: Vec<Button>,
     pub selected: usize,
     pub mouse: (f32, f32),
+    /// A controller is connected: control lists show its bindings.
+    pub pad: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -182,13 +184,17 @@ impl<'a> Ui<'a> {
             self.cv.rect(bxx + 6.0 * s, ry - 5.0 * sm, bw - 12.0 * s, 1.0, with_alpha(LINE, 0.6));
         }
         ry += 2.0 * s;
-        self.cv.text("FLIGHT CONTROLS", bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
-        ry += 10.0 * sm;
         let (k1, k2) = match pitch {
             PitchSource::Mouse => (("MOUSE", "PITCH / YAW"), ("W S", "PITCH OPTION IN K")),
             PitchSource::Keys => (("W S", "PITCH"), ("MOUSE", "YAW")),
         };
-        let keys = [k1, ("A D", "ROLL"), k2, ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("H", "AIRBRAKE ON / OFF"), ("ALT+MOUSE", "LOOK AROUND"), ("V", "CHASE / COCKPIT"), ("F1 F2", "MFD PAGES"), ("C", "CENTER VIEW"), ("P M", "PAUSE, AUDIO")];
+        let keys = if self.pad {
+            [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("RT LT", "THROTTLE"), ("RT FULL", "AFTERBURNER"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("D-PAD", "MFD PAGES"), ("START", "PAUSE"), ("A", "SELECT"), ("BACK", "CONFIG")]
+        } else {
+            [k1, ("A D", "ROLL"), k2, ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("H", "AIRBRAKE ON / OFF"), ("ALT+MOUSE", "LOOK AROUND"), ("V", "CHASE / COCKPIT"), ("F1 F2", "MFD PAGES"), ("C", "CENTER VIEW"), ("P M", "PAUSE, AUDIO")]
+        };
+        self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
+        ry += 10.0 * sm;
         for (i, (k, v)) in keys.iter().enumerate() {
             let col = i % 2;
             let row = i / 2;
@@ -312,13 +318,23 @@ impl<'a> Ui<'a> {
         self.cv.text("CONTROLS / CONFIG", m, y, s, CREAM, Align::Left);
         self.button("CLOSE", "K", w - m - 50.0 * s, y - 7.5 * s, false, Action::Controls);
         y += 16.0 * s;
-        self.cv.text(if paused_flight { "FLIGHT PAUSED" } else { "FLIGHT CONTROLS" }, m, y, sm, rgba(0xbe, 0xd5, 0x8f, 1.0), Align::Left);
-        y += 12.0 * s;
-        let pitch_rows: &[(&str, &str)] = match st.pitch {
-            PitchSource::Mouse => &[("MOUSE Y", "Pitch, down pulls")],
-            PitchSource::Keys => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
+        let heading = match (paused_flight, self.pad) {
+            (true, _) => "FLIGHT PAUSED",
+            (false, true) => "XBOX CONTROLLER",
+            (false, false) => "FLIGHT CONTROLS",
         };
-        let rest = [("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("P ESC", "Pause / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")];
+        self.cv.text(heading, m, y, sm, rgba(0xbe, 0xd5, 0x8f, 1.0), Align::Left);
+        y += 12.0 * s;
+        let pitch_rows: &[(&str, &str)] = match (self.pad, st.pitch) {
+            (true, _) => &[("L STICK", "Pitch / roll, back pulls")],
+            (false, PitchSource::Mouse) => &[("MOUSE Y", "Pitch, down pulls")],
+            (false, PitchSource::Keys) => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
+        };
+        let rest: &[(&str, &str)] = if self.pad {
+            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("D-PAD", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Pause / resume"), ("BACK", "This drawer")]
+        } else {
+            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("P ESC", "Pause / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
+        };
         for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
             self.cv.text(k, m, y, sm, ACID, Align::Left);
             self.cv.text(v, m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
@@ -350,7 +366,7 @@ impl<'a> Ui<'a> {
         self.cv.paragraph("Only the selected input pitches the jet. Invert applies to the mouse.", m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
         y += 16.0 * s;
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
-        self.cv.paragraph("Press K to close. Settings are saved for this user.", m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        self.cv.paragraph(if self.pad { "Press K or BACK to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
     }
 }
 
@@ -417,6 +433,7 @@ pub struct StickCue {
     pub yaw: f64,
     pub roll: f64,
     pub source: PitchSource,
+    pub pad: bool,
     pub brake: bool,
 }
 
@@ -435,7 +452,12 @@ fn stick_cue(cv: &mut Canvas, x: f32, y: f32, s: f32, c: &StickCue) {
     let ry = y + b + 4.0 * s;
     cv.rect(x, ry, b, 1.0, with_alpha(HUD, 0.3));
     cv.rect(cx + clamp(c.roll, -1.0, 1.0) as f32 * travel - 1.0 * s, ry - 2.0 * s, 2.0 * s, 4.0 * s, HUD);
-    let label = if c.source == PitchSource::Mouse { "PITCH MOUSE" } else { "PITCH W S" };
+    let label = match (c.pad, c.source) {
+        (true, PitchSource::Mouse) => "PAD + MOUSE",
+        (true, PitchSource::Keys) => "PAD + W S",
+        (false, PitchSource::Mouse) => "PITCH MOUSE",
+        (false, PitchSource::Keys) => "PITCH W S",
+    };
     cv.text(label, x - 4.0 * s, y + 4.0 * s, sm, with_alpha(HUD, 0.55), Align::Right);
     if c.brake {
         cv.text("SPD BRK", x - 4.0 * s, y + b - 4.0 * s, sm, AMBER, Align::Right);
@@ -456,7 +478,8 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(m.final_score(), 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
-    cv.text("K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE", 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
+    let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    X  CENTER    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
+    cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
     toast_line(cv, w, h * 0.12, s, toast, toast_t);
 }
@@ -550,10 +573,14 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
             cv.text(w2.text, w * 0.5, y + 16.0 * s, s, w2.color, Align::Center);
         }
     }
-    cv.text("C CENTER  //  ALT + MOUSE ORBIT", edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
+    cv.text(if cue.pad { "X CENTER  //  R STICK ORBIT" } else { "C CENTER  //  ALT + MOUSE ORBIT" }, edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
     cv.text(&format!("FUEL {} LB", pad(a.fuel * 2.20462, 4)), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
-    cv.text("V  COCKPIT VIEW", w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
-    let hint = if cue.source == PitchSource::Mouse { "A / D  ROLL  ,  MOUSE PITCH / YAW" } else { "A / D  ROLL  ,  W / S  PITCH  ,  MOUSE YAW" };
+    cv.text(if cue.pad { "Y  COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
+    let hint = match (cue.pad, cue.source) {
+        (true, _) => "L STICK  PITCH / ROLL  ,  LB RB  RUDDER",
+        (false, PitchSource::Mouse) => "A / D  ROLL  ,  MOUSE PITCH / YAW",
+        (false, PitchSource::Keys) => "A / D  ROLL  ,  W / S  PITCH  ,  MOUSE YAW",
+    };
     cv.text(hint, w - edge, h - 14.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
     stick_cue(cv, w - edge - 22.0 * s, h - bottom_h - 34.0 * s, s, cue);
 }

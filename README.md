@@ -38,6 +38,28 @@ at start-up in about half a second.
 | `F11` | Fullscreen |
 | `Enter`, `Tab`, arrows, mouse | Menu navigation; `Ctrl+Q` quits from a menu |
 
+An Xbox controller (or any XInput pad) works alongside the keyboard and
+mouse. It is detected when it is plugged in, and the menus and the K drawer
+then list its bindings:
+
+| Controller | Action |
+| --- | --- |
+| Left stick | Pitch and roll; pull back to raise the nose |
+| Right stick | Look around the cockpit, or orbit the chase camera; springs back |
+| `RT` / `LT` | Throttle up / down; `RT` pulled to the stop lights the afterburner at full throttle |
+| `LB` / `RB` | Rudder left / right |
+| `B` | Speedbrake out / in |
+| `X` or right-stick click | Center the view |
+| `Y` | Toggle cockpit / chase view |
+| D-pad left / right | Cycle left / right MFD page |
+| `Start` | Start, pause / resume, restart from a result screen |
+| `Back` / `View` | Open / close the controls drawer |
+| D-pad or left stick, `A`, `B` | Menu navigation, select, back |
+
+On Windows the pad is read through XInput; on Linux through the kernel
+joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
+flight pauses the game.
+
 Pitch comes from one input at a time, chosen in the K drawer: the mouse
 (default) or W/S. The other one does nothing, so a resting mouse offset can
 never fight a held key. Moving the mouse down pulls the nose up, like a
@@ -184,6 +206,7 @@ viper-run/
     ├── canvas.rs       # GPU 2D batcher with convex clipping
     ├── mesh.rs         # mesh builder (lofts, lathes, capsules, bezels)
     ├── audio.rs        # synth and waveOut / PulseAudio / ALSA output
+    ├── gamepad.rs      # Xbox controller via XInput / Linux joystick device
     ├── font.rs         # 5x7 pixel font
     ├── gfx.rs          # shader and render-target helpers
     ├── settings.rs     # settings and best-run persistence

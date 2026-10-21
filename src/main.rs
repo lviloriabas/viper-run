@@ -6,6 +6,7 @@ mod audio;
 mod canvas;
 mod cockpit;
 mod font;
+mod gamepad;
 mod gfx;
 mod math;
 mod mesh;
@@ -19,6 +20,7 @@ mod world;
 use audio::{Audio, Params, Wave};
 use canvas::{rgba, Canvas};
 use cockpit::{Cockpit, Hands, Page};
+use gamepad::Gamepad;
 use math::*;
 use miniquad::*;
 use settings::{Best, PitchSource, Settings};
@@ -150,6 +152,9 @@ struct App {
     result: Option<RunResult>,
 
     keys: HashSet<KeyCode>,
+    pad: Gamepad,
+    /// Smoothed right-stick position driving the head or chase camera.
+    pad_look: (f64, f64),
     mouse: (f64, f64),
     /// Keyboard pitch, ramped so a tap gives a partial pull and a hold a full one.
     key_pitch: f64,
@@ -176,6 +181,12 @@ struct App {
 fn stick_curve(v: f64) -> f64 {
     const DEAD: f64 = 0.04;
     v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
+}
+
+/// Controller stick shaping: gentle around centre for fine corrections,
+/// still reaching full deflection at the stop.
+fn pad_curve(v: f64) -> f64 {
+    v * (0.45 + 0.55 * v * v)
 }
 
 fn render_size(w: f32, h: f32) -> (u32, u32) {
@@ -241,6 +252,8 @@ impl App {
             warn_clock: 0.0,
             result: None,
             keys: HashSet::new(),
+            pad: Gamepad::new(),
+            pad_look: (0.0, 0.0),
             mouse: (0.0, 0.0),
             key_pitch: 0.0,
             airbrake: false,
@@ -537,16 +550,21 @@ impl App {
             PitchSource::Mouse => stick_curve(mouse.1) * if self.settings.invert_y { -1.0 } else { 1.0 },
             PitchSource::Keys => self.key_pitch,
         };
+        // The controller adds to the keyboard and mouse and reads zero at
+        // rest. Pulling the left stick back pulls the nose up; RT pulled to
+        // the stop asks for afterburner.
+        let pad = &self.pad;
         Input {
             roll_left: k(KeyCode::A) || k(KeyCode::Left),
             roll_right: k(KeyCode::D) || k(KeyCode::Right),
-            yaw_left: k(KeyCode::Q),
-            yaw_right: k(KeyCode::E),
-            pitch_axis,
+            yaw_left: k(KeyCode::Q) || pad.held(gamepad::LB),
+            yaw_right: k(KeyCode::E) || pad.held(gamepad::RB),
+            pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
+            roll_axis: pad_curve(pad.state.left.0),
             yaw_axis: stick_curve(mouse.0),
-            throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift),
-            throttle_down: k(KeyCode::LeftControl) || k(KeyCode::RightControl),
-            afterburner: k(KeyCode::Space),
+            throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift) || pad.state.rt > 0.3,
+            throttle_down: k(KeyCode::LeftControl) || k(KeyCode::RightControl) || pad.state.lt > 0.3,
+            afterburner: k(KeyCode::Space) || pad.state.rt > 0.9,
             airbrake: self.airbrake,
             ..Default::default()
         }
@@ -563,6 +581,49 @@ impl App {
         };
         let rate = if want != 0.0 && want * self.key_pitch >= 0.0 { 6.5 } else { 12.0 };
         self.key_pitch = approach(self.key_pitch, want, rate * dt);
+    }
+
+    /// Controller buttons go through the keyboard handlers, so menus and
+    /// flight behave the same whichever is used.
+    fn pad_buttons(&mut self) {
+        use gamepad::{A, B, BACK, DOWN, LEFT, RIGHT, RS, START, UP, X, Y};
+        let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result);
+        if self.state == State::Attract && !self.controls_open && self.pad.pressed(START) {
+            self.start_mission();
+            return;
+        }
+        let binds = if menu {
+            let start = if self.controls_open { KeyCode::Escape } else if self.state == State::Result { KeyCode::R } else { KeyCode::P };
+            vec![(A, KeyCode::Enter), (B, KeyCode::Escape), (START, start), (BACK, KeyCode::K)]
+        } else {
+            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, KeyCode::H), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2)]
+        };
+        let nav = if menu { self.pad.nav() } else { 0 };
+        let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
+        keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
+        for k in keys {
+            self.key_down_event(k, KeyMods::default(), false);
+        }
+    }
+
+    /// The right stick turns the head in the cockpit or orbits the chase
+    /// camera, and springs back to the forward view when released.
+    fn update_pad_look(&mut self, dt: f64) {
+        let (x, y) = self.pad.state.right;
+        let r = 1.0 - (-dt * 10.0).exp();
+        self.pad_look.0 += (x - self.pad_look.0) * r;
+        self.pad_look.1 += (y - self.pad_look.1) * r;
+        if x == 0.0 && y == 0.0 && self.pad_look.0.abs() + self.pad_look.1.abs() < 0.002 {
+            if self.pad_look != (0.0, 0.0) {
+                self.pad_look = (0.0, 0.0);
+                self.look = (0.0, -12.0 * DEG);
+                self.chase_look = (0.0, 0.0);
+            }
+            return;
+        }
+        let (lx, ly) = self.pad_look;
+        self.look = (lx * 150.0 * DEG, clamp(-12.0 * DEG + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
+        self.chase_look = (lx * PI, -ly * 60.0 * DEG);
     }
 
     fn step(&mut self, dt: f64, input: Input) {
@@ -762,6 +823,13 @@ impl EventHandler for App {
             dt = 0.0;
         }
         self.time += dt;
+        if let Some(on) = self.pad.poll(now) {
+            self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
+            if !on {
+                self.pause();
+            }
+        }
+        self.pad_buttons();
         self.toast_timer = (self.toast_timer - dt).max(0.0);
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
@@ -771,6 +839,7 @@ impl EventHandler for App {
                 let mut steps = 0;
                 // Mouse X works the rudder pedals, which spring back to centre.
                 self.mouse.0 *= (-dt / 0.35).exp();
+                self.update_pad_look(dt);
                 while self.accumulator >= FIXED_DT && steps < 8 && self.state == State::Flying {
                     self.ramp_key_pitch(FIXED_DT);
                     let input = self.read_input();
@@ -846,7 +915,8 @@ impl EventHandler for App {
         // 2D overlays at native resolution.
         let mut buttons = Vec::new();
         let i = if self.state == State::Flying { self.read_input() } else { Input { airbrake: self.airbrake, ..Default::default() } };
-        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, brake: self.airbrake };
+        let pad = self.pad.state.connected;
+        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, pad, brake: self.airbrake };
         {
             let cv = &mut self.overlay;
             if flying_view {
@@ -866,7 +936,7 @@ impl EventHandler for App {
                 cv.rect(0.0, 0.0, w, h, rgba(c[0], c[1], c[2], (self.flash * 0.34) as f32));
             }
             let s = ui::ui_scale(w, h);
-            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos };
+            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad };
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch),
