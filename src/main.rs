@@ -38,6 +38,9 @@ use world::{Camera, World};
 enum State {
     Attract,
     Flying,
+    /// Everything stops, but the camera can still look around and switch
+    /// views, for screenshots.
+    Frozen,
     Paused,
     Transition,
     Result,
@@ -115,7 +118,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,ab,brake] [--screen pause|win|crash|timeout] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
                 std::process::exit(0);
             }
             _ => {}
@@ -329,6 +332,7 @@ impl App {
         self.ab_lit = self.aircraft.as_ref().is_some_and(burner_lit);
         match self.opts.screen.as_deref() {
             Some("pause") => self.pause(),
+            Some("freeze") => self.toggle_freeze(),
             Some("win") | Some("crash") | Some("timeout") => {
                 let kind = match self.opts.screen.as_deref() {
                     Some("win") => Outcome::Win,
@@ -395,7 +399,7 @@ impl App {
     }
 
     fn pause(&mut self) {
-        if self.state != State::Flying {
+        if !matches!(self.state, State::Flying | State::Frozen) {
             return;
         }
         self.state = State::Paused;
@@ -418,6 +422,26 @@ impl App {
         self.accumulator = 0.0;
     }
 
+    /// P toggles a freeze-frame: the sim, effects and clock stop, the view stays
+    /// where it is, and the mouse looks around without Alt.
+    fn toggle_freeze(&mut self) {
+        match self.state {
+            State::Flying => {
+                self.state = State::Frozen;
+                self.keys.clear();
+                self.flash_toast("PAUSED // P RESUME // ESC MENU", 1.6);
+            }
+            State::Frozen => {
+                self.state = State::Flying;
+                self.keys.clear();
+                self.toast_timer = 0.0;
+                self.last_frame = date::now();
+                self.accumulator = 0.0;
+            }
+            _ => {}
+        }
+    }
+
     fn go_menu(&mut self) {
         self.state = State::Attract;
         self.attract_time = 0.0;
@@ -435,7 +459,7 @@ impl App {
         self.controls_open = open;
         self.selected = 0;
         if open {
-            self.controls_was_flying = self.state == State::Flying;
+            self.controls_was_flying = matches!(self.state, State::Flying | State::Frozen);
             if self.controls_was_flying {
                 self.state = State::Paused;
                 self.keys.clear();
@@ -499,7 +523,7 @@ impl App {
             return;
         }
         self.settings.muted = !self.settings.muted;
-        if matches!(self.state, State::Flying | State::Paused | State::Transition) {
+        if matches!(self.state, State::Flying | State::Frozen | State::Paused | State::Transition) {
             self.flash_toast(if self.settings.muted { "AUDIO MUTED" } else { "AUDIO ON" }, 1.4);
         }
         self.save();
@@ -631,7 +655,7 @@ impl App {
             let start = if self.controls_open { KeyCode::Escape } else if self.state == State::Result { KeyCode::R } else { KeyCode::P };
             vec![(A, KeyCode::Enter), (B, KeyCode::Escape), (START, start), (BACK, KeyCode::K)]
         } else {
-            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, KeyCode::H), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2)]
+            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2)]
         };
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
@@ -659,6 +683,20 @@ impl App {
         let (lx, ly) = self.pad_look;
         self.look = (lx * 150.0 * DEG, clamp(-12.0 * DEG + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
         self.chase_look = (lx * PI, -ly * 60.0 * DEG);
+    }
+
+    /// While frozen the right stick pans the view and leaves it there, so a
+    /// framed shot holds without keeping the stick deflected.
+    fn update_frozen_look(&mut self, dt: f64) {
+        let (x, y) = self.pad.state.right;
+        self.pad_look = (0.0, 0.0);
+        if self.view == View::Cockpit {
+            self.look.0 = clamp(self.look.0 + x * 1.6 * dt, -155.0 * DEG, 155.0 * DEG);
+            self.look.1 = clamp(self.look.1 + y * 1.2 * dt, -85.0 * DEG, 85.0 * DEG);
+        } else {
+            self.chase_look.0 += x * 1.6 * dt;
+            self.chase_look.1 = clamp(self.chase_look.1 - y * 1.2 * dt, -65.0 * DEG, 65.0 * DEG);
+        }
     }
 
     fn step(&mut self, dt: f64, input: Input) {
@@ -934,12 +972,13 @@ impl EventHandler for App {
                     self.complete_transition();
                 }
             }
+            State::Frozen => self.update_frozen_look(dt),
             _ => {}
         }
-        if self.state != State::Paused {
+        if !matches!(self.state, State::Paused | State::Frozen) {
             self.advance_effects(dt);
         }
-        if self.opts.shot.is_none() {
+        if self.opts.shot.is_none() && self.state != State::Frozen {
             self.update_hands(dt, None);
         }
         self.camera = self.current_camera();
@@ -979,7 +1018,7 @@ impl EventHandler for App {
         // Composite to the window (or an offscreen target for screenshots).
         let out_pass = self.output.as_ref().map(|t| t.pass);
         self.ctx.begin_pass(out_pass, PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
-        let gloc = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Paused | State::Transition)).map(|a| clamp((a.g_smooth - 7.4) / 2.7, 0.0, 1.0)).unwrap_or(0.0);
+        let gloc = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Frozen | State::Paused | State::Transition)).map(|a| clamp((a.g_smooth - 7.4) / 2.7, 0.0, 1.0)).unwrap_or(0.0);
         self.world.post(&mut *self.ctx, &self.scene, w, h, gloc as f32, (self.time * 60.0).floor() as f32 % 997.0);
         // Instrument faces carry information, so they skip the pixelation.
         if cockpit_view {
@@ -1073,11 +1112,11 @@ impl EventHandler for App {
     }
 
     fn raw_mouse_motion(&mut self, dx: f32, dy: f32) {
-        if self.state != State::Flying || !self.grabbed {
+        if !matches!(self.state, State::Flying | State::Frozen) || !self.grabbed {
             return;
         }
         let (dx, dy) = (dx as f64, dy as f64);
-        if self.keys.contains(&KeyCode::LeftAlt) || self.keys.contains(&KeyCode::RightAlt) {
+        if self.state == State::Frozen || self.keys.contains(&KeyCode::LeftAlt) || self.keys.contains(&KeyCode::RightAlt) {
             if self.view == View::Cockpit {
                 self.look.0 = clamp(self.look.0 + dx * 0.003, -155.0 * DEG, 155.0 * DEG);
                 self.look.1 = clamp(self.look.1 - dy * 0.003, -85.0 * DEG, 85.0 * DEG);
@@ -1098,7 +1137,7 @@ impl EventHandler for App {
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
         self.mouse_pos = (x, y);
-        if self.state == State::Flying && !self.controls_open {
+        if matches!(self.state, State::Flying | State::Frozen) && !self.controls_open {
             match button {
                 MouseButton::Right | MouseButton::Middle => {
                     self.center_stick();
@@ -1164,16 +1203,16 @@ impl EventHandler for App {
             return;
         }
         match key {
-            KeyCode::F1 | KeyCode::F2 if self.state == State::Flying => {
+            KeyCode::F1 | KeyCode::F2 if matches!(self.state, State::Flying | State::Frozen) => {
                 let i = if key == KeyCode::F1 { 0 } else { 1 };
                 self.pages[i] = self.pages[i].next();
             }
             KeyCode::M => self.toggle_mute(),
-            KeyCode::V if matches!(self.state, State::Flying | State::Transition) => {
+            KeyCode::V if matches!(self.state, State::Flying | State::Frozen | State::Transition) => {
                 self.view = if self.view == View::Chase { View::Cockpit } else { View::Chase };
                 self.flash_toast(if self.view == View::Chase { "CHASE VIEW // V COCKPIT" } else { "COCKPIT VIEW // V CHASE" }, 1.8);
             }
-            KeyCode::C if self.state == State::Flying => {
+            KeyCode::C if matches!(self.state, State::Flying | State::Frozen) => {
                 self.center_stick();
                 self.flash_toast("MOUSE STICK CENTERED", 1.1);
             }
@@ -1181,11 +1220,15 @@ impl EventHandler for App {
                 self.airbrake = !self.airbrake;
                 self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT // H RETRACT" } else { "SPEEDBRAKE IN" }, 1.4);
             }
-            KeyCode::P | KeyCode::Escape => match self.state {
-                State::Flying => self.pause(),
+            KeyCode::P => match self.state {
+                State::Flying | State::Frozen => self.toggle_freeze(),
                 State::Paused => self.resume(),
-                State::Result if key == KeyCode::Escape => self.go_menu(),
-                State::Attract if key == KeyCode::Escape => {}
+                _ => {}
+            },
+            KeyCode::Escape => match self.state {
+                State::Flying | State::Frozen => self.pause(),
+                State::Paused => self.resume(),
+                State::Result => self.go_menu(),
                 _ => {}
             },
             KeyCode::Enter | KeyCode::KpEnter => {
@@ -1207,7 +1250,7 @@ impl EventHandler for App {
 
     fn key_up_event(&mut self, key: KeyCode, _mods: KeyMods) {
         self.keys.remove(&key);
-        if matches!(key, KeyCode::LeftAlt | KeyCode::RightAlt) && !self.keys.contains(&KeyCode::LeftAlt) && !self.keys.contains(&KeyCode::RightAlt) {
+        if self.state == State::Flying && matches!(key, KeyCode::LeftAlt | KeyCode::RightAlt) && !self.keys.contains(&KeyCode::LeftAlt) && !self.keys.contains(&KeyCode::RightAlt) {
             self.center_stick();
         }
     }

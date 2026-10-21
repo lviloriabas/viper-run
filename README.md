@@ -32,8 +32,9 @@ at start-up in about half a second.
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
 | `H` | Speedbrake out / in (toggle) |
-| `P` / `Esc` | Pause / resume |
-| `R` | Restart from pause or a result screen |
+| `P` | Freeze the flight; the mouse still looks around and `V`, `C`, `F1` / `F2` still work, for screenshots |
+| `Esc` | Open / close the pause menu |
+| `R` | Restart from the pause menu or a result screen |
 | `M` | Audio on / off |
 | `F11` | Fullscreen |
 | `Enter`, `Tab`, arrows, mouse | Menu navigation; `Ctrl+Q` quits from a menu |
@@ -52,13 +53,14 @@ then list its bindings:
 | `X` or right-stick click | Center the view |
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
-| `Start` | Start, pause / resume, restart from a result screen |
+| `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
+| `B` while frozen | Open the pause menu |
 | `Back` / `View` | Open / close the controls drawer |
 | D-pad or left stick, `A`, `B` | Menu navigation, select, back |
 
 On Windows the pad is read through XInput; on Linux through the kernel
 joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
-flight pauses the game.
+flight opens the pause menu.
 
 Pitch comes from one input at a time, chosen in the K drawer: the mouse
 (default) or W/S. The other one does nothing, so a resting mouse offset can
@@ -212,7 +214,7 @@ Test switches, useful for checking a change without flying:
 viper-run --autostart                      # skip the menu
 viper-run --shot out.png --sim 3 --chase   # simulate 3 s, save a screenshot, exit
 viper-run --shot out.png --look 120,-20    # cockpit free look (yaw, pitch degrees)
-viper-run --shot out.png --screen pause    # pause | win | crash | timeout
+viper-run --shot out.png --screen pause    # pause | freeze | win | crash | timeout
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
 ```
 
