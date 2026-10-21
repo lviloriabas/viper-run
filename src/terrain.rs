@@ -191,28 +191,50 @@ impl Heightmap {
         }
     }
 
-    /// Vertex positions for one chunk at a stride, followed by its skirt ring.
+    /// A grid sample that falls back to the coarse grid outside the corridor,
+    /// where only every other sample is computed.
+    fn sample_any(&self, i: isize, j: isize) -> f32 {
+        let (i, j) = (i.clamp(0, N as isize - 1) as usize, j.clamp(0, N as isize - 1) as usize);
+        let v = self.sample(i, j);
+        if v.is_nan() {
+            self.sample(i & !1, j & !1)
+        } else {
+            v
+        }
+    }
+
+    /// Vertex positions and smooth normals for one chunk at a stride, followed
+    /// by its skirt ring: x, y, z, nx, ny, nz per vertex.
     pub fn chunk_vertices(&self, cx: usize, cz: usize, stride: usize) -> Vec<f32> {
         let n = CHUNK_CELLS / stride;
-        let mut out = Vec::with_capacity(((n + 1) * (n + 1) + 4 * n) * 3);
+        let mut out = Vec::with_capacity(((n + 1) * (n + 1) + 4 * n) * 6);
         let i0 = cx * CHUNK_CELLS;
         let j0 = cz * CHUNK_CELLS;
+        let s = stride as isize;
+        let span = (2 * stride) as f64 * CELL;
         for b in 0..=n {
             for a in 0..=n {
                 let i = i0 + a * stride;
                 let j = j0 + b * stride;
+                let (ii, jj) = (i as isize, j as isize);
+                let dx = (self.sample_any(ii + s, jj) - self.sample_any(ii - s, jj)) as f64 / span;
+                let dz = (self.sample_any(ii, jj + s) - self.sample_any(ii, jj - s)) as f64 / span;
+                let l = (dx * dx + 1.0 + dz * dz).sqrt();
                 out.extend_from_slice(&[
                     (X0 + i as f64 * CELL) as f32,
                     self.sample(i, j),
                     (Z0 + j as f64 * CELL) as f32,
+                    (-dx / l) as f32,
+                    (1.0 / l) as f32,
+                    (-dz / l) as f32,
                 ]);
             }
         }
         let depth = 30.0 + stride as f32 * 18.0;
         for k in perimeter(n) {
-            let p = k as usize * 3;
-            let (x, y, z) = (out[p], out[p + 1], out[p + 2]);
-            out.extend_from_slice(&[x, y - depth, z]);
+            let p = k as usize * 6;
+            let v: [f32; 6] = out[p..p + 6].try_into().unwrap();
+            out.extend_from_slice(&[v[0], v[1] - depth, v[2], v[3], v[4], v[5]]);
         }
         out
     }

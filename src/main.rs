@@ -17,6 +17,7 @@ mod png;
 mod settings;
 mod sim;
 mod terrain;
+mod texture;
 mod ui;
 mod world;
 
@@ -202,13 +203,11 @@ fn burner_lit(a: &Aircraft) -> bool {
     a.ab_level > 0.05
 }
 
+/// Low internal resolution, shown as crisp blocks: about 2.25 window pixels
+/// per scene pixel, between 320 and 480 lines.
 fn render_size(w: f32, h: f32) -> (u32, u32) {
-    let mut tw = clamp(w as f64 * 0.75, 640.0, 1440.0).round();
-    let mut th = (tw * (h as f64 / w as f64)).round().max(1.0);
-    if th > 900.0 {
-        th = 900.0;
-        tw = (th * (w as f64 / h as f64)).round().max(1.0);
-    }
+    let th = clamp((h as f64 / 2.25).round(), 320.0, 480.0).min(h as f64).max(1.0);
+    let tw = (th * (w as f64 / h.max(1.0) as f64)).round().max(1.0);
     (tw as u32, th as u32)
 }
 
@@ -227,7 +226,7 @@ impl App {
         let atlas_canvas = Canvas::new(&mut *ctx, font_tex, 240_000);
         let (w, h) = window::screen_size();
         let (rw, rh) = render_size(w, h);
-        let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Linear);
+        let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Nearest);
         let (settings, best) = settings::load();
         let audio = Audio::start();
         let preview = Mission::new();
@@ -1057,7 +1056,7 @@ impl EventHandler for App {
         let (rw, rh) = render_size(w, h);
         if rw != self.scene.w || rh != self.scene.h {
             self.scene.delete(&mut *self.ctx);
-            self.scene = gfx::Target::new(&mut *self.ctx, rw, rh, FilterMode::Linear);
+            self.scene = gfx::Target::new(&mut *self.ctx, rw, rh, FilterMode::Nearest);
         }
         if self.opts.shot.is_some() {
             if let Some(o) = self.output.take() {

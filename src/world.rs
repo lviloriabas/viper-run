@@ -8,11 +8,15 @@ use crate::math::*;
 use crate::mesh::Mesh;
 use crate::sim::{Aircraft, Mission, GATE_RADIUS};
 use crate::terrain::{self, CHUNKS, CHUNK_M, X0, Z0};
+use crate::texture;
 use miniquad::*;
 
-pub const SUN: V3 = v3(0.52, 0.34, -0.78);
-pub const FOG: [f32; 3] = [0.67, 0.64, 0.53];
+pub const SUN: V3 = v3(0.42, 0.62, -0.66);
+/// Horizon haze: the far terrain, the sea and the bottom of the sky fade into it.
+pub const FOG: [f32; 3] = [0.72, 0.80, 0.88];
 const STRIDES: [usize; 4] = [1, 2, 4, 8];
+/// Terrain material samplers, in the order texture::terrain() builds them.
+const TERRAIN_TEX: [&str; 6] = ["t_grass", "t_scrub", "t_rock", "t_snow", "t_sand", "t_crops"];
 
 #[derive(Clone, Copy, Debug)]
 pub struct Camera {
@@ -50,15 +54,14 @@ float vnoise(vec2 p) {
     float d = hash21(mod(i + vec2(1.0, 1.0), 1024.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
-float fbm5(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 5; i++) {
-        v += a * vnoise(p);
-        p = p * 2.03 + vec2(17.3, 9.2);
-        a *= 0.5;
-    }
-    return v;
+"#;
+
+/// 4x4 ordered-dither threshold of a pixel, in (0, 1).
+const DITHER: &str = r#"
+float bayer4(vec2 p) {
+    int i = int(mod(p.x, 4.0)) + 4 * int(mod(p.y, 4.0));
+    float b[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    return (b[i] + 0.5) / 16.0;
 }
 "#;
 
@@ -77,86 +80,111 @@ uniform vec3 u_sun;
 uniform float u_tan;
 uniform float u_aspect;
 uniform float u_time;
+uniform vec3 u_fog;
 out vec4 frag;
-NOISE
 void main() {
     vec2 ndc = v_uv * 2.0 - 1.0;
     vec3 dir = normalize(u_fwd + u_right * ndc.x * u_tan * u_aspect + u_up * ndc.y * u_tan);
     float y = dir.y;
-    float h = pow(clamp(y, 0.0, 1.0), 0.58);
-    vec3 horizon = vec3(0.71, 0.65, 0.52);
-    vec3 zenith = vec3(0.10, 0.26, 0.43);
-    vec3 sky = mix(horizon, zenith, h);
-    float sun = clamp(dot(dir, u_sun), 0.0, 1.0);
-    sky += vec3(1.0, 0.53, 0.21) * pow(sun, 5.0) * 0.11;
-    sky += vec3(1.0, 0.76, 0.43) * pow(sun, 44.0) * 0.35;
-    sky += vec3(1.0, 0.96, 0.80) * smoothstep(0.9992, 0.9997, sun) * 5.0;
-    if (y < 0.0) {
-        vec3 under = mix(vec3(0.62, 0.59, 0.48), vec3(0.12, 0.18, 0.17), clamp(-y * 7.0, 0.0, 1.0));
-        sky = mix(horizon, under, clamp(-y * 18.0, 0.15, 1.0));
-    }
-    if (y > 0.008) {
-        float t = clamp((3600.0 - u_cam.y) / y, 0.0, 60000.0);
-        vec2 cp = u_cam.xz + dir.xz * t;
-        float n1 = fbm5(cp * 0.00038 + vec2(u_time * 0.0009, 0.0));
-        float n2 = fbm5(cp * 0.00105 - vec2(u_time * 0.0014, u_time * 0.0004));
-        float cover = smoothstep(0.54, 0.72, n1 + n2 * 0.2);
-        float fade = smoothstep(0.0, 0.10, y) * smoothstep(60000.0, 9000.0, t);
-        vec3 cloud = mix(vec3(0.67, 0.70, 0.66), vec3(1.0, 0.93, 0.77), pow(sun, 2.0));
-        sky = mix(sky, cloud, cover * fade * 0.5);
-    }
-    float haze = 1.0 - smoothstep(0.0, 0.13, abs(y - 0.025));
-    sky = mix(sky, vec3(0.70, 0.66, 0.53), haze * 0.15);
+    // Clear day: deep blue overhead, pale haze at the horizon, a hard sun disc.
+    vec3 zenith = vec3(0.13, 0.33, 0.72);
+    vec3 sky = mix(u_fog, zenith, pow(clamp(y, 0.0, 1.0), 0.42));
+    float sun = max(dot(dir, u_sun), 0.0);
+    sky += vec3(1.0, 0.94, 0.78) * pow(sun, 10.0) * 0.22;
+    if (sun > 0.9994) sky = vec3(1.0, 0.98, 0.88);
+    if (y < 0.0) sky = mix(u_fog, vec3(0.50, 0.58, 0.62), clamp(-y * 5.0, 0.0, 1.0));
     frag = vec4(sky, 1.0);
 }"#;
 
 const VS_TERRAIN: &str = r#"
 in vec3 pos;
-uniform mat4 u_vp;
-uniform vec3 u_eye;
-out vec3 v_world;
-void main() { v_world = pos; gl_Position = u_vp * vec4(pos - u_eye, 1.0); }"#;
-
-const FS_TERRAIN: &str = r#"
-in vec3 v_world;
+in vec3 normal;
 uniform mat4 u_vp;
 uniform vec3 u_eye;
 uniform vec3 u_sun;
 uniform vec3 u_fog;
+out vec3 v_world;
+out vec3 v_normal;
+out float v_light;
+void main() {
+    v_world = pos;
+    v_normal = normal;
+    // Gouraud: one lighting value per vertex, interpolated across the triangle.
+    v_light = 0.30 + 0.20 * normal.y + 0.85 * max(dot(normal, u_sun), 0.0);
+    gl_Position = u_vp * vec4(pos - u_eye, 1.0);
+}"#;
+
+const FS_TERRAIN: &str = r#"
+in vec3 v_world;
+in vec3 v_normal;
+in float v_light;
+uniform mat4 u_vp;
+uniform vec3 u_eye;
+uniform vec3 u_sun;
+uniform vec3 u_fog;
+uniform sampler2D t_grass;
+uniform sampler2D t_scrub;
+uniform sampler2D t_rock;
+uniform sampler2D t_snow;
+uniform sampler2D t_sand;
+uniform sampler2D t_crops;
 out vec4 frag;
 NOISE
+DITHER
+float river_x(float z) { return 1500.0 * sin(z / 5200.0) + 420.0 * sin(z / 1900.0 + 0.7); }
 void main() {
     vec3 rel = v_world - u_eye;
-    vec3 n = normalize(cross(dFdx(rel), dFdy(rel)));
-    if (n.y < 0.0) n = -n;
+    vec3 n = normalize(v_normal);
     float h = v_world.y;
     float slope = 1.0 - n.y;
-    float grain = vnoise(v_world.xz * 0.031) * 0.55 + vnoise(v_world.xz * 0.29) * 0.3;
-    vec3 low = vec3(0.235, 0.275, 0.145);
-    vec3 scrub = vec3(0.32, 0.32, 0.16);
-    vec3 rock = vec3(0.33, 0.30, 0.25);
-    vec3 high_rock = vec3(0.43, 0.41, 0.38);
-    vec3 snow = vec3(0.79, 0.80, 0.76);
-    vec3 sand = vec3(0.48, 0.40, 0.25);
-    vec3 col = low;
-    col = mix(col, sand, smoothstep(25.0, 8.0, h));
-    col = mix(col, scrub, smoothstep(360.0, 760.0, h));
-    col = mix(col, rock, smoothstep(800.0, 1450.0, h));
-    col = mix(col, high_rock, smoothstep(1650.0, 2300.0, h));
-    float snow_mask = smoothstep(2050.0, 2450.0, h) * (1.0 - smoothstep(0.42, 0.68, slope));
-    col = mix(col, snow, snow_mask);
-    col = mix(col, rock, smoothstep(0.23, 0.52, slope) * 0.72);
-    col *= 0.82 + grain * 0.36;
-    float sun_light = max(dot(n, u_sun), 0.0);
-    float sky_light = 0.33 + 0.34 * (0.5 + 0.5 * n.y);
-    vec3 lit = col * (sky_light + sun_light * 0.92);
-    lit += vec3(0.10, 0.09, 0.06) * pow(1.0 - n.y, 2.0);
-    lit = mix(lit, vec3(0.12, 0.16, 0.13), smoothstep(0.70, 1.0, slope) * 0.22);
+    float th = bayer4(gl_FragCoord.xy);
+    float macro = vnoise(v_world.xz * 0.0012) * 0.6 + vnoise(v_world.xz * 0.005) * 0.4 - 0.5;
+
+    // Every material is sampled up front so the mip selection stays valid.
+    vec2 uv = v_world.xz / 128.0;
+    vec2 cliff = vec2((v_world.x + v_world.z) / 96.0, h / 72.0);
+    vec2 fp = mat2(0.94, -0.34, 0.34, 0.94) * v_world.xz;
+    vec2 field = fp / vec2(300.0, 210.0);
+    float k = hash21(floor(field));
+    vec3 grass = texture(t_grass, uv).rgb;
+    vec3 scrub = texture(t_scrub, uv).rgb;
+    vec3 rock = texture(t_rock, mix(uv, cliff, smoothstep(0.25, 0.5, slope))).rgb;
+    vec3 snow = texture(t_snow, uv).rgb;
+    vec3 sand = texture(t_sand, uv * 1.5).rgb;
+    vec3 crops = texture(t_crops, (k > 0.5 ? fp.xy : fp.yx) / 64.0).rgb;
+
+    // Hard, dithered borders between materials instead of soft blends.
+    vec3 col = grass;
+    if (smoothstep(620.0, 700.0, h + macro * 700.0) > th) col = scrub;
+    if (smoothstep(0.30, 0.36, slope + macro * 0.16) + smoothstep(1650.0, 1750.0, h + macro * 500.0) > th) col = rock;
+    if (smoothstep(2050.0, 2120.0, h + macro * 350.0) * (1.0 - smoothstep(0.45, 0.52, slope)) > th) col = snow;
+    if (smoothstep(22.0, 12.0, h) > th) col = sand;
+
+    // Patchwork farmland on the gentle valley floor, with hedgerows.
+    float farm = (1.0 - smoothstep(0.03, 0.07, slope)) * (1.0 - smoothstep(560.0, 680.0, h)) * step(40.0, h);
+    if (farm > th && macro > -0.25) {
+        vec3 tint = k < 0.3 ? vec3(0.52, 0.66, 0.30) : k < 0.55 ? vec3(0.86, 0.76, 0.40) : k < 0.8 ? vec3(0.62, 0.48, 0.32) : vec3(0.40, 0.56, 0.26);
+        col = crops * tint;
+        vec2 e = min(fract(field), 1.0 - fract(field)) * vec2(300.0, 210.0);
+        if (min(e.x, e.y) < 6.0) col = vec3(0.20, 0.30, 0.13);
+    }
+
+    // The Cold River down the gorge floor, with sand banks.
+    float rd = abs(v_world.x - river_x(v_world.z) + (vnoise(v_world.xz * 0.012) - 0.5) * 24.0);
+    float wet = 1.0 - smoothstep(0.05, 0.12, slope);
+    float light = v_light;
+    if (rd < 38.0 && wet > th) col = sand;
+    if (rd < 22.0 && wet > th) {
+        float ripple = step(0.8, vnoise(v_world.xz * vec2(0.08, 0.02)));
+        col = mix(vec3(0.18, 0.40, 0.56), vec3(0.62, 0.78, 0.86), ripple * 0.6);
+        light = 0.95;
+    }
+
+    vec3 lit = col * light;
     float dist = length(rel);
-    float fog = 1.0 - exp(-dist * 0.000058);
-    fog = clamp(fog + smoothstep(18000.0, 32000.0, dist) * 0.5, 0.0, 1.0);
-    vec3 fog_col = mix(u_fog, vec3(0.58, 0.62, 0.57), smoothstep(3000.0, 0.0, v_world.y) * 0.25);
-    frag = vec4(mix(lit, fog_col, fog), 1.0);
+    float fog = clamp(1.0 - exp(-dist * 0.000075), 0.0, 1.0);
+    fog = max(fog, smoothstep(20000.0, 36000.0, dist));
+    frag = vec4(mix(lit, u_fog, fog), 1.0);
 }"#;
 
 const VS_OCEAN: &str = r#"
@@ -178,20 +206,18 @@ uniform vec3 u_sun;
 uniform vec3 u_fog;
 uniform float u_time;
 out vec4 frag;
+NOISE
 void main() {
-    vec2 p = mod(v_world.xz, 8192.0);
-    float t = u_time;
-    float dx = cos(p.x * 0.075 + p.y * 0.043 + t * 1.15) * 0.055 + cos(p.x * 0.021 - p.y * 0.034 + t * 0.62) * 0.05;
-    float dz = sin(p.y * 0.068 + p.x * 0.047 - t * 1.02) * 0.05 + sin(p.y * 0.019 + p.x * 0.028 + t * 0.71) * 0.05;
-    vec3 n = normalize(vec3(-dx, 1.0, -dz));
     vec3 rel = v_world - u_eye;
     vec3 view = normalize(rel);
-    float fresnel = pow(1.0 - clamp(dot(n, -view), 0.0, 1.0), 3.0);
-    float sun = pow(max(dot(reflect(view, n), u_sun), 0.0), 110.0);
-    vec3 col = mix(vec3(0.018, 0.095, 0.115), vec3(0.055, 0.24, 0.25), fresnel * 0.72 + 0.08);
-    col += vec3(1.0, 0.84, 0.54) * sun * 1.55;
-    col += vec3(0.13, 0.22, 0.19) * max(dot(n, u_sun), 0.0) * 0.18;
-    float fog = clamp(1.0 - exp(-length(rel) * 0.000052), 0.0, 1.0);
+    float fresnel = pow(1.0 - clamp(-view.y, 0.0, 1.0), 4.0);
+    vec3 col = mix(vec3(0.06, 0.26, 0.44), vec3(0.32, 0.52, 0.70), fresnel);
+    // Blocky wave crests drifting with time, and a sun glitter path.
+    float crest = step(0.78, vnoise(v_world.xz * vec2(0.035, 0.09) + vec2(u_time * 0.15, 0.0)));
+    col = mix(col, vec3(0.55, 0.72, 0.84), crest * 0.35);
+    float sun = pow(max(dot(reflect(view, vec3(0.0, 1.0, 0.0)), u_sun), 0.0), 60.0);
+    col += vec3(1.0, 0.95, 0.8) * sun * step(0.55, vnoise(v_world.xz * 0.2 + u_time)) * 0.9;
+    float fog = clamp(1.0 - exp(-length(rel) * 0.00006), 0.0, 1.0);
     frag = vec4(mix(col, u_fog, fog), 1.0);
 }"#;
 
@@ -227,13 +253,13 @@ uniform vec3 u_up;
 uniform vec3 u_fog;
 uniform sampler2D u_tex;
 out vec4 frag;
+DITHER
 void main() {
-    float a = texture(u_tex, v_uv).a * v_alpha;
-    if (a < 0.008) discard;
-    float fog = clamp(1.0 - exp(-length(v_rel) * 0.000048), 0.0, 0.95);
-    vec3 col = mix(vec3(0.87, 0.86, 0.78), vec3(1.0, 0.92, 0.73), 0.35);
-    col = mix(col, u_fog, fog * 0.9);
-    frag = vec4(col, a * (1.0 - fog * 0.78));
+    vec4 t = texture(u_tex, v_uv);
+    // Screen-door transparency: whole pixels are either cloud or sky.
+    if (smoothstep(0.30, 0.55, t.a) * v_alpha < bayer4(gl_FragCoord.xy)) discard;
+    float fog = clamp(1.0 - exp(-length(v_rel) * 0.00005), 0.0, 0.85);
+    frag = vec4(mix(t.rgb, u_fog, fog), 1.0);
 }"#;
 
 const VS_GATE: &str = r#"
@@ -272,11 +298,12 @@ uniform float u_inflate;
 out vec4 frag;
 void main() {
     vec3 n = normalize(v_normal);
-    float band = 0.70 + 0.30 * step(0.48, fract(v_u * 12.0));
-    float pulse = 0.80 + 0.20 * sin(u_time * 3.4 + v_u * 18.0);
-    vec3 col = u_color * (0.70 + 0.6 * max(dot(n, normalize(vec3(0.4, 0.6, 0.3))), 0.0));
+    // Alternating painted segments, like the pylons of an air race.
+    float band = 0.62 + 0.38 * step(0.5, fract(v_u * 8.0));
+    float pulse = 0.85 + 0.15 * step(0.0, sin(u_time * 6.0 + v_u * 25.0));
+    vec3 col = u_color * (0.62 + 0.55 * max(dot(n, normalize(vec3(0.4, 0.6, 0.3))), 0.0));
     col *= band * pulse;
-    float fog = clamp(1.0 - exp(-length(v_rel) * 0.000045), 0.0, 0.92);
+    float fog = clamp(1.0 - exp(-length(v_rel) * 0.00005), 0.0, 0.92);
     col = mix(col, u_fog, fog);
     if (u_glow > 0.5) frag = vec4(col * 1.4, 0.13);
     else frag = vec4(col, 1.0);
@@ -356,30 +383,21 @@ const FS_POST: &str = r#"
 in vec2 v_uv;
 uniform sampler2D u_tex;
 uniform vec2 u_res;
+uniform vec2 u_src;
 uniform float u_gloc;
 uniform float u_seed;
 out vec4 frag;
-float h21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
+DITHER
 void main() {
-    vec2 cc = v_uv - 0.5;
-    float r2 = dot(cc, cc);
-    vec2 uv = 0.5 + cc * (1.0 + r2 * 0.018);
-    vec2 chroma = cc * 0.00045;
-    vec3 col;
-    col.r = texture(u_tex, uv + chroma).r;
-    col.g = texture(u_tex, uv).g;
-    col.b = texture(u_tex, uv - chroma).b;
-    float scan = 0.955 + 0.045 * sin(gl_FragCoord.y * 2.0943951);
-    col *= mix(1.0, scan, 0.55);
-    float vign = smoothstep(0.98, 0.26, length(uv - 0.5));
-    col *= mix(0.68, 1.0, vign);
-    float grain = h21(mod(gl_FragCoord.xy + u_seed, 1024.0));
-    col += (grain - 0.5) * 0.022;
-    col *= vec3(1.025, 1.0, 0.955);
+    // One sample per low-resolution pixel, shown as a crisp block.
+    vec2 px = min(floor(v_uv * u_src), u_src - 1.0);
+    vec3 col = texture(u_tex, (px + 0.5) / u_src).rgb;
+    // A slightly punchier grade, then 15-bit colour with ordered dithering
+    // laid on the same low-resolution pixels.
+    float l = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(vec3(l), col, 1.12);
+    col = (col - 0.5) * 1.04 + 0.5;
+    col = floor(clamp(col, 0.0, 1.0) * 31.0 + bayer4(px)) / 31.0;
     // Grey-out under sustained G: a dark red ring that closes toward the centre.
     vec2 g = (v_uv - vec2(0.5, 0.58)) * vec2(u_res.x / u_res.y, 1.0);
     float ring = smoothstep(0.16, 0.75, length(g));
@@ -388,7 +406,7 @@ void main() {
 }"#;
 
 fn src(s: &str) -> String {
-    s.replace("NOISE", NOISE)
+    s.replace("NOISE", NOISE).replace("DITHER", DITHER)
 }
 
 #[repr(C)]
@@ -401,6 +419,7 @@ struct SkyU {
     tan: f32,
     aspect: f32,
     time: f32,
+    fog: [f32; 3],
 }
 #[repr(C)]
 struct TerrainU {
@@ -449,6 +468,7 @@ pub struct AirU {
 #[repr(C)]
 struct PostU {
     res: [f32; 2],
+    src: [f32; 2],
     gloc: f32,
     seed: f32,
 }
@@ -490,6 +510,7 @@ pub struct World {
     fullscreen: Bindings,
     sky: Pipeline,
     terrain: Pipeline,
+    terrain_tex: Vec<TextureId>,
     chunks: Vec<Chunk>,
     lod_ib: [BufferId; 4],
     lod_count: [i32; 4],
@@ -531,13 +552,25 @@ impl World {
         let fullscreen = Bindings { vertex_buffers: vec![full_vb], index_buffer: full_ib, images: vec![] };
         let pos2 = [VertexAttribute::new("pos", VertexFormat::Float2)];
 
-        let s = gfx::shader(ctx, VS_FULL, &src(FS_SKY), &[], &[("u_cam", Float3), ("u_right", Float3), ("u_up", Float3), ("u_fwd", Float3), ("u_sun", Float3), ("u_tan", Float1), ("u_aspect", Float1), ("u_time", Float1)]);
+        let s = gfx::shader(ctx, VS_FULL, &src(FS_SKY), &[], &[("u_cam", Float3), ("u_right", Float3), ("u_up", Float3), ("u_fwd", Float3), ("u_sun", Float3), ("u_tan", Float1), ("u_aspect", Float1), ("u_time", Float1), ("u_fog", Float3)]);
         let sky = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, PipelineParams::default());
 
         // Terrain chunks: one vertex buffer per chunk and stride, shared index buffers.
         let terrain_u = [("u_vp", Mat4), ("u_eye", Float3), ("u_sun", Float3), ("u_fog", Float3)];
-        let s = gfx::shader(ctx, VS_TERRAIN, &src(FS_TERRAIN), &[], &terrain_u);
-        let terrain = ctx.new_pipeline(&[BufferLayout::default()], &[VertexAttribute::new("pos", VertexFormat::Float3)], s, depth);
+        let s = gfx::shader(ctx, VS_TERRAIN, &src(FS_TERRAIN), &TERRAIN_TEX, &terrain_u);
+        let terrain_attrs = [VertexAttribute::new("pos", VertexFormat::Float3), VertexAttribute::new("normal", VertexFormat::Float3)];
+        let terrain = ctx.new_pipeline(&[BufferLayout::default()], &terrain_attrs, s, depth);
+        // Pixel tiles: nearest texels up close, nearest mip levels far away.
+        let tile = texture::TILE as u32;
+        let terrain_tex: Vec<TextureId> = texture::terrain()
+            .iter()
+            .map(|px| {
+                let params = TextureParams { width: tile, height: tile, format: TextureFormat::RGBA8, wrap: TextureWrap::Repeat, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
+                let t = ctx.new_texture_from_data_and_format(px, params);
+                ctx.texture_generate_mipmaps(t);
+                t
+            })
+            .collect();
         let hm = terrain::init();
         let mut lod_count = [0; 4];
         let lod_ib: [BufferId; 4] = std::array::from_fn(|k| {
@@ -566,7 +599,7 @@ impl World {
         }
 
         // Ocean: polar grid around the eye, so no triangle is enormous.
-        let s = gfx::shader(ctx, VS_OCEAN, FS_OCEAN, &[], &[("u_vp", Mat4), ("u_eye", Float3), ("u_sun", Float3), ("u_fog", Float3), ("u_time", Float1)]);
+        let s = gfx::shader(ctx, VS_OCEAN, &src(FS_OCEAN), &[], &[("u_vp", Mat4), ("u_eye", Float3), ("u_sun", Float3), ("u_fog", Float3), ("u_time", Float1)]);
         let ocean = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, depth);
         let (rings, segs) = (40usize, 96usize);
         let mut ov = vec![0f32, 0.0];
@@ -592,13 +625,13 @@ impl World {
         }
         let ocean_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &ov)], index_buffer: gfx::immutable_ib(ctx, &oi), images: vec![] };
 
-        // Clouds: sorted camera-facing billboards with a procedural texture.
-        let s = gfx::shader(ctx, VS_CLOUD, FS_CLOUD, &["u_tex"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_right", Float3), ("u_up", Float3), ("u_fog", Float3)]);
+        // Clouds: camera-facing billboards with screen-door transparency.
+        let s = gfx::shader(ctx, VS_CLOUD, &src(FS_CLOUD), &["u_tex"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_right", Float3), ("u_up", Float3), ("u_fog", Float3)]);
         let cloud = ctx.new_pipeline(
             &[BufferLayout::default()],
             &[VertexAttribute::new("center", VertexFormat::Float3), VertexAttribute::new("corner", VertexFormat::Float2), VertexAttribute::new("size", VertexFormat::Float1), VertexAttribute::new("alpha", VertexFormat::Float1)],
             s,
-            PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::alpha_blend()), ..Default::default() },
+            depth,
         );
         let mut rnd = Lcg(4317);
         let clouds: Vec<Cloud> = (0..58)
@@ -608,12 +641,11 @@ impl World {
                 let ground = terrain::terrain_at(x, z);
                 let y = (ground + 420.0).max(1250.0) + rnd.next() * 1600.0;
                 let size = 1000.0 + rnd.next() * 2100.0;
-                let alpha = 0.32 + rnd.next() * 0.34;
+                let alpha = 0.8 + rnd.next() * 0.2;
                 Cloud { pos: v3(x, y, z), size, alpha }
             })
             .collect();
-        let tex = cloud_texture();
-        let cloud_tex = ctx.new_texture_from_data_and_format(&tex, TextureParams { width: 256, height: 128, format: TextureFormat::RGBA8, min_filter: FilterMode::Linear, mag_filter: FilterMode::Linear, ..Default::default() });
+        let cloud_tex = ctx.new_texture_from_data_and_format(&texture::cloud(), TextureParams { width: 128, height: 64, format: TextureFormat::RGBA8, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, ..Default::default() });
         let cloud_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(clouds.len() * 6 * 7));
         let cloud_bind = Bindings { vertex_buffers: vec![cloud_vb], index_buffer: gfx::sequential_ib(ctx, clouds.len() * 6), images: vec![cloud_tex] };
 
@@ -635,7 +667,7 @@ impl World {
         let glass_front = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, glass(CullFace::Front));
         let flame_pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::additive()), ..Default::default() });
 
-        let s = gfx::shader(ctx, VS_FULL, FS_POST, &["u_tex"], &[("u_res", Float2), ("u_gloc", Float1), ("u_seed", Float1)]);
+        let s = gfx::shader(ctx, VS_FULL, &src(FS_POST), &["u_tex"], &[("u_res", Float2), ("u_src", Float2), ("u_gloc", Float1), ("u_seed", Float1)]);
         let post = ctx.new_pipeline(&[BufferLayout::default()], &pos2, s, PipelineParams::default());
 
         World {
@@ -643,6 +675,7 @@ impl World {
             fullscreen,
             sky,
             terrain,
+            terrain_tex,
             chunks,
             lod_ib,
             lod_count,
@@ -693,6 +726,7 @@ impl World {
             tan: (cam.fov / 2.0).tan() as f32,
             aspect: aspect as f32,
             time: time as f32,
+            fog: FOG,
         }));
         ctx.draw(0, 3, 1);
 
@@ -719,7 +753,7 @@ impl World {
             };
             let lod = lod.max(ch.min_lod);
             let vb = ch.vbs[lod].unwrap();
-            ctx.apply_bindings(&Bindings { vertex_buffers: vec![vb], index_buffer: self.lod_ib[lod], images: vec![] });
+            ctx.apply_bindings(&Bindings { vertex_buffers: vec![vb], index_buffer: self.lod_ib[lod], images: self.terrain_tex.clone() });
             ctx.draw(0, self.lod_count[lod], 1);
             self.drawn_chunks += 1;
         }
@@ -858,7 +892,7 @@ impl World {
     pub fn post(&self, ctx: &mut dyn RenderingBackend, scene: &Target, w: f32, h: f32, gloc: f32, seed: f32) {
         ctx.apply_pipeline(&self.post);
         ctx.apply_bindings(&Bindings { images: vec![scene.color], ..self.post_bind.clone() });
-        ctx.apply_uniforms(UniformsSource::table(&PostU { res: [w, h], gloc, seed }));
+        ctx.apply_uniforms(UniformsSource::table(&PostU { res: [w, h], src: [scene.w as f32, scene.h as f32], gloc, seed }));
         ctx.draw(0, 3, 1);
     }
 }
@@ -897,7 +931,7 @@ fn box_visible(cam: &Camera, tan_x: f64, tan_y: f64, ch: &Chunk) -> bool {
 }
 
 fn torus() -> (Vec<f32>, Vec<u16>) {
-    let (major, tube) = (48usize, 10usize);
+    let (major, tube) = (24usize, 6usize);
     let (big_r, r) = (GATE_RADIUS, 3.2);
     let mut v = Vec::new();
     let mut idx = Vec::new();
@@ -919,60 +953,3 @@ fn torus() -> (Vec<f32>, Vec<u16>) {
     (v, idx)
 }
 
-/// Soft cloud sprite: overlapping radial blobs, blurred.
-fn cloud_texture() -> Vec<u8> {
-    let (w, h) = (256usize, 128usize);
-    let mut a = vec![0f32; w * h];
-    let mut rnd = Lcg(9127);
-    for _ in 0..34 {
-        let x = 35.0 + rnd.next() * 186.0;
-        let spread = 1.0 - (x - 128.0).abs() / 150.0;
-        let y = 68.0 + (rnd.next() - 0.5) * 38.0 * spread;
-        let r = 18.0 + rnd.next() * 32.0 * (0.6 + spread);
-        let core = 0.24 + rnd.next() * 0.22;
-        for py in 0..h {
-            for px in 0..w {
-                let d = ((px as f64 - x).powi(2) + (py as f64 - y).powi(2)).sqrt() / r;
-                if d >= 1.0 {
-                    continue;
-                }
-                let g = if d < 0.55 { mix(core, 0.10, d / 0.55) } else { mix(0.10, 0.0, (d - 0.55) / 0.45) } as f32;
-                let o = &mut a[py * w + px];
-                *o = *o + g * (1.0 - *o);
-            }
-        }
-    }
-    for _ in 0..2 {
-        let src = a.clone();
-        for y in 0..h {
-            for x in 0..w {
-                let mut s = 0.0;
-                let mut n = 0.0;
-                for k in -3i32..=3 {
-                    let xx = x as i32 + k;
-                    if xx >= 0 && (xx as usize) < w {
-                        s += src[y * w + xx as usize];
-                        n += 1.0;
-                    }
-                }
-                a[y * w + x] = s / n;
-            }
-        }
-        let src = a.clone();
-        for y in 0..h {
-            for x in 0..w {
-                let mut s = 0.0;
-                let mut n = 0.0;
-                for k in -3i32..=3 {
-                    let yy = y as i32 + k;
-                    if yy >= 0 && (yy as usize) < h {
-                        s += src[yy as usize * w + x];
-                        n += 1.0;
-                    }
-                }
-                a[y * w + x] = s / n;
-            }
-        }
-    }
-    a.iter().flat_map(|&v| [255u8, 255, 255, (v.clamp(0.0, 1.0) * 255.0) as u8]).collect()
-}
