@@ -206,6 +206,9 @@ uniform float u_gloc;
 out vec4 frag;
 void main() {
     vec3 col = texture(u_atlas, v_uv).rgb * 1.08;
+    // The post pass grade, without its dither, so colours match the panel.
+    col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, 1.12);
+    col = clamp((col - 0.5) * 1.04 + 0.5, 0.0, 1.0);
     // The same grey-out ring the post pass lays over the rest of the view.
     vec2 g = (gl_FragCoord.xy / u_res - vec2(0.5, 0.58)) * vec2(u_res.x / u_res.y, 1.0);
     float ring = smoothstep(0.16, 0.75, length(g));
