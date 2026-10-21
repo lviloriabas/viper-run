@@ -1,5 +1,6 @@
 //! Menu screens, the controls drawer and the flight overlays, drawn with the
 //! pixel font. Screens return clickable buttons for mouse and keyboard use.
+use crate::air::AirData;
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::cockpit::pad;
 use crate::math::*;
@@ -260,7 +261,7 @@ impl<'a> Ui<'a> {
                 ("CLEARED", format!("{} / {}", pad(m.passed as f64, 2), pad(m.gates.len() as f64, 2)), GREEN),
                 ("TIME LEFT", format_time(m.time_left), AMBER),
                 ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
-                ("ALTITUDE", format!("{} FT", pad(a.pos.y * 3.28084, 5)), CREAM),
+                ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
             ],
             &[("RESUME", "P", Action::Resume), ("RESTART", "R", Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
             &format!("P / ESC RESUME, R RESTART, M AUDIO {}", if muted { "OFF" } else { "ON" }),
@@ -479,6 +480,7 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(m.final_score(), 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
+    air_panel(cv, lx, h * 0.058 + 34.0 * s, s, a);
     let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    X  CENTER    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
@@ -522,8 +524,9 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     cv.text(&format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)), w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
     cv.text(&format_time(m.time_left), w * 0.5, 22.0 * s, s * 2.0, if m.time_left < 20.0 { RED } else { HUD }, Align::Center);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), w - edge, 10.0 * s, s, HUD, Align::Right);
-    cv.text(&format!("ALT {} FT", pad(a.pos.y * 3.28084, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
-    cv.text(&format!("M {:.2}  G {:.1}  AOA {:.0}  GAVL {:.1}", a.mach, a.g_smooth, a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+    cv.text(&format!("ALT {} FT", pad(AirData::of(a).baro_ft, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
+    cv.text(&format!("AOA {:.0}  GAVL {:.1}", a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+    air_panel(cv, edge, top_h + 8.0 * s, s, a);
     cv.text(&format!("SCR {}", pad(m.final_score(), 5)), w - edge, 36.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
 
     // Gate cue: diamond on screen, or an edge arrow toward it.
@@ -584,4 +587,54 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     };
     cv.text(hint, w - edge, h - 14.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
     stick_cue(cv, w - edge - 22.0 * s, h - bottom_h - 34.0 * s, s, cue);
+}
+
+/// Horizontal meter from `lo` to `hi`, filled from `from` to `value`, with
+/// tick lines through the bar and amber memory carets under it.
+#[allow(clippy::too_many_arguments)]
+fn bar_meter(cv: &mut Canvas, x: f32, y: f32, w: f32, h: f32, lo: f64, hi: f64, from: f64, value: f64, fill: Col, ticks: &[(f64, Col)], carets: &[f64]) {
+    let px = |v: f64| (x + clamp((v - lo) / (hi - lo), 0.0, 1.0) as f32 * w).round();
+    cv.rect(x, y, w, h, rgba(4, 10, 6, 0.7));
+    let (a, b) = (px(from.min(value)), px(from.max(value)));
+    cv.rect(a, y, (b - a).max(1.0), h, with_alpha(fill, 0.7));
+    cv.stroke_rect(x, y, w, h, 1.0, with_alpha(HUD, 0.35));
+    for &(v, c) in ticks {
+        cv.rect(px(v), y - 2.0, 1.0, h + 4.0, c);
+    }
+    for &v in carets {
+        let p = px(v);
+        cv.tri([p, y + h + 1.0], [p - h * 0.6, y + h * 1.8 + 1.0], [p + h * 0.6, y + h * 1.8 + 1.0], AMBER);
+    }
+    cv.rect(px(value) - 1.0, y - 3.0, 2.0, h + 6.0, CREAM);
+}
+
+/// Air-data block: a G meter with the sortie's peak memories, a Mach meter
+/// marked with the limit Mach at this pressure level (800 KCAS low down,
+/// Mach 2.05 upstairs), and the air the jet is flying through.
+fn air_panel(cv: &mut Canvas, x: f32, y: f32, s: f32, a: &Aircraft) {
+    let ad = AirData::of(a);
+    let u = (s - 1.0).max(1.0);
+    let (w, line) = (158.0 * u, 9.0 * u);
+    let rows = [
+        format!("KCAS {}  TAS {}  GS {}", pad(ad.kcas, 3), pad(ad.ktas, 3), pad(ad.gs_kt, 3)),
+        format!("BARO {} FT  QNH {:.2}", pad(ad.baro_ft, 5), ad.qnh_inhg),
+        format!("PA {}  DA {} FT", ad.pressure_alt_ft.round() as i64, ad.density_alt_ft.round() as i64),
+        format!("OAT {:+.0}°C  TAT {:+.0}°C", ad.oat_c, ad.tat_c),
+        format!("RHO {:.3} ({:.0}%)  Q {:.0}KPA", ad.atm.rho, ad.sigma * 100.0, ad.qbar / 1000.0),
+    ];
+    let rows_y = y + 34.0 * u;
+    cv.rect(x - 4.0 * u, y - 5.0 * u, w + 8.0 * u, rows_y - y + rows.len() as f32 * line + 2.0 * u, rgba(4, 10, 6, 0.45));
+    let (bx, bh) = (x + 40.0 * u, 5.0 * u);
+    let bw = w - 40.0 * u;
+    let g_col = if ad.g > 9.0 || ad.g < -3.0 { RED } else if ad.g > 7.0 || ad.g < -1.0 { AMBER } else { GREEN };
+    cv.text(&format!("G {:+.1}", ad.g), x, y + bh * 0.5, u, g_col, Align::Left);
+    let g_ticks = [(-3.0, RED), (0.0, DIM), (1.0, with_alpha(HUD, 0.8)), (5.0, DIM), (9.0, RED)];
+    bar_meter(cv, bx, y, bw, bh, -3.0, 10.0, 1.0, ad.g, g_col, &g_ticks, &[ad.g_max, ad.g_min]);
+    let y2 = y + 16.0 * u;
+    let m_col = if ad.overspeed() { RED } else if ad.mach > ad.vmax_mach - 0.05 { AMBER } else { GREEN };
+    cv.text(&format!("M {:.2}", ad.mach), x, y2 + bh * 0.5, u, m_col, Align::Left);
+    bar_meter(cv, bx, y2, bw, bh, 0.0, 2.2, 0.0, ad.mach, m_col, &[(1.0, with_alpha(HUD, 0.8)), (ad.vmax_mach, RED)], &[]);
+    for (i, r) in rows.iter().enumerate() {
+        cv.text(r, x, rows_y + i as f32 * line, u, with_alpha(HUD, 0.7), Align::Left);
+    }
 }

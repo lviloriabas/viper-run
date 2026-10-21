@@ -53,52 +53,7 @@ use spec::*;
 /// the actuators run at 480 Hz.
 const SUBSTEPS: usize = 4;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Atmosphere {
-    pub rho: f64,
-    pub sound: f64,
-    pub pressure: f64,
-}
-
-/// ISA density, pressure and speed of sound up to 20 km.
-pub fn atmosphere_at(altitude_m: f64) -> Atmosphere {
-    let h = clamp(altitude_m, 0.0, 20000.0);
-    let (rho, sound, pressure);
-    if h <= 11000.0 {
-        let theta = 1.0 - 2.25577e-5 * h;
-        rho = 1.225 * theta.powf(4.2559);
-        pressure = 101325.0 * theta.powf(5.2559);
-        sound = (1.4 * 287.05287 * (288.15 - 0.0065 * h)).sqrt();
-    } else {
-        rho = 0.3639 * (-(h - 11000.0) / 6341.62).exp();
-        sound = 295.1;
-        pressure = 22632.1 * (-(h - 11000.0) / 6341.62).exp();
-    }
-    Atmosphere { rho: rho.max(0.0001), sound, pressure }
-}
-
-/// Compressible pitot impact pressure ratio, with a normal shock above Mach 1.
-fn impact_ratio(mach: f64) -> f64 {
-    if mach <= 1.0 {
-        (1.0 + 0.2 * mach * mach).powf(3.5) - 1.0
-    } else {
-        (1.2 * mach * mach).powf(3.5) * (2.4 / (2.8 * mach * mach - 0.4)).powf(2.5) - 1.0
-    }
-}
-
-pub fn calibrated_airspeed(speed: f64, atm: &Atmosphere) -> f64 {
-    let impact = atm.pressure * impact_ratio(speed / atm.sound) / 101325.0;
-    let (mut low, mut high) = (0.0, 5.0);
-    for _ in 0..32 {
-        let mid = (low + high) / 2.0;
-        if impact_ratio(mid) < impact {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    (low + high) * 0.5 * (1.4f64 * 287.05287 * 288.15).sqrt()
-}
+pub use crate::air::{atmosphere_at, calibrated_airspeed};
 
 pub struct ContactPoint {
     pub name: &'static str,
@@ -800,27 +755,6 @@ mod tests {
         assert!(a.mach > 0.5 && a.agl > 100.0);
         assert!(a.rpm > 80.0);
         assert!((a.g_load - 1.0).abs() < 0.05, "trimmed start: {:.3} g", a.g_load);
-    }
-
-    #[test]
-    fn isa_sea_level_and_tropopause() {
-        let sea = atmosphere_at(0.0);
-        let high = atmosphere_at(11000.0);
-        assert!((sea.rho - 1.225).abs() < 0.001);
-        assert!((sea.sound - 340.294).abs() < 0.1);
-        assert!((high.pressure - 22632.0).abs() < 10.0);
-        assert!((high.sound - 295.07).abs() < 0.2);
-    }
-
-    #[test]
-    fn compressible_calibrated_airspeed() {
-        for speed in [50.0, 200.0, 340.0, 500.0, 680.0] {
-            assert!((calibrated_airspeed(speed, &atmosphere_at(0.0)) - speed).abs() < 0.001);
-        }
-        assert!(calibrated_airspeed(300.0, &atmosphere_at(10000.0)) < 200.0);
-        let a = run(aircraft(10000.0, 300.0), DT, Input::default());
-        assert!(a.airspeed_kt < a.tas_kt);
-        assert!(a.mach > 1.0);
     }
 
     #[test]

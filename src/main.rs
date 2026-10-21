@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod aero;
+mod air;
 mod airframe;
 mod audio;
 mod canvas;

@@ -1,6 +1,7 @@
 //! Modernised F-16 Viper cockpit: flat-shaded, low-polygon 3D geometry in body metres,
 //! live instrument pages rendered into a texture atlas, and the collimated
 //! NAV HUD clipped to the physical combiner glass.
+use crate::air::{self, AirData};
 use crate::airframe::{self, EYE};
 use crate::canvas::{rgba, Align, Canvas, Col};
 use crate::gfx;
@@ -34,7 +35,7 @@ const R_MFD_R: R = r(256.0, 0.0, 256.0, 320.0);
 const R_CPD: R = r(512.0, 0.0, 240.0, 320.0);
 const R_DED: R = r(752.0, 0.0, 272.0, 64.0);
 const R_ICP: R = r(752.0, 64.0, 272.0, 176.0);
-const R_RWR: R = r(752.0, 240.0, 128.0, 128.0);
+const R_RWR: R = r(752.0, 448.0, 128.0, 128.0);
 const R_MC: R = r(880.0, 240.0, 64.0, 64.0);
 const R_DIALS: [R; 7] = [
     r(0.0, 320.0, 128.0, 128.0),
@@ -45,6 +46,7 @@ const R_DIALS: [R; 7] = [
     r(640.0, 320.0, 128.0, 128.0),
     r(768.0, 320.0, 128.0, 128.0),
 ];
+const R_GMETER: R = r(896.0, 320.0, 128.0, 128.0);
 const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
 const R_ARM: R = r(256.0, 448.0, 256.0, 128.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
@@ -57,6 +59,7 @@ const GREEN: Col = rgba(0x98, 0xff, 0xa3, 1.0);
 const WHITE: Col = rgba(0xdd, 0xdc, 0xcf, 1.0);
 const DIM: Col = rgba(0xa2, 0xb8, 0xb6, 1.0);
 const AMBER: Col = rgba(0xe6, 0xbc, 0x7a, 1.0);
+const RED: Col = rgba(0xff, 0x66, 0x54, 1.0);
 pub const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
 
 // Materials.
@@ -351,10 +354,11 @@ fn build_static(m: &mut Mesh) {
     m.block(&lamp(0.14).at(0.0, 0.0, -0.005), v3(0.024, 0.024, 0.01), GLARE.scale(1.4));
     screen(m, &lamp(0.14).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
 
-    // Left column: RWR scope, standby airspeed and altimeter, arm switches.
+    // Left column: RWR scope, airspeed/Mach indicator, altimeter, accelerometer.
     display(m, &panel_at(-0.40, 0.75, 0.0), 0.10, 0.10, 0.074, 0.074, R_RWR, false);
     gauge(m, &panel_at(-0.40, 0.645, 0.0), 0.034, R_DIALS[0]);
     gauge(m, &panel_at(-0.40, 0.555, 0.0), 0.034, R_DIALS[1]);
+    gauge(m, &panel_at(-0.40, 0.462, 0.0), 0.031, R_GMETER);
     // Right column: standby ADI over RPM, FTIT, nozzle and oil.
     gauge(m, &panel_at(0.40, 0.75, 0.0), 0.040, R_DIALS[2]);
     for (i, y) in [0.66, 0.59, 0.52, 0.45].iter().enumerate() {
@@ -424,6 +428,7 @@ pub enum Page {
     Fcr,
     Hsd,
     Eng,
+    Air,
 }
 
 impl Page {
@@ -432,13 +437,15 @@ impl Page {
             Page::Fcr => "FCR",
             Page::Hsd => "HSD",
             Page::Eng => "ENG",
+            Page::Air => "AIR",
         }
     }
     pub fn next(self) -> Page {
         match self {
             Page::Fcr => Page::Hsd,
             Page::Hsd => Page::Eng,
-            Page::Eng => Page::Fcr,
+            Page::Eng => Page::Air,
+            Page::Air => Page::Fcr,
         }
     }
 }
@@ -446,8 +453,22 @@ impl Page {
 pub fn pad(n: f64, l: usize) -> String {
     format!("{:0>l$}", n.max(0.0).round() as i64, l = l)
 }
-fn ft(m: f64) -> f64 {
-    m * 3.28084
+
+/// mm:ss, or dashes when there is no closure.
+fn clock(sec: Option<f64>) -> String {
+    match sec {
+        Some(s) if s < 6000.0 => format!("{:02}:{:02}", (s / 60.0).floor() as i64, (s % 60.0).floor() as i64),
+        _ => "--:--".to_string(),
+    }
+}
+
+/// Distance (m) and time to go (s) to the next steerpoint at the current
+/// ground-speed closure.
+fn steering(a: &Aircraft, m: &Mission) -> (f64, Option<f64>) {
+    let rel = m.current_gate().pos - a.pos;
+    let flat = v3(rel.x, 0.0, rel.z);
+    let closure = v3(a.vel.x, 0.0, a.vel.z).dot(flat.norm());
+    (rel.len(), if closure > 1.0 { Some(flat.len() / closure) } else { None })
 }
 
 fn hardware(cv: &mut Canvas, r: R, label: &str) {
@@ -463,17 +484,112 @@ fn hardware(cv: &mut Canvas, r: R, label: &str) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn dial(cv: &mut Canvas, r: R, value: f64, min: f64, max: f64, label: &str, readout: &str, red_from: usize) {
+/// Round instrument face; returns its centre and radius.
+fn gauge_face(cv: &mut Canvas, r: R) -> (f32, f32, f32) {
     let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
     let rad = r.w * 0.5 - 2.0;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x10, 0x16, 0x19, 1.0));
     cv.disc(x, y, rad, rgba(0x03, 0x06, 0x06, 1.0));
     cv.circle(x, y, rad - 1.0, 2.0, rgba(0x2c, 0x33, 0x32, 1.0));
+    (x, y, rad)
+}
+
+/// Radial stroke at canvas angle `a` (radians, clockwise from three o'clock),
+/// between radii `r0` and `r1`.
+#[allow(clippy::too_many_arguments)]
+fn spoke(cv: &mut Canvas, x: f32, y: f32, a: f64, r0: f32, r1: f32, w: f32, col: Col) {
+    let (c, s) = ((a as f32).cos(), (a as f32).sin());
+    cv.line(x + c * r0, y + s * r0, x + c * r1, y + s * r1, w, col);
+}
+
+fn spoke_text(cv: &mut Canvas, x: f32, y: f32, a: f64, r: f32, s: &str, col: Col) {
+    cv.text(s, x + (a as f32).cos() * r, y + (a as f32).sin() * r, 1.0, col, Align::Center);
+}
+
+const POINTER: Col = rgba(0xf8, 0xf3, 0xd5, 1.0);
+const MACH_RING: Col = rgba(0x8c, 0xd0, 0xe8, 1.0);
+
+/// Airspeed/Mach indicator. One pointer reads KCAS on the fixed outer scale
+/// and Mach on the inner ring. The ring turns with static pressure, as on the
+/// real instrument, because a given Mach number is fewer calibrated knots the
+/// higher the jet flies. The red pointer is the limit speed for this level:
+/// 800 KCAS low down, Mach 2.05 upstairs.
+fn asi_mach(cv: &mut Canvas, r: R, ad: &AirData) {
+    let (x, y, rad) = gauge_face(cv, r);
+    let ang = |kt: f64| (-90.0 + 315.0 * clamp(kt / 850.0, 0.0, 1.0)) * DEG;
+    for k in 0..=17 {
+        let major = k % 2 == 0;
+        spoke(cv, x, y, ang(k as f64 * 50.0), rad * if major { 0.74 } else { 0.81 }, rad * 0.90, 2.0, WHITE);
+        if major && k > 0 {
+            spoke_text(cv, x, y, ang(k as f64 * 50.0), rad * 0.62, &format!("{}", k / 2), WHITE);
+        }
+    }
+    for k in 5..=20 {
+        let kt = air::cas_for_mach(k as f64 / 10.0, ad.atm.pressure) * air::KT;
+        if kt > 850.0 {
+            break;
+        }
+        let major = k % 5 == 0;
+        spoke(cv, x, y, ang(kt), rad * 0.38, rad * if major { 0.52 } else { 0.45 }, 2.0, if k == 10 { AMBER } else { MACH_RING });
+    }
+    spoke(cv, x, y, ang(ad.vmax_kcas), rad * 0.56, rad * 0.92, 3.0, RED);
+    cv.text(&pad(ad.kcas, 3), x, y - rad * 0.08, 2.0, GREEN, Align::Center);
+    cv.text(&format!("M{:.2}", ad.mach), x, y + rad * 0.20, 1.0, AMBER, Align::Center);
+    spoke(cv, x, y, ang(ad.kcas), -rad * 0.12, rad * 0.86, 3.0, POINTER);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+}
+
+/// Counter-pointer altimeter: the pointer turns once per 1,000 ft, the counter
+/// shows the barometric altitude, the Kollsman window the setting (QNH, in Hg).
+fn altimeter(cv: &mut Canvas, r: R, ad: &AirData) {
+    let (x, y, rad) = gauge_face(cv, r);
+    let ang = |t: f64| (-90.0 + 360.0 * t) * DEG;
+    for k in 0..50 {
+        let major = k % 5 == 0;
+        spoke(cv, x, y, ang(k as f64 / 50.0), rad * if major { 0.74 } else { 0.83 }, rad * 0.90, if major { 2.0 } else { 1.0 }, WHITE);
+    }
+    for k in 0..10 {
+        spoke_text(cv, x, y, ang(k as f64 / 10.0), rad * 0.62, &format!("{k}"), WHITE);
+    }
+    let alt = ad.baro_ft.max(0.0);
+    cv.rect(x - 20.0, y - rad * 0.22 - 8.0, 40.0, 16.0, rgba(0x00, 0x00, 0x00, 1.0));
+    cv.text(&pad(alt, 5), x, y - rad * 0.22, 1.0, WHITE, Align::Center);
+    cv.rect(x - 16.0, y + rad * 0.26 - 7.0, 32.0, 14.0, rgba(0x00, 0x00, 0x00, 1.0));
+    cv.text(&format!("{:.2}", ad.qnh_inhg), x, y + rad * 0.26, 1.0, AMBER, Align::Center);
+    spoke(cv, x, y, ang(alt % 1000.0 / 1000.0), -rad * 0.12, rad * 0.86, 3.0, POINTER);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+}
+
+/// Accelerometer: normal load factor from -5 to +10 G, +1 at nine o'clock,
+/// red beyond the +9 / -3 airframe limits, with amber memory pointers that
+/// hold the peak positive and negative G of the sortie.
+fn g_meter(cv: &mut Canvas, r: R, ad: &AirData) {
+    let (x, y, rad) = gauge_face(cv, r);
+    let ang = |g: f64| (180.0 + (clamp(g, -5.0, 10.0) - 1.0) * 22.0) * DEG;
+    cv.arc(x, y, rad * 0.87, ang(9.0) as f32, ang(10.0) as f32, 4.0, RED);
+    cv.arc(x, y, rad * 0.87, ang(-5.0) as f32, ang(-3.0) as f32, 4.0, RED);
+    for g in -5..=10 {
+        let major = g % 2 == 0;
+        spoke(cv, x, y, ang(g as f64), rad * if major { 0.74 } else { 0.81 }, rad * 0.90, 2.0, WHITE);
+        if major {
+            spoke_text(cv, x, y, ang(g as f64), rad * 0.62, &format!("{g}"), WHITE);
+        }
+    }
+    cv.text("G", x, y - rad * 0.24, 1.0, WHITE, Align::Center);
+    cv.text(&format!("{:+.1}", ad.g), x, y + rad * 0.30, 1.0, GREEN, Align::Center);
+    spoke(cv, x, y, ang(ad.g_max), rad * 0.10, rad * 0.80, 2.0, AMBER);
+    spoke(cv, x, y, ang(ad.g_min), rad * 0.10, rad * 0.80, 2.0, AMBER);
+    spoke(cv, x, y, ang(ad.g), -rad * 0.12, rad * 0.86, 3.0, POINTER);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dial(cv: &mut Canvas, r: R, value: f64, min: f64, max: f64, label: &str, readout: &str, red_from: usize) {
+    let (x, y, rad) = gauge_face(cv, r);
     for i in 0..=10 {
         let a = ((-220.0 + i as f64 * 26.0) * DEG) as f32;
         let (c, s) = (a.cos(), a.sin());
-        let col = if i >= red_from { rgba(0xff, 0x66, 0x54, 1.0) } else { WHITE };
+        let col = if i >= red_from { RED } else { WHITE };
         let len = if i % 2 == 0 { 0.70 } else { 0.78 };
         cv.line(x + c * rad * len, y + s * rad * len, x + c * rad * 0.90, y + s * rad * 0.90, 2.0, col);
         if i % 2 == 0 {
@@ -484,7 +600,7 @@ fn dial(cv: &mut Canvas, r: R, value: f64, min: f64, max: f64, label: &str, read
     }
     let t = clamp((value - min) / (max - min), 0.0, 1.0);
     let a = ((-220.0 + t * 260.0) * DEG) as f32;
-    cv.line(x - a.cos() * rad * 0.15, y - a.sin() * rad * 0.15, x + a.cos() * rad * 0.80, y + a.sin() * rad * 0.80, 3.0, rgba(0xf8, 0xf3, 0xd5, 1.0));
+    cv.line(x - a.cos() * rad * 0.15, y - a.sin() * rad * 0.15, x + a.cos() * rad * 0.80, y + a.sin() * rad * 0.80, 3.0, POINTER);
     cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
     cv.text(label, x, y - rad * 0.24, 1.0, WHITE, Align::Center);
     cv.text(readout, x, y + rad * 0.40, 2.0, GREEN, Align::Center);
@@ -498,10 +614,11 @@ fn osb_labels(cv: &mut Canvas, r: R, top: [&str; 5], bottom: [&str; 5]) {
     }
 }
 
-fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, m: &Mission, time: f64) {
+#[allow(clippy::too_many_arguments)]
+fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Mission, time: f64) {
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x01, 0x07, 0x0a, 1.0));
     let (x0, y0, w, h) = (r.x, r.y, r.w, r.h);
-    osb_labels(cv, r, ["OVRD", "", page.name(), "", "CNTL"], ["SWAP", "FCR", "HSD", "ENG", "DTE"]);
+    osb_labels(cv, r, ["OVRD", "", page.name(), "", "CNTL"], ["SWAP", "FCR", "HSD", "ENG", "AIR"]);
     match page {
         Page::Hsd => {
             let (cx, cy) = (x0 + w / 2.0, y0 + h * 0.58);
@@ -539,7 +656,7 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, m: &Mission, time: f64) 
             cv.text("NAV  GPS  NORM", cx, y0 + 46.0, 1.0, rgba(0x7c, 0xbc, 0xc2, 1.0), Align::Center);
             cv.text(&format!("{} HDG", pad(a.heading, 3)), x0 + 10.0, y0 + h - 44.0, 1.0, GREEN, Align::Left);
             cv.text(&format!("STPT {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2)), x0 + w - 10.0, y0 + h - 44.0, 1.0, GREEN, Align::Right);
-            cv.text(&format!("VS {}", (a.vs * 196.85).round() as i64), x0 + 10.0, y0 + h - 32.0, 1.0, DIM, Align::Left);
+            cv.text(&format!("VS {:+}", (ad.vs_fpm / 10.0).round() as i64 * 10), x0 + 10.0, y0 + h - 32.0, 1.0, DIM, Align::Left);
             cv.text(&format!("AOA {:.1}", a.alpha_deg), x0 + w - 10.0, y0 + h - 32.0, 1.0, DIM, Align::Right);
         }
         Page::Fcr => {
@@ -556,8 +673,27 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, m: &Mission, time: f64) 
             let sx = l + 4.0 + sweep * (rr - l - 8.0);
             cv.line(sx, t + 2.0, sx, b - 2.0, 2.0, rgba(0x39, 0x79, 0x57, 1.0));
             cv.text("NO TRACK", x0 + w / 2.0, (t + b) / 2.0, 2.0, rgba(0x80, 0xb7, 0x91, 1.0), Align::Center);
-            cv.text(&format!("{} C", pad(a.airspeed_kt, 3)), l + 4.0, b + 14.0, 1.0, GREEN, Align::Left);
-            cv.text(&format!("{} ALT", pad(ft(a.pos.y) / 100.0, 3)), rr - 4.0, b + 14.0, 1.0, GREEN, Align::Right);
+            cv.text(&format!("{} C", pad(ad.kcas, 3)), l + 4.0, b + 14.0, 1.0, GREEN, Align::Left);
+            cv.text(&format!("{} ALT", pad(ad.baro_ft / 100.0, 3)), rr - 4.0, b + 14.0, 1.0, GREEN, Align::Right);
+        }
+        Page::Air => {
+            // Air-data computer: static air at the jet and what it does to the airspeeds.
+            let rows = [
+                ("OAT / TAT", format!("{:+.0} / {:+.0} C", ad.oat_c, ad.tat_c)),
+                ("STATIC PRESS", format!("{:.1} HPA", ad.atm.pressure / 100.0)),
+                ("PRESS ALT", format!("{} FT", ad.pressure_alt_ft.round() as i64)),
+                ("DENS ALT", format!("{} FT", ad.density_alt_ft.round() as i64)),
+                ("DENSITY  SIGMA", format!("{:.3} {:.2}", ad.atm.rho, ad.sigma)),
+                ("SOUND / Q", format!("{} KT {:.0}KPA", pad(ad.atm.sound * air::KT, 3), ad.qbar / 1000.0)),
+                ("TAS / EAS", format!("{} / {}", pad(ad.ktas, 3), pad(ad.keas, 3))),
+                ("GS / VS", format!("{} {:+}", pad(ad.gs_kt, 3), (ad.vs_fpm / 10.0).round() as i64 * 10)),
+            ];
+            for (i, (k, v)) in rows.iter().enumerate() {
+                let yy = y0 + 40.0 + i as f32 * 31.0;
+                cv.text(k, x0 + 14.0, yy, 1.0, DIM, Align::Left);
+                cv.text(v, x0 + w - 14.0, yy + 12.0, 2.0, GREEN, Align::Right);
+                cv.line(x0 + 12.0, yy + 22.0, x0 + w - 12.0, yy + 22.0, 1.0, rgba(0x1c, 0x34, 0x31, 1.0));
+            }
         }
         Page::Eng => {
             let rows = [
@@ -581,20 +717,20 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, m: &Mission, time: f64) 
 }
 
 fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64) {
-    mfd(cv, R_MFD_L, pages[0], a, m, time);
-    mfd(cv, R_MFD_R, pages[1], a, m, time);
-    mfd(cv, R_CPD, Page::Hsd, a, m, time);
+    let ad = AirData::of(a);
+    mfd(cv, R_MFD_L, pages[0], a, &ad, m, time);
+    mfd(cv, R_MFD_R, pages[1], a, &ad, m, time);
+    mfd(cv, R_CPD, Page::Hsd, a, &ad, m, time);
 
     // DED.
     let r = R_DED;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x02, 0x08, 0x04, 1.0));
-    let gate = m.current_gate();
-    let dist = (gate.pos - a.pos).len() / 1852.0;
+    let (dist, ttg) = steering(a, m);
     let lines = [
         format!("UHF  305.00   STPT {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2)),
-        "VHF  127.50     * *".to_string(),
-        format!("M {:.2}       {} DEG", a.mach, pad(a.heading, 3)),
-        format!("DIST {:.1} NM   GPS OK", dist),
+        format!("ALT {:.2}IN  OAT {:+.0}C", ad.qnh_inhg, ad.oat_c),
+        format!("M {:.2}       {} DEG", ad.mach, pad(a.heading, 3)),
+        format!("DIST {:.1} NM   TTG {}", dist / 1852.0, clock(ttg)),
         format!("TIME {}:{}  FUEL {}", pad((m.elapsed / 60.0).floor(), 2), pad((m.elapsed % 60.0).floor(), 2), pad(a.fuel * 2.20462, 4)),
     ];
     for (i, s) in lines.iter().enumerate() {
@@ -635,9 +771,10 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     cv.text("MASTER", r.x + r.w / 2.0, r.y + 24.0, 1.0, if on { rgba(0x1c, 0x14, 0x05, 1.0) } else { rgba(0x6b, 0x55, 0x30, 1.0) }, Align::Center);
     cv.text("CAUTION", r.x + r.w / 2.0, r.y + 38.0, 1.0, if on { rgba(0x1c, 0x14, 0x05, 1.0) } else { rgba(0x6b, 0x55, 0x30, 1.0) }, Align::Center);
 
-    // Dials: airspeed, altimeter, standby ADI, RPM, FTIT, nozzle, oil.
-    dial(cv, R_DIALS[0], a.airspeed_kt, 0.0, 800.0, "KCAS", &pad(a.airspeed_kt, 3), 11);
-    dial(cv, R_DIALS[1], ft(a.pos.y) % 10000.0, 0.0, 10000.0, "ALT", &pad(ft(a.pos.y) / 100.0, 3), 11);
+    // Dials: airspeed/Mach, altimeter, accelerometer, standby ADI, RPM, FTIT, nozzle, oil.
+    asi_mach(cv, R_DIALS[0], &ad);
+    altimeter(cv, R_DIALS[1], &ad);
+    g_meter(cv, R_GMETER, &ad);
     adi(cv, R_DIALS[2], a);
     dial(cv, R_DIALS[3], a.rpm, 0.0, 110.0, "RPM", &pad(a.rpm, 2), 10);
     dial(cv, R_DIALS[4], a.ftit, 200.0, 1200.0, "FTIT", &pad(a.ftit, 3), 9);
@@ -647,7 +784,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // Caution light panel.
     let r = R_CAUTION;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x20, 0x27, 0x29, 1.0));
-    let labels = [("FLCS", a.alpha_deg > 25.0), ("FUEL LOW", a.fuel < 450.0), ("ENGINE", a.fuel <= 0.0), ("OIL", a.oil_psi < 20.0), ("ALT LOW", a.agl < 100.0), ("SPD BRK", a.brake > 0.1)];
+    let labels = [("FLCS", a.alpha_deg > 25.0), ("FUEL LOW", a.fuel < 450.0), ("ENGINE", a.fuel <= 0.0), ("OIL", a.oil_psi < 20.0), ("ALT LOW", ad.radar_ft < 300.0), ("SPD BRK", a.brake > 0.1)];
     for (i, (s, lit)) in labels.iter().enumerate() {
         let (x, y) = (r.x + (i % 2) as f32 * 128.0, r.y + (i / 2) as f32 * 42.6);
         cv.rect(x + 3.0, y + 3.0, 122.0, 36.0, if *lit { rgba(0xd4, 0x96, 0x38, 1.0) } else { rgba(0x0c, 0x14, 0x14, 1.0) });
@@ -821,20 +958,26 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
         }
     };
     let half = 70.0;
-    let alt_ft = ft(a.pos.y);
-    ht(cv, &format!("{:.1}", a.g_smooth), -half, -62.0, small, Align::Left);
-    boxed(cv, &pad(a.airspeed_kt, 3), -half, 0.0, Align::Left);
+    let ad = AirData::of(a);
+    let alt_ft = ad.baro_ft;
+    // Left: load factor, the KCAS box, then Mach, angle of attack, peak G and
+    // the master mode. Right: the barometric altitude box (altimeter on QNH),
+    // radar altitude, vertical velocity and steering to the next gate.
+    ht(cv, &format!("G {:.1}", ad.g), -half, -62.0, small, Align::Left);
+    boxed(cv, &pad(ad.kcas, 3), -half, 0.0, Align::Left);
     ht(cv, "C", -half, 13.0, small, Align::Left);
     boxed(cv, &pad(alt_ft, 5), half, 0.0, Align::Right);
     ht(cv, "B", half, 13.0, small, Align::Right);
-    ht(cv, &format!("{:.2}", a.mach), -half, 34.0, small, Align::Left);
-    ht(cv, &format!("{:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
-    ht(cv, &format!("{:.1}", a.max_g), -half, 58.0, small, Align::Left);
+    ht(cv, &format!("M {:.2}", ad.mach), -half, 34.0, small, Align::Left);
+    ht(cv, &format!("AOA {:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
+    ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 58.0, small, Align::Left);
     ht(cv, "NAV", -half, 70.0, small, Align::Left);
-    ht(cv, &format!("R {}", pad(ft(a.agl), 4)), half, 34.0, small, Align::Right);
+    ht(cv, &format!("R {}", pad(ad.radar_ft, 5)), half, 34.0, small, Align::Right);
+    ht(cv, &format!("VV {:+}", (ad.vs_fpm / 10.0).round() as i64 * 10), half, 46.0, small, Align::Right);
     let gate = m.current_gate();
-    let dist = (gate.pos - a.pos).len() / 1852.0;
-    ht(cv, &format!("{:.1}>{}", dist, (m.gate_index + 1).min(m.gates.len())), half, 46.0, small, Align::Right);
+    let (dist, ttg) = steering(a, m);
+    ht(cv, &format!("{:.1}>{:02}", dist / 1852.0, (m.gate_index + 1).min(m.gates.len())), half, 58.0, small, Align::Right);
+    ht(cv, &clock(ttg), half, 70.0, small, Align::Right);
     // Heading tape along the bottom of the field of view.
     let base = (a.heading / 5.0).round() * 5.0;
     for k in -5..=5 {
@@ -854,8 +997,8 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     ht(cv, &pad(a.heading, 3), 0.0, 119.0, small, Align::Center);
     // Speed and altitude scales flank the flight path.
     for i in -3..=3 {
-        let speed = (a.airspeed_kt / 10.0).round() * 10.0 + i as f64 * 10.0;
-        let dy = (a.airspeed_kt - speed) * 0.9;
+        let speed = (ad.kcas / 10.0).round() * 10.0 + i as f64 * 10.0;
+        let dy = (ad.kcas - speed) * 0.9;
         if dy.abs() < 24.0 {
             hl(cv, -half - 6.0, dy, -half - 2.0, dy);
         }
@@ -929,7 +1072,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
         Some("AOA")
     } else if a.g_smooth > 9.15 {
         Some("G LIMIT")
-    } else if a.mach > 2.05 {
+    } else if ad.overspeed() {
         Some("OVERSPEED")
     } else if a.fuel < 450.0 {
         Some("BINGO")
