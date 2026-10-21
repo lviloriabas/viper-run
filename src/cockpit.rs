@@ -10,6 +10,8 @@ use crate::sim::{Aircraft, Mission};
 use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
+mod pilot;
+
 pub const ATLAS: u32 = 1024;
 const A: f64 = ATLAS as f64;
 
@@ -64,10 +66,6 @@ const GLARE: Rgb = Rgb(0.075, 0.085, 0.095);
 const WALL: Rgb = Rgb(0.19, 0.21, 0.215);
 const CONSOLE: Rgb = Rgb(0.15, 0.17, 0.18);
 const SEAT: Rgb = Rgb(0.17, 0.20, 0.17);
-const SUIT: Rgb = Rgb(0.27, 0.29, 0.22);
-const GLOVE: Rgb = Rgb(0.21, 0.21, 0.17);
-const BOOT: Rgb = Rgb(0.09, 0.09, 0.085);
-const HARNESS: Rgb = Rgb(0.55, 0.52, 0.40);
 const METALC: Rgb = Rgb(0.55, 0.57, 0.56);
 
 /// Round gauges are 16-sided, like the polygon cockpits of early-90s sims.
@@ -244,7 +242,7 @@ impl Cockpit {
         ctx.draw(0, self.statics.count, 1);
 
         self.dynamic.clear();
-        build_dynamic(&mut self.dynamic, hands);
+        pilot::build_dynamic(&mut self.dynamic, hands);
         let n = self.dynamic.count().min(self.dyn_cap);
         ctx.buffer_update(self.dyn_bind.vertex_buffers[0], BufferSource::slice(&self.dynamic.v[..n * crate::mesh::STRIDE]));
         ctx.apply_bindings(&self.dyn_bind);
@@ -384,12 +382,14 @@ fn build_static(m: &mut Mesh) {
             let (w0, w1) = (airframe::canopy_profile(z0).0.max(0.47), airframe::canopy_profile(z1).0.max(0.47));
             m.quad(v3(s * 0.47, 0.22, z0), v3(s * 0.47, 0.22, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL);
             m.quad(v3(s * 0.47, b0 - 0.03, z0), v3(s * 0.47, b1 - 0.03, z1), v3(s * w1, b1, z1), v3(s * w0, b0, z0), WALL.scale(1.15));
-            m.capsule(v3(s * w0, b0, z0), v3(s * w1, b1, z1), 0.02, 0.02, Rgb(0.12, 0.13, 0.14), 6);
+            let d = (v3(s * w1, b1, z1) - v3(s * w0, b0, z0)).norm() * 0.012;
+            pilot::bar(m, v3(s * w0, b0, z0) - d, v3(s * w1, b1, z1) + d, 0.024, 0.018, V3::Y, Rgb(0.12, 0.13, 0.14));
         }
 
-        // Side consoles with labelled panels.
-        let base = Frame { o: v3(s * 0.38, 0.52, -3.20), x: V3::X, y: V3::Y, z: V3::Z };
-        m.block(&base, v3(0.09, 0.12, 0.58), CONSOLE);
+        // Side consoles with labelled panels, running forward to the stick
+        // mount and the throttle quadrant.
+        let base = Frame { o: v3(s * 0.38, 0.52, -3.25), x: V3::X, y: V3::Y, z: V3::Z };
+        m.block(&base, v3(0.09, 0.12, 0.63), CONSOLE);
         let names = if s < 0.0 { 0 } else { 5 };
         for j in 0..5 {
             let z = -3.66 + j as f64 * 0.23;
@@ -397,7 +397,8 @@ fn build_static(m: &mut Mesh) {
             let (u0, v0, u1, v1) = uv(r_console(names + j));
             let (hw, hh) = (0.082, 0.105);
             m.quad_uv(top.p(-hw, hh, 0.0), top.p(hw, hh, 0.0), top.p(hw, -hh, 0.0), top.p(-hw, -hh, 0.0), [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]);
-            if j != 0 || s < 0.0 {
+            // No toggles under the throttle or the right arm rest.
+            if (s < 0.0 && j > 0) || (s > 0.0 && j > 1) {
                 for k in 0..2 {
                     let x = s * 0.38 + (k as f64 - 0.5) * 0.055;
                     m.capsule(v3(x, 0.645, z + 0.03), v3(x, 0.67, z + 0.022), 0.004, 0.003, METALC, 6);
@@ -406,102 +407,14 @@ fn build_static(m: &mut Mesh) {
             }
         }
     }
-    // Throttle quadrant and the sidestick base with its arm rest.
-    m.block(&Frame { o: v3(-0.40, 0.648, -3.42), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.05, 0.008, 0.17), Rgb(0.07, 0.08, 0.08));
-    m.block(&Frame { o: v3(0.40, 0.65, -3.42), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.05, 0.012, 0.06), Rgb(0.08, 0.09, 0.09));
-    m.block(&Frame { o: v3(0.405, 0.705, -3.12), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.05, 0.025, 0.15), Rgb(0.12, 0.12, 0.11));
-
-    // ACES II seat, reclined 30 degrees.
-    let (c30, s30) = ((30.0 * DEG).cos(), (30.0 * DEG).sin());
-    let up = v3(0.0, c30, s30);
-    let back = v3(0.0, -s30, c30);
-    let hip = v3(0.0, 0.58, -3.50);
-    let seat = |o: V3| Frame { o, x: V3::X, y: up, z: back };
-    m.block(&Frame { o: v3(0.0, 0.47, -3.40), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.23, 0.06, 0.24), SEAT.scale(0.8));
-    m.block(&seat(hip + up * 0.36 + back * 0.17), v3(0.23, 0.40, 0.05), SEAT);
-    m.block(&seat(hip + up * 0.82 + back * 0.21), v3(0.155, 0.13, 0.07), SEAT.scale(1.1));
-    // Yellow and black ejection handle on the seat bucket, between the thighs.
-    for i in 0..8 {
-        let (t0, t1) = (i as f64 * PI / 8.0, (i + 1) as f64 * PI / 8.0);
-        let p = |t: f64| v3(0.06 * t.cos(), 0.535 + 0.045 * t.sin(), -3.655);
-        m.capsule(p(t0), p(t1), 0.0085, 0.0085, if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) }, 6);
-    }
-
-    // Pilot torso, harness and thighs. The head sits at the eye and is omitted.
-    m.ellipsoid_basis(hip + up * 0.27 + back * 0.05, V3::X * 0.20, up * 0.30, back * 0.13, SUIT, 6, 10);
-    for &s in &[-1.0, 1.0] {
-        m.capsule(v3(s * 0.11, 1.00, -3.32), v3(s * 0.08, 0.66, -3.56), 0.022, 0.022, HARNESS, 6);
-        m.capsule(v3(s * 0.20, 0.64, -3.44), v3(0.0, 0.66, -3.60), 0.02, 0.02, HARNESS, 6);
-        let knee = v3(s * 0.17, 0.66, -3.95);
-        m.capsule(v3(s * 0.12, 0.58, -3.50), knee, 0.088, 0.072, SUIT, 8);
-        m.ellipsoid(knee, v3(0.074, 0.074, 0.08), SUIT, 4, 8);
-        // G-suit bladder seam along the thigh.
-        m.capsule(v3(s * 0.18, 0.66, -3.58), v3(s * 0.20, 0.70, -3.86), 0.012, 0.012, SUIT.scale(0.8), 6);
-    }
-    m.block(&Frame { o: v3(0.0, 0.66, -3.60), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.035, 0.018, 0.03), METALC);
-    // Kneeboard strapped to the left thigh.
-    let kb = Frame { o: v3(-0.17, 0.745, -3.76), x: V3::X, y: v3(0.0, 0.17, -0.985), z: v3(0.0, 0.985, 0.17) };
-    m.block(&kb.at(0.0, 0.0, -0.006), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
-    screen(m, &kb, 0.12, 0.15, R_KNEE);
+    pilot::build_static(m);
 
     // Canopy aft bow and bulkhead behind the seat, on the canopy's facet lines.
     let nv = airframe::CANOPY_NV;
-    for k in 0..nv {
-        let (a, b) = (airframe::canopy_point(0.985, k as f64 / nv as f64), airframe::canopy_point(0.985, (k + 1) as f64 / nv as f64));
-        m.capsule(a, b, 0.03, 0.03, Rgb(0.13, 0.15, 0.16), 6);
-    }
+    let bow: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.985, k as f64 / nv as f64)).collect();
+    pilot::strap(m, &bow, 0.03, 0.026, V3::Z, Rgb(0.13, 0.15, 0.16));
     let bulk: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.995, k as f64 / nv as f64)).collect();
     m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));
-    m.facet();
-}
-
-fn hand(m: &mut Mesh, h: V3, side: f64) {
-    m.ellipsoid(h + v3(0.0, 0.035, 0.006), v3(0.048, 0.036, 0.052), GLOVE, 4, 6);
-    for i in 0..4 {
-        let x = h.x + (i as f64 - 1.5) * 0.02;
-        m.capsule(v3(x, h.y + 0.055, h.z + 0.028), v3(x, h.y + 0.054, h.z - 0.022), 0.011, 0.010, GLOVE, 5);
-        m.capsule(v3(x, h.y + 0.054, h.z - 0.022), v3(x, h.y + 0.008, h.z - 0.034), 0.010, 0.009, GLOVE, 5);
-    }
-    m.capsule(h + v3(-side * 0.042, 0.025, 0.01), h + v3(-side * 0.03, 0.035, -0.032), 0.015, 0.013, GLOVE, 5);
-}
-
-fn arm(m: &mut Mesh, shoulder: V3, elbow: V3, hand_at: V3, side: f64) {
-    let wrist = hand_at + v3(0.0, 0.015, 0.072);
-    m.capsule(shoulder, elbow, 0.075, 0.062, SUIT, 6);
-    m.ellipsoid(elbow, v3(0.063, 0.064, 0.064), SUIT, 4, 8);
-    m.capsule(elbow, wrist, 0.060, 0.044, SUIT, 6);
-    m.capsule(wrist, hand_at + v3(0.0, 0.026, 0.005), 0.045, 0.047, GLOVE, 6);
-    m.capsule(wrist + v3(0.0, 0.004, 0.022), wrist + v3(0.0, 0.004, 0.045), 0.05, 0.05, Rgb(0.21, 0.24, 0.17), 6);
-    hand(m, hand_at, side);
-}
-
-fn build_dynamic(m: &mut Mesh, h: &Hands) {
-    // Pressure sidestick: deliberately tiny travel.
-    let pivot = v3(0.40, 0.655, -3.42);
-    let grip = pivot + v3(h.roll * 0.009, 0.12, h.pitch * 0.010);
-    m.capsule(pivot, grip, 0.016, 0.022, Rgb(0.10, 0.11, 0.11), 6);
-    m.ellipsoid(grip + v3(0.0, 0.035, 0.0), v3(0.024, 0.05, 0.03), Rgb(0.13, 0.14, 0.14), 4, 6);
-    m.block(&Frame { o: grip + v3(0.0, 0.088, -0.008), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.012, 0.006, 0.013), Rgb(0.6, 0.22, 0.14));
-    m.block(&Frame { o: grip + v3(-0.02, 0.064, -0.012), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.007, 0.008), METALC);
-    arm(m, v3(0.20, 1.01, -3.26), v3(0.32, 0.765, -3.13), grip + v3(0.0, 0.004, 0.0), 1.0);
-
-    // Throttle moves forward with power, the left hand rides on it.
-    let z = -3.34 - h.throttle * 0.17;
-    let base = v3(-0.40, 0.65, z + 0.02);
-    let top = v3(-0.40, 0.745, z);
-    m.capsule(base, top, 0.018, 0.02, Rgb(0.20, 0.22, 0.22), 6);
-    m.block(&Frame { o: top + v3(0.0, 0.02, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.032, 0.026, 0.04), Rgb(0.13, 0.15, 0.16));
-    m.block(&Frame { o: top + v3(0.036, 0.026, -0.01), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.009, 0.012), METALC);
-    arm(m, v3(-0.20, 1.01, -3.26), v3(-0.33, 0.775, -3.17), top + v3(0.0, 0.01, 0.0), -1.0);
-
-    // Shins and boots on the rudder pedals.
-    for &s in &[-1.0, 1.0] {
-        let knee = v3(s * 0.17, 0.66, -3.95);
-        let ankle = v3(s * 0.17, 0.30, -4.25 - s * h.rudder * 0.04);
-        m.capsule(knee, ankle, 0.068, 0.048, SUIT, 6);
-        m.capsule(ankle, ankle + v3(0.0, -0.02, -0.17), 0.055, 0.045, BOOT, 6);
-        m.block(&Frame { o: ankle + v3(0.0, -0.07, -0.12), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.06, 0.012, 0.09), Rgb(0.24, 0.26, 0.26));
-    }
     m.facet();
 }
 
