@@ -1,0 +1,2 @@
+- If multiple agents are modifying files, coordinate them to avoid conflicts.
+- Make a commit with a clear message after every major modification.

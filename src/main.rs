@@ -11,6 +11,7 @@ mod font;
 mod fx;
 mod gamepad;
 mod gfx;
+mod icon;
 mod math;
 mod mesh;
 mod png;
@@ -1227,6 +1228,7 @@ fn main() {
         window_width: win_w,
         window_height: win_h,
         window_resizable: true,
+        icon: Some(window_icon()),
         high_dpi: false,
         sample_count: 1,
         platform: conf::Platform { swap_interval: Some(if bench { 0 } else { 1 }), ..Default::default() },
@@ -1238,4 +1240,12 @@ fn main() {
         app.resize_event(w, h);
         Box::new(app)
     });
+}
+
+fn window_icon() -> conf::Icon {
+    let mut icon = conf::Icon { small: [0; 1024], medium: [0; 4096], big: [0; 16384] };
+    icon.small.copy_from_slice(&icon::render(16));
+    icon.medium.copy_from_slice(&icon::render(32));
+    icon.big.copy_from_slice(&icon::render(64));
+    icon
 }

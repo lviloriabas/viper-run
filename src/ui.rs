@@ -485,10 +485,10 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
         cv.text(&format!("{:.1} KM", dist / 1000.0), lx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Left);
         cv.text(&format!("{} {}°  {}{}°", if diff >= 0.0 { "R" } else { "L" }, pad(diff.abs(), 2), if el >= 0.0 { "+" } else { "-" }, pad(el.abs(), 2)), lx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Left);
     }
+    air_panel(cv, lx, h * 0.058 + 34.0 * s, s, a);
     cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(m.final_score(), 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
-    air_panel(cv, lx, h * 0.058 + 34.0 * s, s, a);
     let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    X  CENTER    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
