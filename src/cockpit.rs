@@ -174,13 +174,66 @@ void main() {
     frag = vec4(col + spec, 1.0);
 }"#;
 
+#[repr(C)]
+struct FaceU {
+    vp: M4,
+    eye: [f32; 3],
+    res: [f32; 2],
+    gloc: f32,
+}
+
+/// Instrument faces redrawn at window resolution over the pixelated scene.
+const FACE_VS: &str = r#"
+in vec3 pos;
+in vec3 normal;
+in vec3 color;
+in vec2 uv;
+uniform mat4 u_vp;
+uniform vec3 u_eye;
+out vec2 v_uv;
+void main() {
+    v_uv = uv;
+    // A hair toward the eye, so each face wins the depth test against its own
+    // triangle laid down by the depth-only pass.
+    gl_Position = u_vp * vec4((pos - u_eye) * 0.998, 1.0);
+}"#;
+
+const FACE_FS: &str = r#"
+in vec2 v_uv;
+uniform sampler2D u_atlas;
+uniform vec2 u_res;
+uniform float u_gloc;
+out vec4 frag;
+void main() {
+    vec3 col = texture(u_atlas, v_uv).rgb * 1.08;
+    // The same grey-out ring the post pass lays over the rest of the view.
+    vec2 g = (gl_FragCoord.xy / u_res - vec2(0.5, 0.58)) * vec2(u_res.x / u_res.y, 1.0);
+    float ring = smoothstep(0.16, 0.75, length(g));
+    frag = vec4(mix(col, vec3(0.20, 0.0, 0.0), u_gloc * ring * 0.75), 1.0);
+}"#;
+
+/// The textured triangles of `m`: displays, gauge dials, placards.
+fn faces(m: &Mesh) -> Mesh {
+    let mut out = Mesh::new();
+    for tri in m.v.chunks(3 * crate::mesh::STRIDE) {
+        if tri[9] >= 0.0 {
+            out.v.extend_from_slice(tri);
+        }
+    }
+    out
+}
+
 pub struct Cockpit {
     pip: Pipeline,
     glass_pip: Pipeline,
+    depth_pip: Pipeline,
+    face_pip: Pipeline,
     statics: Part,
+    faces: Part,
     dynamic: Mesh,
     dyn_bind: Bindings,
     dyn_cap: usize,
+    dyn_count: usize,
     canopy: Part,
     hud_glass: Part,
     pub atlas: gfx::Target,
@@ -194,6 +247,9 @@ impl Cockpit {
         let s = gfx::shader(ctx, VS, FS, &["u_atlas"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_sun", Float3), ("u_sun_vis", Float1), ("u_alpha", Float1), ("u_tint", Float3)]);
         let pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
         let glass_pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::alpha_blend()), ..Default::default() });
+        let depth_pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_write: (false, false, false, false), ..Default::default() });
+        let fs = gfx::shader(ctx, FACE_VS, FACE_FS, &["u_atlas"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_res", Float2), ("u_gloc", Float1)]);
+        let face_pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, fs, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
         let atlas_tex = ctx.new_render_texture(TextureParams {
             width: ATLAS,
             height: ATLAS,
@@ -211,6 +267,8 @@ impl Cockpit {
         build_static(&mut m);
         let mut statics = world::part(ctx, &m);
         statics.bind.images = vec![atlas_tex];
+        let mut faces = world::part(ctx, &faces(&m));
+        faces.bind.images = vec![atlas_tex];
         let dyn_cap = 60000;
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(dyn_cap * crate::mesh::STRIDE));
         let dyn_bind = Bindings { vertex_buffers: vec![vb], index_buffer: gfx::sequential_ib(ctx, dyn_cap), images: vec![atlas_tex] };
@@ -220,7 +278,7 @@ impl Cockpit {
         glass.quad(HUD_GLASS[0], HUD_GLASS[1], HUD_GLASS[2], HUD_GLASS[3], Rgb(0.4, 0.6, 0.5));
         let mut hud_glass = world::part(ctx, &glass);
         hud_glass.bind.images = vec![atlas_tex];
-        Cockpit { pip, glass_pip, statics, dynamic: Mesh::new(), dyn_bind, dyn_cap, canopy, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, canopy, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -250,6 +308,7 @@ impl Cockpit {
         ctx.buffer_update(self.dyn_bind.vertex_buffers[0], BufferSource::slice(&self.dynamic.v[..n * crate::mesh::STRIDE]));
         ctx.apply_bindings(&self.dyn_bind);
         ctx.draw(0, n as i32, 1);
+        self.dyn_count = n;
 
         ctx.apply_pipeline(&self.glass_pip);
         ctx.apply_bindings(&self.hud_glass.bind);
@@ -258,6 +317,27 @@ impl Cockpit {
         ctx.apply_bindings(&self.canopy.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.035, tint: [0.16, 0.13, 0.05], ..u }));
         ctx.draw(0, self.canopy.count, 1);
+    }
+
+    /// Redraws the displays, dials and placards at full resolution into the
+    /// current pass, after the low-resolution scene has been composited, so
+    /// their text stays sharp. The cockpit from the last `draw` first lays
+    /// down depth only, so hands, arms and the kneeboard still cover them.
+    /// `res` is the pass size in pixels; `gloc` matches the post pass.
+    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32) {
+        let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
+        let vp = mat_mul(&proj, &cam_b.view());
+        let eye = cam_b.eye.f32();
+        ctx.apply_pipeline(&self.depth_pip);
+        ctx.apply_uniforms(UniformsSource::table(&CockpitU { vp, eye, sun: [0.0, 1.0, 0.0], sun_vis: 0.0, alpha: 1.0, tint: [0.0; 3] }));
+        ctx.apply_bindings(&self.statics.bind);
+        ctx.draw(0, self.statics.count, 1);
+        ctx.apply_bindings(&self.dyn_bind);
+        ctx.draw(0, self.dyn_count as i32, 1);
+        ctx.apply_pipeline(&self.face_pip);
+        ctx.apply_bindings(&self.faces.bind);
+        ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
+        ctx.draw(0, self.faces.count, 1);
     }
 }
 

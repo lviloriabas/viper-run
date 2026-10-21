@@ -981,6 +981,11 @@ impl EventHandler for App {
         self.ctx.begin_pass(out_pass, PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
         let gloc = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Paused | State::Transition)).map(|a| clamp((a.g_smooth - 7.4) / 2.7, 0.0, 1.0)).unwrap_or(0.0);
         self.world.post(&mut *self.ctx, &self.scene, w, h, gloc as f32, (self.time * 60.0).floor() as f32 % 997.0);
+        // Instrument faces carry information, so they skip the pixelation.
+        if cockpit_view {
+            let cam_b = cockpit::body_camera(&cam, self.aircraft.as_ref().unwrap());
+            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32);
+        }
 
         // 2D overlays at native resolution.
         let mut buttons = Vec::new();
