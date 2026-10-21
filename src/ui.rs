@@ -1,0 +1,513 @@
+//! Menu screens, the controls drawer and the flight overlays, drawn with the
+//! pixel font. Screens return clickable buttons for mouse and keyboard use.
+use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
+use crate::cockpit::pad;
+use crate::math::*;
+use crate::settings::{Best, Settings};
+use crate::sim::{Aircraft, Mission};
+use crate::world::Camera;
+
+pub const INK: Col = rgba(0x05, 0x08, 0x07, 1.0);
+pub const PANEL: Col = rgba(0x0a, 0x11, 0x0e, 0.94);
+pub const LINE: Col = rgba(0x31, 0x47, 0x3a, 1.0);
+pub const LINE_HOT: Col = rgba(0x6e, 0x9b, 0x6d, 1.0);
+pub const GREEN: Col = rgba(0x9d, 0xff, 0xa7, 1.0);
+pub const ACID: Col = rgba(0xd8, 0xff, 0x86, 1.0);
+pub const AMBER: Col = rgba(0xff, 0xc0, 0x5b, 1.0);
+pub const RED: Col = rgba(0xff, 0x6d, 0x5f, 1.0);
+pub const CREAM: Col = rgba(0xec, 0xe8, 0xcd, 1.0);
+pub const DIM: Col = rgba(0x7b, 0x95, 0x7e, 1.0);
+const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Action {
+    Start,
+    Resume,
+    Restart,
+    Menu,
+    Mute,
+    Controls,
+    Quit,
+    SensDown,
+    SensUp,
+    FovDown,
+    FovUp,
+    Invert,
+    Fullscreen,
+    Reset,
+}
+
+#[derive(Clone, Copy)]
+pub struct Button {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub action: Action,
+}
+
+impl Button {
+    pub fn hit(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
+    }
+}
+
+pub struct Ui<'a> {
+    pub cv: &'a mut Canvas,
+    pub w: f32,
+    pub h: f32,
+    pub s: f32,
+    pub buttons: Vec<Button>,
+    pub selected: usize,
+    pub mouse: (f32, f32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Outcome {
+    Win,
+    Crash,
+    Timeout,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RunResult {
+    pub kind: Outcome,
+    pub time: f64,
+    pub gates: usize,
+    pub score: f64,
+    pub impact: f64,
+}
+
+pub fn format_time(sec: f64) -> String {
+    let s = sec.max(0.0).round() as i64;
+    format!("{:02}:{:02}", s / 60, s % 60)
+}
+
+pub fn ui_scale(w: f32, h: f32) -> f32 {
+    (w / 640.0).min(h / 360.0).floor().clamp(1.0, 4.0)
+}
+
+impl<'a> Ui<'a> {
+    fn button(&mut self, label: &str, hint: &str, x: f32, y: f32, primary: bool, action: Action) -> f32 {
+        let s = self.s;
+        let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, s.max(2.0) - 1.0) + 8.0 * s } + 16.0 * s;
+        let h = 15.0 * s;
+        let i = self.buttons.len();
+        let hot = self.selected == i || Button { x, y, w, h, action }.hit(self.mouse.0, self.mouse.1);
+        let (bg, fg, border) = if primary {
+            (if hot { CREAM } else { ACID }, INK, ACID)
+        } else {
+            (if hot { rgba(0x1a, 0x2a, 0x20, 0.95) } else { rgba(0x0a, 0x11, 0x0e, 0.6) }, if hot { ACID } else { GREEN }, if hot { ACID } else { LINE_HOT })
+        };
+        self.cv.rect(x, y, w, h, bg);
+        self.cv.stroke_rect(x, y, w, h, 1.0, border);
+        self.cv.text(label, x + 8.0 * s, y + h / 2.0, s, fg, Align::Left);
+        if !hint.is_empty() {
+            let hs = s.max(2.0) - 1.0;
+            self.cv.text(hint, x + w - 8.0 * s, y + h / 2.0, hs, with_alpha(fg, 0.7), Align::Right);
+        }
+        self.buttons.push(Button { x, y, w, h, action });
+        w
+    }
+
+    fn frame(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.cv.rect(x, y, w, h, PANEL);
+        self.cv.stroke_rect(x, y, w, h, 1.0, LINE_HOT);
+        let c = 8.0 * self.s;
+        for (cx, cy, dx, dy) in [(x, y, 1.0, 1.0), (x + w, y, -1.0, 1.0), (x, y + h, 1.0, -1.0), (x + w, y + h, -1.0, -1.0)] {
+            self.cv.rect(cx.min(cx + dx * c), cy.min(cy + dy * 2.0), c, 2.0, ACID);
+            self.cv.rect(cx.min(cx + dx * 2.0), cy.min(cy + dy * c), 2.0, c, ACID);
+        }
+    }
+
+    // ---------------------------------------------------------- screens
+    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64) {
+        let s = self.s;
+        let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 20.0 * s).min(250.0 * s));
+        let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
+        self.frame(x, y, pw, ph);
+        let m = 12.0 * s;
+        self.cv.text("// TACTICAL AIR COMMAND, 0715 ZULU", x + m, y + m, s.max(2.0) - 1.0, DIM, Align::Left);
+        let lamp = (time * 1.6).fract() < 0.7;
+        let lx = x + pw - m;
+        self.cv.text("FLCS ONLINE", lx, y + m, s.max(2.0) - 1.0, DIM, Align::Right);
+        let tw = Canvas::text_width("FLCS ONLINE", s.max(2.0) - 1.0);
+        for (i, c) in [GREEN, with_alpha(GREEN, 0.35), RED].iter().enumerate() {
+            let c = if i == 0 && !lamp { with_alpha(*c, 0.4) } else { *c };
+            self.cv.disc(lx - tw - 8.0 * s - i as f32 * 7.0 * s, y + m, 2.2 * s, c);
+        }
+        self.cv.line(x + m, y + m + 8.0 * s, x + pw - m, y + m + 8.0 * s, 1.0, LINE);
+
+        let left_w = pw * 0.56;
+        let mut yy = y + 34.0 * s;
+        self.cv.text("F-16 VIPER, MODERN COCKPIT", x + m, yy, s, AMBER, Align::Left);
+        yy += 26.0 * s;
+        let ts = s * 4.0;
+        self.cv.text("VIPER", x + m, yy, ts, GREEN, Align::Left);
+        let vw = Canvas::text_width("VIPER", ts);
+        self.cv.text("/", x + m + vw + 4.0 * s, yy, ts, AMBER, Align::Left);
+        self.cv.text("RUN", x + m + vw + 4.0 * s + Canvas::text_width("/", ts) + 4.0 * s, yy, ts, CREAM, Align::Left);
+        yy += 22.0 * s;
+        self.cv.rect(x + m, yy, left_w - m, 1.0, LINE_HOT);
+        self.cv.text("COLD RIVER GORGE, SECTOR 07", x + m, yy + 7.0 * s, s.max(2.0) - 1.0, DIM, Align::Left);
+        yy += 18.0 * s;
+        let copy = "You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.";
+        yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
+        yy += 2.0 * s;
+        yy += self.cv.paragraph("THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT.", x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, CREAM);
+        yy += 10.0 * s;
+        let bx = x + m;
+        let w1 = self.button("ENGAGE", "ENTER", bx, yy, true, Action::Start);
+        let w2 = self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
+        let _ = w2;
+        yy += 19.0 * s;
+        let w3 = self.button("CONTROLS / CONFIG", "K", bx, yy, false, Action::Controls);
+        self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
+
+        // Briefing card.
+        let (bxx, byy, bw) = (x + left_w + 6.0 * s, y + 30.0 * s, pw - left_w - m - 6.0 * s);
+        let bh = ph - 52.0 * s;
+        self.cv.rect(bxx, byy, bw, bh, rgba(0x05, 0x0b, 0x08, 0.8));
+        self.cv.stroke_rect(bxx, byy, bw, bh, 1.0, LINE);
+        let sm = s.max(2.0) - 1.0;
+        self.cv.text("MISSION DATA // COLD RIVER", bxx + 6.0 * s, byy + 8.0 * s, sm, AMBER, Align::Left);
+        let rows = [("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM"), ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")];
+        let mut ry = byy + 20.0 * s;
+        for (k, v1, v2) in rows {
+            self.cv.text(k, bxx + 6.0 * s, ry, sm, DIM, Align::Left);
+            self.cv.text(v1, bxx + 6.0 * s + 58.0 * sm, ry, sm, CREAM, Align::Left);
+            self.cv.text(v2, bxx + 6.0 * s + 58.0 * sm, ry + 9.0 * sm, sm, with_alpha(GREEN, 0.75), Align::Left);
+            ry += 22.0 * sm;
+            self.cv.rect(bxx + 6.0 * s, ry - 5.0 * sm, bw - 12.0 * s, 1.0, with_alpha(LINE, 0.6));
+        }
+        ry += 2.0 * s;
+        self.cv.text("FLIGHT CONTROLS", bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
+        ry += 10.0 * sm;
+        let keys = [("MOUSE", "PITCH / YAW"), ("A D", "ROLL"), ("W S", "BACKUP PITCH"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("H", "AIRBRAKE"), ("ALT+MOUSE", "LOOK AROUND"), ("V", "CHASE / COCKPIT"), ("F1 F2", "MFD PAGES"), ("C", "CENTER VIEW"), ("P M", "PAUSE, AUDIO")];
+        for (i, (k, v)) in keys.iter().enumerate() {
+            let col = i % 2;
+            let row = i / 2;
+            let kx = bxx + 6.0 * s + col as f32 * (bw - 12.0 * s) / 2.0;
+            let ky = ry + row as f32 * 10.0 * sm;
+            if ky > byy + bh - 6.0 * sm {
+                break;
+            }
+            self.cv.text(k, kx, ky, sm, ACID, Align::Left);
+            self.cv.text(v, kx + Canvas::text_width(k, sm) + 4.0 * sm, ky, sm, with_alpha(CREAM, 0.7), Align::Left);
+        }
+        // Footer.
+        let fy = y + ph - 12.0 * s;
+        self.cv.line(x + m, fy - 8.0 * s, x + pw - m, fy - 8.0 * s, 1.0, LINE);
+        self.cv.text(&best_line(best), x + m, fy, sm, AMBER, Align::Left);
+        self.cv.text("37°14′N 081°06′E  ALT 2,140 FT", x + pw - m, fy, sm, DIM, Align::Right);
+    }
+
+    fn status_panel(&mut self, kicker: &str, kicker_col: Col, title: &str, title_col: Col, sub: &str, stats: [(&str, String, Col); 4], actions: &[(&str, &str, Action)], small: &str) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let (pw, ph) = ((self.w - 24.0 * s).min(380.0 * s), (self.h - 20.0 * s).min(186.0 * s));
+        let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
+        self.frame(x, y, pw, ph);
+        let m = 14.0 * s;
+        let mut yy = y + m;
+        self.cv.text(kicker, x + m, yy, sm, kicker_col, Align::Left);
+        yy += 20.0 * s;
+        self.cv.text(title, x + m, yy, s * 3.0, title_col, Align::Left);
+        yy += 18.0 * s;
+        yy += self.cv.paragraph(sub, x + m, yy, pw - 2.0 * m, sm, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
+        yy += 8.0 * s;
+        let cw = (pw - 2.0 * m - 3.0 * 4.0 * s) / 4.0;
+        for (i, (k, v, c)) in stats.iter().enumerate() {
+            let cx = x + m + i as f32 * (cw + 4.0 * s);
+            self.cv.rect(cx, yy, cw, 30.0 * s, rgba(0x05, 0x0b, 0x08, 0.85));
+            self.cv.stroke_rect(cx, yy, cw, 30.0 * s, 1.0, LINE);
+            self.cv.text(k, cx + 5.0 * s, yy + 8.0 * s, sm, DIM, Align::Left);
+            self.cv.text(v, cx + 5.0 * s, yy + 20.0 * s, s, *c, Align::Left);
+        }
+        yy += 40.0 * s;
+        let mut bx = x + m;
+        for (i, (label, hint, act)) in actions.iter().enumerate() {
+            let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, sm) + 8.0 * s } + 16.0 * s;
+            if bx + w > x + pw - m {
+                bx = x + m;
+                yy += 19.0 * s;
+            }
+            let used = self.button(label, hint, bx, yy, i == 0, *act);
+            bx += used + 6.0 * s;
+        }
+        self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+    }
+
+    pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool) {
+        self.status_panel(
+            "// FLIGHT SUSPENDED, FLCS HOLD",
+            DIM,
+            "PAUSED",
+            GREEN,
+            "Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.",
+            [
+                ("CLEARED", format!("{} / {}", pad(m.passed as f64, 2), pad(m.gates.len() as f64, 2)), GREEN),
+                ("TIME LEFT", format_time(m.time_left), AMBER),
+                ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
+                ("ALTITUDE", format!("{} FT", pad(a.pos.y * 3.28084, 5)), CREAM),
+            ],
+            &[("RESUME", "P", Action::Resume), ("RESTART", "R", Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
+            &format!("P / ESC RESUME, R RESTART, M AUDIO {}", if muted { "OFF" } else { "ON" }),
+        );
+    }
+
+    pub fn result_screen(&mut self, r: &RunResult, best: &Best) {
+        let best_str = if best.score > 0.0 { pad(best.score, 5) } else { "-----".to_string() };
+        match r.kind {
+            Outcome::Win => {
+                let rank = if r.time < 95.0 { "ACE" } else if r.time < 125.0 { "VIPER" } else if r.time < 155.0 { "QUALIFIED" } else { "CADET" };
+                self.status_panel(
+                    "// ROUTE COMPLETE, COLD RIVER GORGE",
+                    DIM,
+                    "COURSE COMPLETE",
+                    ACID,
+                    &format!("All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as {rank}."),
+                    [("RUN TIME", format_time(r.time), GREEN), ("GATES", format!("{} / 10", r.gates), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)],
+                    &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
+                    &format!("{}, R RESTART, ESC MENU", best_line(best)),
+                );
+            }
+            Outcome::Crash => self.status_panel(
+                "// FLIGHT TERMINATED, AIRFRAME LOST",
+                RED,
+                "TERRAIN WINS",
+                RED,
+                &format!("The gorge is unforgiving. The flight recorder shows {} gates cleared before impact.", pad(r.gates as f64, 2)),
+                [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), RED), ("ELAPSED", format_time(r.time), CREAM), ("IMPACT", format!("{} KT", pad(r.impact * 1.94384, 3)), RED), ("BEST", best_str, CREAM)],
+                &[("REARM & RETRY", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
+                "TIP: EASE OFF THE PULL AT HIGH SPEED. LET THE GORGE OPEN BEFORE YOU ROLL IN.",
+            ),
+            Outcome::Timeout => self.status_panel(
+                "// CLOCK EXPIRED, RUN INVALID",
+                AMBER,
+                "RUN EXPIRED",
+                AMBER,
+                &format!("The coast is still out there. You cleared {} gates before the clock ran dry.", pad(r.gates as f64, 2)),
+                [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), AMBER), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("BEST", best_str, CREAM)],
+                &[("TRY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
+                "THE CLOCK IS A HARD CEILING. GATES ADD 8 SECONDS EACH.",
+            ),
+        }
+    }
+
+    /// Left drawer with the control reference and live settings.
+    pub fn controls_drawer(&mut self, st: &Settings, paused_flight: bool) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let w = (200.0 * s).min(self.w * 0.94);
+        self.cv.rect(0.0, 0.0, w, self.h, rgba(0x09, 0x10, 0x12, 0.97));
+        self.cv.rect(w - 1.0, 0.0, 1.0, self.h, rgba(0x78, 0x8e, 0x7b, 1.0));
+        let m = 10.0 * s;
+        let mut y = m + 4.0 * s;
+        self.cv.text("CONTROLS / CONFIG", m, y, s, CREAM, Align::Left);
+        self.button("CLOSE", "K", w - m - 50.0 * s, y - 7.5 * s, false, Action::Controls);
+        y += 16.0 * s;
+        self.cv.text(if paused_flight { "FLIGHT PAUSED" } else { "FLIGHT CONTROLS" }, m, y, sm, rgba(0xbe, 0xd5, 0x8f, 1.0), Align::Left);
+        y += 12.0 * s;
+        let rows = [("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push"), ("MOUSE", "Pitch / yaw"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake, hold"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("P ESC", "Pause / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")];
+        for (k, v) in rows {
+            self.cv.text(k, m, y, sm, ACID, Align::Left);
+            self.cv.text(v, m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
+            y += 11.0 * sm;
+            self.cv.rect(m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
+        }
+        y += 6.0 * s;
+        let slider = |ui: &mut Ui, y: f32, label: &str, value: String, t: f64, down: Action, up: Action| {
+            ui.cv.text(label, m, y, sm, CREAM, Align::Left);
+            ui.cv.text(&value, w - m, y, sm, rgba(0xc9, 0xe9, 0xa0, 1.0), Align::Right);
+            let by = y + 9.0 * s;
+            ui.button("-", "", m, by, false, down);
+            let bw = 15.0 * s;
+            let (tx, tw) = (m + bw + 4.0 * s, w - 2.0 * m - 2.0 * bw - 8.0 * s);
+            ui.cv.rect(tx, by + 7.0 * s, tw, 2.0, LINE_HOT);
+            ui.cv.rect(tx + tw * t as f32 - 2.0 * s, by + 3.0 * s, 4.0 * s, 9.0 * s, ACID);
+            ui.button("+", "", w - m - bw + 1.0 * s, by, false, up);
+        };
+        slider(self, y, "MOUSE SENSITIVITY", format!("{:.1}X", st.sensitivity), (st.sensitivity - 0.5) / 4.5, Action::SensDown, Action::SensUp);
+        y += 30.0 * s;
+        slider(self, y, "COCKPIT FIELD OF VIEW", format!("{}°", st.fov.round()), (st.fov - 45.0) / 27.0, Action::FovDown, Action::FovUp);
+        y += 30.0 * s;
+        self.button(if st.invert_y { "[X] INVERT MOUSE Y" } else { "[ ] INVERT MOUSE Y" }, "", m, y, false, Action::Invert);
+        y += 18.0 * s;
+        self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
+        y += 18.0 * s;
+        self.cv.paragraph("W and S always keep their labeled directions.", m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        y += 16.0 * s;
+        self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
+        self.cv.paragraph("Press K to close. Settings are saved for this user.", m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+    }
+}
+
+pub fn best_line(best: &Best) -> String {
+    if best.score <= 0.0 && best.time <= 0.0 {
+        "NO QUALIFYING RUN ON FILE".to_string()
+    } else if best.time > 0.0 {
+        format!("BEST {} PTS // {}", pad(best.score, 5), format_time(best.time))
+    } else {
+        format!("BEST {} PTS", pad(best.score, 5))
+    }
+}
+
+// ================================================================ flight overlays
+pub struct Warn {
+    pub text: &'static str,
+    pub color: Col,
+}
+
+pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
+    let mut w = Vec::new();
+    if pull_up(a) {
+        w.push(Warn { text: "PULL UP", color: RED });
+    }
+    if stall(a) {
+        w.push(Warn { text: "STALL", color: RED });
+    }
+    if a.g_smooth > 9.15 {
+        w.push(Warn { text: "G LIMIT", color: AMBER });
+    }
+    if a.fuel < 400.0 {
+        w.push(Warn { text: "BINGO", color: AMBER });
+    }
+    if m.time_left < 20.0 {
+        w.push(Warn { text: "TIME CRITICAL", color: AMBER });
+    }
+    w
+}
+
+pub fn pull_up(a: &Aircraft) -> bool {
+    let clearance = a.agl.min(if a.clearance > 0.0 { a.clearance } else { a.agl });
+    let sink = -a.vs;
+    let tti = if sink > 1.0 { clearance / sink } else { 99.0 };
+    clearance < 260.0 && sink > 7.0 && (tti < 6.2 || clearance < 95.0)
+}
+
+pub fn stall(a: &Aircraft) -> bool {
+    a.stall > 0.06 || a.alpha_deg > 20.5 || a.speed < 92.0
+}
+
+fn gate_geometry(a: &Aircraft, m: &Mission) -> Option<(f64, f64, f64)> {
+    let gate = m.gates.get(m.gate_index)?;
+    let rel = gate.pos - a.pos;
+    let bearing = rel.x.atan2(-rel.z) * RAD;
+    let diff = wrap180(bearing - a.heading);
+    let elevation = rel.y.atan2((rel.x * rel.x + rel.z * rel.z).sqrt()) * RAD;
+    Some((rel.len(), diff, elevation))
+}
+
+/// Mission data at the canopy edges, outside the HUD combiner.
+pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, toast: &str, toast_t: f64) {
+    let s = ui_scale(w, h);
+    let sm = (s - 1.0).max(1.0);
+    let (lx, rx) = (w * 0.026, w * 0.974);
+    let gate_n = (m.gate_index + 1).min(m.gates.len());
+    cv.text(&format!("GATE {}/{}", pad(gate_n as f64, 2), pad(m.gates.len() as f64, 2)), lx, h * 0.058, s, with_alpha(HUD, 0.78), Align::Left);
+    if let Some((dist, diff, el)) = gate_geometry(a, m) {
+        cv.text(&format!("{:.1} KM", dist / 1000.0), lx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Left);
+        cv.text(&format!("{} {}°  {}{}°", if diff >= 0.0 { "R" } else { "L" }, pad(diff.abs(), 2), if el >= 0.0 { "+" } else { "-" }, pad(el.abs(), 2)), lx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Left);
+    }
+    cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
+    cv.text(&format!("SCR {}", pad(m.final_score(), 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
+    cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
+    cv.text("K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE", 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
+    toast_line(cv, w, h * 0.12, s, toast, toast_t);
+}
+
+fn toast_line(cv: &mut Canvas, w: f32, y: f32, s: f32, toast: &str, t: f64) {
+    if t > 0.0 && !toast.is_empty() {
+        let alpha = clamp(t, 0.0, 1.0) as f32;
+        let tw = Canvas::text_width(toast, s);
+        cv.rect(w * 0.5 - tw * 0.5 - 6.0 * s, y - 7.0 * s, tw + 12.0 * s, 14.0 * s, rgba(4, 10, 6, 0.55 * alpha));
+        cv.text(toast, w * 0.5, y, s, with_alpha(rgba(0xd8, 0xff, 0x86, 1.0), 0.62 + alpha * 0.36), Align::Center);
+    }
+}
+
+fn project(cam: &Camera, w: f32, h: f32, p: V3) -> Option<(f32, f32)> {
+    let rel = p - cam.eye;
+    let z = rel.dot(cam.forward);
+    if z <= 0.25 {
+        return None;
+    }
+    let tan = (cam.fov / 2.0).tan();
+    let aspect = (w / h) as f64;
+    let nx = rel.dot(cam.right) / (z * tan * aspect);
+    let ny = rel.dot(cam.up) / (z * tan);
+    Some((((nx * 0.5 + 0.5) * w as f64) as f32, ((1.0 - (ny * 0.5 + 0.5)) * h as f64) as f32))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, cam: &Camera, toast: &str, toast_t: f64, time: f64, flying: bool) {
+    let s = ui_scale(w, h);
+    let sm = (s - 1.0).max(1.0);
+    let edge = 12.0 * s;
+    let (top_h, bottom_h) = (44.0 * s, 40.0 * s);
+    cv.rect_grad(0.0, 0.0, w, top_h, rgba(4, 10, 6, 0.82), rgba(4, 10, 6, 0.0));
+    cv.rect_grad(0.0, h - bottom_h, w, bottom_h, rgba(4, 10, 6, 0.0), rgba(4, 10, 6, 0.78));
+    cv.rect(edge, top_h - 4.0 * s, w - 2.0 * edge, 1.0, with_alpha(HUD, 0.16));
+
+    cv.text("F-16C  //  CHASE VIEW", edge, 10.0 * s, sm, HUD, Align::Left);
+    cv.text("COLD RIVER  /  SECTOR 07", edge, 19.0 * s, sm, with_alpha(HUD, 0.48), Align::Left);
+    cv.text(&format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)), w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
+    cv.text(&format_time(m.time_left), w * 0.5, 22.0 * s, s * 2.0, if m.time_left < 20.0 { RED } else { HUD }, Align::Center);
+    cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), w - edge, 10.0 * s, s, HUD, Align::Right);
+    cv.text(&format!("ALT {} FT", pad(a.pos.y * 3.28084, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
+    cv.text(&format!("M {:.2}  G {:.1}  AOA {:.0}  GAVL {:.1}", a.mach, a.g_smooth, a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+    cv.text(&format!("SCR {}", pad(m.final_score(), 5)), w - edge, 36.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+
+    // Gate cue: diamond on screen, or an edge arrow toward it.
+    if let Some(gate) = m.gates.get(m.gate_index) {
+        let rel = gate.pos - cam.eye;
+        let dist = rel.len();
+        let p = project(cam, w, h, gate.pos);
+        let (mx, mt, mb) = (30.0 * s, 56.0 * s, 52.0 * s);
+        match p {
+            Some((px, py)) if px > mx && px < w - mx && py > mt && py < h - mb => {
+                let size = 5.0 * s + clamp(1.0 - dist / 5000.0, 0.0, 1.0) as f32 * 4.0 * s;
+                cv.polyline(&[[px, py - size], [px + size, py], [px, py + size], [px - size, py]], 1.5, true, AMBER);
+                cv.circle(px, py, size * 1.85, 1.0, with_alpha(AMBER, 0.3));
+                cv.text(&format!("GATE {}  {:.1} KM", pad((m.gate_index + 1) as f64, 2), dist / 1000.0), px, py + size * 2.6, sm, AMBER, Align::Center);
+            }
+            _ => {
+                let tan = (cam.fov / 2.0).tan();
+                let aspect = (w / h) as f64;
+                let fz = rel.dot(cam.forward);
+                let mut nx = rel.dot(cam.right) / (fz.abs() * tan * aspect).max(0.05);
+                let mut ny = rel.dot(cam.up) / (fz.abs() * tan).max(0.05);
+                if fz <= 0.0 {
+                    nx = -nx;
+                    ny = -ny;
+                }
+                let mag = (nx * nx + ny * ny).sqrt().max(1e-6);
+                let (nx, ny) = ((nx / mag) as f32, (ny / mag) as f32);
+                let (cx, cy, rx, ry) = (w * 0.5, h * 0.48, w * 0.39, h * 0.31);
+                let (x, y) = (cx + nx.clamp(-1.0, 1.0) * rx, cy - ny.clamp(-1.0, 1.0) * ry);
+                let ang = (-ny).atan2(nx);
+                let (c, sn) = (ang.cos(), ang.sin());
+                let rot = |px: f32, py: f32| [x + px * c - py * sn, y + px * sn + py * c];
+                cv.tri(rot(0.0, 0.0), rot(-8.0 * s, -4.5 * s), rot(-8.0 * s, 4.5 * s), AMBER);
+                cv.text(&format!("{}  {:.1} KM", pad((m.gate_index + 1) as f64, 2), dist / 1000.0), x, y + 11.0 * s, sm, AMBER, Align::Center);
+            }
+        }
+        if let Some((_, diff, el)) = gate_geometry(a, m) {
+            cv.text(&format!("TGT {} {}°   EL {}{}°", if diff >= 0.0 { "R" } else { "L" }, pad(diff.abs(), 2), if el >= 0.0 { "+" } else { "-" }, pad(el.abs(), 2)), edge, h - 34.0 * s, sm, AMBER, Align::Left);
+        }
+    }
+
+    toast_line(cv, w, top_h + 12.0 * s, s, toast, toast_t);
+    let warns = warnings(a, m);
+    if !warns.is_empty() && flying && ((time * 4.5).floor() as i64) % 2 == 0 {
+        let y = h * 0.60;
+        cv.text(warns[0].text, w * 0.5, y, s * 2.0, warns[0].color, Align::Center);
+        if let Some(w2) = warns.get(1) {
+            cv.text(w2.text, w * 0.5, y + 16.0 * s, s, w2.color, Align::Center);
+        }
+    }
+    cv.text("C CENTER  //  ALT + MOUSE ORBIT", edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
+    cv.text(&format!("FUEL {} LB", pad(a.fuel * 2.20462, 4)), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
+    cv.text("V  COCKPIT VIEW", w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
+    cv.text("A / D  ROLL  ,  MOUSE PITCH / YAW", w - edge, h - 14.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+}

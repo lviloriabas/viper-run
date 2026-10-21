@@ -1,12 +1,13 @@
 # Cabina y modelo de vuelo del F-16
 
-Revisión del 20 de octubre de 2026. La base de vuelo sigue siendo el F-16C
-Block 50 con motor F110-GE-129. La cabina se ha revisado siguiendo la imagen
-modernizada del usuario, con dos pantallas laterales verticales y una pantalla
-central CPD, como en la modernización F-16V. El modelado es procedural, con
-superficies suaves y acabado retro mediante resolución, color y texturas.
-Las fotografías se usan como
-referencia visual y no se incluyen como texturas ni se redistribuyen.
+Revisión del 20 de octubre de 2026, versión nativa en Rust. La base de vuelo
+sigue siendo el F-16C Block 50 con motor F110-GE-129, portada línea a línea
+desde la versión web. La cabina sigue la imagen modernizada del usuario, con dos
+pantallas laterales verticales y una pantalla central CPD, como en la
+modernización F-16V, pero ahora es geometría 3D real a distancias realistas del
+ojo de diseño. El modelado es procedural, con superficies suaves y acabado retro
+mediante resolución, color y texturas. Las fotografías se usan como referencia
+visual y no se incluyen como texturas ni se redistribuyen.
 
 ## Referencias visuales
 
@@ -34,9 +35,17 @@ referencia visual y no se incluyen como texturas ni se redistribuyen.
 
 La [ficha de la USAF sobre el F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirma el asiento inclinado 30 grados, la palanca lateral sensible a presión,
-la visibilidad de la cúpula y la capacidad de 9 G. La cámara se sitúa detrás de
-las caderas y sobre el torso, dentro de la cúpula exterior. Las coordenadas de
-la cabina son aproximadas; no proceden de un escaneo o plano dimensional.
+la visibilidad de la cúpula y la capacidad de 9 G. El ojo de diseño está en
+(0; 1,25; -3,24) m en ejes del avión, detrás de las caderas por la inclinación
+del asiento y dentro de la cúpula. El panel está a unos 0,9 m del ojo, el
+cristal combinador del HUD a unos 0,75 m y el UFC (DED sobre el teclado ICP)
+justo debajo del HUD. Las dos MFD verticales flanquean la CPD central; a la
+izquierda quedan el RWR, el anemómetro y el altímetro de reserva, y a la
+derecha el ADI de reserva y los indicadores redondos de RPM, FTIT, tobera y
+aceite, cada uno con su bisel circular. La cúpula es una única capa convexa de
+cristal con tinte leve, brillo de Fresnel y reflejos del sol, de modo que cada
+píxel la atraviesa una sola vez. Las coordenadas son aproximadas; no proceden
+de un escaneo o plano dimensional.
 
 El FOV predeterminado baja de 78 a 58 grados, con ajuste entre 45 y 72. La
 sensibilidad predeterminada del mouse es 2,8 veces la original. K abre el panel
@@ -44,11 +53,16 @@ izquierdo y pausa el vuelo mientras se configura; H mantiene el aerofreno.
 La inversión se aplica al eje vertical del mouse. S y W conservan sus
 direcciones y tienen prioridad sobre el mouse mientras se mantienen pulsadas.
 
-El exterior usa perfiles continuos y normales suaves. La geometría completa
-mide 15,06 metros de longitud y 9,96 metros de envergadura. Las pruebas miden
-las coordenadas reales de la malla, no solo los valores declarados. Los
-contactos de colisión se ajustaron al nuevo morro, cúpula, alas, toma y deriva.
-El acabado incluye líneas de panel, marcos, indicadores y bordes biselados.
+El exterior es un fuselaje de secciones superelípticas con radomo ojival, toma
+ventral en D con su separador de capa límite, LERX fundidos con el ala, ala de
+40 grados de flecha con perfil NACA del 4 %, deriva de unos 47 grados con
+alojamiento del paracaídas, estabilizadores monobloque con 10 grados de
+anhedro, aletas ventrales inclinadas, tobera de pétalos y cúpula de burbuja con
+tinte dorado. Estabilizadores, timón y aerofrenos se mueven con los mandos. Las
+pruebas miden la malla real: 15,06 metros de longitud, 9,96 metros de
+envergadura sobre los AIM-9 de punta de ala y 5,09 metros de altura desde la
+línea del tren. Los diez contactos de colisión (morro, cúpula, cola, puntas de
+ala, toma, vientre, deriva y puntas de los estabilizadores) siguen esa malla.
 La cabina sigue siendo una adaptación visual para juego.
 
 ## Correspondencia con la simulación
@@ -93,8 +107,9 @@ altura. Los coeficientes y curvas son ajustes de juego; no se han extraído las
 tablas aerodinámicas completas de una variante real. El límite de AOA de unos
 26 grados y los consumos son aproximaciones de esta implementación.
 
-`node tests/performance.mjs` calcula equilibrio ideal de fuerzas a 1 G y plena
-postcombustión, con el peso inicial de la misión. Resultado de esta revisión:
+`cargo test --release equilibrium -- --nocapture` calcula equilibrio ideal de
+fuerzas a 1 G y plena postcombustión, con el peso inicial de la misión. El port
+a Rust reproduce exactamente los valores de la versión web:
 
 | Altitud | Mach de equilibrio del modelo |
 | --- | --- |
@@ -112,14 +127,17 @@ cuando se supera Mach 2,05.
 
 ## Verificación
 
-- `tests/physics.mjs`: ISA, velocidad calibrada subsónica y supersónica,
-  diferencias por velocidad y altitud, combustible agotado, retardo de
-  postcombustión, vuelo invertido, aerofreno, instrumentos y estabilidad numérica.
-- `tests/browser.html`: arranque WebGL, separación entre vista libre y mandos,
-  páginas MFD, manos, pausa, reanudación, vista externa, diez puertas, victoria,
-  tiempo agotado, colisión y reinicio.
-- `tests/airframe.mjs`: dimensiones medidas, geometría finita y normales
-  unitarias del fuselaje, cúpula, piloto exterior y postcombustión.
+- `cargo test --release`, en `src/sim.rs`: ISA, velocidad calibrada subsónica
+  y supersónica, diferencias por velocidad y altitud, combustible agotado,
+  retardo de postcombustión, vuelo invertido, aerofreno, instrumentos,
+  estabilidad numérica, equilibrio a Mach 2,05, cruce de puertas y puntuación.
+- `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
+  vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
+  triángulos que se dibujan.
+- `src/airframe.rs`: dimensiones medidas, geometría finita, normales unitarias
+  y ojo de diseño dentro de la cúpula.
+- Capturas con `--shot`, `--screen` y `--look` del menú, pausa, resultados,
+  cabina y vista externa, y `--bench` para medir el tiempo por fotograma.
 - Inspección visual de frente, ambos laterales, piloto y cola. Alt más mouse
   permite girar la cabeza hasta 155 grados por lado y 85 grados en vertical.
   Al soltar Alt, la vista vuelve al frente y la cámara externa recupera su
