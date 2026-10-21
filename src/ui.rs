@@ -395,6 +395,9 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if pull_up(a) {
         w.push(Warn { text: "PULL UP", color: RED });
     }
+    if a.departure > 0.4 {
+        w.push(Warn { text: "DEPARTURE", color: RED });
+    }
     if stall(a) {
         w.push(Warn { text: "STALL", color: RED });
     }
@@ -417,9 +420,11 @@ pub fn pull_up(a: &Aircraft) -> bool {
     clearance < 260.0 && sink > 7.0 && (tti < 6.2 || clearance < 95.0)
 }
 
+/// Stalled, within a degree or so of the critical AoA for the present
+/// condition, or too slow for the wing to hold much more than 1 g at this
+/// weight and altitude.
 pub fn stall(a: &Aircraft) -> bool {
-    // The FLCS holds about 25 degrees at full aft stick; beyond that the jet is departing.
-    a.stall > 0.06 || a.speed < 80.0
+    a.stall > 0.05 || a.alpha_deg.abs() > a.alpha_crit - 1.2 || a.g_avail < 1.25
 }
 
 fn gate_geometry(a: &Aircraft, m: &Mission) -> Option<(f64, f64, f64)> {

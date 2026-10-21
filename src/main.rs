@@ -923,7 +923,7 @@ impl EventHandler for App {
                         } else {
                             self.audio.warn_stall();
                         }
-                        self.warn_clock = if pu { 0.8 } else { 1.5 };
+                        self.warn_clock = if pu || a.departure > 0.4 { 0.8 } else { 1.5 };
                     }
                 }
             }

@@ -113,6 +113,17 @@ out of margin.
   Mach 1.653 / 1.740 / 1.869 / 2.019 at 10,000 / 20,000 / 30,000 / 40,000 ft,
   identical to the previous version.
 - F-16C Block 50 / F110-GE-129 scale and limits: about 9 g, 26 degrees AoA.
+- Stall: each wing panel separates on its own local AoA against a critical
+  angle of about 27 degrees in slow, smooth air. Mach (shock-induced
+  separation), altitude, ground effect and sideslip lower it; a quick pull
+  delays it for a moment. Rolling raises the AoA of the down-going wing,
+  rudder that of the windward one, and low-level gusts either. Weight, load
+  factor, bank and airspeed act through the AoA the jet needs. A separated
+  panel loses lift and adds drag, and the flow only reattaches a few degrees
+  below the critical angle. An uneven stall drops that wing and yaws the nose
+  towards it (DEPARTURE). The limiter keeps a straight full pull just short
+  of it in smooth air, but high and fast, slow in the gusts near the ground,
+  or with rudder at full aft stick, the wing stalls.
 - Exterior measured from the mesh by the test suite: 15.06 m overall length,
   9.96 m span over the wingtip AIM-9s and 5.09 m height. Lofted fuselage with
   an ogive radome, D-shaped chin intake with its diverter, blended leading-edge

@@ -3,8 +3,9 @@
 //! F-16 FLCS (g command with an AoA limiter, roll-rate command, aileron-rudder
 //! interconnect, yaw damper) driving rate-limited surface actuators,
 //! F110-GE-129 thrust with spool lag, fuel burn changing mass and inertia, ISA
-//! atmosphere and compressible pitot.
-use crate::aero::{self, Flow};
+//! atmosphere and compressible pitot. On top of the tables, each wing panel
+//! stalls on its own, so a stall can drop a wing and start a departure.
+use crate::aero::{self, Coeffs, Flow};
 use crate::math::*;
 use crate::terrain::{self, river_x, terrain_at};
 
@@ -46,6 +47,12 @@ pub mod spec {
     pub const FLAPERON_RATE: f64 = 80.0;
     pub const RUDDER_MAX: f64 = 30.0;
     pub const RUDDER_RATE: f64 = 120.0;
+    /// Wing-panel stall: critical AoA in slow, smooth air (degrees), a little
+    /// past where the limiter holds a full pull; spanwise station of each
+    /// half-wing's lift (m); share of a panel's lift lost once it separates.
+    pub const ALPHA_CRIT: f64 = 27.0;
+    pub const PANEL_ARM: f64 = 2.3;
+    pub const STALL_LIFT_LOSS: f64 = 0.3;
 }
 use spec::*;
 
@@ -449,6 +456,13 @@ pub struct Aircraft {
     pub surf_pitch: f64,
     pub surf_roll: f64,
     pub surf_yaw: f64,
+    /// Flow separation on the left and right wing panels, 0 attached to 1 stalled.
+    pub stall_left: f64,
+    pub stall_right: f64,
+    /// Critical AoA for the present flight condition, degrees.
+    pub alpha_crit: f64,
+    /// Uncommanded roll and yaw while stalled (a wing drop or spin entry), 0..1.
+    pub departure: f64,
 }
 
 impl Aircraft {
@@ -513,6 +527,10 @@ impl Aircraft {
             surf_pitch: 0.0,
             surf_roll: 0.0,
             surf_yaw: 0.0,
+            stall_left: 0.0,
+            stall_right: 0.0,
+            alpha_crit: ALPHA_CRIT,
+            departure: 0.0,
         };
         a.update(0.0, &Input::default());
         a
@@ -562,6 +580,54 @@ impl Aircraft {
         Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, h_over_b }
     }
 
+    /// Critical AoA for the present condition, degrees. Shock-induced
+    /// separation lowers it towards Mach 1; thin air (a lower Reynolds
+    /// number), ground effect and sideslip lower it a little; a fast pitch-up
+    /// briefly delays separation (dynamic stall).
+    fn critical_alpha(&self, f: &Flow) -> f64 {
+        let compressibility = 1.0 - 0.22 * smoothstep(0.45, 0.95, f.mach);
+        let thin_air = 1.5 * smoothstep(4000.0, 15000.0, self.pos.y);
+        let ground = 2.5 * (1.0 - smoothstep(0.0, 1.0, f.h_over_b));
+        let slip = 0.2 * f.beta.abs();
+        let dynamic = clamp(f.q * aero::CHORD / (2.0 * f.speed.max(30.0)) * 300.0, -2.0, 4.0);
+        ALPHA_CRIT * compressibility - thin_air - ground - slip + dynamic
+    }
+
+    /// Wing-panel stall, applied to the table coefficients after the FLCS
+    /// has set its surfaces, so the computer meets it as a disturbance. Each
+    /// half-wing separates on its own local AoA: rolling raises it on the
+    /// down-going wing, sideslip on the windward one, low-level gusts on
+    /// either. Weight, load factor, bank, airspeed and altitude all act
+    /// through the AoA the jet needs. A separated panel loses lift and drags
+    /// like a plate; an uneven stall drops that wing and yaws the nose
+    /// towards it, and the lost lift lets the nose fall.
+    fn separation(&mut self, f: &Flow, c: &mut Coeffs, dt: f64) {
+        let crit = self.critical_alpha(f);
+        let v = f.speed.max(30.0);
+        let roll = f.p * PANEL_ARM / v * RAD;
+        let slip = 0.25 * f.beta * clamp(f.alpha / 10.0, -1.0, 1.0);
+        let span = self.q.axes().right * PANEL_ARM;
+        let gusts = self.turbulence * 3.0 / v * RAD;
+        let left = f.alpha - roll - slip + gust(self.pos - span) * gusts;
+        let right = f.alpha + roll + slip + gust(self.pos + span) * gusts;
+        self.stall_left = separate(self.stall_left, left, crit, dt);
+        self.stall_right = separate(self.stall_right, right, crit, dt);
+        self.alpha_crit = crit;
+
+        let (sl, sr) = (self.stall_left, self.stall_right);
+        // Per fully separated panel: lost normal force and added plate drag.
+        let lost = 0.5 * STALL_LIFT_LOSS * c.cz;
+        let (sa, ca) = (f.alpha.to_radians().sin(), f.alpha.to_radians().cos());
+        let plate = 0.45 * sa * sa;
+        c.cz -= lost * (sl + sr);
+        c.cx -= plate * (sl + sr) * ca;
+        c.cz -= plate * (sl + sr) * sa;
+        let arm = PANEL_ARM / aero::SPAN;
+        c.cl += lost * (sl - sr) * arm;
+        c.cn -= plate * (sl - sr) * arm;
+        c.cm -= 0.03 * 0.5 * (sl + sr) * f.alpha.signum();
+    }
+
     /// One rigid-body step: FLCS, engine, forces and moments, integration.
     fn integrate(&mut self, dt: f64, input: &Input, want_ab: bool) {
         let atm = atmosphere_at(self.pos.y);
@@ -583,7 +649,9 @@ impl Aircraft {
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
         self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) } else { 0.0 };
 
-        let c = aero::coefficients(&self.flow(speed, alpha, beta, p, q, r, mach));
+        let flow = self.flow(speed, alpha, beta, p, q, r, mach);
+        let mut c = aero::coefficients(&flow);
+        self.separation(&flow, &mut c, dt);
         let qs = qbar * aero::WING_AREA;
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
@@ -643,11 +711,11 @@ impl Aircraft {
             let saved = self.clone();
             self.integrate(0.0, input, want_ab);
             let g = self.g_load;
-            let (thrust, cl, cd, lift, drag) = (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n);
+            let (thrust, cl, cd, lift, drag, crit) = (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n, self.alpha_crit);
             *self = saved;
             self.g_load = g;
             self.g_smooth = g;
-            (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n) = (thrust, cl, cd, lift, drag);
+            (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n, self.alpha_crit) = (thrust, cl, cd, lift, drag, crit);
         }
 
         // Fuel: specific consumption of the F110 dry and in afterburner.
@@ -667,7 +735,7 @@ impl Aircraft {
         self.oil_psi = (self.rpm * 0.65).max(0.0);
 
         // Derived data for instruments and effects.
-        let (speed, alpha, beta, ..) = self.air_state();
+        let (speed, alpha, beta, p, _, r) = self.air_state();
         let atm = atmosphere_at(self.pos.y);
         self.speed = speed;
         self.airspeed_kt = calibrated_airspeed(speed, &atm) * 1.94384;
@@ -684,9 +752,13 @@ impl Aircraft {
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
-        self.stall = smoothstep(26.0, 34.0, self.alpha_deg.abs());
+        self.stall = self.stall_left.max(self.stall_right);
         let mach_buffet = smoothstep(0.92, 1.08, self.mach) * (1.0 - smoothstep(1.16, 1.4, self.mach)) * 0.6;
-        self.buffet = clamp(smoothstep(14.0, 26.0, self.alpha_deg.abs()) * 0.7 + self.stall + mach_buffet, 0.0, 1.0);
+        let onset = smoothstep(self.alpha_crit - 14.0, self.alpha_crit - 2.0, self.alpha_deg.abs());
+        self.buffet = clamp(onset * 0.7 + self.stall + mach_buffet, 0.0, 1.0);
+        let uncommanded = (p - self.flcs.p_cmd * DEG).abs() + 1.5 * r.abs();
+        let departing = smoothstep(0.5, 1.5, uncommanded) * smoothstep(0.1, 0.5, self.stall);
+        self.departure += (departing - self.departure) * clamp(dt * 3.0, 0.0, 1.0);
         // Low-altitude roughness is recorded for camera shake and audio only.
         self.turbulence = 1.0 - smoothstep(300.0, 1700.0, self.agl);
         self.brake = self.flcs.brake;
@@ -701,6 +773,23 @@ impl Aircraft {
 
         self.detect_terrain_collision();
     }
+}
+
+/// One panel's separation, 0 attached to 1 stalled, with hysteresis: past
+/// the critical AoA the flow lets go within a fraction of a second, and it
+/// only reattaches a few degrees below it. Negative AoA stalls earlier.
+fn separate(sep: f64, alpha: f64, crit: f64, dt: f64) -> f64 {
+    let crit = if alpha >= 0.0 { crit } else { 0.6 * crit };
+    let excess = alpha.abs() - crit;
+    let target = clamp(sep, smoothstep(-0.5, 5.0, excess), smoothstep(-4.5, 0.5, excess));
+    let rate = if target > sep { 8.0 } else { 2.5 };
+    sep + (target - sep) * clamp(dt * rate, 0.0, 1.0)
+}
+
+/// Frozen low-level turbulence, -1..1. Flying through it faster makes the
+/// gusts come quicker, not stronger.
+fn gust(p: V3) -> f64 {
+    0.55 * (p.x * 0.021 + (p.z * 0.017).sin() * 1.3).sin() + 0.3 * (p.z * 0.033 + p.x * 0.011).sin() + 0.15 * ((p.x - p.z) * 0.067 + p.y * 0.05).sin()
 }
 
 /// True when the step from `last_pos` to `pos` crossed the gate disc.
@@ -974,5 +1063,56 @@ mod tests {
             assert!(g.pos.y - terrain_at(g.pos.x, g.pos.z) > 100.0);
         }
         assert!(m.start_pos.y > terrain_at(m.start_pos.x, m.start_pos.z) + 150.0);
+    }
+
+    #[test]
+    fn mach_altitude_and_sideslip_lower_the_critical_aoa() {
+        let slow = aircraft(1000.0, 120.0);
+        let fast_high = aircraft(11000.0, 260.0);
+        assert!(slow.alpha_crit > 26.5, "slow and low: {:.1} deg", slow.alpha_crit);
+        assert!(fast_high.alpha_crit < slow.alpha_crit - 4.0, "Mach 0.88 at 11 km: {:.1} deg", fast_high.alpha_crit);
+        let mut slipping = slow.clone();
+        slipping.vel = Quat::axis_angle(V3::Y, -10.0 * DEG).rotate(slipping.vel);
+        slipping.update(0.0, &Input::default());
+        assert!(slipping.alpha_crit < slow.alpha_crit - 1.5, "10 deg sideslip: {:.1} deg", slipping.alpha_crit);
+    }
+
+    /// In smooth air a straight full pull stops just short of the stall, but
+    /// rudder at that AoA stalls the windward wing and drops it.
+    #[test]
+    fn rudder_at_the_aoa_limit_stalls_the_windward_wing() {
+        let pull = Input { pitch_up: true, ..Default::default() };
+        let mut a = run(aircraft(3000.0, 110.0), 3.0, pull);
+        assert!(a.stall < 0.02, "straight pull: stall {:.2} at {:.1} deg", a.stall, a.alpha_deg);
+        let g = a.g_load;
+        a = run(a, 2.0, Input { yaw_right: true, ..pull });
+        assert!(a.beta < -6.0 * DEG, "sideslip {:.1} deg", a.beta * RAD);
+        assert!(a.stall_left > 0.4 && a.stall_right < 0.1, "left {:.2}, right {:.2}", a.stall_left, a.stall_right);
+        assert!(a.g_load < g - 0.3, "lift kept: {:.2} g", a.g_load);
+        let a = run(a, 1.5, Input { yaw_right: true, ..pull });
+        assert!(a.bank < -5.0, "left wing did not drop: bank {:.1}", a.bank);
+    }
+
+    /// High and fast the limiter's 25 degrees lies past the critical AoA: a
+    /// full pull stalls the wing into heavy buffet, and letting go recovers.
+    #[test]
+    fn high_altitude_pull_stalls_and_recovers() {
+        let a = run(aircraft(11000.0, 250.0), 3.0, Input { pitch_up: true, ..Default::default() });
+        assert!(a.stall > 0.3 && a.buffet > 0.6, "stall {:.2}, buffet {:.2} at {:.1} deg", a.stall, a.buffet, a.alpha_deg);
+        let a = run(a, 4.0, Input::default());
+        assert!(a.stall < 0.05, "still stalled after release: {:.2} at {:.1} deg", a.stall, a.alpha_deg);
+    }
+
+    #[test]
+    fn separation_costs_lift_and_reattaches_with_hysteresis() {
+        let mut sep = 0.0;
+        for _ in 0..60 {
+            sep = separate(sep, 31.0, 28.0, DT);
+        }
+        assert!(sep > 0.4, "3 deg past critical: {sep:.2}");
+        let held = (0..120).fold(sep, |s, _| separate(s, 26.0, 28.0, DT));
+        assert!(held > 0.2, "2 deg below critical lets go too early: {held:.2}");
+        let gone = (0..240).fold(sep, |s, _| separate(s, 20.0, 28.0, DT));
+        assert!(gone < 0.01, "8 deg below critical: {gone:.2}");
     }
 }
