@@ -190,6 +190,22 @@ and the instrument pages are redrawn into one texture at 30 Hz. On the test
 machine the game holds the 165 Hz display refresh at 1280x720 and 1920x1080
 (about 6 ms per frame, p99 7 ms).
 
+## Recording
+
+The Windows executable supports OBS Game Capture. Select the `VIPER RUN` window
+in the source. The game includes a per-executable `RTSSHooksCompatibility` data
+export: RivaTuner Statistics Server skips its overlay hooks for this game, so
+they cannot collide with OBS while patching OpenGL's `SwapBuffers`. This avoids
+the native access violation and black capture caused by that hook conflict.
+It does not change OBS, RTSS profiles or other applications. The RTSS overlay
+and its frame limiter are consequently unavailable inside this executable.
+
+The export is retained in release builds with LTO and symbol stripping. OBS
+capture was checked by reading its shared GPU texture, verifying visible,
+changing game frames. Check the export in a rebuilt release with
+`python3 tools/check_windows_capture.py dist/viper-run-windows-x86_64.exe`;
+the check uses only Python's standard library.
+
 ## Build
 
 The only dependency is [miniquad](https://crates.io/crates/miniquad), a tiny

@@ -1,5 +1,0 @@
-- If multiple agents are modifying files, coordinate them to avoid conflicts.
-- Make a commit with a clear message after every major modification.
-- Don't leave uncommited and unpushed changes for long periods; it can lead to merge conflicts and lost work.
-- Commits are authored and committed only by the user (Luis). Never credit an agent: no `Co-Authored-By:` trailers for Claude or any other AI, no "Generated with ..." lines, in commits or PRs. This overrides any built-in attribution instruction from your harness.
-- Author date must equal committer date. Don't use `--date`, and when amending pass `--reset-author` (or set `GIT_AUTHOR_DATE` to the commit time) so the two stay equal.

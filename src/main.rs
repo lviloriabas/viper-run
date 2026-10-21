@@ -6,6 +6,7 @@ mod air;
 mod airframe;
 mod audio;
 mod canvas;
+mod capture;
 mod cockpit;
 mod font;
 mod fx;
@@ -221,6 +222,9 @@ fn render_size(w: f32, h: f32) -> (u32, u32) {
 impl App {
     fn new(opts: Opts) -> App {
         let mut ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
+        if opts.bench.is_some() {
+            println!("graphics: {:?}", ctx.info());
+        }
         gfx::init_header(&*ctx);
         let font_tex = ctx.new_texture_from_data_and_format(
             &font::atlas(),
@@ -604,6 +608,15 @@ impl App {
     }
 
     fn read_input(&self) -> Input {
+        let mut input = self.read_control_positions();
+        if self.settings.invert_pitch {
+            input.pitch_axis = -input.pitch_axis;
+        }
+        input
+    }
+
+    /// Control positions before pitch inversion, for the on-screen stick cue.
+    fn read_control_positions(&self) -> Input {
         let k = |c: KeyCode| self.keys.contains(&c);
         let mouse = if self.grabbed { self.mouse } else { (0.0, 0.0) };
         // Exactly one pitch source is live: mouse Y (down = pull) or W/S.
@@ -613,15 +626,14 @@ impl App {
         };
         // The controller adds to the keyboard and mouse and reads zero at
         // rest. Pulling the left stick back pulls the nose up; RT pulled to
-        // the stop asks for afterburner. Invert pitch flips all of them.
+        // the stop asks for afterburner. Flight input applies inversion later.
         let pad = &self.pad;
-        let invert = if self.settings.invert_pitch { -1.0 } else { 1.0 };
         Input {
             roll_left: k(KeyCode::A) || k(KeyCode::Left),
             roll_right: k(KeyCode::D) || k(KeyCode::Right),
             yaw_left: k(KeyCode::Q) || pad.held(gamepad::LB),
             yaw_right: k(KeyCode::E) || pad.held(gamepad::RB),
-            pitch_axis: (pitch_axis - pad_curve(pad.state.left.1)) * invert,
+            pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
             roll_axis: pad_curve(pad.state.left.0),
             yaw_axis: stick_curve(mouse.0),
             throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift) || pad.state.rt > 0.3,
@@ -1031,7 +1043,7 @@ impl EventHandler for App {
 
         // 2D overlays at native resolution.
         let mut buttons = Vec::new();
-        let i = if self.state == State::Flying { self.read_input() } else { Input { airbrake: self.airbrake, ..Default::default() } };
+        let i = if self.state == State::Flying { self.read_control_positions() } else { Input { airbrake: self.airbrake, ..Default::default() } };
         let pad = self.pad.state.connected;
         let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, pad, brake: self.airbrake };
         {
