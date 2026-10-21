@@ -256,7 +256,7 @@ pub fn build_static(m: &mut Mesh) {
     let e = elbow(SHOULDER, stick_grip(&Hands::default()).1, pole(1.0));
     bar(m, v3(0.36, e.y - 0.075, e.z + 0.09), v3(0.36, e.y - 0.08, e.z - 0.20), 0.045, 0.022, V3::Y, Rgb(0.12, 0.12, 0.11));
     bar(m, v3(0.36, 0.64, e.z), v3(0.36, e.y - 0.08, e.z - 0.04), 0.03, 0.02, V3::Z, Rgb(0.09, 0.10, 0.10));
-    m.block(&Frame { o: v3(-0.445, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.017, 0.006, 0.13), Rgb(0.06, 0.065, 0.07));
+    m.block(&Frame { o: v3(-0.445, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.022, 0.006, 0.135), Rgb(0.06, 0.065, 0.07));
 }
 
 fn pole(side: f64) -> V3 {
@@ -308,38 +308,39 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     let z = -3.64 - h.throttle * 0.20;
     let a = v3(0.95, 0.26, -0.10).norm();
     // Grip frame: `g` along the grip toward the head, `fwd` forward, `out` up.
-    let k = Grip::new(v3(-0.36, 0.79, z - 0.01), a, -1.0);
+    let k = Grip::new(v3(-0.36, 0.80, z - 0.01), a, -1.0);
 
-    // Lever from the slot to a pivot under the root, and the cutoff release
-    // trigger on its outboard side.
+    // Broad lever from the slot to a pivot under the root, and the cutoff
+    // release trigger on its outboard side.
     let foot = v3(-0.445, 0.64, z + 0.02);
-    bar(m, foot, k.p(0.0, -0.088, -0.022), 0.012, 0.022, V3::Z, Rgb(0.20, 0.22, 0.22));
-    strap(m, &[foot + v3(-0.012, 0.03, 0.0), foot + v3(-0.02, 0.06, -0.01), foot + v3(-0.016, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
+    bar(m, foot, k.p(0.0, -0.090, -0.032), 0.017, 0.034, V3::Z, Rgb(0.20, 0.22, 0.22));
+    strap(m, &[foot + v3(-0.018, 0.03, 0.0), foot + v3(-0.026, 0.06, -0.01), foot + v3(-0.022, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
 
-    // Grip body: root bulb, waist under the hand, head at the inboard end.
+    // Grip body, as chunky as the real one: root bulb about 9 cm across,
+    // waist under the hand, head at the inboard end.
     let st = |u: f64, w: f64, h: f64| St(k.p(0.0, u, 0.0), w, h, GRIP);
-    loft(m, &[st(-0.098, 0.022, 0.026), st(-0.085, 0.032, 0.036), st(-0.050, 0.030, 0.033), st(-0.010, 0.023, 0.026), st(0.030, 0.024, 0.027), st(0.058, 0.028, 0.031), st(0.080, 0.025, 0.028), st(0.088, 0.014, 0.016)], k.out, &OCT);
+    loft(m, &[st(-0.100, 0.028, 0.032), st(-0.086, 0.040, 0.046), st(-0.050, 0.038, 0.043), st(-0.010, 0.031, 0.035), st(0.030, 0.032, 0.036), st(0.060, 0.036, 0.040), st(0.085, 0.033, 0.037), st(0.095, 0.018, 0.020)], k.out, &OCT);
     // MAN RNG/UNCAGE knob on top of the head, ANT ELEV thumbwheel on its end,
     // DOG FIGHT switch and comm switch on top behind them, and on the aft
     // face the speed brake slider and the radar cursor control.
     let (white, grey) = (Rgb(0.74, 0.74, 0.71), Rgb(0.50, 0.51, 0.50));
-    knob(m, k.p(0.004, 0.062, 0.024), k.out, 0.011, 0.013, white);
-    knob(m, k.p(0.004, 0.084, 0.0), k.g, 0.014, 0.009, white);
-    knob(m, k.p(-0.014, 0.070, 0.020), (k.out - k.fwd).norm(), 0.007, 0.010, grey);
-    m.block(&k.frame(-0.006, 0.046, 0.026), v3(0.005, 0.005, 0.004), GRIP.scale(0.6));
-    m.block(&k.frame(-0.028, 0.040, 0.010), v3(0.003, 0.011, 0.004), grey);
-    knob(m, k.p(-0.026, 0.056, -0.010), -k.fwd, 0.008, 0.010, grey);
+    knob(m, k.p(0.006, 0.066, 0.032), k.out, 0.013, 0.014, white);
+    knob(m, k.p(0.004, 0.092, 0.0), k.g, 0.018, 0.010, white);
+    knob(m, k.p(-0.020, 0.074, 0.026), (k.out - k.fwd).norm(), 0.008, 0.012, grey);
+    m.block(&k.frame(-0.008, 0.048, 0.034), v3(0.006, 0.006, 0.004), GRIP.scale(0.6));
+    m.block(&k.frame(-0.038, 0.042, 0.012), v3(0.003, 0.013, 0.005), grey);
+    knob(m, k.p(-0.034, 0.062, -0.012), -k.fwd, 0.009, 0.010, grey);
 
-    // The hand lies level on top of the grip, in line with the forearm
-    // (forward and a little inboard), one mitten piece from the wrist over
-    // the root bulb and down in front; the thumb runs along the aft face.
-    let hf = v3(0.45, 0.0, -0.89).norm();
+    // The hand lies level on top of the grip, pointing forward in line with
+    // the forearm: one mitten piece from the wrist over the root bulb and
+    // down in front, the thumb along the aft face.
+    let hf = v3(0.10, 0.0, -1.0).norm();
     let hs = V3::Y.cross(hf);
-    let c = k.p(-0.004, -0.024, 0.0) + V3::Y * 0.040;
+    let c = k.p(-0.004, -0.030, 0.0) + V3::Y * 0.054;
     let at = |s: f64, y: f64| c + hf * s + V3::Y * y;
-    let wrist = at(-0.075, -0.010);
-    loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.028, -0.006), 0.046, 0.013, GLOVE), St(at(0.044, -0.026), 0.044, 0.012, GLOVE), St(at(0.048, -0.048), 0.040, 0.011, GLOVE)], hs, &OCT);
-    thumb_loft(m, [k.p(-0.034, -0.044, 0.008), k.p(-0.037, -0.008, 0.002), k.p(-0.033, 0.026, 0.004)], k.out);
+    let wrist = at(-0.078, -0.012);
+    loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.036, -0.008), 0.046, 0.013, GLOVE), St(at(0.054, -0.032), 0.044, 0.012, GLOVE), St(at(0.058, -0.058), 0.040, 0.011, GLOVE)], hs, &OCT);
+    thumb_loft(m, [k.p(-0.046, -0.046, 0.012), k.p(-0.050, -0.010, 0.006), k.p(-0.046, 0.026, 0.008)], k.out);
     wrist
 }
 
