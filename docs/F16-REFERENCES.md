@@ -23,14 +23,17 @@ visual y no se incluyen como texturas ni se redistribuyen.
   Block 40; su HUD específico no se considera una referencia exacta del Block 50.
 - [Palanca de potencia, Martin Ingold](https://www.f-16.net/g3/f-16-photos/album03/album72/aak).
   Control izquierdo, empuñadura y consola.
-- [Diagrama de la empuñadura del throttle, Wikimedia Commons](https://commons.wikimedia.org/wiki/File:F-16_Throttle.jpg).
-  Junto con la foto anterior fija la forma del throttle del juego: palanca
-  corta en una ranura del borde exterior de la consola izquierda y empuñadura
-  bulbosa inclinada hacia delante, ancha atrás donde apoya la palma, con la
-  perilla MAN RNG/UNCAGE arriba, la rueda ANT ELEV delante, DOG FIGHT, cursor
-  y aerofreno en la cara interior y la palanca de corte por fuera. La mano
-  izquierda va palma abajo, con índice y medio sobre la cabeza y el pulgar en
-  la cara interior.
+- [Diagrama de la empuñadura del throttle, Wikimedia Commons](https://commons.wikimedia.org/wiki/File:F-16_Throttle.jpg)
+  y [réplica 1:1 Thrustmaster Viper TQS](https://shop.thrustmaster.com/en_gb/viper-tqs.html).
+  Fijan la forma del throttle del juego: una palanca en el borde exterior de
+  la consola izquierda lleva una empuñadura que sale hacia dentro, subiendo
+  unos 30 grados, desde un bulbo grueso junto a la palanca, por una cintura,
+  hasta la cabeza de mandos en el extremo interior. Arriba de la cabeza van la
+  perilla MAN RNG/UNCAGE, DOG FIGHT y el interruptor de comunicaciones; en el
+  extremo, la rueda ANT ELEV; en la cara trasera, el cursor del radar y el
+  aerofreno. La palanca de corte queda por fuera. La mano izquierda la toma en
+  horizontal desde arriba: dorso arriba, dedos por delante y por debajo y el
+  pulgar por la cara trasera hacia el cursor.
 - [Palanca lateral, Martin Ingold](https://www.f-16.net/g3/f-16-photos/album03/album72/aal).
   Empuñadura derecha y apoyo del brazo.
 - [HUD de F-16C, fotografía USAF](https://www.f-16.net/g3/f-16-photos/album03/album72/aad).

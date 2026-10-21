@@ -99,11 +99,6 @@ impl Grip {
     fn frame(&self, f: f64, u: f64, s: f64) -> Frame {
         Frame { o: self.p(f, u, s), x: self.fwd, y: self.g, z: self.out }
     }
-    /// The same grip turned about its axis, the back of the hand swinging aft.
-    fn rolled(&self, deg: f64) -> Grip {
-        let (c, s) = ((deg * DEG).cos(), (deg * DEG).sin());
-        Grip { fwd: self.fwd * c + self.out * s, out: self.out * c - self.fwd * s, ..*self }
-    }
 }
 
 /// Gloved fist closed round a grip of half extents `rx` across and `rf` fore
@@ -261,7 +256,7 @@ pub fn build_static(m: &mut Mesh) {
     let e = elbow(SHOULDER, stick_grip(&Hands::default()).1, pole(1.0));
     bar(m, v3(0.36, e.y - 0.075, e.z + 0.09), v3(0.36, e.y - 0.08, e.z - 0.20), 0.045, 0.022, V3::Y, Rgb(0.12, 0.12, 0.11));
     bar(m, v3(0.36, 0.64, e.z), v3(0.36, e.y - 0.08, e.z - 0.04), 0.03, 0.02, V3::Z, Rgb(0.09, 0.10, 0.10));
-    m.block(&Frame { o: v3(-0.425, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.017, 0.006, 0.13), Rgb(0.06, 0.065, 0.07));
+    m.block(&Frame { o: v3(-0.445, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.017, 0.006, 0.13), Rgb(0.06, 0.065, 0.07));
 }
 
 fn pole(side: f64) -> V3 {
@@ -302,42 +297,42 @@ fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
     loft(m, &[St(c, r, r, col), St(c + axis * len, r, r, col)], side, &OCT);
 }
 
-/// F-16 throttle (TQS) after the grip diagram and cockpit photos: a short
-/// lever in a slot along the outboard edge of the left console carries a
-/// black grip leaning forward about 25 degrees, with a broad bulb at its foot
-/// and the switch head on top. The pilot holds it like a fist from behind:
-/// back of the hand outboard, fingers round the front, thumb on the inboard
-/// face by the cursor control, the switch head standing above the fingers.
-/// Returns the wrist.
+/// F-16 throttle (TQS) after the grip diagram, cockpit photos and the 1:1
+/// Viper TQS replica: a lever on the outboard edge of the left console
+/// carries a grip that runs inboard, rising about 30 degrees, from a fat
+/// root bulb at the lever through a waist to the switch head at its inboard
+/// end. The left hand holds it level from above: back of the hand up,
+/// fingers round the front and under, thumb along the aft face to the
+/// cursor control and speed brake. Returns the wrist.
 fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     let z = -3.64 - h.throttle * 0.20;
-    let g = v3(0.08, 0.90, -0.42).norm();
-    let k = Grip::new(v3(-0.392, 0.80, z - 0.01), g, -1.0);
+    let a = v3(0.88, 0.45, -0.10).norm();
+    // Grip frame: `g` along the grip toward the head, `fwd` forward, `out` up.
+    let k = Grip::new(v3(-0.36, 0.79, z - 0.01), a, -1.0);
 
-    // Lever from the slot and the cutoff release trigger on its outboard side.
-    let foot = v3(-0.425, 0.64, z + 0.02);
-    bar(m, foot, k.p(-0.006, -0.08, 0.0), 0.011, 0.02, V3::Z, Rgb(0.20, 0.22, 0.22));
-    strap(m, &[foot + v3(-0.016, 0.03, 0.0), foot + v3(-0.024, 0.06, -0.01), foot + v3(-0.02, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
+    // Lever from the slot to a pivot under the root, and the cutoff release
+    // trigger on its outboard side.
+    let foot = v3(-0.445, 0.64, z + 0.02);
+    bar(m, foot, k.p(0.0, -0.088, -0.022), 0.012, 0.022, V3::Z, Rgb(0.20, 0.22, 0.22));
+    strap(m, &[foot + v3(-0.012, 0.03, 0.0), foot + v3(-0.02, 0.06, -0.01), foot + v3(-0.016, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
 
-    // Grip body: bulb at the foot, waist under the hand, and the head.
-    let st = |f: f64, u: f64, w: f64, h: f64| St(k.p(f, u, 0.0), w, h, GRIP);
-    loft(m, &[st(-0.006, -0.078, 0.032, 0.036), st(-0.010, -0.060, 0.037, 0.044), st(-0.006, -0.025, 0.031, 0.036), st(0.0, 0.015, 0.026, 0.029), st(0.004, 0.045, 0.028, 0.031), st(0.004, 0.064, 0.022, 0.024), st(0.004, 0.072, 0.012, 0.014)], V3::X, &OCT);
-    // MAN RNG/UNCAGE knob on top, ANT ELEV thumbwheel in front, DOG FIGHT
-    // switch and cursor control on the inboard face, the comm switch on top
-    // and the speed brake slider under the thumb.
+    // Grip body: root bulb, waist under the hand, head at the inboard end.
+    let st = |u: f64, w: f64, h: f64| St(k.p(0.0, u, 0.0), w, h, GRIP);
+    loft(m, &[st(-0.098, 0.022, 0.026), st(-0.085, 0.032, 0.036), st(-0.050, 0.030, 0.033), st(-0.010, 0.023, 0.026), st(0.030, 0.024, 0.027), st(0.058, 0.028, 0.031), st(0.080, 0.025, 0.028), st(0.088, 0.014, 0.016)], k.out, &OCT);
+    // MAN RNG/UNCAGE knob on top of the head, ANT ELEV thumbwheel on its end,
+    // DOG FIGHT switch and comm switch on top behind them, and on the aft
+    // face the speed brake slider and the radar cursor control.
     let (white, grey) = (Rgb(0.74, 0.74, 0.71), Rgb(0.50, 0.51, 0.50));
-    let inboard = -k.out;
-    knob(m, k.p(0.002, 0.066, 0.004), k.g, 0.012, 0.014, white);
-    knob(m, k.p(0.026, 0.046, -0.008), inboard, 0.013, 0.009, white);
-    knob(m, k.p(0.006, 0.048, -0.024), inboard, 0.008, 0.012, grey);
-    knob(m, k.p(0.012, 0.024, -0.022), inboard, 0.007, 0.010, grey);
-    m.block(&k.frame(-0.012, 0.062, -0.010), v3(0.006, 0.005, 0.006), GRIP.scale(0.6));
-    m.block(&k.frame(-0.014, 0.010, -0.029), v3(0.012, 0.005, 0.003), grey);
+    knob(m, k.p(0.004, 0.062, 0.024), k.out, 0.011, 0.013, white);
+    knob(m, k.p(0.004, 0.084, 0.0), k.g, 0.014, 0.009, white);
+    knob(m, k.p(-0.014, 0.070, 0.020), (k.out - k.fwd).norm(), 0.007, 0.010, grey);
+    m.block(&k.frame(-0.006, 0.046, 0.026), v3(0.005, 0.005, 0.004), GRIP.scale(0.6));
+    m.block(&k.frame(-0.028, 0.040, 0.010), v3(0.003, 0.011, 0.004), grey);
+    knob(m, k.p(-0.026, 0.056, -0.010), -k.fwd, 0.008, 0.010, grey);
 
-    // The hand sits behind the grip as if pushing it, so the back of the
-    // hand faces aft, up and outboard; the waist is near round under it.
-    let hand = Grip { o: k.p(0.0, -0.004, 0.0), ..k.rolled(65.0) };
-    fist(m, &hand, 0.034, 0.034, [k.p(-0.030, -0.030, -0.022), k.p(-0.012, 0.0, -0.040), k.p(0.010, 0.020, -0.036)])
+    let (rx, rf) = (0.026, 0.030);
+    let hand = Grip { o: k.p(0.0, -0.012, 0.0), ..k };
+    fist(m, &hand, rx, rf, [hand.p(-rf - 0.008, -0.020, -0.004), hand.p(-rf - 0.010, 0.020, -0.002), hand.p(-rf - 0.004, 0.052, 0.002)])
 }
 
 /// Legs on the pedals, both arms and the two controls under the hands.
@@ -351,6 +346,6 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.006, 0.026, -rx * 0.5), k.p(-0.027, 0.058, -rx - 0.003), k.p(-0.02, 0.078, -0.015)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
     let wrist = throttle(m, h);
-    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.026, 0.036));
+    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.024));
     m.facet();
 }
