@@ -23,8 +23,9 @@ const RED: Rgb = Rgb(0.62, 0.12, 0.08);
 /// Sidestick pivot on its raised mount at the front of the right console.
 const STICK: V3 = v3(0.365, 0.668, -3.81);
 const SHOULDER: V3 = v3(0.19, 1.00, -3.26);
-/// Upper arm and forearm (elbow to wrist) lengths.
+/// Upper arm and forearm (elbow to wrist) lengths, then thigh and shin.
 const ARM: (f64, f64) = (0.30, 0.31);
+const LEG: (f64, f64) = (0.49, 0.47);
 
 /// Unit outlines for loft sections: x across the limb, y toward its front.
 const OCT: [(f64, f64); 8] = [(1.0, -0.45), (1.0, 0.45), (0.55, 1.0), (-0.55, 1.0), (-1.0, 0.45), (-1.0, -0.45), (-0.55, -1.0), (0.55, -1.0)];
@@ -122,15 +123,16 @@ fn thumb_loft(m: &mut Mesh, t: [V3; 3], side: V3) {
     loft(m, &[St(t[0], 0.013, 0.012, GLOVE), St(t[1], 0.011, 0.010, GLOVE), St(t[2], 0.0085, 0.008, GLOVE)], side, &OCT);
 }
 
-/// Elbow of a two-bone arm from `shoulder` to `wrist`, bent toward `pole`.
-fn elbow(shoulder: V3, wrist: V3, pole: V3) -> V3 {
-    let (a, b) = ARM;
-    let d = wrist - shoulder;
+/// Middle joint of a two-bone limb from `root` to `end` with bone lengths
+/// `len`, bent toward `pole`: the elbow of an arm, the knee of a leg.
+fn joint(root: V3, end: V3, len: (f64, f64), pole: V3) -> V3 {
+    let (a, b) = len;
+    let d = end - root;
     let l = clamp(d.len(), b - a + 0.01, a + b - 0.002);
     let dir = d.norm();
     let x = (a * a - b * b + l * l) / (2.0 * l);
     let h = (a * a - x * x).max(0.0).sqrt();
-    shoulder + dir * x + (pole - dir * pole.dot(dir)).norm() * h
+    root + dir * x + (pole - dir * pole.dot(dir)).norm() * h
 }
 
 /// Sleeve from shoulder through the elbow to the wrist, under the gauntlet.
@@ -138,7 +140,7 @@ fn elbow(shoulder: V3, wrist: V3, pole: V3) -> V3 {
 /// at the wrist: taller than wide for a hand on the stick, flatter for the
 /// palm-down hand on the throttle.
 fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3, cuff: (f64, f64)) {
-    let e = elbow(shoulder, wrist, pole);
+    let e = joint(shoulder, wrist, ARM, pole);
     let back = (e - wrist).norm();
     let (cw, ch) = cuff;
     loft(
@@ -164,9 +166,12 @@ fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3, cuff: (f64, f64)) {
 }
 
 fn leg(m: &mut Mesh, s: f64, rudder: f64) {
+    // Right rudder pushes the right pedal forward and lets the left one back.
+    // The pedals travel 7 cm, far more than the real ones, so the knees
+    // visibly drop and rise with the yaw input.
     let hip = v3(s * 0.10, 0.60, -3.48);
-    let knee = v3(s * 0.15, 0.675, -3.96);
-    let ankle = v3(s * 0.165, 0.31, -4.25 - s * rudder * 0.04);
+    let ankle = v3(s * 0.165, 0.31, -4.25 - s * rudder * 0.07);
+    let knee = joint(hip, ankle, LEG, v3(s * 0.12, 1.0, -0.35));
     let thigh = (knee - hip).norm();
     let shin = (ankle - knee).norm();
     let front = V3::X.cross(shin).norm();
@@ -185,16 +190,27 @@ fn leg(m: &mut Mesh, s: f64, rudder: f64) {
         V3::X,
         &OCT,
     );
-    // Kneecap, and the big G-suit pocket on the outside of the thigh.
+    // Kneecap, and the big G-suit pocket on the outside of the right thigh;
+    // the kneeboard covers that spot on the left one.
     let kt = (thigh + shin).norm();
     let kf = V3::X.cross(kt).norm();
     m.block(&Frame { o: knee + kf * 0.06, x: V3::X, y: kf, z: kt }, v3(0.046, 0.016, 0.04), SUIT.scale(1.08));
-    let n = (V3::X * s + V3::Y * 0.9).norm();
-    let mid = hip.lerp(knee, 0.48);
-    let y = thigh;
-    let x = y.cross(n).norm();
-    m.block(&Frame { o: mid + n * 0.092, x, y, z: n }, v3(0.036, 0.075, 0.009), POCKET);
-    m.block(&Frame { o: mid + n * 0.101 + y * -0.06, x, y, z: n }, v3(0.038, 0.016, 0.004), POCKET.scale(0.85));
+    if s > 0.0 {
+        let n = (V3::X * s + V3::Y * 0.9).norm();
+        let mid = hip.lerp(knee, 0.48);
+        let y = thigh;
+        let x = y.cross(n).norm();
+        m.block(&Frame { o: mid + n * 0.092, x, y, z: n }, v3(0.036, 0.075, 0.009), POCKET);
+        m.block(&Frame { o: mid + n * 0.101 + y * -0.06, x, y, z: n }, v3(0.038, 0.016, 0.004), POCKET.scale(0.85));
+    }
+    if s < 0.0 {
+        // Kneeboard strapped to the left thigh, riding with it.
+        let y = (thigh - V3::X * thigh.x).norm();
+        let z = V3::X.cross(y);
+        let kb = Frame { o: hip.lerp(knee, 0.58) + z * 0.090 - V3::X * 0.036, x: V3::X, y, z };
+        m.block(&kb.at(0.0, 0.0, -0.006), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
+        screen(m, &kb, 0.12, 0.15, R_KNEE);
+    }
     // Boot on the rudder pedal.
     let foot = |dy: f64, dz: f64| ankle + v3(0.0, dy, dz);
     loft(m, &[St(foot(0.03, 0.0), 0.050, 0.052, BOOT), St(foot(-0.045, -0.05), 0.052, 0.048, BOOT), St(foot(-0.06, -0.15), 0.048, 0.034, BOOT), St(foot(-0.055, -0.205), 0.036, 0.022, BOOT)], V3::X, &OCT);
@@ -209,7 +225,7 @@ fn seat_axes() -> (V3, V3, V3) {
     (v3(0.0, 0.58, -3.50), v3(0.0, c, s), v3(0.0, s, -c))
 }
 
-/// Seat, torso, harness, kneeboard and the control mounts: everything that
+/// Seat, torso, harness and the control mounts: everything that
 /// does not move. The caller facets the mesh.
 pub fn build_static(m: &mut Mesh) {
     let (hip, up, fwd) = seat_axes();
@@ -245,15 +261,10 @@ pub fn build_static(m: &mut Mesh) {
     }
     m.block(&chest(0.07, 0.106, 0.0), v3(0.036, 0.03, 0.009), METALC);
 
-    // Kneeboard strapped to the left thigh.
-    let kb = Frame { o: v3(-0.165, 0.745, -3.76), x: V3::X, y: v3(0.0, 0.17, -0.985), z: v3(0.0, 0.985, 0.17) };
-    m.block(&kb.at(0.0, 0.0, -0.006), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
-    screen(m, &kb, 0.12, 0.15, R_KNEE);
-
     // Raised sidestick mount, the right arm rest under the neutral elbow, and
     // the throttle slot along the outboard edge of the left console.
     m.block(&Frame { o: STICK - V3::Y * 0.014, x: V3::X, y: V3::Y, z: V3::Z }, v3(0.058, 0.014, 0.06), Rgb(0.10, 0.11, 0.11));
-    let e = elbow(SHOULDER, stick_grip(&Hands::default()).1, pole(1.0));
+    let e = joint(SHOULDER, stick_grip(&Hands::default()).1, ARM, pole(1.0));
     bar(m, v3(0.36, e.y - 0.075, e.z + 0.09), v3(0.36, e.y - 0.08, e.z - 0.20), 0.045, 0.022, V3::Y, Rgb(0.12, 0.12, 0.11));
     bar(m, v3(0.36, 0.64, e.z), v3(0.36, e.y - 0.08, e.z - 0.04), 0.03, 0.02, V3::Z, Rgb(0.09, 0.10, 0.10));
     m.block(&Frame { o: v3(-0.445, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.022, 0.006, 0.135), Rgb(0.06, 0.065, 0.07));

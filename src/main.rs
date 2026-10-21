@@ -98,6 +98,8 @@ fn parse_opts() -> Opts {
                         "push" => o.input.pitch_down = true,
                         "left" => o.input.roll_left = true,
                         "right" => o.input.roll_right = true,
+                        "yawleft" => o.input.yaw_left = true,
+                        "yawright" => o.input.yaw_right = true,
                         "ab" => {
                             o.input.afterburner = true;
                             o.input.throttle_up = true;
@@ -119,7 +121,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
                 std::process::exit(0);
             }
             _ => {}
@@ -743,7 +745,7 @@ impl App {
             let i = input.unwrap_or_else(|| self.read_input());
             roll = i.roll();
             pitch = i.pitch();
-            rudder = clamp(i.yaw_right as i32 as f64 - i.yaw_left as i32 as f64, -1.0, 1.0);
+            rudder = i.yaw();
         }
         let r = 1.0 - (-dt.max(0.0) * 11.0).exp();
         let tr = 1.0 - (-dt.max(0.0) * 7.0).exp();

@@ -215,6 +215,9 @@ void main() {
     frag = vec4(mix(col, vec3(0.20, 0.0, 0.0), u_gloc * ring * 0.75), 1.0);
 }"#;
 
+/// Room for the textured faces of the moving geometry, in vertices.
+const DYN_FACE_CAP: usize = 600;
+
 /// The textured triangles of `m`: displays, gauge dials, placards.
 fn faces(m: &Mesh) -> Mesh {
     let mut out = Mesh::new();
@@ -237,6 +240,9 @@ pub struct Cockpit {
     dyn_bind: Bindings,
     dyn_cap: usize,
     dyn_count: usize,
+    /// Textured faces of the moving geometry (the kneeboard), for draw_faces.
+    dyn_face_bind: Bindings,
+    dyn_face_count: usize,
     canopy: Part,
     hud_glass: Part,
     pub atlas: gfx::Target,
@@ -275,13 +281,15 @@ impl Cockpit {
         let dyn_cap = 60000;
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(dyn_cap * crate::mesh::STRIDE));
         let dyn_bind = Bindings { vertex_buffers: vec![vb], index_buffer: gfx::sequential_ib(ctx, dyn_cap), images: vec![atlas_tex] };
+        let fvb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(DYN_FACE_CAP * crate::mesh::STRIDE));
+        let dyn_face_bind = Bindings { vertex_buffers: vec![fvb], index_buffer: gfx::sequential_ib(ctx, DYN_FACE_CAP), images: vec![atlas_tex] };
         let mut canopy = world::part(ctx, canopy);
         canopy.bind.images = vec![atlas_tex];
         let mut glass = Mesh::new();
         glass.quad(HUD_GLASS[0], HUD_GLASS[1], HUD_GLASS[2], HUD_GLASS[3], Rgb(0.4, 0.6, 0.5));
         let mut hud_glass = world::part(ctx, &glass);
         hud_glass.bind.images = vec![atlas_tex];
-        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, canopy, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -312,6 +320,11 @@ impl Cockpit {
         ctx.apply_bindings(&self.dyn_bind);
         ctx.draw(0, n as i32, 1);
         self.dyn_count = n;
+        let f = faces(&self.dynamic);
+        self.dyn_face_count = f.count().min(DYN_FACE_CAP);
+        if self.dyn_face_count > 0 {
+            ctx.buffer_update(self.dyn_face_bind.vertex_buffers[0], BufferSource::slice(&f.v[..self.dyn_face_count * crate::mesh::STRIDE]));
+        }
 
         ctx.apply_pipeline(&self.glass_pip);
         ctx.apply_bindings(&self.hud_glass.bind);
@@ -325,7 +338,7 @@ impl Cockpit {
     /// Redraws the displays, dials and placards at full resolution into the
     /// current pass, after the low-resolution scene has been composited, so
     /// their text stays sharp. The cockpit from the last `draw` first lays
-    /// down depth only, so hands, arms and the kneeboard still cover them.
+    /// down depth only, so hands, arms and knees still cover them.
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
     pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32) {
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
@@ -341,6 +354,8 @@ impl Cockpit {
         ctx.apply_bindings(&self.faces.bind);
         ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
         ctx.draw(0, self.faces.count, 1);
+        ctx.apply_bindings(&self.dyn_face_bind);
+        ctx.draw(0, self.dyn_face_count as i32, 1);
     }
 }
 
