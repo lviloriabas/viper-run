@@ -102,6 +102,7 @@ fn parse_opts() -> Opts {
                             o.input.afterburner = true;
                             o.input.throttle_up = true;
                         }
+                        "throttle" => o.input.throttle_up = true,
                         "brake" => o.input.airbrake = true,
                         _ => {}
                     }
@@ -118,7 +119,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
                 std::process::exit(0);
             }
             _ => {}

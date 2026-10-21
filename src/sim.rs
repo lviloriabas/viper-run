@@ -96,6 +96,7 @@ pub struct Input {
     pub yaw_axis: f64,
     pub throttle_up: bool,
     pub throttle_down: bool,
+    /// Slams the throttle to the stop, past the military detent.
     pub afterburner: bool,
     pub airbrake: bool,
 }
@@ -697,8 +698,12 @@ impl Aircraft {
         if input.throttle_down {
             self.throttle = clamp(self.throttle - dt * 0.62, 0.0, 1.0);
         }
+        if input.afterburner {
+            self.throttle = 1.0;
+        }
         let fueled = self.fuel > 0.0;
-        let want_ab = input.afterburner && self.throttle >= 0.95 && fueled;
+        // Full throttle is the afterburner; anything short of the stop is dry.
+        let want_ab = self.throttle >= 1.0 && fueled;
         self.ab = want_ab;
         self.agl = self.pos.y - terrain::floor(self.pos.x, self.pos.z);
         if dt > 0.0 {
@@ -888,16 +893,24 @@ mod tests {
     }
 
     #[test]
-    fn afterburner_needs_military_throttle_and_lags() {
+    fn full_throttle_lights_the_afterburner_and_it_lags() {
+        assert!(Mission::new().start_throttle < 1.0, "the mission starts dry");
         let mut a = aircraft(3000.0, 220.0);
-        a.throttle = 0.7;
-        let ab = Input { afterburner: true, ..Default::default() };
-        a.update(DT, &ab);
+        a.throttle = 0.997;
+        a.power = 50.0 * a.throttle;
+        a.update(DT, &Input::default());
         assert!(!a.ab);
-        a.throttle = 1.0;
-        a.update(DT, &ab);
-        assert!(a.ab);
+        a.update(DT, &Input { throttle_up: true, ..Default::default() });
+        assert!(a.ab, "pushing the throttle to the stop lights it");
         assert!(a.ab_level < 0.1);
+        let a = run(a, 1.0, Input::default());
+        assert!(a.ab && a.ab_level > 0.8, "it stays lit with the throttle at the stop");
+        let a = run(a, 0.1, Input { throttle_down: true, ..Default::default() });
+        assert!(!a.ab, "one notch back is military power");
+        let mut b = aircraft(3000.0, 220.0);
+        b.throttle = 0.4;
+        b.update(DT, &Input { afterburner: true, ..Default::default() });
+        assert!(b.ab && b.throttle == 1.0, "the afterburner key slams the throttle forward");
     }
 
     #[test]
