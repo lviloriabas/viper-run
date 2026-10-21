@@ -141,9 +141,13 @@ fn elbow(shoulder: V3, wrist: V3, pole: V3) -> V3 {
 }
 
 /// Sleeve from shoulder through the elbow to the wrist, under the gauntlet.
-fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3) {
+/// `cuff` is the half width (across) and half height of the glove's opening
+/// at the wrist: taller than wide for a hand on the stick, flatter for the
+/// palm-down hand on the throttle.
+fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3, cuff: (f64, f64)) {
     let e = elbow(shoulder, wrist, pole);
     let back = (e - wrist).norm();
+    let (cw, ch) = cuff;
     loft(
         m,
         &[
@@ -151,7 +155,7 @@ fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3) {
             St(shoulder.lerp(e, 0.5), 0.064, 0.062, SUIT),
             St(e, 0.060, 0.056, SUIT),
             St(e.lerp(wrist, 0.5), 0.050, 0.050, SUIT),
-            St(wrist + back * 0.07, 0.036, 0.042, SUIT),
+            St(wrist + back * 0.07, cw + 0.010, ch + 0.006, SUIT),
         ],
         V3::X,
         &HEX,
@@ -163,7 +167,7 @@ fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3) {
     let side = (x - ua * x.dot(ua)).norm();
     let mid = shoulder.lerp(e, 0.35) + side * 0.064;
     bar(m, mid, mid + ua * 0.09, 0.026, 0.007, side, POCKET);
-    loft(m, &[St(wrist + back * 0.08, 0.038, 0.046, GLOVE_DARK), St(wrist + back * 0.03, 0.034, 0.042, GLOVE_DARK), St(wrist - back * 0.008, 0.026, 0.036, GLOVE)], V3::X, &HEX);
+    loft(m, &[St(wrist + back * 0.08, cw + 0.012, ch + 0.010, GLOVE_DARK), St(wrist + back * 0.03, cw + 0.008, ch + 0.006, GLOVE_DARK), St(wrist - back * 0.008, cw, ch, GLOVE)], V3::X, &HEX);
 }
 
 fn leg(m: &mut Mesh, s: f64, rudder: f64) {
@@ -254,12 +258,12 @@ pub fn build_static(m: &mut Mesh) {
     screen(m, &kb, 0.12, 0.15, R_KNEE);
 
     // Raised sidestick mount, the right arm rest under the neutral elbow, and
-    // the throttle quadrant slot on the left console.
+    // the throttle slot along the outboard edge of the left console.
     m.block(&Frame { o: STICK - V3::Y * 0.014, x: V3::X, y: V3::Y, z: V3::Z }, v3(0.058, 0.014, 0.06), Rgb(0.10, 0.11, 0.11));
     let e = elbow(SHOULDER, stick_grip(&Hands::default()).1, pole(1.0));
     bar(m, v3(0.36, e.y - 0.075, e.z + 0.09), v3(0.36, e.y - 0.08, e.z - 0.20), 0.045, 0.022, V3::Y, Rgb(0.12, 0.12, 0.11));
     bar(m, v3(0.36, 0.64, e.z), v3(0.36, e.y - 0.08, e.z - 0.04), 0.03, 0.02, V3::Z, Rgb(0.09, 0.10, 0.10));
-    m.block(&Frame { o: v3(-0.385, 0.645, -3.765), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.036, 0.006, 0.115), Rgb(0.06, 0.065, 0.07));
+    m.block(&Frame { o: v3(-0.425, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.017, 0.006, 0.13), Rgb(0.06, 0.065, 0.07));
 }
 
 fn pole(side: f64) -> V3 {
@@ -288,18 +292,62 @@ fn sidestick(m: &mut Mesh, k: &Grip) {
     m.block(&k.frame(0.016, 0.06, -0.011), v3(0.006, 0.005, 0.006), RED);
 }
 
-/// Throttle lever and grip under the left hand; returns the left wrist.
+/// Short octagonal cylinder from `c` along `axis`: knobs and thumbwheels.
+fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
+    let side = if axis.y.abs() < 0.9 { V3::Y } else { V3::X };
+    loft(m, &[St(c, r, r, col), St(c + axis * len, r, r, col)], side, &OCT);
+}
+
+/// F-16 throttle (TQS) after the grip diagram and cockpit photos: a short
+/// lever in a slot along the outboard edge of the left console carries a
+/// big bulbous grip that leans forward about 33 degrees, broad at the back
+/// where the palm rests, with the switch head at the front. The left hand
+/// lies on it palm down: index and middle fingers forward over the head,
+/// ring and little fingers curled round the outboard side, the thumb on the
+/// inboard face by the cursor control and speed brake. Returns the wrist.
 fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
-    let z = -3.68 - h.throttle * 0.17;
-    let g = v3(0.16, 1.0, 0.20).norm();
-    let k = Grip::new(v3(-0.378, 0.80, z), g, -1.0);
-    // Lever from the slot, then the chunky grip with its switches.
-    bar(m, v3(-0.385, 0.64, z + 0.03), k.o - k.g * 0.05, 0.011, 0.024, V3::Z, Rgb(0.20, 0.22, 0.22));
-    loft(m, &[St(k.o - k.g * 0.056, 0.022, 0.034, GRIP), St(k.o - k.g * 0.02, 0.026, 0.042, GRIP), St(k.o + k.g * 0.026, 0.027, 0.044, GRIP), St(k.o + k.g * 0.052, 0.02, 0.034, GRIP)], V3::X, &OCT);
-    m.block(&k.frame(-0.006, 0.034, -0.029), v3(0.012, 0.008, 0.005), METALC.scale(0.7));
-    m.block(&k.frame(0.022, 0.05, -0.012), v3(0.006, 0.006, 0.006), GRIP.scale(0.6));
-    m.block(&k.frame(0.0, 0.054, 0.0), v3(0.008, 0.004, 0.008), RED.scale(0.8));
-    fist(m, &k, 0.027, 0.044, 0.05)
+    let z = -3.64 - h.throttle * 0.20;
+    // Grip axes: `a` along the grip toward the head, `n` its top, `s` inboard.
+    let a = v3(0.10, 0.55, -0.83).norm();
+    let n = (V3::Y - a * a.y).norm();
+    let s = a.cross(n);
+    let g0 = v3(-0.395, 0.78, z - 0.01);
+    let q = |t: f64, u: f64, v: f64| g0 + a * t + n * u + s * v;
+
+    // Lever from the slot and the cutoff release trigger on its outboard side.
+    let foot = v3(-0.425, 0.64, z + 0.02);
+    bar(m, foot, q(-0.03, -0.022, -0.004), 0.011, 0.02, V3::Z, Rgb(0.20, 0.22, 0.22));
+    strap(m, &[foot + v3(-0.016, 0.03, 0.0), foot + v3(-0.024, 0.06, -0.01), foot + v3(-0.02, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
+
+    // Grip body: rear bulb, waist, and the head carrying the switches.
+    let st = |t: f64, u: f64, w: f64, h: f64| St(q(t, u, 0.0), w, h, GRIP);
+    loft(m, &[st(-0.072, -0.004, 0.030, 0.028), st(-0.056, -0.002, 0.043, 0.040), st(-0.022, 0.0, 0.037, 0.035), st(0.028, 0.004, 0.024, 0.025), st(0.066, 0.010, 0.027, 0.029), st(0.090, 0.012, 0.021, 0.022), st(0.100, 0.012, 0.011, 0.012)], s, &OCT);
+    let (white, grey) = (Rgb(0.74, 0.74, 0.71), Rgb(0.50, 0.51, 0.50));
+    // MAN RNG/UNCAGE knob on top of the head, ANT ELEV thumbwheel at its
+    // front, DOG FIGHT switch and cursor control on the inboard face, the
+    // comm switch on top and the speed brake slider under the thumb.
+    knob(m, q(0.074, 0.034, -0.008), n, 0.012, 0.014, white);
+    knob(m, q(0.090, 0.010, 0.012), s, 0.013, 0.009, white);
+    knob(m, q(0.052, 0.012, 0.024), s, 0.008, 0.012, grey);
+    knob(m, q(0.022, -0.012, 0.022), s, 0.007, 0.010, grey);
+    m.block(&Frame { o: q(0.046, 0.032, 0.010), x: a, y: n, z: s }, v3(0.006, 0.005, 0.006), GRIP.scale(0.6));
+    m.block(&Frame { o: q(-0.012, 0.010, 0.036), x: a, y: n, z: s }, v3(0.012, 0.005, 0.003), grey);
+
+    // Back of the hand on the bulb, from the wrist to the knuckles.
+    let wrist = q(-0.098, 0.030, -0.004);
+    loft(m, &[St(wrist, 0.030, 0.019, GLOVE), St(q(-0.062, 0.054, -0.002), 0.044, 0.017, GLOVE), St(q(-0.020, 0.050, 0.0), 0.047, 0.013, GLOVE)], s, &OCT);
+    let fingers: [[V3; 4]; 4] = [
+        [q(-0.014, 0.048, 0.024), q(0.022, 0.046, 0.026), q(0.052, 0.046, 0.024), q(0.078, 0.032, 0.024)],
+        [q(-0.012, 0.050, 0.005), q(0.024, 0.046, 0.005), q(0.050, 0.048, 0.006), q(0.064, 0.050, 0.010)],
+        [q(-0.016, 0.046, -0.014), q(0.010, 0.038, -0.034), q(0.022, 0.014, -0.041), q(0.028, -0.010, -0.036)],
+        [q(-0.022, 0.040, -0.030), q(-0.002, 0.026, -0.045), q(0.006, 0.004, -0.047), q(0.010, -0.016, -0.041)],
+    ];
+    for (i, f) in fingers.iter().enumerate() {
+        let (w, h) = if i == 3 { (0.0078, 0.0072) } else { (0.0092, 0.0084) };
+        strap(m, f, w, h, if i < 2 { n } else { a }, GLOVE.scale(1.0 - i as f64 * 0.04));
+    }
+    strap(m, &[q(-0.076, 0.026, 0.028), q(-0.042, 0.016, 0.051), q(-0.006, 0.008, 0.045)], 0.0105, 0.0095, s, GLOVE.scale(1.06));
+    wrist
 }
 
 /// Legs on the pedals, both arms and the two controls under the hands.
@@ -310,8 +358,8 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
     let wrist = fist(m, &k, 0.019, 0.025, 0.06);
-    arm(m, SHOULDER, wrist, pole(1.0));
+    arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
     let wrist = throttle(m, h);
-    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0));
+    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.024));
     m.facet();
 }
