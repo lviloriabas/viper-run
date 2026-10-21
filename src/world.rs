@@ -393,7 +393,8 @@ void main() {
     // One sample per low-resolution pixel, shown as a crisp block.
     vec2 px = min(floor(v_uv * u_src), u_src - 1.0);
     vec3 col = texture(u_tex, (px + 0.5) / u_src).rgb;
-    // A slightly punchier grade, then 15-bit colour with ordered dithering
+    // A slightly punchier grade (cockpit::FACE_FS repeats it for the sharp
+    // displays: keep the two in step), then 15-bit colour with ordered dithering
     // laid on the same low-resolution pixels.
     float l = dot(col, vec3(0.299, 0.587, 0.114));
     col = mix(vec3(l), col, 1.12);
