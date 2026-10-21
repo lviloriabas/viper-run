@@ -12,8 +12,8 @@ const GSUIT: Rgb = Rgb(0.245, 0.265, 0.185);
 const POCKET: Rgb = Rgb(0.355, 0.365, 0.26);
 const VEST: Rgb = Rgb(0.19, 0.205, 0.15);
 const WEBBING: Rgb = Rgb(0.42, 0.40, 0.30);
-const GLOVE: Rgb = Rgb(0.40, 0.33, 0.22);
-const GLOVE_DARK: Rgb = Rgb(0.27, 0.22, 0.15);
+const GLOVE: Rgb = Rgb(0.68, 0.69, 0.64);
+const GLOVE_DARK: Rgb = Rgb(0.54, 0.55, 0.51);
 const BOOT: Rgb = Rgb(0.085, 0.08, 0.075);
 const SOLE: Rgb = Rgb(0.035, 0.035, 0.035);
 const RUBBER: Rgb = Rgb(0.055, 0.06, 0.065);
@@ -123,7 +123,7 @@ fn fist(m: &mut Mesh, k: &Grip, rx: f64, rf: f64, thumb: [V3; 3]) -> V3 {
         k.p(t.cos() * (rf + 0.010), u, t.sin() * (rx + 0.010))
     };
     loft(m, &[St(knuckles, 0.044, 0.013, GLOVE), St(ring(30.0, 0.0), 0.042, 0.011, GLOVE), St(ring(-20.0, -0.001), 0.041, 0.010, GLOVE), St(ring(-70.0, -0.003), 0.038, 0.0095, GLOVE), St(ring(-105.0, -0.005), 0.034, 0.008, GLOVE)], k.g, &OCT);
-    strap(m, &thumb, 0.0105, 0.0095, k.out, GLOVE.scale(1.06));
+    loft(m, &[St(thumb[0], 0.013, 0.012, GLOVE), St(thumb[1], 0.011, 0.010, GLOVE), St(thumb[2], 0.0085, 0.008, GLOVE)], k.out, &OCT);
     wrist
 }
 
@@ -270,9 +270,9 @@ fn pole(side: f64) -> V3 {
 
 /// Sidestick axes for the current deflection, and the right wrist.
 fn stick_grip(h: &Hands) -> (Grip, V3) {
-    // The grip leans aft 7 degrees; the real stick barely moves, so the
-    // deflection is exaggerated to a few degrees to stay readable.
-    let g = v3(h.roll * 0.07, 1.0, 0.13 + h.pitch * 0.08).norm();
+    // The grip leans aft 7 degrees. The real stick barely moves; here full
+    // deflection tilts it about 11 degrees so the hand visibly follows input.
+    let g = v3(h.roll * 0.20, 1.0, 0.13 + h.pitch * 0.20).norm();
     let k = Grip::new(STICK + g * 0.105, g, 1.0);
     (k, k.p(-0.072, -0.004, 0.019 + 0.009))
 }
@@ -280,14 +280,20 @@ fn stick_grip(h: &Hands) -> (Grip, V3) {
 fn sidestick(m: &mut Mesh, k: &Grip) {
     let base = STICK;
     loft(m, &[St(base, 0.042, 0.042, RUBBER), St(base + k.g * 0.02, 0.032, 0.034, RUBBER), St(base + k.g * 0.04, 0.017, 0.021, GRIP)], V3::X, &OCT);
+    // Grip, then the broad head standing above the hand, leaning forward.
     let p = |f: f64, u: f64| k.p(f, u - 0.105, 0.0);
-    loft(m, &[St(p(0.0, 0.035), 0.016, 0.020, GRIP), St(p(0.0, 0.07), 0.019, 0.025, GRIP), St(p(0.002, 0.135), 0.019, 0.026, GRIP), St(p(0.004, 0.158), 0.017, 0.024, GRIP), St(p(0.004, 0.17), 0.011, 0.016, GRIP)], V3::X, &OCT);
-    // Palm rest flaring outboard at the foot of the grip, trigger, trim hat
-    // and the red weapon release button.
+    loft(m, &[St(p(0.0, 0.035), 0.016, 0.020, GRIP), St(p(0.0, 0.07), 0.019, 0.025, GRIP), St(p(0.002, 0.13), 0.019, 0.025, GRIP), St(p(0.006, 0.15), 0.023, 0.031, GRIP), St(p(0.008, 0.172), 0.024, 0.032, GRIP), St(p(0.006, 0.186), 0.018, 0.025, GRIP), St(p(0.006, 0.192), 0.010, 0.014, GRIP)], V3::X, &OCT);
+    // Palm rest flaring outboard at the foot of the grip, the trigger under
+    // the head, and on top the red weapon release, the trim hat and the
+    // target management switch.
     m.block(&k.frame(-0.008, -0.048, 0.027), v3(0.036, 0.007, 0.02), GRIP.scale(1.25));
-    m.block(&k.frame(0.031, 0.035, 0.0), v3(0.006, 0.01, 0.007), GRIP.scale(0.7));
-    m.block(&k.frame(0.004, 0.068, 0.0), v3(0.006, 0.004, 0.006), METALC.scale(0.6));
-    m.block(&k.frame(0.016, 0.06, -0.011), v3(0.006, 0.005, 0.006), RED);
+    m.block(&k.frame(0.033, 0.04, 0.0), v3(0.006, 0.01, 0.007), GRIP.scale(0.7));
+    let top = |f: f64, s: f64| k.p(f, 0.082, s);
+    knob(m, top(0.016, -0.010), k.g, 0.0065, 0.008, RED);
+    knob(m, top(0.0, 0.003), k.g, 0.006, 0.009, METALC.scale(0.6));
+    m.block(&k.frame(0.0, 0.09, 0.003), v3(0.009, 0.002, 0.0025), METALC.scale(0.6));
+    m.block(&k.frame(0.0, 0.09, 0.003), v3(0.0025, 0.002, 0.009), METALC.scale(0.6));
+    knob(m, top(-0.012, 0.012), k.g, 0.006, 0.007, METALC.scale(0.45));
 }
 
 /// Short octagonal cylinder from `c` along `axis`: knobs and thumbwheels.
@@ -330,7 +336,7 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
 
     // The hand sits behind the grip as if pushing it, so the back of the
     // hand faces aft, up and outboard; the waist is near round under it.
-    let hand = Grip { o: k.p(0.0, -0.012, 0.0), ..k.rolled(55.0) };
+    let hand = Grip { o: k.p(0.0, -0.004, 0.0), ..k.rolled(65.0) };
     fist(m, &hand, 0.034, 0.034, [k.p(-0.030, -0.030, -0.022), k.p(-0.012, 0.0, -0.040), k.p(0.010, 0.020, -0.036)])
 }
 
@@ -342,7 +348,7 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
     let (rx, rf) = (0.019, 0.025);
-    let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.006, 0.032, -rx * 0.35), k.p(-rf * 0.35, 0.066, -rx * 0.3), k.p(rf * 0.45, 0.068, -rx * 0.15)]);
+    let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.006, 0.026, -rx * 0.5), k.p(-0.027, 0.058, -rx - 0.003), k.p(-0.02, 0.078, -0.015)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
     let wrist = throttle(m, h);
     arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.026, 0.036));
