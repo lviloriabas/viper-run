@@ -12,8 +12,8 @@ const GSUIT: Rgb = Rgb(0.245, 0.265, 0.185);
 const POCKET: Rgb = Rgb(0.355, 0.365, 0.26);
 const VEST: Rgb = Rgb(0.19, 0.205, 0.15);
 const WEBBING: Rgb = Rgb(0.42, 0.40, 0.30);
-const GLOVE: Rgb = Rgb(0.68, 0.69, 0.64);
-const GLOVE_DARK: Rgb = Rgb(0.54, 0.55, 0.51);
+const GLOVE: Rgb = Rgb(0.42, 0.49, 0.35);
+const GLOVE_DARK: Rgb = Rgb(0.32, 0.38, 0.27);
 const BOOT: Rgb = Rgb(0.085, 0.08, 0.075);
 const SOLE: Rgb = Rgb(0.035, 0.035, 0.035);
 const RUBBER: Rgb = Rgb(0.055, 0.06, 0.065);
@@ -101,25 +101,25 @@ impl Grip {
     }
 }
 
-/// Gloved fist closed round a grip of half extents `rx` across and `rf` fore
-/// and aft, centred on `k.o`: the back of the hand on the outboard side, the
-/// fingers closed together as one curled mitten round the front, and the
+/// Gloved hand closed round a grip of half extents `rx` across and `rf` fore
+/// and aft, centred on `k.o`: one mitten piece from the wrist along the
+/// outboard side and round the front, the palm heel behind the grip, and the
 /// thumb through the points `thumb`. Returns the wrist.
 fn fist(m: &mut Mesh, k: &Grip, rx: f64, rf: f64, thumb: [V3; 3]) -> V3 {
-    // Back of the hand, widening from the wrist to the knuckles, and the heel
-    // of the palm behind the grip.
     let wrist = k.p(-0.072, -0.004, rx + 0.009);
-    let knuckles = k.p(0.006, 0.0, rx + 0.016);
-    loft(m, &[St(wrist, 0.029, 0.018, GLOVE), St(k.p(-0.036, 0.0, rx + 0.015), 0.042, 0.016, GLOVE), St(knuckles, 0.045, 0.013, GLOVE)], k.g, &OCT);
-    m.block(&k.frame(-rf - 0.010, -0.006, 0.004), v3(0.012, 0.034, rx * 0.9), GLOVE_DARK);
-    // Fingers wrapped round the front to the inboard side, thinning to the tips.
-    let ring = |deg: f64, u: f64| {
+    let ring = |deg: f64, pad: f64| {
         let t = deg * DEG;
-        k.p(t.cos() * (rf + 0.010), u, t.sin() * (rx + 0.010))
+        k.p(t.cos() * (rf + pad), 0.0, t.sin() * (rx + pad))
     };
-    loft(m, &[St(knuckles, 0.044, 0.013, GLOVE), St(ring(30.0, 0.0), 0.042, 0.011, GLOVE), St(ring(-20.0, -0.001), 0.041, 0.010, GLOVE), St(ring(-70.0, -0.003), 0.038, 0.0095, GLOVE), St(ring(-105.0, -0.005), 0.034, 0.008, GLOVE)], k.g, &OCT);
-    loft(m, &[St(thumb[0], 0.013, 0.012, GLOVE), St(thumb[1], 0.011, 0.010, GLOVE), St(thumb[2], 0.0085, 0.008, GLOVE)], k.out, &OCT);
+    loft(m, &[St(wrist, 0.030, 0.018, GLOVE), St(k.p(-0.036, 0.0, rx + 0.016), 0.043, 0.016, GLOVE), St(k.p(0.004, 0.0, rx + 0.015), 0.046, 0.015, GLOVE), St(ring(35.0, 0.015), 0.046, 0.015, GLOVE), St(ring(-15.0, 0.014), 0.045, 0.014, GLOVE), St(ring(-65.0, 0.013), 0.043, 0.013, GLOVE), St(ring(-100.0, 0.012), 0.040, 0.012, GLOVE)], k.g, &OCT);
+    m.block(&k.frame(-rf - 0.010, -0.006, 0.004), v3(0.012, 0.034, rx * 0.9), GLOVE);
+    thumb_loft(m, thumb, k.out);
     wrist
+}
+
+/// Tapering gloved thumb through three points.
+fn thumb_loft(m: &mut Mesh, t: [V3; 3], side: V3) {
+    loft(m, &[St(t[0], 0.013, 0.012, GLOVE), St(t[1], 0.011, 0.010, GLOVE), St(t[2], 0.0085, 0.008, GLOVE)], side, &OCT);
 }
 
 /// Elbow of a two-bone arm from `shoulder` to `wrist`, bent toward `pole`.
@@ -299,14 +299,14 @@ fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
 
 /// F-16 throttle (TQS) after the grip diagram, cockpit photos and the 1:1
 /// Viper TQS replica: a lever on the outboard edge of the left console
-/// carries a grip that runs inboard, rising about 30 degrees, from a fat
+/// carries a grip that runs inboard, rising about 15 degrees, from a fat
 /// root bulb at the lever through a waist to the switch head at its inboard
-/// end. The left hand holds it level from above: back of the hand up,
-/// fingers round the front and under, thumb along the aft face to the
+/// end. The left hand lies level on top of it: back of the hand up, the
+/// mitten falling over the front, thumb along the aft face to the
 /// cursor control and speed brake. Returns the wrist.
 fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     let z = -3.64 - h.throttle * 0.20;
-    let a = v3(0.88, 0.45, -0.10).norm();
+    let a = v3(0.95, 0.26, -0.10).norm();
     // Grip frame: `g` along the grip toward the head, `fwd` forward, `out` up.
     let k = Grip::new(v3(-0.36, 0.79, z - 0.01), a, -1.0);
 
@@ -330,9 +330,17 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     m.block(&k.frame(-0.028, 0.040, 0.010), v3(0.003, 0.011, 0.004), grey);
     knob(m, k.p(-0.026, 0.056, -0.010), -k.fwd, 0.008, 0.010, grey);
 
-    let (rx, rf) = (0.026, 0.030);
-    let hand = Grip { o: k.p(0.0, -0.012, 0.0), ..k };
-    fist(m, &hand, rx, rf, [hand.p(-rf - 0.008, -0.020, -0.004), hand.p(-rf - 0.010, 0.020, -0.002), hand.p(-rf - 0.004, 0.052, 0.002)])
+    // The hand lies level on top of the grip, in line with the forearm
+    // (forward and a little inboard), one mitten piece from the wrist over
+    // the root bulb and down in front; the thumb runs along the aft face.
+    let hf = v3(0.45, 0.0, -0.89).norm();
+    let hs = V3::Y.cross(hf);
+    let c = k.p(-0.004, -0.024, 0.0) + V3::Y * 0.040;
+    let at = |s: f64, y: f64| c + hf * s + V3::Y * y;
+    let wrist = at(-0.075, -0.010);
+    loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.028, -0.006), 0.046, 0.013, GLOVE), St(at(0.044, -0.026), 0.044, 0.012, GLOVE), St(at(0.048, -0.048), 0.040, 0.011, GLOVE)], hs, &OCT);
+    thumb_loft(m, [k.p(-0.034, -0.044, 0.008), k.p(-0.037, -0.008, 0.002), k.p(-0.033, 0.026, 0.004)], k.out);
+    wrist
 }
 
 /// Legs on the pedals, both arms and the two controls under the hands.
@@ -346,6 +354,6 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.006, 0.026, -rx * 0.5), k.p(-0.027, 0.058, -rx - 0.003), k.p(-0.02, 0.078, -0.015)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
     let wrist = throttle(m, h);
-    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.024));
+    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.018));
     m.facet();
 }
