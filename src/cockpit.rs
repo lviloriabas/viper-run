@@ -131,21 +131,37 @@ fn panel_at(u: f64, y: f64, w: f64) -> Frame {
     Frame { o: pp(u, pv(y), w), x, y: panel().y, z: n }
 }
 
-/// Auxiliary consoles: below and outboard of the panel wings, folded
-/// further toward the pilot from the wing edge back to the tub wall, from
-/// knee height up toward the canopy sill. Returns the face's bottom-left
-/// corner, its axes across (to the right), up and out, and its width and
-/// height in metres.
+/// Auxiliary consoles: under the panel wings, ramps that carry each side
+/// console on forward and up at 45 degrees, keeping its 10 degree lean and
+/// toed 7.3 degrees toward the pilot (the FlightGear cockpit's offsets),
+/// from just under the console's front edge, outboard of the knees, to the
+/// wall. A shelf closes the gap from the top edge to the panel. Returns the
+/// face's bottom-left corner, its axes across (to the right), up and out,
+/// and its width and height in metres.
 fn aux_face(s: f64) -> (V3, V3, V3, V3, f64, f64) {
-    const AUX_CANT: f64 = 62.0 * DEG;
-    let p = panel();
-    let edge = pp(s * 0.47, pv(0.21), 0.0);
-    let d = p.x * (s * AUX_CANT.cos()) + p.z * AUX_CANT.sin();
-    let len = (consoles::WALL_X - edge.x.abs()) / AUX_CANT.cos();
-    let height = (0.73 - 0.21) / TILT.cos();
-    let across = if s > 0.0 { d } else { -d };
-    let corner = if s > 0.0 { edge } else { edge + d * len };
-    (corner, across, p.y, across.cross(p.y), len, height)
+    const PITCH: f64 = 45.0 * DEG;
+    const TOE: f64 = 7.3 * DEG;
+    // The inboard top edge stays under the sight line to the MFD bottoms.
+    const TOP: f64 = 0.68;
+    let t = -s * TOE;
+    let yaw = |p: V3| v3(p.x * t.cos() + p.z * t.sin(), p.y, -p.x * t.sin() + p.z * t.cos());
+    let out = yaw(v3(s * consoles::ROLL.cos(), consoles::ROLL.sin(), 0.0));
+    let up = yaw(v3(0.0, PITCH.sin(), -PITCH.cos()));
+    let up = (up - out * out.dot(up)).norm();
+    // Inboard bottom corner set forward so the outboard one meets the console's front edge.
+    let w = (consoles::WALL_X - HINGE) / out.x.abs();
+    let inboard = v3(s * HINGE, consoles::top_y(s * HINGE, consoles::FRONT_Z) - 0.03, consoles::FRONT_Z - out.z * w);
+    let h = (TOP - inboard.y) / up.y;
+    let across = out * s;
+    let corner = if s > 0.0 { inboard } else { inboard + out * w };
+    (corner, across, up, across.cross(up), w, h)
+}
+
+/// Point on the panel face (folding with the wings) at body `x` and height `y`.
+fn panel_point(x: f64, y: f64) -> V3 {
+    let ax = x.abs();
+    let u = if ax <= HINGE { ax } else { HINGE + (ax - HINGE) / CANT.cos() };
+    pp(x.signum() * u, pv(y), 0.0)
 }
 /// Panel outline in face coordinates, with points at the wing hinges.
 const OUTLINE: [(f64, f64); 16] = [
@@ -519,15 +535,17 @@ fn build_static(m: &mut Mesh) {
     m.block(&lamp(0.14).at(0.0, 0.0, -0.005), v3(0.024, 0.024, 0.01), GLARE.scale(1.4));
     screen(m, &lamp(0.14).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
 
-    // Left column: RWR scope, airspeed/Mach indicator, altimeter, accelerometer.
-    display(m, &panel_at(-0.40, 0.75, 0.0), 0.10, 0.10, 0.074, 0.074, R_RWR, false);
-    gauge(m, &panel_at(-0.40, 0.645, 0.0), 0.034, R_DIALS[0]);
-    gauge(m, &panel_at(-0.40, 0.555, 0.0), 0.034, R_DIALS[1]);
-    gauge(m, &panel_at(-0.40, 0.462, 0.0), 0.031, R_GMETER);
-    // Right column: standby ADI over RPM, FTIT, nozzle and oil.
-    gauge(m, &panel_at(0.40, 0.75, 0.0), 0.040, R_DIALS[2]);
-    for (i, y) in [0.66, 0.59, 0.52, 0.45].iter().enumerate() {
-        gauge(m, &panel_at(0.40, *y, 0.0), 0.029, R_DIALS[3 + i]);
+    // Standby row under the UFC, as on the F-16C: airspeed/Mach, ADI,
+    // altimeter and the accelerometer.
+    gauge(m, &panel_at(-0.105, 0.745, 0.0), 0.026, R_DIALS[0]);
+    gauge(m, &panel_at(-0.035, 0.745, 0.0), 0.026, R_DIALS[2]);
+    gauge(m, &panel_at(0.035, 0.745, 0.0), 0.026, R_DIALS[1]);
+    gauge(m, &panel_at(0.105, 0.745, 0.0), 0.026, R_GMETER);
+    // The wings end at the auxiliary console shelves: the RWR scope on the
+    // left, and RPM, FTIT, nozzle and oil on the right.
+    display(m, &panel_at(-0.40, 0.765, 0.0), 0.10, 0.10, 0.074, 0.074, R_RWR, false);
+    for (i, (u, y)) in [(0.35, 0.79), (0.412, 0.79), (0.35, 0.73), (0.412, 0.73)].iter().enumerate() {
+        gauge(m, &panel_at(*u, *y, 0.0), 0.022, R_DIALS[3 + i]);
     }
     plate(m, &panel_at(0.222, 0.88, 0.0), 0.13, 0.065, R_CAUTION);
     plate(m, &panel_at(-0.222, 0.88, 0.0), 0.13, 0.065, R_ARM);
@@ -536,8 +554,8 @@ fn build_static(m: &mut Mesh) {
     // warning prime lights and the fuel flow counter.
     gauge(m, &panel_at(-0.24, 0.535, 0.0), 0.036, R_VVI);
     gauge(m, &panel_at(0.24, 0.535, 0.0), 0.040, R_FUEL);
-    plate(m, &panel_at(-0.40, 0.845, 0.0), 0.088, 0.033, R_TWP);
-    plate(m, &panel_at(0.40, 0.84, 0.0), 0.070, 0.024, R_FFLOW);
+    plate(m, &panel_at(-0.40, 0.85, 0.0), 0.088, 0.033, R_TWP);
+    plate(m, &panel_at(0.38, 0.86, 0.0), 0.070, 0.024, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -554,38 +572,35 @@ fn build_static(m: &mut Mesh) {
     m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.22, -2.40), v3(-wx, 0.22, -2.40), WALL.scale(0.55));
     m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.42, -4.12), v3(-wx, 0.42, -4.12), WALL.scale(0.45));
     for &s in &[-1.0, 1.0] {
-        // The walls start behind the auxiliary consoles, which close the tub
-        // in front of them.
-        let (ao, ax, _, _, aw, _) = aux_face(s);
-        let aux_aft = ao.z.max((ao + ax * aw).z);
         let n = 12;
         for k in 0..n {
             let (z0, z1) = (mix(-4.30, -2.30, k as f64 / n as f64), mix(-4.30, -2.30, (k + 1) as f64 / n as f64));
             let (b0, b1) = (airframe::canopy_profile(z0).1, airframe::canopy_profile(z1).1);
             let (w0, w1) = (airframe::canopy_profile(z0).0.max(0.47), airframe::canopy_profile(z1).0.max(0.47));
-            if z1 > aux_aft + 0.02 {
-                let (z0, b0) = if z0 < aux_aft { (aux_aft, airframe::canopy_profile(aux_aft).1) } else { (z0, b0) };
-                m.quad(v3(s * wx, 0.22, z0), v3(s * wx, 0.22, z1), v3(s * wx, wy, z1), v3(s * wx, wy, z0), WALL);
-                m.quad(v3(s * wx, wy, z0), v3(s * wx, wy, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL.scale(1.08));
-            }
+            m.quad(v3(s * wx, 0.22, z0), v3(s * wx, 0.22, z1), v3(s * wx, wy, z1), v3(s * wx, wy, z0), WALL);
+            m.quad(v3(s * wx, wy, z0), v3(s * wx, wy, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL.scale(1.08));
             m.quad(v3(s * 0.47, b0 - 0.03, z0), v3(s * 0.47, b1 - 0.03, z1), v3(s * w1, b1, z1), v3(s * w0, b0, z0), WALL.scale(1.15));
             let d = (v3(s * w1, b1, z1) - v3(s * w0, b0, z0)).norm() * 0.012;
             pilot::bar(m, v3(s * w0, b0, z0) - d, v3(s * w1, b1, z1) + d, 0.024, 0.018, V3::Y, Rgb(0.12, 0.13, 0.14));
         }
-        // Auxiliary console from the wing edge to the wall: its face, a
-        // skirt down to the floor and a plain cheek up to the canopy sill.
+        // Auxiliary console: its face and rim, the shelf from its top edge
+        // to the panel, the inboard side down to the floor, and the panel
+        // carried out from the wing edge to the wall above the shelf. The
+        // leaning wall hides what reaches past it.
         let (o, x, y, n, w, h) = aux_face(s);
         let c = |a: f64, b: f64| o + x * a + y * b;
         m.quad(c(0.0, 0.0), c(w, 0.0), c(w, h), c(0.0, h), PANEL.scale(0.92));
         for (a, b) in [((0.0, 0.0), (w, 0.0)), ((w, 0.0), (w, h)), ((w, h), (0.0, h)), ((0.0, h), (0.0, 0.0))] {
             m.quad(c(a.0, a.1), c(b.0, b.1), c(b.0, b.1) - n * 0.02, c(a.0, a.1) - n * 0.02, PANEL.scale(0.7));
         }
+        let (bi, ti, to) = if s > 0.0 { (c(0.0, 0.0), c(0.0, h), c(w, h)) } else { (c(w, 0.0), c(w, h), c(0.0, h)) };
+        m.quad(ti, to, panel_point(to.x, to.y), panel_point(ti.x, ti.y), PANEL.scale(0.75));
         let floor = |p: V3| v3(p.x, 0.22, p.z);
-        m.quad(floor(c(0.0, 0.0)), floor(c(w, 0.0)), c(w, 0.0), c(0.0, 0.0), WALL.scale(0.6));
+        let low = panel_point(ti.x, 0.40);
+        m.polygon(&[bi, ti, panel_point(ti.x, ti.y), low, floor(low), floor(bi)], WALL.scale(0.6));
         let b = airframe::canopy_profile(-3.9).1 - 0.03;
-        let (inner, outer) = if s > 0.0 { (c(0.0, h), c(w, h)) } else { (c(w, h), c(0.0, h)) };
-        let sill = |p: V3| v3(s * 0.47, b, p.z);
-        m.polygon(&[inner, outer, v3(s * wx, wy.max(outer.y), outer.z), sill(outer), sill(inner), pp(s * 0.47, pv(b), 0.0)], PANEL.scale(0.8));
+        let (u0, u1) = (s * 0.47, s * (HINGE + (wx - HINGE) / CANT.cos()));
+        m.quad(pp(u0, pv(to.y), 0.0), pp(u1, pv(to.y), 0.0), pp(u1, pv(b), 0.0), pp(u0, pv(b), 0.0), PANEL.scale(0.8));
     }
     // On the walls leaning in above the consoles: the canopy jettison
     // T-handle and the map light on the left, the canopy switch box and the

@@ -110,15 +110,20 @@ palanca, el throttle y las consolas están 12 cm más adelante que en el modelo
 de FlightGear para que se vean como desde el asiento real. La inclinación por defecto es una sola constante,
 `LOOK_PITCH` en `src/main.rs`. Una prueba fija las posiciones de referencia
 de la palanca y el throttle. Los tercios exteriores del panel principal se pliegan 30 grados hacia el
-piloto sobre bisagras verticales junto a las MFD, y fuera de ellos las
-consolas auxiliares se pliegan 62 grados, del borde del panel a la pared,
-desde la altura de las rodillas: la izquierda con el tren (manija con luz
+piloto sobre bisagras verticales junto a las MFD. Bajo ellos, por fuera de las
+rodillas, las consolas auxiliares continúan cada consola lateral hacia
+delante en rampa a 45 grados, con su misma inclinación de 10 grados y giradas
+7,3 grados hacia el piloto, como en el modelo de FlightGear
+(`panels_mlu_left-aux-console` y `right-aux-console` en `cockpit.xml`) y en
+las fotos de cabina de Wikimedia Commons; una repisa las une al panel por
+debajo de la línea de vista a las MFD. La izquierda lleva el tren (manija con luz
 roja en tránsito, luces verdes NOSE LEFT RIGHT, ALT GEAR, gancho, ALT
 FLAPS, frenos, luces de aterrizaje, STORES CONFIG y lanzamiento de
-emergencia), la derecha con presión hidráulica A y B, combustible del EPU,
-oxígeno, altitud de cabina, reloj, selector de combustible y las luces de
+emergencia), y la derecha la presión hidráulica A y B, combustible del EPU,
+oxígeno, altitud de cabina, reloj y las luces de
 aviso (ENG FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY,
-OXY LOW). Bajo las MFD quedan el VVI y el indicador de combustible, sobre
+OXY LOW). Bajo el UFC van en fila el anemómetro, el ADI, el altímetro y el
+acelerómetro de reserva, como en el F-16C. Bajo las MFD quedan el VVI y el indicador de combustible, sobre
 las columnas el TWP y el caudal de combustible, y en las paredes la
 manija de eyección de la cúpula, la luz de mapas, el interruptor de la
 cúpula y el portamapas.
