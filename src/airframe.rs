@@ -280,6 +280,8 @@ pub struct Airframe {
     pub rudder: Mesh,
     /// Speedbrake petals: left upper, left lower, right upper, right lower.
     pub brakes: [Mesh; 4],
+    /// Left and right wingtip AIM-9s.
+    pub tips: [Mesh; 2],
     /// Paint texture, `SKIN_W` x `SKIN_H` RGBA.
     pub skin: Vec<u8>,
 }
@@ -643,21 +645,12 @@ pub fn build() -> Airframe {
         flame.quad(f(6.70, 0.21, a), f(6.70, 0.21, b), f(7.8, 0.04, b), f(7.8, 0.04, a), Rgb(1.0, 0.85, 0.55));
     }
 
-    for &side in &[-1.0, 1.0] {
-        // Wingtip launcher with an AIM-9.
+    let mut tips = [Mesh::new(), Mesh::new()];
+    for (i, &side) in [-1.0, 1.0].iter().enumerate() {
+        // Wingtip launcher; its AIM-9 is a separate part, gone once fired.
         let rail = crate::mesh::Frame { o: v3(side * 4.69, WING_Y, 2.55), x: V3::X, y: V3::Y, z: V3::Z };
         ext.block(&rail, v3(0.035, 0.045, 0.78), Rgb(0.46, 0.48, 0.50));
-        let (mx, my) = (side * 4.80, WING_Y - 0.03);
-        let white = Rgb(0.80, 0.80, 0.76);
-        ext.lathe(v3(mx, my, 0.55), V3::Z, &[(0.0, 0.0), (0.08, 0.04), (0.20, 0.064), (2.80, 0.064), (2.86, 0.05), (2.87, 0.0)], 6, white);
-        ext.lathe(v3(mx, my, 0.55), V3::Z, &[(-0.001, 0.0), (0.07, 0.036), (0.08, 0.0)], 6, Rgb(0.08, 0.09, 0.08));
-        for f in 0..4 {
-            let a = PI / 4.0 + f as f64 * PI / 2.0;
-            let d = v3(a.cos(), a.sin(), 0.0);
-            let c0 = v3(mx, my, 0.55) + d * 0.064;
-            ext.quad(c0 + V3::Z * 0.36, c0 + V3::Z * 0.62, c0 + d * 0.14 + V3::Z * 0.58, c0 + d * 0.14 + V3::Z * 0.48, white.scale(0.9));
-            ext.quad(c0 + V3::Z * 2.45, c0 + V3::Z * 2.84, c0 + d * 0.18 + V3::Z * 2.84, c0 + d * 0.18 + V3::Z * 2.62, white.scale(0.9));
-        }
+        aim9(&mut tips[i], v3(side * AIM9_TIP.x, AIM9_TIP.y, AIM9_TIP.z));
         // Two underwing pylons.
         for &(x, z0, z1) in &[(2.30, 0.70, 3.00), (3.50, 1.60, 3.10)] {
             let f = crate::mesh::Frame { o: v3(side * x, WING_Y - 0.13, (z0 + z1) * 0.5), x: V3::X, y: V3::Y, z: V3::Z };
@@ -718,10 +711,28 @@ pub fn build() -> Airframe {
         }
     }
 
-    for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()) {
+    for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()).chain(tips.iter_mut()) {
         mend_normals(m);
     }
-    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, skin: paint_skin() }
+    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, skin: paint_skin() }
+}
+
+/// Nose of the right wingtip AIM-9 (the left one mirrors it).
+pub const AIM9_TIP: V3 = v3(4.80, WING_Y - 0.03, 0.55);
+
+/// AIM-9 Sidewinder, 2.87 m long and 127 mm across, nose at `nose`, pointing
+/// forward: seeker dome, canards near the nose and rollerons on the tail fins.
+pub fn aim9(m: &mut Mesh, nose: V3) {
+    let white = Rgb(0.80, 0.80, 0.76);
+    m.lathe(nose, V3::Z, &[(0.0, 0.0), (0.08, 0.04), (0.20, 0.064), (2.80, 0.064), (2.86, 0.05), (2.87, 0.0)], 6, white);
+    m.lathe(nose, V3::Z, &[(-0.001, 0.0), (0.07, 0.036), (0.08, 0.0)], 6, Rgb(0.08, 0.09, 0.08));
+    for f in 0..4 {
+        let a = PI / 4.0 + f as f64 * PI / 2.0;
+        let d = v3(a.cos(), a.sin(), 0.0);
+        let c0 = nose + d * 0.064;
+        m.quad(c0 + V3::Z * 0.36, c0 + V3::Z * 0.62, c0 + d * 0.14 + V3::Z * 0.58, c0 + d * 0.14 + V3::Z * 0.48, white.scale(0.9));
+        m.quad(c0 + V3::Z * 2.45, c0 + V3::Z * 2.84, c0 + d * 0.18 + V3::Z * 2.84, c0 + d * 0.18 + V3::Z * 2.62, white.scale(0.9));
+    }
 }
 
 fn thin_plate(m: &mut Mesh, pts: &[V3], half: V3, col: Rgb) {
@@ -755,7 +766,7 @@ mod tests {
     fn measured_dimensions_match_the_f16() {
         let a = build();
         let mut all = Mesh::new();
-        for m in [&a.exterior, &a.stab[0], &a.stab[1], &a.rudder] {
+        for m in [&a.exterior, &a.stab[0], &a.stab[1], &a.rudder, &a.tips[0], &a.tips[1]] {
             all.v.extend_from_slice(&m.v);
         }
         let (lo, hi) = extent(&all);
@@ -786,7 +797,7 @@ mod tests {
     #[test]
     fn geometry_is_finite_with_unit_normals() {
         let a = build();
-        for m in [&a.exterior, &a.canopy, &a.crew, &a.flame, &a.rudder] {
+        for m in [&a.exterior, &a.canopy, &a.crew, &a.flame, &a.rudder, &a.tips[0], &a.tips[1]] {
             assert!(m.count() > 0);
             for c in m.v.chunks(STRIDE) {
                 assert!(c.iter().all(|x| x.is_finite()));

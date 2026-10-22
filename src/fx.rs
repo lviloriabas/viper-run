@@ -34,8 +34,8 @@ void main() {
     frag = vec4(mix(v_color.rgb, u_fog, fog), v_color.a * (1.0 - fog * 0.8));
 }"#;
 
-const MAX_PARTICLES: usize = 720;
-const MAX_VERTS: usize = 48000;
+const MAX_PARTICLES: usize = 1400;
+const MAX_VERTS: usize = 80000;
 const FLOATS: usize = 7;
 /// Nozzle exit in body axes (x right, y up, z aft), from the airframe.
 const NOZZLE: V3 = airframe::NOZZLE_EXIT;
@@ -102,6 +102,8 @@ struct Emitter {
     life: f64,
     water: bool,
     clock: f64,
+    /// Puff rate relative to a crashed jet.
+    rate: f64,
 }
 
 #[repr(C)]
@@ -123,6 +125,10 @@ pub struct Fx {
     ranges: [(usize, usize); 4],
     /// Condensation trails and fog, and the shock cones.
     pub vapor: Vapor,
+    /// Geometry other systems hand in each frame, in the same eye-relative
+    /// vertex format: smoke trails (blended) and tracers (glowing).
+    pub extra_blend: Vec<f32>,
+    pub extra_glow: Vec<f32>,
 }
 
 impl Fx {
@@ -136,7 +142,7 @@ impl Fx {
         let add = ctx.new_pipeline(&[BufferLayout::default()], &attrs, s, params(gfx::additive()));
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(MAX_VERTS * FLOATS));
         let bind = Bindings { vertex_buffers: vec![vb], index_buffer: gfx::sequential_ib(ctx, MAX_VERTS), images: vec![] };
-        Fx { parts: Vec::new(), emitters: Vec::new(), rnd: Lcg(7919), blend, add, bind, data: Vec::with_capacity(MAX_VERTS * FLOATS), order: Vec::new(), ranges: [(0, 0); 4], vapor: Vapor::default() }
+        Fx { parts: Vec::new(), emitters: Vec::new(), rnd: Lcg(7919), blend, add, bind, data: Vec::with_capacity(MAX_VERTS * FLOATS), order: Vec::new(), ranges: [(0, 0); 4], vapor: Vapor::default(), extra_blend: Vec::new(), extra_glow: Vec::new() }
     }
 
     pub fn clear(&mut self) {
@@ -244,7 +250,7 @@ impl Fx {
                 self.push(p);
             }
             self.debris(pos, carry, 10, scale, false);
-            self.emitters.push(Emitter { pos, age: 0.0, life: 4.0, water: true, clock: 0.0 });
+            self.emitters.push(Emitter { pos, age: 0.0, life: 4.0, water: true, clock: 0.0, rate: 1.0 });
             return;
         }
         for _ in 0..16 {
@@ -283,7 +289,7 @@ impl Fx {
             let grown = self.r(5.0, 8.0) * scale;
             self.smoke(pos + out * 2.0, vel, (2.0, grown), life, (0.52, 0.47), 0.55, 0.0);
         }
-        self.emitters.push(Emitter { pos, age: 0.0, life: 16.0, water: false, clock: 0.0 });
+        self.emitters.push(Emitter { pos, age: 0.0, life: 16.0, water: false, clock: 0.0, rate: 1.0 });
     }
 
     fn debris(&mut self, pos: V3, carry: V3, count: usize, scale: f64, burning: bool) {
@@ -324,6 +330,115 @@ impl Fx {
                 ..BASE
             };
             self.push(p);
+        }
+    }
+
+    fn sparks(&mut self, pos: V3, carry: V3, count: usize, speed: f64) {
+        for _ in 0..count {
+            let d = self.dir();
+            let p = Particle {
+                kind: Kind::Spark,
+                pos,
+                vel: carry + d * self.r(0.3, 1.0) * speed + V3::Y * self.r(2.0, 10.0),
+                life: self.r(0.3, 0.8),
+                size: (0.22, 0.12),
+                color: ([1.0, 0.92, 0.55], [1.0, 0.38, 0.08]),
+                drag: 0.6,
+                gravity: 9.8,
+                ..BASE
+            };
+            self.push(p);
+        }
+    }
+
+    /// A warhead, or a jet blowing up in the air: a fireball carried along
+    /// at the target's speed, sparks, burning fragments and a dark cloud.
+    pub fn airburst(&mut self, pos: V3, vel: V3, scale: f64) {
+        let carry = vel * 0.5;
+        for _ in 0..(6.0 + 10.0 * scale) as usize {
+            self.fire(pos, carry, scale, 0.0);
+        }
+        self.sparks(pos, carry, (14.0 + 26.0 * scale) as usize, 70.0 * scale + 20.0);
+        if scale > 0.5 {
+            self.debris(pos, carry, (8.0 + 12.0 * scale) as usize, scale * 0.8, true);
+        }
+        for _ in 0..(3.0 + 5.0 * scale) as usize {
+            let d = self.dir();
+            let (life, delay) = (self.r(2.5, 4.0), self.r(0.1, 0.4));
+            self.smoke(pos + d * 3.0 * scale, carry * 0.3 + d * 4.0, (2.0 * scale, 8.0 * scale), life, (0.12, 0.38), 0.7, delay);
+        }
+    }
+
+    /// A bomb or a target going up on the ground: fireball, fragments,
+    /// sparks and a ring of dust, then a fire burning for `burn` seconds.
+    pub fn blast(&mut self, pos: V3, scale: f64, burn: f64) {
+        for _ in 0..(10.0 + 10.0 * scale) as usize {
+            self.fire(pos + V3::Y * 2.0, V3::Y * 6.0 * scale, scale, 0.0);
+        }
+        self.debris(pos + V3::Y, V3::ZERO, (10.0 + 16.0 * scale) as usize, scale, scale > 0.9);
+        self.sparks(pos + V3::Y, V3::ZERO, (16.0 + 20.0 * scale) as usize, 60.0 * scale + 20.0);
+        for k in 0..12 {
+            let t = k as f64 / 12.0 * TAU + self.r(-0.2, 0.2);
+            let out = v3(t.cos(), 0.0, t.sin());
+            let vel = out * self.r(12.0, 24.0) * scale + V3::Y * self.r(1.0, 5.0);
+            let life = self.r(2.0, 3.2);
+            let grown = self.r(5.0, 8.0) * scale;
+            self.smoke(pos + out * 2.0, vel, (2.0, grown), life, (0.55, 0.49), 0.55, 0.0);
+        }
+        if burn > 0.0 {
+            self.emitters.push(Emitter { pos, age: 0.0, life: burn, water: false, clock: 0.0, rate: 0.25 + 0.2 * scale });
+        }
+    }
+
+    /// A countermeasure program: a white-hot flare thrown down and aft,
+    /// burning out as it falls, and a small grey puff of chaff.
+    pub fn decoy(&mut self, pos: V3, vel: V3) {
+        let d = self.dir();
+        let p = Particle {
+            kind: Kind::Fire,
+            pos,
+            vel: vel * 0.55 + V3::Y * -12.0 + d * 6.0,
+            life: self.r(2.2, 3.0),
+            size: (0.9, 0.5),
+            color: ([1.0, 1.0, 0.92], [1.0, 0.55, 0.2]),
+            drag: 0.8,
+            gravity: 9.8,
+            ..BASE
+        };
+        self.push(p);
+        let life = self.r(1.5, 2.2);
+        self.smoke(pos, vel * 0.3 + d * 3.0, (0.6, 3.5), life, (0.62, 0.58), 0.45, 0.0);
+    }
+
+    /// A 20 mm round arriving: sparks off a target, a puff of dirt off the
+    /// ground, a spout off the water.
+    pub fn impact(&mut self, pos: V3, what: Impact) {
+        match what {
+            Impact::Metal => {
+                self.sparks(pos, V3::ZERO, 5, 25.0);
+                let p = Particle { kind: Kind::Fire, pos, vel: V3::Y * 2.0, life: 0.2, size: (0.4, 1.2), color: ([1.0, 0.9, 0.6], [1.0, 0.5, 0.1]), ..BASE };
+                self.push(p);
+            }
+            Impact::Dirt => {
+                let vel = V3::Y * self.r(4.0, 9.0) + self.dir() * 2.0;
+                let (life, grown) = (self.r(0.9, 1.5), self.r(1.6, 2.6));
+                self.smoke(pos, vel, (0.5, grown), life, (0.50, 0.44), 0.7, 0.0);
+            }
+            Impact::Water => {
+                let d = self.dir();
+                let p = Particle {
+                    kind: Kind::Spray,
+                    pos,
+                    vel: V3::Y * self.r(9.0, 16.0) + v3(d.x, 0.0, d.z) * 1.5,
+                    life: self.r(0.8, 1.2),
+                    size: (0.4, self.r(1.0, 1.8)),
+                    color: ([0.94, 0.97, 1.0], [0.80, 0.86, 0.88]),
+                    alpha: 0.8,
+                    gravity: 9.8,
+                    ..BASE
+                };
+                self.push(p);
+            }
         }
     }
 
@@ -380,7 +495,7 @@ impl Fx {
             e.age += dt;
             e.clock += dt;
             let fade = e.age / e.life;
-            let rate = if e.water { mix(10.0, 2.0, fade) } else { mix(16.0, 3.0, fade) };
+            let rate = if e.water { mix(10.0, 2.0, fade) } else { mix(16.0, 3.0, fade) } * e.rate;
             while e.clock >= 1.0 / rate {
                 e.clock -= 1.0 / rate;
                 spawn.push((e.pos, e.water, fade));
@@ -438,6 +553,7 @@ impl Fx {
             }
         }
         self.vapor.emit(&mut self.data, aircraft, eye, time);
+        self.data.extend_from_slice(&self.extra_blend);
         let mut ends = [self.data.len() / FLOATS; 4];
         if let Some(a) = aircraft {
             plume_core(&mut self.data, a, eye, time);
@@ -451,6 +567,7 @@ impl Fx {
                 emit(&mut self.data, p, eye, sun);
             }
         }
+        self.data.extend_from_slice(&self.extra_glow);
         self.data.truncate(MAX_VERTS * FLOATS);
         ends[3] = self.data.len() / FLOATS;
         for k in 0..4 {
@@ -485,6 +602,14 @@ impl Fx {
             gfx::depth_writes(true);
         }
     }
+}
+
+/// What a round struck.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Impact {
+    Metal,
+    Dirt,
+    Water,
 }
 
 #[derive(Clone, Copy)]

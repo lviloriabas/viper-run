@@ -326,6 +326,7 @@ uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
 uniform vec2 u_flex;
+uniform vec4 u_paint;
 out vec3 v_rel;
 out vec3 v_normal;
 out vec3 v_color;
@@ -364,12 +365,20 @@ uniform vec3 u_fog;
 uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
+uniform vec4 u_paint;
 uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
     // From the seat, the cockpit model replaces the skin inside the canopy.
     if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
     vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
+    // Repaint: 1 lays two-tone splinter camouflage of the paint colour over
+    // the grey skin (aggressors); 2 tints everything (burnt wrecks).
+    if (u_paint.w > 1.5) base *= u_paint.rgb;
+    else if (u_paint.w > 0.5 && v_uv.x >= 0.0) {
+        float splinter = step(0.0, sin(v_local.x * 1.9 + v_local.z * 0.8) + sin(v_local.z * 1.3 - v_local.x * 0.5 + v_local.y * 2.0 + 1.0));
+        base *= u_paint.rgb * mix(1.15, 0.62, splinter);
+    }
     vec3 col = base * v_light;
     float a = u_alpha;
     if (u_alpha < 0.9 && u_glow < 0.5) {
@@ -500,6 +509,8 @@ pub struct AirU {
     pub cutout: f32,
     /// Static wingtip bend and the antisymmetric flutter deflection, m.
     pub flex: [f32; 2],
+    /// Repaint colour and mode (0 none, 1 aggressor camouflage, 2 tint).
+    pub paint: [f32; 4],
 }
 #[repr(C)]
 struct PostU {
@@ -713,7 +724,7 @@ impl World {
         let gate_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &gv)], index_buffer: gfx::immutable_ib(ctx, &gi), images: vec![] };
 
         // Exterior aircraft.
-        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float2)];
+        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float2), ("u_paint", Float4)];
         let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
@@ -776,8 +787,10 @@ impl World {
         }
     }
 
-    /// Renders sky, terrain, ocean, clouds, gates and the exterior into the current pass.
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera, aspect: f64, time: f64, mission: Option<&Mission>, aircraft: Option<&Aircraft>, cockpit: bool) {
+    /// Renders sky, terrain, ocean, clouds, gates, the combat props and the
+    /// exterior into the current pass.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera, aspect: f64, time: f64, mission: Option<&Mission>, aircraft: Option<&Aircraft>, cockpit: bool, props: Option<&dyn Props>) {
         let near = if cockpit { 0.25 } else { 0.7 };
         let proj = perspective(cam.fov, aspect, near, 80000.0);
         let vp = mat_mul(&proj, &cam.view());
@@ -867,12 +880,17 @@ impl World {
         ctx.apply_uniforms(UniformsSource::table(&CloudU { vp, eye, right: cam.right.f32(), up: cam.up.f32(), fog: FOG }));
         ctx.draw(0, (self.clouds.len() * 6) as i32, 1);
 
+        // Bandits, stores, missiles, bombs and ground targets: opaque, with the jet.
+        if let Some(p) = props {
+            p.draw(self, ctx, vp, cam);
+        }
+
         // Exterior aircraft, shared by both views; first person omits canopy and crew.
         self.fx.prepare(ctx, cam, time, aircraft);
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32] };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.air);
             self.draw_part(ctx, &self.exterior, &base, &model);
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
@@ -933,7 +951,7 @@ impl World {
         if let (Some(a), false) = (aircraft, cockpit) {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2] };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, &self.canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);
@@ -945,6 +963,45 @@ impl World {
         ctx.apply_bindings(&p.bind);
         ctx.apply_uniforms(UniformsSource::table(&AirU { model: *model, ..*u }));
         ctx.draw(0, p.count, 1);
+    }
+
+    /// Another F-16 in the scene (a bandit or a tumbling wreck), repainted.
+    /// Moving surfaces and the canopy are only drawn within 2.5 km; beyond
+    /// that the jet is a few pixels and the skin alone will do.
+    pub fn draw_jet(&self, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera, a: &Aircraft, paint: [f32; 4]) {
+        let ax = a.q.axes();
+        let rel = a.pos - cam.eye;
+        let model = basis(ax.right, ax.up, ax.back, rel);
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint };
+        ctx.apply_pipeline(&self.air);
+        self.draw_part(ctx, &self.exterior, &base, &model);
+        if rel.len() > 2500.0 {
+            return;
+        }
+        for (i, side) in [-1.0, 1.0].iter().enumerate() {
+            let angle = clamp(-a.surf_pitch * 25.0 * DEG + side * -a.surf_roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
+            let pivot = v3(side * airframe::STAB_PIVOT.x, airframe::STAB_PIVOT.y, airframe::STAB_PIVOT.z);
+            let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
+            self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
+        }
+        let (hinge, axis) = airframe::rudder_axis();
+        let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
+        self.draw_part(ctx, &self.rudder, &base, &mat_mul(&model, &local));
+        // Opaque canopy: the gold tint reads at a distance without the glass passes.
+        self.draw_part(ctx, &self.canopy, &base, &model);
+    }
+
+    /// A prop part (store, missile, bomb or ground target) at a model
+    /// transform relative to the eye.
+    pub fn draw_prop(&self, ctx: &mut dyn RenderingBackend, vp: M4, part: &Part, model: M4, paint: [f32; 4]) {
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint };
+        ctx.apply_pipeline(&self.air);
+        self.draw_part(ctx, part, &base, &model);
+    }
+
+    /// The painted skin texture, for props that share the aircraft shader.
+    pub fn skin(&self) -> TextureId {
+        self.exterior.bind.images[0]
     }
 
     fn update_clouds(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera) {
@@ -979,6 +1036,12 @@ impl World {
         ctx.apply_uniforms(UniformsSource::table(&VisionU { res: [w, h], src: [scene.w as f32, scene.h as f32], vision }));
         ctx.draw(0, 3, 1);
     }
+}
+
+/// Extra opaque geometry drawn in the world pass with the aircraft shader:
+/// bandits, stores, missiles, bombs and ground targets.
+pub trait Props {
+    fn draw(&self, world: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera);
 }
 
 /// Local transform rotating about a pivot point.

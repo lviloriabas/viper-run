@@ -9,6 +9,7 @@ pub const LEFT: u16 = 0x0004;
 pub const RIGHT: u16 = 0x0008;
 pub const START: u16 = 0x0010;
 pub const BACK: u16 = 0x0020;
+pub const LS: u16 = 0x0040;
 pub const RS: u16 = 0x0080;
 pub const LB: u16 = 0x0100;
 pub const RB: u16 = 0x0200;
@@ -178,7 +179,7 @@ mod backend {
     const JSIOCGBUTTONS: u64 = 0x8001_6a12;
     /// xpad button order: A B X Y LB RB BACK START GUIDE LS RS, then the
     /// d-pad on wireless receivers that report it as buttons.
-    const BUTTONS: [u16; 15] = [A, B, X, Y, LB, RB, BACK, START, 0, 0, RS, LEFT, RIGHT, UP, DOWN];
+    const BUTTONS: [u16; 15] = [A, B, X, Y, LB, RB, BACK, START, 0, LS, RS, LEFT, RIGHT, UP, DOWN];
 
     pub struct Device {
         fd: i32,

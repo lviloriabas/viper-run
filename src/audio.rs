@@ -17,6 +17,11 @@ pub struct Params {
     pub rumble_freq: f32,
     pub whine_gain: f32,
     pub whine_freq: f32,
+    /// M61A1 firing: 0 or the buzz level.
+    pub gun: f32,
+    /// Sidewinder seeker tone: a low growl searching, a high tone locked.
+    pub seeker_gain: f32,
+    pub seeker_freq: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +102,10 @@ struct Synth {
     rumble_lp: Biquad,
     tone_lp: Biquad,
     crash_lp: Biquad,
+    gun_lp: Biquad,
+    gun_phase: f32,
+    gun_env: f32,
+    seeker_phase: f32,
     rumble_phase: f32,
     whine_phase: f32,
     voices: Vec<Voice>,
@@ -116,6 +125,10 @@ impl Synth {
             rumble_lp: Biquad::default(),
             tone_lp: Biquad::default(),
             crash_lp: Biquad::default(),
+            gun_lp: Biquad::default(),
+            gun_phase: 0.0,
+            gun_env: 0.0,
+            seeker_phase: 0.0,
             rumble_phase: 0.0,
             whine_phase: 0.0,
             voices: Vec::new(),
@@ -147,10 +160,14 @@ impl Synth {
         glide(&mut c.rumble_freq, t.rumble_freq, k);
         glide(&mut c.whine_gain, t.whine_gain, k);
         glide(&mut c.whine_freq, t.whine_freq, k);
+        glide(&mut c.gun, t.gun, km);
+        glide(&mut c.seeker_gain, t.seeker_gain, km);
+        c.seeker_freq = t.seeker_freq;
         let p = self.cur;
         self.eng.set(true, p.eng_freq.max(40.0), 0.6);
         self.wind.set(false, p.wind_freq.max(60.0), 0.35);
         self.rumble_lp.set(true, 120.0, 0.7);
+        self.gun_lp.set(true, 1600.0, 0.9);
         for s in out.iter_mut() {
             let w0 = self.white();
             let w1 = self.white();
@@ -162,6 +179,22 @@ impl Synth {
             v += self.rumble_lp.run(self.rumble_phase * 2.0 - 1.0) * p.rumble_gain;
             self.whine_phase = (self.whine_phase + p.whine_freq / RATE as f32).fract();
             v += (self.whine_phase * TAU).sin() * p.whine_gain;
+            // The gun: a crack of noise for each of its 100 rounds a second,
+            // which the ear hears as one tearing buzz.
+            if p.gun > 0.001 {
+                self.gun_phase += 100.0 / RATE as f32;
+                if self.gun_phase >= 1.0 {
+                    self.gun_phase -= 1.0;
+                    self.gun_env = 1.0;
+                }
+                let crack = self.white() * self.gun_env + (self.gun_env - 0.5) * 0.8;
+                self.gun_env *= 0.9975;
+                v += self.gun_lp.run(crack) * p.gun;
+            }
+            if p.seeker_gain > 0.0005 {
+                self.seeker_phase = (self.seeker_phase + p.seeker_freq / RATE as f32).fract();
+                v += (self.seeker_phase * TAU).sin() * p.seeker_gain;
+            }
 
             let mut tones = 0.0;
             for voice in self.voices.iter_mut() {

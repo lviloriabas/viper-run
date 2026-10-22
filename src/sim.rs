@@ -306,6 +306,34 @@ const ROLL_GRADIENT: [(f64, f64); 5] = [(0.0, 0.0), (1.0, 0.0), (6.0, 20.0), (11
 /// typical fighter buffet boundary, lowest just below Mach 1.
 const BUFFET_ONSET: [(f64, f64); 6] = [(0.5, 1.2), (0.7, 0.95), (0.85, 0.7), (0.95, 0.5), (1.05, 0.6), (1.2, 0.9)];
 
+/// Value of `x` where a rising piecewise-linear curve reaches `y`.
+fn inverse(t: &[(f64, f64)], y: f64) -> f64 {
+    for w in t.windows(2) {
+        let ((x0, y0), (x1, y1)) = (w[0], w[1]);
+        if y <= y1 && y1 > y0 {
+            return x0 + (x1 - x0) * clamp((y - y0) / (y1 - y0), 0.0, 1.0);
+        }
+    }
+    t[t.len() - 1].0
+}
+
+/// Stick deflection (-1 push to 1 pull) that commands a load factor, by
+/// inverting the stick-force gradient: what a pilot's hand does for the AI.
+pub fn stick_for_g(n: f64) -> f64 {
+    let above = clamp(n - 1.0, NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
+    if above >= 0.0 {
+        inverse(&PITCH_GRADIENT[2..], above) / 40.0
+    } else {
+        -inverse(&[(1.75, 0.0), (7.25, 0.44), (17.65, 4.0)], -above) / 17.65
+    }
+}
+
+/// Lateral stick deflection (-1 left to 1 right) that commands a roll rate in deg/s.
+pub fn stick_for_roll(rate: f64) -> f64 {
+    let f = inverse(&ROLL_GRADIENT[1..], rate.abs().min(ROLL_RATE_MAX));
+    rate.signum() * f / 17.0
+}
+
 /// What the FLCS reads each frame: air data, rates, load factor, the
 /// gravity component along the body's up axis and the mass properties.
 struct Sensors {
@@ -418,6 +446,11 @@ pub struct Aircraft {
     pub brake: f64,
     pub fuel: f64,
     pub mass: f64,
+    /// What hangs on the stations, kg: STORES_MASS for the two wingtip
+    /// AIM-9s, set by the loadout and lightened as stores are released.
+    pub stores_mass: f64,
+    /// Zero-lift drag coefficient of the stores beyond that clean baseline.
+    pub stores_drag: f64,
     pub speed: f64,
     pub airspeed_kt: f64,
     pub tas_kt: f64,
@@ -495,6 +528,8 @@ impl Aircraft {
             brake: 0.0,
             fuel: FUEL_MAX,
             mass,
+            stores_mass: STORES_MASS,
+            stores_drag: 0.0,
             speed,
             airspeed_kt: 0.0,
             tas_kt: 0.0,
@@ -668,6 +703,9 @@ impl Aircraft {
         let keas = speed * (atm.rho / RHO0).sqrt() * KT;
         self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet, self.wing_stores);
         c.cl += self.structure.roll();
+        // Bombs and missiles on the pylons drag along the wind.
+        c.cx -= self.stores_drag * alpha.cos();
+        c.cz -= self.stores_drag * alpha.sin();
         let qs = qbar * aero::WING_AREA;
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
@@ -753,7 +791,7 @@ impl Aircraft {
         let tsfc = mix(0.661, 1.9, ab);
         self.fuel_flow = if fueled { (lbf * tsfc / 3600.0 * 0.4536).max(0.12) } else { 0.0 };
         self.fuel = (self.fuel - self.fuel_flow * dt).max(0.0);
-        self.mass = EMPTY_MASS + STORES_MASS + self.fuel;
+        self.mass = EMPTY_MASS + self.stores_mass + self.fuel;
 
         let core = (self.power / 50.0).min(1.0);
         self.engine_spool = core;
