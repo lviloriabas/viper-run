@@ -7,7 +7,9 @@ use crate::canvas::{rgba, Align, Canvas, Col};
 use crate::gfx;
 use crate::math::*;
 use crate::mesh::{rounded_rect, Frame, Mesh, Rgb};
+use crate::combat::{Combat, Mode};
 use crate::sim::{Aircraft, Mission};
+use crate::symbology;
 use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
@@ -293,9 +295,9 @@ impl Cockpit {
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
-    pub fn update_atlas(&mut self, ctx: &mut dyn RenderingBackend, cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64) {
+    pub fn update_atlas(&mut self, ctx: &mut dyn RenderingBackend, cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64, c: &Combat) {
         ctx.begin_pass(Some(self.atlas_pass), PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
-        draw_instruments(cv, a, m, pages, time);
+        draw_instruments(cv, a, m, pages, time, c);
         cv.flush(ctx, A as f32, A as f32);
         ctx.end_render_pass();
         ctx.texture_generate_mipmaps(self.atlas.color);
@@ -713,7 +715,7 @@ fn osb_labels(cv: &mut Canvas, r: R, top: [&str; 5], bottom: [&str; 5]) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Mission, time: f64) {
+fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Mission, time: f64, c: &Combat) {
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x01, 0x07, 0x0a, 1.0));
     let (x0, y0, w, h) = (r.x, r.y, r.w, r.h);
     osb_labels(cv, r, ["OVRD", "", page.name(), "", "CNTL"], ["SWAP", "FCR", "HSD", "ENG", "AIR"]);
@@ -759,7 +761,8 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
         }
         Page::Fcr => {
             cv.text("CRM  RWS  NORM", x0 + w / 2.0, y0 + 34.0, 1.0, GREEN, Align::Center);
-            cv.text("40", x0 + 10.0, y0 + 60.0, 1.0, GREEN, Align::Left);
+            let nm = symbology::fcr_scale(a, c);
+            cv.text(&format!("{nm}"), x0 + 10.0, y0 + 60.0, 1.0, GREEN, Align::Left);
             let (l, rr, t, b) = (x0 + 28.0, x0 + w - 28.0, y0 + 50.0, y0 + h - 50.0);
             for i in 1..4 {
                 let yy = t + (b - t) * i as f32 / 4.0;
@@ -770,7 +773,9 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
             let sweep = ((time * 0.24).fract() as f32).abs();
             let sx = l + 4.0 + sweep * (rr - l - 8.0);
             cv.line(sx, t + 2.0, sx, b - 2.0, 2.0, rgba(0x39, 0x79, 0x57, 1.0));
-            cv.text("NO TRACK", x0 + w / 2.0, (t + b) / 2.0, 2.0, rgba(0x80, 0xb7, 0x91, 1.0), Align::Center);
+            if !symbology::fcr(cv, [l, t, rr, b], a, c, nm) {
+                cv.text("NO TRACK", x0 + w / 2.0, (t + b) / 2.0, 2.0, rgba(0x80, 0xb7, 0x91, 1.0), Align::Center);
+            }
             cv.text(&format!("{} C", pad(ad.kcas, 3)), l + 4.0, b + 14.0, 1.0, GREEN, Align::Left);
             cv.text(&format!("{} ALT", pad(ad.baro_ft / 100.0, 3)), rr - 4.0, b + 14.0, 1.0, GREEN, Align::Right);
         }
@@ -814,11 +819,11 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
     }
 }
 
-fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64) {
+fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64, c: &Combat) {
     let ad = AirData::of(a);
-    mfd(cv, R_MFD_L, pages[0], a, &ad, m, time);
-    mfd(cv, R_MFD_R, pages[1], a, &ad, m, time);
-    mfd(cv, R_CPD, Page::Hsd, a, &ad, m, time);
+    mfd(cv, R_MFD_L, pages[0], a, &ad, m, time, c);
+    mfd(cv, R_MFD_R, pages[1], a, &ad, m, time, c);
+    mfd(cv, R_CPD, Page::Hsd, a, &ad, m, time, c);
 
     // DED.
     let r = R_DED;
@@ -848,7 +853,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         }
     }
 
-    // RWR: no emitters on a navigation sortie.
+    // RWR: the threats of the fight, if any.
     let r = R_RWR;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x02, 0x08, 0x05, 1.0));
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
@@ -858,7 +863,9 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     cv.line(cx - 56.0, cy, cx + 56.0, cy, 1.0, rgba(0x46, 0x6d, 0x50, 1.0));
     cv.line(cx, cy - 56.0, cx, cy + 56.0, 1.0, rgba(0x46, 0x6d, 0x50, 1.0));
     cv.text("N", cx, r.y + 9.0, 1.0, GREEN, Align::Center);
-    cv.text("NO EMITTER", cx, cy + 22.0, 1.0, GREEN, Align::Center);
+    if !symbology::rwr(cv, cx, cy, a, c, time) {
+        cv.text("NO EMITTER", cx, cy + 22.0, 1.0, GREEN, Align::Center);
+    }
     cv.text("RWR", cx, r.y + r.h - 9.0, 1.0, WHITE, Align::Center);
 
     // Master caution lamp.
@@ -893,10 +900,12 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let r = R_ARM;
     hardware(cv, r, "");
     cv.text("MASTER ARM", r.x + 64.0, r.y + 22.0, 1.0, WHITE, Align::Center);
+    // The switch sits at SAFE in NAV and at ARM with a weapon selected.
+    let switch = if c.mode == Mode::Nav { 2 } else { 0 };
     for (i, s) in ["ARM", "SIM", "SAFE"].iter().enumerate() {
         let y = r.y + 46.0 + i as f32 * 22.0;
         cv.text(s, r.x + 80.0, y, 1.0, rgba(0xb6, 0xc6, 0xb5, 1.0), Align::Left);
-        if i == 2 {
+        if i == switch {
             cv.line(r.x + 38.0, y, r.x + 64.0, y, 4.0, WHITE);
         }
     }
@@ -1008,7 +1017,7 @@ impl BodyProjector {
 /// NAV HUD symbology. Every symbol is a world direction projected with the
 /// same camera as the scene, so the ladder and flight-path marker stay on the
 /// real horizon, and the whole display is clipped to the combiner glass.
-pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: &BodyProjector) {
+pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: &BodyProjector, c: &Combat) {
     let glass: Vec<[f32; 2]> = HUD_GLASS.iter().filter_map(|&p| body.project(p)).collect();
     if glass.len() < 4 {
         return;
@@ -1069,7 +1078,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     ht(cv, &format!("M {:.2}", ad.mach), -half, 34.0, small, Align::Left);
     ht(cv, &format!("AOA {:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
     ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 58.0, small, Align::Left);
-    ht(cv, "NAV", -half, 70.0, small, Align::Left);
+    ht(cv, c.mode.label(), -half, 70.0, small, Align::Left);
     ht(cv, &format!("R {}", pad(ad.radar_ft, 5)), half, 34.0, small, Align::Right);
     ht(cv, &format!("VV {:+}", (ad.vs_fpm / 10.0).round() as i64 * 10), half, 46.0, small, Align::Right);
     let gate = m.current_gate();
@@ -1180,6 +1189,8 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     if let Some(wn) = warning {
         ht(cv, wn, 0.0, 22.0, big, Align::Center);
     }
+    let pen = symbology::Pen { dir: &world_dir, at: &at, eye: cam.eye, big, small, lw };
+    symbology::hud(cv, &pen, a, c, c.clock);
     cv.set_clip(None);
 }
 

@@ -86,13 +86,6 @@ pub enum Store {
 }
 
 impl Store {
-    pub fn name(self) -> &'static str {
-        match self {
-            Store::Aim9 => "AIM-9M",
-            Store::Aim120 => "AIM-120C",
-            Store::Mk82 => "MK-82",
-        }
-    }
     pub fn mass(self) -> f64 {
         match self {
             Store::Aim9 => AIM9M.mass,

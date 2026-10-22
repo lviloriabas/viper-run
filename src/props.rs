@@ -1,0 +1,293 @@
+//! What the fight looks and sounds like: the stores on the player's jet, the
+//! bandits in aggressor paint and their falling wrecks, missiles and bombs in
+//! flight and the ground targets, all drawn with the aircraft shader; smoke
+//! trails and tracers handed to the effects as extra geometry; and the
+//! combat events turned into explosions, sounds and messages.
+use crate::airframe::{self, Airframe};
+use crate::audio::{Audio, Wave};
+use crate::combat::{Combat, Event, Smoke, Store};
+use crate::fx::{Fx, Impact};
+use crate::math::*;
+use crate::mesh::{Mesh, Rgb};
+use crate::sim::Aircraft;
+use crate::targets::{self, Kind, KINDS};
+use crate::weapons::{Who, AIM120C};
+use crate::world::{self, Camera, Part, Props, World};
+use miniquad::*;
+
+/// Aggressor paint: desert sand with a brown splinter.
+const AGGRESSOR: [f32; 4] = [0.86, 0.70, 0.48, 1.0];
+/// Burnt and blackened.
+const BURNT: [f32; 4] = [0.20, 0.18, 0.16, 2.0];
+const NONE: [f32; 4] = [0.0; 4];
+
+pub struct Models {
+    tips: [Part; 2],
+    aim9: Part,
+    aim120: Part,
+    mk82: Part,
+    sites: Vec<Part>,
+    ruin: Part,
+}
+
+/// AIM-120 AMRAAM, 3.66 m and 178 mm, nose at the origin pointing forward:
+/// radome, mid-body wings and tail fins.
+fn aim120() -> Mesh {
+    let mut m = Mesh::new();
+    let white = Rgb(0.84, 0.84, 0.80);
+    m.lathe(V3::ZERO, V3::Z, &[(0.0, 0.0), (0.12, 0.05), (0.42, 0.089), (3.62, 0.089), (3.66, 0.0)], 6, white);
+    m.lathe(V3::ZERO, V3::Z, &[(-0.001, 0.0), (0.10, 0.045), (0.11, 0.0)], 6, Rgb(0.55, 0.53, 0.48));
+    for f in 0..4 {
+        let a = PI / 4.0 + f as f64 * PI / 2.0;
+        let d = v3(a.cos(), a.sin(), 0.0);
+        let c = d * 0.089;
+        m.quad(c + V3::Z * 1.30, c + V3::Z * 1.75, c + d * 0.20 + V3::Z * 1.75, c + d * 0.20 + V3::Z * 1.62, white.scale(0.9));
+        m.quad(c + V3::Z * 3.20, c + V3::Z * 3.64, c + d * 0.22 + V3::Z * 3.64, c + d * 0.22 + V3::Z * 3.50, white.scale(0.9));
+    }
+    m
+}
+
+/// Mk-82 low-drag bomb, 2.21 m and 273 mm, centred on the origin, nose
+/// forward: olive body with a yellow nose band and conical tail fins.
+fn mk82() -> Mesh {
+    let mut m = Mesh::new();
+    let olive = Rgb(0.30, 0.34, 0.22);
+    m.lathe(v3(0.0, 0.0, -1.10), V3::Z, &[(0.0, 0.0), (0.08, 0.05), (0.45, 0.125), (0.75, 0.137), (1.45, 0.137), (1.80, 0.10), (1.90, 0.0)], 8, olive);
+    m.lathe(v3(0.0, 0.0, -1.10), V3::Z, &[(0.30, 0.118), (0.38, 0.126)], 8, Rgb(0.85, 0.72, 0.15));
+    for f in 0..4 {
+        let a = PI / 4.0 + f as f64 * PI / 2.0;
+        let d = v3(a.cos(), a.sin(), 0.0);
+        m.quad(d * 0.09 + V3::Z * 0.62, d * 0.09 + V3::Z * 1.11, d * 0.19 + V3::Z * 1.11, d * 0.17 + V3::Z * 0.70, olive.scale(0.85));
+    }
+    m
+}
+
+impl Models {
+    pub fn new(ctx: &mut dyn RenderingBackend, frame: &Airframe, world: &World) -> Models {
+        let skin = world.skin();
+        let mut part = |m: &Mesh| {
+            let mut p = world::part(ctx, m);
+            p.bind.images = vec![skin];
+            p
+        };
+        let mut a9 = Mesh::new();
+        airframe::aim9(&mut a9, V3::ZERO);
+        let sites = KINDS.iter().map(|&k| part(&targets::mesh(k))).collect();
+        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()) }
+    }
+}
+
+/// The combat scene for one frame, drawn inside the world pass.
+pub struct Scene<'a> {
+    pub models: &'a Models,
+    pub combat: &'a Combat,
+    /// The player's jet, while it is drawn.
+    pub player: Option<&'a Aircraft>,
+}
+
+/// Model transform of a body moving along `dir` at `pos`, relative to the eye.
+fn along(dir: V3, pos: V3, eye: V3) -> M4 {
+    let ax = Quat::from_forward_up(dir, V3::Y).axes();
+    basis(ax.right, ax.up, ax.back, pos - eye)
+}
+
+fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
+    let ax = a.q.axes();
+    basis(ax.right, ax.up, ax.back, a.pos + a.q.rotate(at) - eye)
+}
+
+impl Props for Scene<'_> {
+    fn draw(&self, w: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera) {
+        let (m, c, eye) = (self.models, self.combat, cam.eye);
+        if let Some(a) = self.player {
+            for (i, st) in c.loadout.stations.iter().enumerate().filter(|(_, s)| s.loaded) {
+                if st.tip {
+                    w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, V3::ZERO, eye), NONE);
+                    continue;
+                }
+                let part = match st.store {
+                    Store::Aim9 => &m.aim9,
+                    Store::Aim120 => &m.aim120,
+                    Store::Mk82 => &m.mk82,
+                };
+                w.draw_prop(ctx, vp, part, jet_model(a, st.at, eye), NONE);
+            }
+        }
+        for b in c.bandits.iter().filter(|b| b.alive) {
+            if (b.jet.pos - eye).len() > 30000.0 {
+                continue;
+            }
+            w.draw_jet(ctx, vp, cam, &b.jet, AGGRESSOR);
+            for tip in m.tips.iter().take(b.missiles as usize) {
+                w.draw_prop(ctx, vp, tip, jet_model(&b.jet, V3::ZERO, eye), NONE);
+            }
+        }
+        for wr in &c.wrecks {
+            w.draw_jet(ctx, vp, cam, &wr.jet, BURNT);
+        }
+        for ms in &c.missiles {
+            if (ms.pos - eye).len() < 9000.0 && ms.vel.len() > 1.0 {
+                let part = if ms.spec.name == AIM120C.name { &m.aim120 } else { &m.aim9 };
+                let mut model = along(ms.vel, ms.pos, eye);
+                // The SA-6 is drawn as the Sidewinder shape at twice the size.
+                let scale = if ms.spec.name == AIM120C.name { 1.0 } else { (ms.spec.length / 2.87) as f32 };
+                for v in model.iter_mut().take(11) {
+                    *v *= scale;
+                }
+                w.draw_prop(ctx, vp, part, model, NONE);
+            }
+        }
+        for b in &c.bombs {
+            if (b.pos - eye).len() < 8000.0 {
+                w.draw_prop(ctx, vp, &m.mk82, along(b.vel, b.pos, eye), NONE);
+            }
+        }
+        for s in &c.sites {
+            if (s.pos - eye).len() > 16000.0 {
+                continue;
+            }
+            let rot = s.rot();
+            let (r, u, b) = (rot.rotate(V3::X), rot.rotate(V3::Y), rot.rotate(V3::Z));
+            let k = KINDS.iter().position(|&k| k == s.kind).unwrap_or(0);
+            match (s.dead, s.kind) {
+                (false, _) => w.draw_prop(ctx, vp, &m.sites[k], basis(r, u, b, s.pos - eye), NONE),
+                (true, Kind::Bridge) => w.draw_prop(ctx, vp, &m.ruin, basis(r, u, b, s.pos - eye), NONE),
+                // A burnt-out hulk, slumped on its wheels or tracks.
+                (true, _) => w.draw_prop(ctx, vp, &m.sites[k], basis(r, u * 0.55, b, s.pos - eye), BURNT),
+            }
+        }
+    }
+}
+
+fn vert(data: &mut Vec<f32>, p: V3, c: [f64; 3], a: f64) {
+    data.extend_from_slice(&[p.x as f32, p.y as f32, p.z as f32, c[0] as f32, c[1] as f32, c[2] as f32, a.clamp(0.0, 1.0) as f32]);
+}
+
+/// Camera-facing strip from `p0` to `p1`, `w0` and `w1` wide.
+#[allow(clippy::too_many_arguments)]
+fn strip(data: &mut Vec<f32>, eye: V3, p0: V3, p1: V3, w0: f64, w1: f64, c: [f64; 3], a0: f64, a1: f64) {
+    let (q0, q1) = (p0 - eye, p1 - eye);
+    let side = (q1 - q0).cross(q0).norm();
+    if side.len() < 0.5 {
+        return;
+    }
+    let (s0, s1) = (side * (w0 * 0.5), side * (w1 * 0.5));
+    for (p, a) in [(q0 - s0, a0), (q0 + s0, a0), (q1 + s1, a1), (q0 - s0, a0), (q1 + s1, a1), (q1 - s1, a1)] {
+        vert(data, p, c, a);
+    }
+}
+
+/// Hands this frame's smoke trails, tracers and motor flames to the effects.
+pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera) {
+    let eye = cam.eye;
+    fx.extra_blend.clear();
+    fx.extra_glow.clear();
+    let now = c.clock;
+    let sun = crate::world::sun_dir();
+    for t in &c.trails {
+        let (col, alpha, w0, w1) = match t.kind {
+            Smoke::Motor => ([0.88, 0.88, 0.86], 0.55, 0.5, 5.0),
+            Smoke::Damage => ([0.40, 0.40, 0.41], 0.6, 1.2, 7.0),
+            Smoke::Fire => ([0.10, 0.09, 0.08], 0.75, 2.0, 10.0),
+        };
+        let life = t.kind.life();
+        let pts: Vec<(V3, f64)> = t.points.iter().copied().collect();
+        for s in pts.windows(2) {
+            let ((p0, t0), (p1, t1)) = (s[0], s[1]);
+            if (p0 - eye).len() > 14000.0 || (p1 - p0).len() > 80.0 {
+                continue;
+            }
+            let (g0, g1) = (((now - t0) / life).clamp(0.0, 1.0), ((now - t1) / life).clamp(0.0, 1.0));
+            // Lit a little on the sunny side, like the particle smoke.
+            let lit = 0.85 + 0.15 * (p1 - p0).norm().cross(V3::Y).dot(sun).abs();
+            let shade = [col[0] * lit, col[1] * lit, col[2] * lit];
+            strip(&mut fx.extra_blend, eye, p0, p1, mix(w0, w1, g0.sqrt()), mix(w0, w1, g1.sqrt()), shade, alpha * (1.0 - g0).powf(1.3), alpha * (1.0 - g1).powf(1.3));
+        }
+    }
+    for r in c.rounds.iter().filter(|r| r.tracer) {
+        let d = (r.pos - eye).len();
+        if d > 6000.0 || r.age < 0.02 {
+            continue;
+        }
+        let col = if matches!(r.from, Who::Ground(_)) { [1.0, 0.42, 0.22] } else { [1.0, 0.86, 0.45] };
+        let tail = r.pos - r.vel * 0.028;
+        let w = (d * 0.0016).max(0.25);
+        strip(&mut fx.extra_glow, eye, tail, r.pos, w * 0.4, w, col, 0.2, 1.0);
+    }
+    for m in c.missiles.iter().filter(|m| m.burning()) {
+        let back = m.vel.norm() * -1.0;
+        let tail = m.pos + back * m.spec.length;
+        let d = (tail - eye).len();
+        let w = (d * 0.002).max(0.5) * if m.spec.length > 4.0 { 2.0 } else { 1.0 };
+        strip(&mut fx.extra_glow, eye, tail, tail + back * (w * 3.0), w, w * 0.3, [1.0, 0.75, 0.40], 1.0, 0.1);
+    }
+}
+
+/// What the game loop should show after the fight's events.
+#[derive(Default)]
+pub struct Feedback {
+    pub toast: Option<String>,
+    pub flash: Option<[u8; 3]>,
+    pub kick: f64,
+}
+
+/// Turns the combat events into explosions, sounds and messages. `ear` is
+/// where the listener is; distant blasts are quieter and arrive later.
+pub fn present(c: &mut Combat, fx: &mut Fx, audio: &Audio, ear: V3, muted: bool) -> Feedback {
+    let mut out = Feedback::default();
+    let volume = |p: V3| clamp(1.0 - (p - ear).len() / 7000.0, 0.0, 1.0) as f32;
+    let delay = |p: V3| ((p - ear).len() / 343.0).min(4.0) as f32;
+    for e in c.events.drain(..) {
+        match e {
+            Event::Launch { pos, from, name } => {
+                if !muted {
+                    audio.burst(1.4, 1.6 * volume(pos).max(0.15), 3200.0, 400.0, 0.0);
+                }
+                if from == Who::Player {
+                    out.toast = Some(name.to_string());
+                } else {
+                    out.toast = Some(name.to_string());
+                    if !muted {
+                        for k in 0..4 {
+                            audio.tone(1400.0, 0.08, 0.04, Wave::Square, k as f32 * 0.16);
+                        }
+                    }
+                }
+            }
+            Event::Release { pos } => {
+                if !muted {
+                    audio.burst(0.18, volume(pos), 600.0, 120.0, 0.0);
+                }
+            }
+            Event::Hit { pos } => fx.impact(pos, Impact::Metal),
+            Event::Dirt { pos } => fx.impact(pos, Impact::Dirt),
+            Event::Splash { pos } => fx.impact(pos, Impact::Water),
+            Event::Airburst { pos, vel, scale } => {
+                fx.airburst(pos, vel, scale);
+                if !muted {
+                    audio.burst(1.2, 3.0 * volume(pos) * scale as f32 + 0.05, 900.0, 60.0, delay(pos));
+                }
+            }
+            Event::Blast { pos, scale, burn } => {
+                fx.blast(pos, scale, burn);
+                if !muted {
+                    audio.burst(1.6, 4.0 * volume(pos) * scale as f32 + 0.05, 500.0, 35.0, delay(pos));
+                }
+            }
+            Event::Dud { pos } => {
+                fx.impact(pos, Impact::Dirt);
+                out.toast = Some("DUD // FUZE NOT ARMED".to_string());
+            }
+            Event::Kill { text } => out.toast = Some(text),
+            Event::Lock { text } => out.toast = Some(text),
+            Event::PlayerHit { damage } => {
+                out.kick = out.kick.max(clamp(damage / 40.0, 0.15, 1.0));
+                out.flash = Some([255, 90, 50]);
+                if !muted {
+                    audio.burst(0.3, 2.5, 1800.0, 200.0, 0.0);
+                }
+            }
+        }
+    }
+    out
+}

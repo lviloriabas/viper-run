@@ -173,10 +173,6 @@ impl GunSight {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.shots.clear();
-    }
-
     /// Where the stream is at a slant range from the gun, if it reaches it.
     pub fn at_range(&self, gun: V3, range: f64) -> Option<V3> {
         let mut prev: Option<(V3, f64)> = None;

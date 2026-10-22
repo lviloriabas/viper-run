@@ -3,6 +3,7 @@
 use crate::air::AirData;
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::cockpit::pad;
+use crate::combat::MissionKind;
 use crate::math::*;
 use crate::settings::{Best, PitchSource, Settings};
 use crate::sim::{Aircraft, Mission};
@@ -37,6 +38,8 @@ pub enum Action {
     Invert,
     Fullscreen,
     Reset,
+    /// Choose the mission on the start screen.
+    Pick(MissionKind),
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +74,8 @@ pub enum Outcome {
     Win,
     Crash,
     Timeout,
+    /// Destroyed in the air by a missile or gunfire; the pilot ejects.
+    ShotDown,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -80,6 +85,18 @@ pub struct RunResult {
     pub gates: usize,
     pub score: f64,
     pub impact: f64,
+    pub mission: MissionKind,
+    /// Bandits killed or primary targets destroyed, of the total.
+    pub done: usize,
+    pub total: usize,
+}
+
+/// What the flight overlays show for a combat mission instead of the gate
+/// count: the objective tally, the score and the steerpoint cue name.
+pub struct Objective {
+    pub label: String,
+    pub score: f64,
+    pub cue: &'static str,
 }
 
 pub fn format_time(sec: f64) -> String {
@@ -125,7 +142,7 @@ impl<'a> Ui<'a> {
     }
 
     // ---------------------------------------------------------- screens
-    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource) {
+    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind) {
         let s = self.s;
         let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 20.0 * s).min(250.0 * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
@@ -155,12 +172,22 @@ impl<'a> Ui<'a> {
         self.cv.rect(x + m, yy, left_w - m, 1.0, LINE_HOT);
         self.cv.text("COLD RIVER GORGE, SECTOR 07", x + m, yy + 7.0 * s, s.max(2.0) - 1.0, DIM, Align::Left);
         yy += 18.0 * s;
-        let copy = "You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.";
+        let (copy, tag) = match mission {
+            MissionKind::Gates => ("You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
+            MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
+            MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
+        };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
         yy += 2.0 * s;
-        yy += self.cv.paragraph("THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT.", x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, CREAM);
-        yy += 10.0 * s;
+        yy += self.cv.paragraph(tag, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, CREAM);
+        yy += 8.0 * s;
         let bx = x + m;
+        let mut mx = bx;
+        for k in MissionKind::ALL {
+            let label = if k == mission { format!("[X] {}", k.name()) } else { format!("[ ] {}", k.name()) };
+            mx += self.button(&label, "", mx, yy, false, Action::Pick(k)) + 4.0 * s;
+        }
+        yy += 19.0 * s;
         let w1 = self.button("ENGAGE", "ENTER", bx, yy, true, Action::Start);
         let w2 = self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
         let _ = w2;
@@ -174,8 +201,13 @@ impl<'a> Ui<'a> {
         self.cv.rect(bxx, byy, bw, bh, rgba(0x05, 0x0b, 0x08, 0.8));
         self.cv.stroke_rect(bxx, byy, bw, bh, 1.0, LINE);
         let sm = s.max(2.0) - 1.0;
-        self.cv.text("MISSION DATA // COLD RIVER", bxx + 6.0 * s, byy + 8.0 * s, sm, AMBER, Align::Left);
-        let rows = [("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM"), ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")];
+        self.cv.text(&format!("MISSION DATA // {}", mission.name()), bxx + 6.0 * s, byy + 8.0 * s, sm, AMBER, Align::Left);
+        let airframe = ("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM");
+        let rows = match mission {
+            MissionKind::Gates => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")],
+            MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", "AGGRESSOR F-16, AIM-9, GUN"), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "05:00", "SPLASH ALL THREE")],
+            MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
+        };
         let mut ry = byy + 20.0 * s;
         for (k, v1, v2) in rows {
             self.cv.text(k, bxx + 6.0 * s, ry, sm, DIM, Align::Left);
@@ -189,7 +221,13 @@ impl<'a> Ui<'a> {
             PitchSource::Mouse => (("MOUSE", "PITCH / YAW"), ("W S", "PITCH OPTION IN K")),
             PitchSource::Keys => (("W S", "PITCH"), ("MOUSE", "YAW")),
         };
-        let keys = if self.pad {
+        let keys = if mission != MissionKind::Gates {
+            if self.pad {
+                [("L STICK", "PITCH / ROLL"), ("RT LT", "THROTTLE"), ("LB RB", "RUDDER"), ("A", "FIRE / PICKLE"), ("D-UP", "WEAPON"), ("D-DOWN", "LOCK TARGET"), ("R STICK", "LOOK AROUND"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("START", "PAUSE, B MENU"), ("BACK", "CONFIG")]
+            } else {
+                [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("X", "WEAPON"), ("T", "LOCK TARGET"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("V", "CHASE / COCKPIT"), ("H", "AIRBRAKE"), ("C", "CENTER VIEW"), ("P ESC", "PAUSE, MENU")]
+            }
+        } else if self.pad {
             [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("RT LT", "THROTTLE"), ("RT FULL", "AFTERBURNER"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("D-PAD", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
         } else {
             [k1, ("A D", "ROLL"), k2, ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("H", "AIRBRAKE ON / OFF"), ("ALT+MOUSE", "LOOK AROUND"), ("V", "CHASE / COCKPIT"), ("F1 F2", "MFD PAGES"), ("C", "CENTER VIEW"), ("P ESC", "PAUSE, MENU")]
@@ -250,7 +288,11 @@ impl<'a> Ui<'a> {
         self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
     }
 
-    pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool) {
+    pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool, obj: Option<&Objective>) {
+        let cleared = match obj {
+            Some(o) => ("OBJECTIVE", o.label.clone(), GREEN),
+            None => ("CLEARED", format!("{} / {}", pad(m.passed as f64, 2), pad(m.gates.len() as f64, 2)), GREEN),
+        };
         self.status_panel(
             "// FLIGHT SUSPENDED, FLCS HOLD",
             DIM,
@@ -258,7 +300,7 @@ impl<'a> Ui<'a> {
             GREEN,
             "Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.",
             [
-                ("CLEARED", format!("{} / {}", pad(m.passed as f64, 2), pad(m.gates.len() as f64, 2)), GREEN),
+                cleared,
                 ("TIME LEFT", format_time(m.time_left), AMBER),
                 ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
                 ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
@@ -269,6 +311,10 @@ impl<'a> Ui<'a> {
     }
 
     pub fn result_screen(&mut self, r: &RunResult, best: &Best) {
+        if r.mission != MissionKind::Gates {
+            self.combat_result(r);
+            return;
+        }
         let best_str = if best.score > 0.0 { pad(best.score, 5) } else { "-----".to_string() };
         match r.kind {
             Outcome::Win => {
@@ -284,7 +330,7 @@ impl<'a> Ui<'a> {
                     &format!("{}, R RESTART, ESC MENU", best_line(best)),
                 );
             }
-            Outcome::Crash => self.status_panel(
+            Outcome::Crash | Outcome::ShotDown => self.status_panel(
                 "// FLIGHT TERMINATED, AIRFRAME LOST",
                 RED,
                 "TERRAIN WINS",
@@ -303,6 +349,61 @@ impl<'a> Ui<'a> {
                 [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), AMBER), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("BEST", best_str, CREAM)],
                 &[("TRY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
                 "THE CLOCK IS A HARD CEILING. GATES ADD 8 SECONDS EACH.",
+            ),
+        }
+    }
+
+    /// Result of a DOGFIGHT or STRIKE sortie.
+    fn combat_result(&mut self, r: &RunResult) {
+        let fight = r.mission == MissionKind::Dogfight;
+        let (what, unit) = if fight { ("KILLS", "bandits") } else { ("TARGETS", "primary targets") };
+        let tally = format!("{} / {}", r.done, r.total);
+        let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)];
+        match r.kind {
+            Outcome::Win => {
+                let rank = match (fight, r.time) {
+                    (true, t) if t < 100.0 => "ACE",
+                    (true, t) if t < 170.0 => "VIPER",
+                    (false, t) if t < 200.0 => "ACE",
+                    (false, t) if t < 300.0 => "VIPER",
+                    _ => "QUALIFIED",
+                };
+                let (kicker, title, text) = if fight {
+                    ("// SPLASH ALL BANDITS, COLD RIVER", "SKY CLEARED", format!("All three aggressors are down and you are still flying. The evaluator has logged the fight as {rank}."))
+                } else {
+                    ("// TARGETS DESTROYED, COLD RIVER", "STRIKE COMPLETE", format!("The bridge is in the river and the SA-6 battery is burning. The evaluator has logged the strike as {rank}."))
+                };
+                self.status_panel(kicker, DIM, title, ACID, &text, [("TIME", format_time(r.time), GREEN), (what, tally, CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)], again, "R RESTART, ESC MENU");
+            }
+            Outcome::ShotDown => self.status_panel(
+                "// AIRFRAME LOST, PILOT EJECTED",
+                RED,
+                "SHOT DOWN",
+                RED,
+                &format!("The jet came apart around you and the seat did its job. You took {} {unit} with you.", r.done),
+                [(what, tally, RED), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("SPEED", format!("{} KT", pad(r.impact * 1.94384, 3)), CREAM)],
+                again,
+                if fight { "TIP: WATCH THE RWR. BREAK INTO A MISSILE, NOT AWAY FROM IT." } else { "TIP: STAY LOW IN THE GORGE. THE SA-6 CANNOT SEE YOU BELOW THE RIDGES." },
+            ),
+            Outcome::Crash => self.status_panel(
+                "// FLIGHT TERMINATED, AIRFRAME LOST",
+                RED,
+                "TERRAIN WINS",
+                RED,
+                &format!("The gorge is unforgiving. The flight recorder shows {} {unit} down before impact.", r.done),
+                [(what, tally, RED), ("ELAPSED", format_time(r.time), CREAM), ("IMPACT", format!("{} KT", pad(r.impact * 1.94384, 3)), RED), ("SCORE", pad(r.score, 5), CREAM)],
+                again,
+                "TIP: A DIVE ON A TARGET NEEDS ROOM TO PULL OUT. RELEASE HIGH ENOUGH.",
+            ),
+            Outcome::Timeout => self.status_panel(
+                "// CLOCK EXPIRED, BINGO FUEL",
+                AMBER,
+                "TIME EXPIRED",
+                AMBER,
+                &format!("The tanker will not wait. You return with {} of {} {unit} done.", r.done, r.total),
+                [(what, tally, AMBER), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("MISSION", r.mission.name().to_string(), CREAM)],
+                again,
+                "X CYCLES THE WEAPON, T LOCKS THE TARGET NEAREST THE NOSE.",
             ),
         }
     }
@@ -335,9 +436,9 @@ impl<'a> Ui<'a> {
             (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
         };
         let rest: &[(&str, &str)] = if self.pad {
-            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("D-PAD", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
+            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
         } else {
-            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
+            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("F L-CLICK", "Fire / pickle"), ("X", "Cycle weapon"), ("T", "Lock / next target"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
         };
         for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
             self.cv.text(k, m, y, sm, ACID, Align::Left);
@@ -475,19 +576,22 @@ fn stick_cue(cv: &mut Canvas, x: f32, y: f32, s: f32, c: &StickCue) {
 }
 
 /// Mission data at the canopy edges, outside the HUD combiner.
-pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, toast: &str, toast_t: f64, cue: &StickCue) {
+#[allow(clippy::too_many_arguments)]
+pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, toast: &str, toast_t: f64, cue: &StickCue, obj: Option<&Objective>) {
     let s = ui_scale(w, h);
     let sm = (s - 1.0).max(1.0);
     let (lx, rx) = (w * 0.026, w * 0.974);
     let gate_n = (m.gate_index + 1).min(m.gates.len());
-    cv.text(&format!("GATE {}/{}", pad(gate_n as f64, 2), pad(m.gates.len() as f64, 2)), lx, h * 0.058, s, with_alpha(HUD, 0.78), Align::Left);
+    let title = obj.map(|o| o.label.clone()).unwrap_or_else(|| format!("GATE {}/{}", pad(gate_n as f64, 2), pad(m.gates.len() as f64, 2)));
+    cv.text(&title, lx, h * 0.058, s, with_alpha(HUD, 0.78), Align::Left);
+    let score = obj.map_or(m.final_score(), |o| o.score);
     if let Some((dist, diff, el)) = gate_geometry(a, m) {
         cv.text(&format!("{:.1} KM", dist / 1000.0), lx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Left);
         cv.text(&format!("{} {}°  {}{}°", if diff >= 0.0 { "R" } else { "L" }, pad(diff.abs(), 2), if el >= 0.0 { "+" } else { "-" }, pad(el.abs(), 2)), lx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Left);
     }
     air_panel(cv, lx, h * 0.058 + 34.0 * s, s, a);
     cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
-    cv.text(&format!("SCR {}", pad(m.final_score(), 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
+    cv.text(&format!("SCR {}", pad(score, 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
     let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    X  CENTER    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
@@ -518,7 +622,9 @@ fn project(cam: &Camera, w: f32, h: f32, p: V3) -> Option<(f32, f32)> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, cam: &Camera, toast: &str, toast_t: f64, time: f64, flying: bool, cue: &StickCue) {
+pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission, cam: &Camera, toast: &str, toast_t: f64, time: f64, flying: bool, cue: &StickCue, obj: Option<&Objective>) {
+    let score = obj.map_or(m.final_score(), |o| o.score);
+    let cue_name = obj.map_or("GATE", |o| o.cue);
     let s = ui_scale(w, h);
     let sm = (s - 1.0).max(1.0);
     let edge = 12.0 * s;
@@ -529,13 +635,14 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
 
     cv.text("F-16C  //  CHASE VIEW", edge, 10.0 * s, sm, HUD, Align::Left);
     cv.text("COLD RIVER  /  SECTOR 07", edge, 19.0 * s, sm, with_alpha(HUD, 0.48), Align::Left);
-    cv.text(&format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)), w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
+    let title = obj.map(|o| o.label.clone()).unwrap_or_else(|| format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)));
+    cv.text(&title, w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
     cv.text(&format_time(m.time_left), w * 0.5, 22.0 * s, s * 2.0, if m.time_left < 20.0 { RED } else { HUD }, Align::Center);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), w - edge, 10.0 * s, s, HUD, Align::Right);
     cv.text(&format!("ALT {} FT", pad(AirData::of(a).baro_ft, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     cv.text(&format!("AOA {:.0}  GAVL {:.1}", a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
     air_panel(cv, edge, top_h + 8.0 * s, s, a);
-    cv.text(&format!("SCR {}", pad(m.final_score(), 5)), w - edge, 36.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
+    cv.text(&format!("SCR {}", pad(score, 5)), w - edge, 36.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
 
     // Gate cue: diamond on screen, or an edge arrow toward it.
     if let Some(gate) = m.gates.get(m.gate_index) {
@@ -548,7 +655,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
                 let size = 5.0 * s + clamp(1.0 - dist / 5000.0, 0.0, 1.0) as f32 * 4.0 * s;
                 cv.polyline(&[[px, py - size], [px + size, py], [px, py + size], [px - size, py]], 1.5, true, AMBER);
                 cv.circle(px, py, size * 1.85, 1.0, with_alpha(AMBER, 0.3));
-                cv.text(&format!("GATE {}  {:.1} KM", pad((m.gate_index + 1) as f64, 2), dist / 1000.0), px, py + size * 2.6, sm, AMBER, Align::Center);
+                cv.text(&format!("{cue_name} {}  {:.1} KM", pad((m.gate_index + 1) as f64, 2), dist / 1000.0), px, py + size * 2.6, sm, AMBER, Align::Center);
             }
             _ => {
                 let tan = (cam.fov / 2.0).tan();

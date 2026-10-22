@@ -18,8 +18,10 @@ mod icon;
 mod math;
 mod mesh;
 mod png;
+mod props;
 mod settings;
 mod sim;
+mod symbology;
 mod targets;
 mod terrain;
 mod texture;
@@ -30,13 +32,14 @@ mod world;
 use audio::{Audio, Params, Wave};
 use canvas::{rgba, Canvas};
 use cockpit::{Cockpit, Hands, Page};
+use combat::{Combat, MissionKind, Mode};
 use gamepad::Gamepad;
 use math::*;
 use miniquad::*;
 use settings::{Best, PitchSource, Settings};
 use sim::{gate_crossed, Aircraft, Input, Mission, FIXED_DT, GATE_BONUS};
 use std::collections::HashSet;
-use ui::{Action, Button, Outcome, RunResult, Ui};
+use ui::{Action, Button, Objective, Outcome, RunResult, Ui};
 use world::{Camera, World};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -72,6 +75,11 @@ struct Opts {
     fov: Option<f64>,
     bench: Option<f64>,
     size: Option<(i32, i32)>,
+    mission: Option<MissionKind>,
+    /// Hold the trigger, and lock the nearest target, through a scripted run.
+    fire: bool,
+    lock: bool,
+    weapon: Option<Mode>,
 }
 
 fn parse_opts() -> Opts {
@@ -111,11 +119,24 @@ fn parse_opts() -> Opts {
                         }
                         "throttle" => o.input.throttle_up = true,
                         "brake" => o.input.airbrake = true,
+                        "fire" => o.fire = true,
+                        "lock" => o.lock = true,
                         _ => {}
                     }
                 }
             }
             "--screen" => o.screen = Some(next(&mut i)),
+            "--mission" => o.mission = MissionKind::parse(&next(&mut i)),
+            "--weapon" => {
+                o.weapon = match next(&mut i).as_str() {
+                    "nav" => Some(Mode::Nav),
+                    "gun" => Some(Mode::Gun),
+                    "aim9" | "srm" => Some(Mode::Srm),
+                    "aim120" | "mrm" => Some(Mode::Mrm),
+                    "mk82" | "ccip" => Some(Mode::Ccip),
+                    _ => None,
+                }
+            }
             "--controls" => o.controls = true,
             "--fov" => o.fov = next(&mut i).parse().ok(),
             "--bench" => o.bench = next(&mut i).parse().ok(),
@@ -126,7 +147,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake] [--screen pause|freeze|win|crash|timeout] [--controls]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--controls] [--mission gates|dogfight|strike] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -152,6 +173,12 @@ struct App {
     view: View,
     mission: Mission,
     preview: Mission,
+    /// Mission chosen on the start screen, and the fight it sets up.
+    kind: MissionKind,
+    combat: Combat,
+    models: props::Models,
+    /// Left mouse button held as the trigger.
+    trigger_mouse: bool,
     aircraft: Option<Aircraft>,
     camera: Camera,
     time: f64,
@@ -236,6 +263,7 @@ impl App {
         );
         let frame = airframe::build();
         let world = World::new(&mut *ctx, &frame);
+        let models = props::Models::new(&mut *ctx, &frame, &world);
         let cockpit = Cockpit::new(&mut *ctx, &frame.canopy);
         let overlay = Canvas::new(&mut *ctx, font_tex, 240_000);
         let atlas_canvas = Canvas::new(&mut *ctx, font_tex, 240_000);
@@ -245,7 +273,9 @@ impl App {
         let (settings, best) = settings::load();
         let audio = Audio::start();
         let preview = Mission::new();
-        let mission = preview.clone();
+        let mut mission = preview.clone();
+        let kind = opts.mission.unwrap_or(MissionKind::Gates);
+        let combat = Combat::new(MissionKind::Gates, &mut mission);
         if settings.fullscreen && opts.shot.is_none() {
             window::set_fullscreen(true);
         }
@@ -264,6 +294,10 @@ impl App {
             view: if opts.chase { View::Chase } else { View::Cockpit },
             mission,
             preview,
+            kind,
+            combat,
+            models,
+            trigger_mouse: false,
             aircraft: None,
             camera: Camera { eye: V3::ZERO, forward: -V3::Z, right: V3::X, up: V3::Y, fov: 1.0 },
             time: 0.0,
@@ -327,7 +361,15 @@ impl App {
             let steps = (self.opts.sim_seconds / FIXED_DT).round() as usize;
             for _ in 0..steps {
                 match self.state {
-                    State::Flying => self.step(FIXED_DT, self.opts.input),
+                    State::Flying => {
+                        // --input lock: lock up the nearest target once one is in view.
+                        if self.opts.lock && self.combat.lock.is_none() && (self.time * 2.0).fract() < FIXED_DT * 2.0 {
+                            if let Some(a) = &self.aircraft {
+                                self.combat.designate(a);
+                            }
+                        }
+                        self.step(FIXED_DT, self.opts.input)
+                    }
                     // Let an impact play out, so a screenshot can show it.
                     State::Transition => {
                         self.advance_effects(FIXED_DT);
@@ -344,13 +386,16 @@ impl App {
         match self.opts.screen.as_deref() {
             Some("pause") => self.pause(),
             Some("freeze") => self.toggle_freeze(),
-            Some("win") | Some("crash") | Some("timeout") => {
+            Some("win") | Some("crash") | Some("timeout") | Some("shotdown") => {
                 let kind = match self.opts.screen.as_deref() {
                     Some("win") => Outcome::Win,
                     Some("crash") => Outcome::Crash,
+                    Some("shotdown") => Outcome::ShotDown,
                     _ => Outcome::Timeout,
                 };
-                self.result = Some(RunResult { kind, time: 112.0, gates: if kind == Outcome::Win { 10 } else { 6 }, score: 7650.0, impact: 190.0 });
+                let (_, total) = self.combat.tally();
+                let done = if kind == Outcome::Win { total } else { total.saturating_sub(1) };
+                self.result = Some(RunResult { kind, time: 112.0, gates: if kind == Outcome::Win { 10 } else { 6 }, score: 7650.0, impact: 190.0, mission: self.kind, done, total });
                 self.state = State::Result;
             }
             _ => {}
@@ -391,7 +436,15 @@ impl App {
             self.toggle_controls(Some(false));
         }
         self.mission = Mission::new();
-        self.aircraft = Some(Aircraft::new(&self.mission));
+        self.combat = Combat::new(self.kind, &mut self.mission);
+        if let Some(w) = self.opts.weapon {
+            self.combat.select(w);
+        }
+        let mut a = Aircraft::new(&self.mission);
+        a.stores_mass = self.combat.loadout.mass();
+        a.stores_drag = self.combat.loadout.drag();
+        self.aircraft = Some(a);
+        self.trigger_mouse = false;
         self.state = State::Flying;
         self.accumulator = 0.0;
         self.transition_timer = 0.0;
@@ -405,7 +458,14 @@ impl App {
         self.keys.clear();
         self.center_stick();
         self.grab(true);
-        self.flash_toast("COLD RIVER // 10 GATES // MOUSE CAPTURED", 3.4);
+        self.flash_toast(
+            match self.kind {
+                MissionKind::Gates => "COLD RIVER // 10 GATES // MOUSE CAPTURED",
+                MissionKind::Dogfight => "DOGFIGHT // 3 BANDITS // T LOCK, X WEAPON",
+                MissionKind::Strike => "STRIKE // BRIDGE AND SA-6 // X WEAPON, T DESIGNATE",
+            },
+            3.4,
+        );
         self.last_frame = date::now();
     }
 
@@ -414,6 +474,7 @@ impl App {
             return;
         }
         self.state = State::Paused;
+        self.trigger_mouse = false;
         self.keys.clear();
         self.center_stick();
         self.grab(false);
@@ -516,6 +577,7 @@ impl App {
                 self.key_pitch = 0.0;
             }
             Action::Fullscreen => self.toggle_fullscreen(),
+            Action::Pick(k) => self.kind = k,
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
@@ -553,14 +615,23 @@ impl App {
         if self.state != State::Flying {
             return;
         }
+        if kind == Outcome::ShotDown {
+            // The jet comes apart in the air: it stops being flown, and the
+            // outside camera circles the fireball.
+            let a = self.aircraft.as_mut().unwrap();
+            a.crashed = true;
+            a.impact_speed = a.speed;
+            a.collision_label = "shot down";
+        }
         let a = self.aircraft.as_ref().unwrap();
-        self.mission.score = self.mission.final_score();
-        self.result = Some(RunResult { kind, time: self.mission.elapsed, gates: self.mission.passed, score: self.mission.score, impact: if a.crashed { a.impact_speed } else { a.speed } });
+        self.mission.score = if self.kind == MissionKind::Gates { self.mission.final_score() } else { self.combat.score(&self.mission) };
+        let (done, total) = self.combat.tally();
+        self.result = Some(RunResult { kind, time: self.mission.elapsed, gates: self.mission.passed, score: self.mission.score, impact: if a.crashed { a.impact_speed } else { a.speed }, mission: self.kind, done, total });
         self.transition_kind = kind;
         self.transition_timer = match kind {
             Outcome::Win => 1.35,
             // Long enough to watch the fireball from the wreck camera.
-            Outcome::Crash => 2.6,
+            Outcome::Crash | Outcome::ShotDown => 2.6,
             Outcome::Timeout => 0.85,
         };
         self.state = State::Transition;
@@ -586,6 +657,14 @@ impl App {
                 self.audio.crash(a.impact_water);
                 self.world.fx.explode(a);
             }
+            Outcome::ShotDown => {
+                self.flash_color = [255, 100, 58];
+                self.flash = 0.8;
+                self.toast_timer = 0.0;
+                self.kick = 1.0;
+                self.crash_time = self.time;
+                self.audio.crash(false);
+            }
             Outcome::Timeout => {
                 self.flash_color = [255, 170, 70];
                 self.flash = 0.45;
@@ -597,7 +676,7 @@ impl App {
 
     fn complete_transition(&mut self) {
         if let Some(r) = self.result {
-            if r.kind == Outcome::Win {
+            if r.kind == Outcome::Win && r.mission == MissionKind::Gates {
                 if r.score > self.best.score {
                     self.best.score = r.score.round();
                 }
@@ -674,7 +753,7 @@ impl App {
             let start = if self.controls_open { KeyCode::Escape } else if self.state == State::Result { KeyCode::R } else { KeyCode::P };
             vec![(A, KeyCode::Enter), (B, KeyCode::Escape), (START, start), (BACK, KeyCode::K)]
         } else {
-            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2)]
+            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2), (UP, KeyCode::X), (DOWN, KeyCode::T)]
         };
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
@@ -725,7 +804,7 @@ impl App {
         m.time_left = (m.time_left - dt).max(0.0);
         a.update(dt, &input);
         m.score = m.final_score();
-        if m.gate_index < m.gates.len() {
+        if self.kind == MissionKind::Gates && m.gate_index < m.gates.len() {
             let gi = m.gate_index;
             if gate_crossed(a, &m.gates[gi]) {
                 m.gates[gi].passed = true;
@@ -745,12 +824,60 @@ impl App {
                 }
             }
         }
+        if self.fight(dt) {
+            return;
+        }
         if self.aircraft.as_ref().unwrap().crashed {
             self.begin_finish(Outcome::Crash);
             return;
         }
         if self.mission.time_left <= 0.0 {
             self.begin_finish(Outcome::Timeout);
+        }
+    }
+
+    /// Trigger and pickle: F, the left mouse button while flying, the pad's A,
+    /// or --input fire.
+    fn trigger(&self) -> bool {
+        self.keys.contains(&KeyCode::F) || self.trigger_mouse || self.pad.held(gamepad::A) || self.opts.fire
+    }
+
+    /// The combat step after the jet has moved: weapons, bandits, targets
+    /// and their effects. Returns true when it ended the run.
+    fn fight(&mut self, dt: f64) -> bool {
+        let trigger = self.trigger();
+        let a = self.aircraft.as_mut().unwrap();
+        self.combat.step(dt, a, trigger, &mut self.mission);
+        let fb = props::present(&mut self.combat, &mut self.world.fx, &self.audio, self.camera.eye, self.settings.muted);
+        if let Some(t) = fb.toast {
+            self.flash_toast(&t, 2.0);
+        }
+        if let Some(c) = fb.flash {
+            self.flash_color = c;
+            self.flash = self.flash.max(0.3);
+        }
+        self.kick = self.kick.max(fb.kick * 0.5);
+        if self.kind != MissionKind::Gates {
+            self.mission.score = self.combat.score(&self.mission);
+        }
+        if self.combat.player_dead {
+            self.begin_finish(Outcome::ShotDown);
+            return true;
+        }
+        if self.combat.won() {
+            self.begin_finish(Outcome::Win);
+            return true;
+        }
+        false
+    }
+
+    /// Objective line for the overlays in a combat mission.
+    fn objective(&self) -> Option<Objective> {
+        let (done, total) = self.combat.tally();
+        match self.kind {
+            MissionKind::Gates => None,
+            MissionKind::Dogfight => Some(Objective { label: format!("KILLS {done}/{total}"), score: self.combat.score(&self.mission), cue: "BULLSEYE" }),
+            MissionKind::Strike => Some(Objective { label: format!("TARGETS {done}/{total}"), score: self.combat.score(&self.mission), cue: "STPT" }),
         }
     }
 
@@ -907,6 +1034,14 @@ impl App {
             p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0 - buffet * 12.0;
             p.whine_gain = 0.0015 + thr * 0.003;
             p.whine_freq = 620.0 + thr * 560.0 + ab * 250.0;
+            p.gun = if self.combat.firing { 0.11 } else { 0.0 };
+            // Sidewinder tone: a low growl while the seeker searches, a high
+            // steady tone once it tracks.
+            if self.combat.mode == Mode::Srm && self.combat.loadout.count(combat::Store::Aim9) > 0 {
+                let locked = self.combat.seeker.is_some();
+                p.seeker_gain = if locked { 0.035 } else { 0.014 };
+                p.seeker_freq = if locked { 1250.0 } else { 380.0 + 40.0 * (self.time * 23.0).sin() as f32 };
+            }
         }
         p.master = if self.settings.muted || !active && self.state != State::Result { 0.0 } else { 0.5 };
         self.audio.set(p);
@@ -1015,15 +1150,24 @@ impl EventHandler for App {
         // Instrument pages refresh at 30 Hz.
         if cockpit_view && (self.time - self.cockpit.atlas_clock >= 1.0 / 30.0 || self.cockpit.atlas_clock < 0.0 || self.time < self.cockpit.atlas_clock) {
             let a = self.aircraft.as_ref().unwrap();
-            self.cockpit.update_atlas(&mut *self.ctx, &mut self.atlas_canvas, a, &self.mission, self.pages, self.time);
+            self.cockpit.update_atlas(&mut *self.ctx, &mut self.atlas_canvas, a, &self.mission, self.pages, self.time, &self.combat);
             self.cockpit.atlas_clock = self.time;
         }
 
         // World and cockpit into the low-resolution scene target.
         let aspect = (w / h) as f64;
         self.ctx.begin_pass(Some(self.scene.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
-        let mission = if flying_view { Some(&self.mission) } else { Some(&self.preview) };
-        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, if flying_view && !wrecked { self.aircraft.as_ref() } else { None }, cockpit_view, None);
+        // Gate rings only on the gate run; the fight brings its own props and smoke.
+        let mission = if flying_view { (self.kind == MissionKind::Gates).then_some(&self.mission) } else { Some(&self.preview) };
+        if flying_view {
+            props::fill_fx(&self.combat, &mut self.world.fx, &cam);
+        } else {
+            self.world.fx.extra_blend.clear();
+            self.world.fx.extra_glow.clear();
+        }
+        let player = if flying_view && !wrecked { self.aircraft.as_ref() } else { None };
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player };
+        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, player, cockpit_view, flying_view.then_some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
         if cockpit_view {
             let a = self.aircraft.as_ref().unwrap();
@@ -1049,6 +1193,7 @@ impl EventHandler for App {
         let mut buttons = Vec::new();
         let i = if self.state == State::Flying { self.read_control_positions() } else { Input { airbrake: self.airbrake, ..Default::default() } };
         let pad = self.pad.state.connected;
+        let obj = self.objective();
         let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, pad, brake: self.airbrake };
         {
             let cv = &mut self.overlay;
@@ -1058,10 +1203,12 @@ impl EventHandler for App {
                     let cam_b = cockpit::body_camera(&cam, a);
                     let focal = h as f64 * 0.5 / (cam.fov / 2.0).tan();
                     let body = cockpit::BodyProjector { eye: cam_b.eye, right: cam_b.right, up: cam_b.up, fwd: cam_b.forward, focal, w: w as f64, h: h as f64 };
-                    cockpit::draw_hud(cv, a, &self.mission, &cam, &body);
-                    ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue);
+                    cockpit::draw_hud(cv, a, &self.mission, &cam, &body, &self.combat);
+                    ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue, obj.as_ref());
+                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), &self.combat, &cam, self.time, false);
                 } else {
-                    ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue);
+                    ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue, obj.as_ref());
+                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), &self.combat, &cam, self.time, true);
                 }
             }
             if self.flash > 0.005 {
@@ -1072,10 +1219,10 @@ impl EventHandler for App {
             let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad };
             if !self.controls_open {
                 match self.state {
-                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch),
+                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));
-                        u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted);
+                        u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted, obj.as_ref());
                     }
                     State::Result => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.5));
@@ -1162,7 +1309,14 @@ impl EventHandler for App {
                     self.center_stick();
                     self.flash_toast("MOUSE STICK CENTERED", 1.1);
                 }
-                MouseButton::Left => self.grab(true),
+                MouseButton::Left => {
+                    // With the mouse captured the left button is the trigger;
+                    // otherwise a click captures it again.
+                    if self.grabbed && self.state == State::Flying {
+                        self.trigger_mouse = true;
+                    }
+                    self.grab(true);
+                }
                 _ => {}
             }
             return;
@@ -1235,6 +1389,15 @@ impl EventHandler for App {
                 self.center_stick();
                 self.flash_toast("MOUSE STICK CENTERED", 1.1);
             }
+            KeyCode::X if self.state == State::Flying => {
+                self.combat.cycle_weapon();
+                self.flash_toast(&format!("{} // {}", self.combat.mode.label(), symbology::stores_line(&self.combat)), 1.6);
+            }
+            KeyCode::T if self.state == State::Flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.designate(a);
+                }
+            }
             KeyCode::H if self.state == State::Flying => {
                 self.airbrake = !self.airbrake;
                 self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT // H RETRACT" } else { "SPEEDBRAKE IN" }, 1.4);
@@ -1264,6 +1427,12 @@ impl EventHandler for App {
                     self.keys.insert(key);
                 }
             }
+        }
+    }
+
+    fn mouse_button_up_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
+        if button == MouseButton::Left {
+            self.trigger_mouse = false;
         }
     }
 
