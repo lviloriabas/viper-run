@@ -17,7 +17,8 @@
 //! reflex has acted, light loss comes 0.7 G sooner. The suit adds about
 //! 1.4 G, COMBAT EDGE pressure breathing about 1.1 G and a good AGSM about
 //! 3 G, which a trained pilot tires of within a minute at 9 G. G-LOC brings
-//! about 12 s of absolute and 12 s of relative incapacitation. Negative g
+//! 12 s of absolute and 12 s of relative incapacitation on average (2 to 38 s
+//! measured); the game keeps the short end, 5 s and 4 s. Negative g
 //! reddens the view from about -1.5 G and fully at the jet's -3 G limit.
 use crate::math::*;
 use crate::sim::{Aircraft, Input, G0};
@@ -55,8 +56,8 @@ const REFLEX_MIN: f64 = -30.0;
 const REFLEX_UP: f64 = 6.0;
 const REFLEX_DOWN: f64 = 2.0;
 /// G-LOC: absolute, then relative incapacitation (s).
-pub const GLOC_ABSOLUTE: f64 = 12.0;
-pub const GLOC_RELATIVE: f64 = 12.0;
+pub const GLOC_ABSOLUTE: f64 = 5.0;
+pub const GLOC_RELATIVE: f64 = 4.0;
 /// Auto-GCAS recovery: roll rate (deg/s), pull (g) and the clearance it keeps (m).
 const GCAS_ROLL: f64 = 180.0;
 const GCAS_PULL: f64 = 5.0;
@@ -226,7 +227,7 @@ impl Pilot {
         let mut v = Vision { tunnel: 1.0 - smoothstep(0.15, 0.85, o), grey: 1.0 - smoothstep(0.4, 0.92, o), black: 1.0 - smoothstep(0.0, 0.25, o), red: self.red };
         if self.gloc > 0.0 {
             // Out cold, then the view comes back through a grey haze.
-            let back = smoothstep(GLOC_RELATIVE, GLOC_RELATIVE - 4.0, self.gloc);
+            let back = smoothstep(GLOC_RELATIVE, GLOC_RELATIVE - 2.0, self.gloc);
             v.black = v.black.max(1.0 - back);
             v.tunnel = v.tunnel.max(1.0 - back);
             v.grey = v.grey.max(0.6 * smoothstep(0.0, GLOC_RELATIVE, self.gloc));
@@ -345,7 +346,7 @@ mod tests {
         assert!(worst < 0.95, "9 G should cost some light: {worst:.2}");
         // Held long enough, the straining tires and the pilot goes out.
         ride(&mut p, &mut a, 60.0, |_| 9.0, false);
-        assert!(p.glocs == 1, "a minute more at 9 G");
+        assert!(p.glocs >= 1, "a minute more at 9 G");
     }
 
     #[test]
@@ -359,7 +360,7 @@ mod tests {
         }
         assert!(p.glocs == 1 && p.out() && t > 3.0, "out after {t:.1} s at 7 G");
         assert!(p.vision().black > 0.99 && p.authority() == 0.0);
-        // About 12 s out cold, then the controls come back over 12 s more.
+        // 5 s out cold, then the controls come back over 4 s more.
         ride(&mut p, &mut a, GLOC_ABSOLUTE - 0.5, |_| 1.0, true);
         assert!(p.out() && p.controls(&a, Input { pitch_up: true, ..Default::default() }).pitch() == 0.0);
         ride(&mut p, &mut a, 1.0, |_| 1.0, true);

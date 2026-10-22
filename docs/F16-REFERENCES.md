@@ -190,8 +190,9 @@ protección pierde visión periférica a unos 4,9 G con instauración gradual
 (0,1 G/s), se queda a oscuras a 5,5 G y pierde la conciencia a 6,9 G; con
 instauración rápida a una meseta, la visión se cierra 0,7 G antes. El
 piloto entrenado aguanta 9 G durante 15 s con la vista algo estrechada, y se
-desmaya si los mantiene más de un minuto. El G-LOC dura 12 s de
-incapacidad absoluta y 12 s de relativa, en los que los mandos vuelven poco a
+desmaya si los mantiene más de un minuto. El G-LOC dura de media 12 s de
+incapacidad absoluta y 12 s de relativa (de 2 a 38 s medidos); el juego usa
+el extremo corto, 5 s y 4 s, en los que los mandos vuelven poco a
 poco. Mientras el piloto no puede volar, el Auto-GCAS (en servicio en el F-16
 desde 2014) predice una recuperación (medio segundo de reacción, alabeo a
 180 grados por segundo hasta alas niveladas y tirón de 5 G) y la ejecuta si su
