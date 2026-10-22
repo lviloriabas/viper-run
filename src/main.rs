@@ -18,6 +18,7 @@ mod icon;
 mod keymap;
 mod math;
 mod mesh;
+mod mig29;
 mod physio;
 mod png;
 mod props;
@@ -99,6 +100,9 @@ struct Opts {
     /// Fly the scripted run with the AI pilot toward the steerpoint.
     auto: bool,
     weapon: Option<Mode>,
+    /// Airframes for the player and the bandits.
+    jet: Option<sim::Type>,
+    bandits: Option<sim::Type>,
 }
 
 fn parse_opts() -> Opts {
@@ -155,6 +159,14 @@ fn parse_opts() -> Opts {
                 o.vision = Some([v.first().copied().unwrap_or(1.0), v.get(1).copied().unwrap_or(0.0), v.get(2).copied().unwrap_or(0.0)]);
             }
             "--mission" => o.mission = MissionKind::parse(&next(&mut i)),
+            "--jet" | "--bandits" => {
+                let t = if next(&mut i).contains("mig") { sim::Type::Mig29 } else { sim::Type::F16 };
+                if args[i - 1] == "--jet" {
+                    o.jet = Some(t);
+                } else {
+                    o.bandits = Some(t);
+                }
+            }
             "--weapon" => {
                 o.weapon = match next(&mut i).as_str() {
                     "nav" => Some(Mode::Nav),
@@ -175,7 +187,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--mission gates|dogfight|strike] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--mission gates|dogfight|strike|airfield] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -339,7 +351,7 @@ impl App {
             mission,
             preview,
             kind,
-            config: combat::Config::for_mission(kind),
+            config: combat::Config { jet: opts.jet.unwrap_or_default(), aggressor: opts.bandits.unwrap_or(sim::Type::Mig29), ..combat::Config::for_mission(kind) },
             combat,
             models,
             trigger_mouse: false,
@@ -511,6 +523,7 @@ impl App {
             self.combat.select(w);
         }
         let mut a = Aircraft::new(&self.mission);
+        a.set_type(self.config.jet);
         // Only the airfield sortie starts on the ground, gear down.
         self.gear_lever = a.on_ground;
         self.flaps_switch = false;
@@ -670,8 +683,11 @@ impl App {
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Pick(k) => {
                 self.kind = k;
-                self.config = combat::Config::for_mission(k);
+                let (jet, aggressor) = (self.config.jet, self.config.aggressor);
+                self.config = combat::Config { jet, aggressor, ..combat::Config::for_mission(k) };
             }
+            Action::Jet => self.config.jet = self.config.jet.next(),
+            Action::Aggressor => self.config.aggressor = self.config.aggressor.next(),
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
@@ -1460,7 +1476,7 @@ impl EventHandler for App {
             let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad };
             if !self.controls_open {
                 match self.state {
-                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind),
+                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config),
                     State::Loadout => u.loadout_screen(self.kind, &self.config),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));

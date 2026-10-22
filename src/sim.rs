@@ -77,6 +77,59 @@ const SUBSTEPS: usize = 4;
 
 pub use crate::air::{atmosphere_at, calibrated_airspeed};
 
+/// Which jet: the F-16C the tables describe, or a MiG-29A flown on the same
+/// aerodynamic tables scaled to its size, weight and engines. The MiG-29 is
+/// an approximation built from published figures, not wind-tunnel data:
+/// 38 m^2 of wing against 27.9, 11,000 kg empty, two RD-33s giving 22,200 lbf
+/// dry and 36,600 lbf in afterburner, and about 35 % more inertia.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Type {
+    #[default]
+    F16,
+    Mig29,
+}
+
+impl Type {
+    pub fn name(self) -> &'static str {
+        match self {
+            Type::F16 => "F-16C",
+            Type::Mig29 => "MIG-29A",
+        }
+    }
+    pub fn empty_mass(self) -> f64 {
+        match self {
+            Type::F16 => EMPTY_MASS,
+            Type::Mig29 => 11000.0,
+        }
+    }
+    /// Wing reference area, m^2.
+    pub fn area(self) -> f64 {
+        match self {
+            Type::F16 => aero::WING_AREA,
+            Type::Mig29 => 38.0,
+        }
+    }
+    /// Thrust against the F110's at the same power setting.
+    pub fn thrust_scale(self, power: f64) -> f64 {
+        match self {
+            Type::F16 => 1.0,
+            Type::Mig29 => mix(22200.0 / 17000.0, 36600.0 / 29000.0, ((power - 50.0) / 50.0).clamp(0.0, 1.0)),
+        }
+    }
+    pub fn inertia_scale(self) -> f64 {
+        match self {
+            Type::F16 => 1.0,
+            Type::Mig29 => 1.35,
+        }
+    }
+    pub fn next(self) -> Type {
+        match self {
+            Type::F16 => Type::Mig29,
+            Type::Mig29 => Type::F16,
+        }
+    }
+}
+
 /// A landing-gear leg: the tyre's lowest point at full extension (body
 /// axes), the oleo's spring and damping, its stroke, and whether it brakes
 /// or steers. Nose gear 3.45 m ahead of the centre of gravity, main gear
@@ -405,6 +458,8 @@ struct Sensors {
     rotor: f64,
     /// Weight on wheels: the g integrator rests, as the FLCS ground mode does.
     ground: bool,
+    /// Wing reference area of the airframe, m^2.
+    area: f64,
 }
 
 /// Surface deflection that makes a monotonically falling coefficient reach a
@@ -428,8 +483,8 @@ impl Flcs {
         let (alpha, speed) = (f.alpha, f.speed.max(40.0));
         let (p, q, r) = (f.p, f.q, f.r);
         let (ixx, iyy, izz, ixz) = s.inertia;
-        let qsc = s.qbar.max(50.0) * aero::WING_AREA * aero::CHORD;
-        let qsb = s.qbar.max(50.0) * aero::WING_AREA * aero::SPAN;
+        let qsc = s.qbar.max(50.0) * s.area * aero::CHORD;
+        let qsb = s.qbar.max(50.0) * s.area * aero::SPAN;
 
         // Pitch. The stick commands g; above 22.5 degrees of filtered AoA,
         // with pitch-rate anticipation, the limiter takes away 2 g per degree,
@@ -579,6 +634,8 @@ pub struct Aircraft {
     pub wheel_brake: f64,
     /// Gear lowered or held down past its limit speed: the doors are bent.
     pub gear_overspeed: bool,
+    /// The airframe flown.
+    pub kind: Type,
 }
 
 impl Aircraft {
@@ -658,6 +715,7 @@ impl Aircraft {
             compression: [0.0; 3],
             wheel_brake: 0.0,
             gear_overspeed: false,
+            kind: Type::F16,
             wing_stores: 0.0,
         };
         a.update(0.0, &Input::default());
@@ -691,6 +749,20 @@ impl Aircraft {
             self.omega = V3::ZERO;
             self.pos.y = self.pos.y.max(floor + 0.8);
         }
+    }
+
+    /// Inertia of this airframe with its fuel and pylon stores.
+    fn inertia(&self) -> (f64, f64, f64, f64) {
+        let (x, y, z, xz) = inertia(self.fuel, self.wing_stores);
+        let k = self.kind.inertia_scale();
+        (x * k, y * k, z * k, xz * k)
+    }
+
+    /// Changes the airframe, keeping the state, and retrims for 1 g at the
+    /// present speed when flying.
+    pub fn set_type(&mut self, kind: Type) {
+        self.kind = kind;
+        self.mass = kind.empty_mass() + self.stores_mass + self.fuel;
     }
 
     /// Tyre and oleo forces on the legs that touch the ground, as force and
@@ -820,16 +892,17 @@ impl Aircraft {
             nz: self.g_load,
             qbar,
             up_y: self.q.axes().up.y,
-            inertia: inertia(self.fuel, self.wing_stores),
+            inertia: self.inertia(),
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
             ground: self.on_ground,
+            area: self.kind.area(),
         };
         self.flcs.update(dt, input, &sensors);
 
         let fueled = self.fuel > 0.0;
         let command = if !fueled { 0.0 } else if want_ab { 100.0 } else { 50.0 * self.throttle };
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
-        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) } else { 0.0 };
+        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) } else { 0.0 };
 
         let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
         let mut c = aero::coefficients(&flow);
@@ -847,7 +920,7 @@ impl Aircraft {
         // Bombs and missiles on the pylons drag along the wind.
         c.cx -= self.stores_drag * alpha.cos();
         c.cz -= self.stores_drag * alpha.sin();
-        let qs = qbar * aero::WING_AREA;
+        let qs = qbar * self.kind.area();
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
         let (gf, gm) = self.wheel_forces(input, dt);
@@ -861,7 +934,7 @@ impl Aircraft {
 
         // Rotation: body-axis moment equations with the roll-yaw product of
         // inertia and the engine rotor's gyroscopic moment.
-        let (ixx, iyy, izz, ixz) = inertia(self.fuel, self.wing_stores);
+        let (ixx, iyy, izz, ixz) = self.inertia();
         let h = aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0;
         let gam = ixx * izz - ixz * ixz;
         let xpq = ixz * (ixx - iyy + izz);
@@ -945,7 +1018,7 @@ impl Aircraft {
         let tsfc = mix(0.661, 1.9, ab);
         self.fuel_flow = if fueled { (lbf * tsfc / 3600.0 * 0.4536).max(0.12) } else { 0.0 };
         self.fuel = (self.fuel - self.fuel_flow * dt).max(0.0);
-        self.mass = EMPTY_MASS + self.stores_mass + self.fuel;
+        self.mass = self.kind.empty_mass() + self.stores_mass + self.fuel;
 
         let core = (self.power / 50.0).min(1.0);
         self.engine_spool = core;
@@ -969,7 +1042,7 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = G_LIMIT.min(self.qbar * aero::WING_AREA * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        self.g_avail = G_LIMIT.min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);

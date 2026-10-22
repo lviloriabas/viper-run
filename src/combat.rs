@@ -6,7 +6,7 @@
 //! moved, and reports what happened as events for the effects and the sound.
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
-use crate::sim::{spec::STORES_MASS, trim, Aircraft, Flcs, Gate, Input, Mission, G0};
+use crate::sim::{spec::STORES_MASS, trim, Aircraft, Flcs, Gate, Input, Mission, Type, G0};
 use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
 use crate::weapons::*;
@@ -132,15 +132,18 @@ pub struct Config {
     pub inboard: Option<Store>,
     /// Internal fuel, fraction of the 7,000 lb.
     pub fuel: f64,
+    /// The player's airframe and the bandits'.
+    pub jet: Type,
+    pub aggressor: Type,
 }
 
 impl Config {
     pub fn for_mission(kind: MissionKind) -> Config {
         match kind {
-            MissionKind::Gates => Config { outboard: None, inboard: None, fuel: 1.0 },
-            MissionKind::Airfield => Config { outboard: None, inboard: None, fuel: 0.6 },
-            MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0 },
-            MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0 },
+            MissionKind::Gates => Config { outboard: None, inboard: None, fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
+            MissionKind::Airfield => Config { outboard: None, inboard: None, fuel: 0.6, jet: Type::F16, aggressor: Type::Mig29 },
+            MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
+            MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
         }
     }
 
@@ -159,7 +162,7 @@ impl Config {
     /// Gross weight (kg) and total drag coefficient of the stores.
     pub fn weight(&self) -> (f64, f64) {
         let l = Loadout::configure(self);
-        (crate::sim::spec::EMPTY_MASS + l.mass() + crate::sim::spec::FUEL_MAX * self.fuel, l.drag())
+        (self.jet.empty_mass() + l.mass() + crate::sim::spec::FUEL_MAX * self.fuel, l.drag())
     }
 }
 
@@ -392,10 +395,39 @@ pub struct Combat {
     last_vs: f64,
 }
 
-/// A trimmed jet at a point, heading (radians clockwise from north) and speed.
+/// A trimmed F-16 at a point, heading (radians clockwise from north) and speed.
 pub fn spawn(pos: V3, heading: f64, speed: f64) -> Aircraft {
+    spawn_type(Type::F16, pos, heading, speed)
+}
+
+/// Wings-level 1 g trim for any airframe: the F-16 tables at the wing
+/// loading this jet has, then the power its own engines need for the drag
+/// of its own wing area and of the stores.
+fn trim_for(a: &Aircraft, alt: f64, speed: f64) -> crate::sim::Trim {
+    let k = a.kind;
+    let mut t = trim(alt, speed, a.mass * crate::aero::WING_AREA / k.area());
+    let atm = crate::sim::atmosphere_at(alt);
+    let mach = speed / atm.sound;
+    let need = crate::aero::thrust(t.power, mach, alt) * k.area() / crate::aero::WING_AREA + 0.5 * atm.rho * speed * speed * k.area() * a.stores_drag;
+    let (mut lo, mut hi) = (0.0, 100.0);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if crate::aero::thrust(mid, mach, alt) * k.thrust_scale(mid) < need {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    t.power = 0.5 * (lo + hi);
+    t.throttle = (t.power / 50.0).min(0.99);
+    t
+}
+
+/// A trimmed jet of either type at a point, heading and speed.
+pub fn spawn_type(kind: Type, pos: V3, heading: f64, speed: f64) -> Aircraft {
     let mut a = Aircraft::new(&Mission::new());
-    let t = trim(pos.y, speed, a.mass);
+    a.set_type(kind);
+    let t = trim_for(&a, pos.y, speed);
     let fwd = v3(heading.sin(), 0.0, -heading.cos());
     a.pos = pos;
     a.last_pos = pos;
@@ -417,27 +449,13 @@ pub fn load(a: &mut Aircraft, l: &Loadout) {
     a.stores_mass = l.mass();
     a.wing_stores = l.wing_mass();
     a.stores_drag = l.drag();
-    a.mass = crate::sim::spec::EMPTY_MASS + a.stores_mass + a.fuel;
-    if a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 && a.fuel == crate::sim::spec::FUEL_MAX {
+    a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
+    if a.kind == Type::F16 && a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 && a.fuel == crate::sim::spec::FUEL_MAX {
         return;
     }
     // Trim balances the clean airframe at the new weight; the stores' drag
     // then takes the power that adds its thrust.
-    let mut t = trim(a.pos.y, a.speed, a.mass);
-    let atm = crate::sim::atmosphere_at(a.pos.y);
-    let mach = a.speed / atm.sound;
-    let need = crate::aero::thrust(t.power, mach, a.pos.y) + 0.5 * atm.rho * a.speed * a.speed * crate::aero::WING_AREA * a.stores_drag;
-    let (mut lo, mut hi) = (0.0, 100.0);
-    for _ in 0..40 {
-        let mid = 0.5 * (lo + hi);
-        if crate::aero::thrust(mid, mach, a.pos.y) < need {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    t.power = 0.5 * (lo + hi);
-    t.throttle = (t.power / 50.0).min(0.99);
+    let t = trim_for(a, a.pos.y, a.speed);
     let fwd = a.vel.norm();
     a.q = Quat::from_forward_up(fwd, V3::Y).mul(Quat::axis_angle(V3::X, t.alpha));
     let mut f = Flcs::default();
@@ -576,6 +594,13 @@ impl Combat {
     /// Hangs the stores the loadout screen chose, and selects a master mode
     /// they allow.
     pub fn equip(&mut self, cfg: &Config) {
+        // Bandits of the chosen type, where and as fast as the briefing put them.
+        for b in self.bandits.iter_mut().chain(self.reserve.iter_mut()) {
+            if b.jet.kind != cfg.aggressor {
+                let j = &b.jet;
+                b.jet = spawn_type(cfg.aggressor, j.pos, heading_of(j.vel), j.speed);
+            }
+        }
         self.loadout = Loadout::configure(cfg);
         if !self.modes().contains(&self.mode) {
             self.mode = *self.modes().iter().rev().find(|&&m| m != Mode::Ccip).unwrap_or(&Mode::Gun);
@@ -1363,7 +1388,7 @@ impl Combat {
             let r = (a.pos - b.jet.pos).len();
             if r < 60000.0 {
                 let locked = r < 15000.0 && b.jet.q.axes().forward.dot((a.pos - b.jet.pos).norm()) > 0.85;
-                v.push((b.jet.pos, "16", locked));
+                v.push((b.jet.pos, if b.jet.kind == Type::Mig29 { "29" } else { "16" }, locked));
             }
         }
         for s in self.sites.iter().filter(|s| !s.dead) {
@@ -1409,6 +1434,22 @@ mod tests {
         assert!((strike.mass() - (STORES_MASS + 3.0 * MK82_MASS - 100.0 * ROUND_EXPENDED)).abs() < 1e-9);
         let fight = Loadout::for_mission(MissionKind::Dogfight);
         assert_eq!((fight.count(Store::Aim9), fight.count(Store::Aim120)), (2, 2));
+    }
+
+    /// The MiG-29 spawns trimmed: hands off it holds its height and speed,
+    /// and its engines outpull the F110 against its own weight.
+    #[test]
+    fn a_fulcrum_spawns_trimmed() {
+        crate::terrain::init();
+        let mut a = spawn_type(Type::Mig29, v3(0.0, 3000.0, 0.0), 0.0, 230.0);
+        assert_eq!(a.kind, Type::Mig29);
+        for _ in 0..(20.0 / crate::sim::FIXED_DT) as usize {
+            a.update(crate::sim::FIXED_DT, &Input::default());
+        }
+        assert!(!a.crashed && (a.pos.y - 3000.0).abs() < 150.0 && (a.speed - 230.0).abs() < 25.0, "after 20 s: {:.0} m, {:.0} m/s", a.pos.y, a.speed);
+        let f16 = spawn(v3(0.0, 3000.0, 0.0), 0.0, 230.0);
+        let ab = |k: Type| crate::aero::thrust(100.0, 0.0, 0.0) * k.thrust_scale(100.0) / (k.empty_mass() + 3000.0);
+        assert!(ab(Type::Mig29) > ab(Type::F16), "{} vs {}", ab(Type::Mig29), ab(f16.kind));
     }
 
     /// The same jet at the same throttle: four Mk-82s, their weight and drag,

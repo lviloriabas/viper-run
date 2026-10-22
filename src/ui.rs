@@ -46,6 +46,9 @@ pub enum Action {
     Station(u8),
     Fuel,
     Launch,
+    /// Next airframe for the player, and for the bandits.
+    Jet,
+    Aggressor,
     /// Wait for a key for an action (index into keymap::BINDS) and slot.
     Rebind(u8, u8),
     ResetKeys,
@@ -164,7 +167,7 @@ impl<'a> Ui<'a> {
     }
 
     // ---------------------------------------------------------- screens
-    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind) {
+    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind, cfg: &Config) {
         let s = self.s;
         let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 20.0 * s).min(250.0 * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
@@ -209,6 +212,8 @@ impl<'a> Ui<'a> {
         // keyboard order, so Enter still starts the flight.
         let picks_y = yy;
         yy += 19.0 * s;
+        let jets_y = yy;
+        yy += 19.0 * s;
         let w1 = self.button("ENGAGE", "ENTER", bx, yy, true, Action::Start);
         let w2 = self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
         let _ = w2;
@@ -217,8 +222,12 @@ impl<'a> Ui<'a> {
         self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
         let mut mx = bx;
         for k in MissionKind::ALL {
-            let label = if k == mission { format!("[X] {}", k.name()) } else { format!("[ ] {}", k.name()) };
-            mx += self.button(&label, "", mx, picks_y, false, Action::Pick(k)) + 4.0 * s;
+            // The chosen mission is the lit button.
+            mx += self.button(k.name(), "", mx, picks_y, k == mission, Action::Pick(k)) + 4.0 * s;
+        }
+        let jw = self.button(&format!("JET: {}", cfg.jet.name()), "", bx, jets_y, false, Action::Jet);
+        if mission == MissionKind::Dogfight {
+            self.button(&format!("BANDITS: {}", cfg.aggressor.name()), "", bx + jw + 4.0 * s, jets_y, false, Action::Aggressor);
         }
 
         // Briefing card.
@@ -228,10 +237,13 @@ impl<'a> Ui<'a> {
         self.cv.stroke_rect(bxx, byy, bw, bh, 1.0, LINE);
         let sm = s.max(2.0) - 1.0;
         self.cv.text(&format!("MISSION DATA // {}", mission.name()), bxx + 6.0 * s, byy + 8.0 * s, sm, AMBER, Align::Left);
-        let airframe = ("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM");
+        let airframe = match cfg.jet {
+            crate::sim::Type::F16 => ("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM"),
+            crate::sim::Type::Mig29 => ("AIRFRAME", "MIG-29A 9.12", "2 X RD-33 / FBW TRAINER FLCS"),
+        };
         let rows = match mission {
             MissionKind::Gates => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")],
-            MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", "AGGRESSOR F-16, AIM-9, GUN"), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "05:00", "SPLASH ALL THREE")],
+            MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", if cfg.aggressor == crate::sim::Type::Mig29 { "MIG-29A FULCRUM, AIM-9, GUN" } else { "AGGRESSOR F-16, AIM-9, GUN" }), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
             MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
             MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
         };
@@ -787,7 +799,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     cv.rect_grad(0.0, h - bottom_h, w, bottom_h, rgba(4, 10, 6, 0.0), rgba(4, 10, 6, 0.78));
     cv.rect(edge, top_h - 4.0 * s, w - 2.0 * edge, 1.0, with_alpha(HUD, 0.16));
 
-    cv.text("F-16C  //  CHASE VIEW", edge, 10.0 * s, sm, HUD, Align::Left);
+    cv.text(&format!("{}  //  CHASE VIEW", a.kind.name()), edge, 10.0 * s, sm, HUD, Align::Left);
     cv.text("COLD RIVER  /  SECTOR 07", edge, 19.0 * s, sm, with_alpha(HUD, 0.48), Align::Left);
     let title = obj.map(|o| o.label.clone()).unwrap_or_else(|| format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)));
     cv.text(&title, w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
@@ -851,7 +863,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     if a.gear > 0.0 || a.flaps > 0.0 {
         let gear = if a.gear >= 1.0 { "GEAR DN" } else if a.gear > 0.0 { "GEAR TRANSIT" } else { "GEAR UP" };
         let text = format!("{gear}  FLAPS {}{}", (a.flaps * crate::sim::spec::FLAP_MAX).round() as i64, if a.wheel_brake > 0.1 { "  BRAKES" } else { "" });
-        cv.text(&text, edge, h - 34.0 * s, sm, if a.gear > 0.0 && a.gear < 1.0 { AMBER } else { with_alpha(HUD, 0.6) }, Align::Left);
+        cv.text(&text, edge, h - 44.0 * s, sm, if a.gear > 0.0 && a.gear < 1.0 { AMBER } else { with_alpha(HUD, 0.6) }, Align::Left);
     }
     cv.text(if cue.pad { "Y  COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     let hint = match (cue.pad, cue.source) {
@@ -896,7 +908,7 @@ fn air_panel(cv: &mut Canvas, x: f32, y: f32, s: f32, a: &Aircraft) {
         format!("OAT {:+.0}°C  TAT {:+.0}°C", ad.oat_c, ad.tat_c),
         format!("RHO {:.3} ({:.0}%)  Q {:.0}KPA", ad.atm.rho, ad.sigma * 100.0, ad.qbar / 1000.0),
         // Gross weight and the drag the stores, gear and flaps add, in counts.
-        format!("GW {} LB  DRAG +{}  T/W {:.2}", (a.mass * 2.20462 / 10.0).round() as i64 * 10, ((a.stores_drag + crate::sim::spec::GEAR_DRAG * a.gear + crate::sim::spec::FLAP_CD * a.flaps) * 10000.0).round() as i64, a.thrust_n / (a.mass * crate::sim::G0)),
+        format!("GW {}  DRAG +{}  T/W {:.2}", (a.mass * 2.20462 / 10.0).round() as i64 * 10, ((a.stores_drag + crate::sim::spec::GEAR_DRAG * a.gear + crate::sim::spec::FLAP_CD * a.flaps) * 10000.0).round() as i64, a.thrust_n / (a.mass * crate::sim::G0)),
     ];
     let rows_y = y + 34.0 * u;
     cv.rect(x - 4.0 * u, y - 5.0 * u, w + 8.0 * u, rows_y - y + rows.len() as f32 * line + 2.0 * u, rgba(4, 10, 6, 0.45));

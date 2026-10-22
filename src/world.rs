@@ -7,7 +7,7 @@ use crate::gfx::{self, Target};
 use crate::math::*;
 use crate::mesh::Mesh;
 use crate::physio::Vision;
-use crate::sim::{Aircraft, Mission, GATE_RADIUS};
+use crate::sim::{Aircraft, Mission, Type, GATE_RADIUS};
 use crate::terrain::{self, CHUNKS, CHUNK_M, X0, Z0};
 use crate::texture;
 use miniquad::*;
@@ -625,6 +625,9 @@ pub struct World {
     rudder: Part,
     brakes: [Part; 4],
     gear: [Part; 3],
+    /// MiG-29: airframe and the right and left stabilators.
+    mig: Part,
+    mig_stab: [Part; 2],
     post: Pipeline,
     vision: Pipeline,
     post_bind: Bindings,
@@ -786,6 +789,8 @@ impl World {
         let rudder = skinned(&airframe.rudder);
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
+        let (mig_body, mig_stabs) = crate::mig29::build();
+        let (mig, mig_stab) = (skinned(&mig_body), [skinned(&mig_stabs[0]), skinned(&mig_stabs[1])]);
         World {
             post_bind: fullscreen.clone(),
             fullscreen,
@@ -818,6 +823,8 @@ impl World {
             rudder,
             brakes,
             gear,
+            mig,
+            mig_stab,
             post,
             vision,
             fx: Fx::new(ctx),
@@ -930,6 +937,9 @@ impl World {
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
             let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.air);
+            if a.kind == Type::Mig29 {
+                self.draw_mig(ctx, a, &base, &model);
+            } else {
             self.draw_part(ctx, &self.exterior, &base, &model);
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
             let roll = clamp(a.surf_roll, -1.0, 1.0);
@@ -950,8 +960,9 @@ impl World {
                 let local = rotate_about(hinge, Quat::axis_angle(V3::X, angle));
                 self.draw_part(ctx, b, &base, &mat_mul(&model, &local));
             }
+            }
             self.draw_gear(ctx, a, &base, &model);
-            if !cockpit {
+            if !cockpit && a.kind == Type::F16 {
                 self.draw_part(ctx, &self.crew, &base, &model);
             }
             // The flame sits between the plume's shock diamonds and its sheath.
@@ -960,7 +971,16 @@ impl World {
                 ctx.apply_pipeline(&self.flame_pip);
                 let u = AirU { alpha: (0.18 + 0.30 * a.afterburner_visual) as f32, glow: 1.0, ..base };
                 gfx::depth_writes(false);
-                self.draw_part(ctx, &self.flame, &u, &model);
+                if a.kind == Type::Mig29 {
+                    // Two RD-33 nozzles out on the nacelles instead of the F110's.
+                    for s in [-1.0, 1.0] {
+                        let n = crate::mig29::NOZZLE;
+                        let shift = v3(s * n.x, n.y, n.z) - airframe::NOZZLE_EXIT;
+                        self.draw_part(ctx, &self.flame, &u, &mat_mul(&model, &basis(V3::X, V3::Y, V3::Z, shift)));
+                    }
+                } else {
+                    self.draw_part(ctx, &self.flame, &u, &model);
+                }
                 gfx::depth_writes(true);
             }
             self.fx.draw(ctx, vp, Layer::PlumeSheath);
@@ -1013,6 +1033,10 @@ impl World {
         let model = basis(ax.right, ax.up, ax.back, rel);
         let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint };
         ctx.apply_pipeline(&self.air);
+        if a.kind == Type::Mig29 {
+            self.draw_mig(ctx, a, &base, &model);
+            return;
+        }
         self.draw_part(ctx, &self.exterior, &base, &model);
         if rel.len() > 2500.0 {
             return;
@@ -1029,6 +1053,20 @@ impl World {
         self.draw_gear(ctx, a, &base, &model);
         // Opaque canopy: the gold tint reads at a distance without the glass passes.
         self.draw_part(ctx, &self.canopy, &base, &model);
+    }
+
+    /// The MiG-29 with its stabilators at their deflection and its gear.
+    fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+        self.draw_part(ctx, &self.mig, base, model);
+        let pitch = clamp(a.surf_pitch, -1.0, 1.0);
+        let roll = clamp(a.surf_roll, -1.0, 1.0);
+        for (i, side) in [1.0, -1.0].iter().enumerate() {
+            let angle = clamp(-pitch * 25.0 * DEG + side * -roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
+            let p = crate::mig29::STAB_PIVOT;
+            let local = rotate_about(v3(side * p.x, p.y, p.z), Quat::axis_angle(V3::X, angle));
+            self.draw_part(ctx, &self.mig_stab[i], base, &mat_mul(model, &local));
+        }
+        self.draw_gear(ctx, a, base, model);
     }
 
     /// Landing gear legs, swung up toward their wells as the gear retracts,

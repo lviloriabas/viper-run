@@ -172,8 +172,9 @@ ground. The result screen shows the kills or targets, the time and a rating.
 
 ### Bandits and ground targets
 
-Bandits fly the same six-degree-of-freedom F-16 and FLCS as the player, in
-desert splinter paint. Their AI pilot only moves the stick and throttle: lead
+Bandits fly the same six-degree-of-freedom model and FLCS as the player:
+MiG-29A Fulcrums by default, or F-16s in desert splinter paint (BANDITS on
+the start screen while DOGFIGHT is picked); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
 pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
 overshoot, a max-g break when the player is at its six, beaming and then
 breaking into missiles, unloading to regain speed, extending past 2 km
@@ -191,6 +192,20 @@ fuel tanks. Armour decides what the gun can kill; the bridge only falls to a
 bomb. The ZSU-23-4s fire tracer bursts at a jet within 2.5 km in their line of
 sight; the SA-6 fires when its radar sees the jet more than 300 m above the
 ground, so the gorge is the way in.
+
+### MiG-29
+
+JET on the start screen swaps the player's F-16C for a MiG-29A (9.12), and
+BANDITS picks the aggressors. The Fulcrum is a low-poly model after the
+published three-view (17.3 m long, 11.4 m span, 4.7 m tall): radome and
+bubble canopy, leading-edge root extensions, the flat centre body between
+two widely spaced nacelles with wedge intakes, 42 degree wings, twin fins
+canted out 6 degrees, moving stabilators, two afterburner flames, in the
+two-tone grey of the type with red stars. It flies the F-16 aerodynamic
+tables scaled to its own size, weight and engines, an approximation from
+public figures rather than wind-tunnel data: 38 m² of wing, 11,000 kg
+empty, two RD-33s with 22,200 lbf dry and 36,600 lbf in afterburner, and
+about 35 % more inertia. The cockpit stays the F-16's.
 
 ### Airbase, take-off and landing
 
@@ -447,7 +462,8 @@ viper-run/
     ├── terrain.rs      # analytic terrain, airbase, height grid, LOD chunk meshes
     ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, pixel pass
     ├── texture.rs      # procedural pixel-art terrain and cloud textures
-    ├── airframe.rs     # F-16 exterior, moving surfaces and painted skin
+    ├── airframe.rs     # F-16 exterior, moving surfaces, landing gear and painted skin
+    ├── mig29.rs        # MiG-29 exterior
     ├── cockpit.rs      # 3D cockpit, instrument pages and NAV HUD
     ├── cockpit/consoles.rs  # side consoles: lightplates, legends, switches
     ├── cockpit/pilot.rs     # pilot, seat, stick and throttle
