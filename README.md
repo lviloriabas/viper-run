@@ -134,7 +134,7 @@ thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 | DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
 | AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 60 % fuel | 10:00 |
-| FREE FLIGHT | Practice with no end: the gate rings on a loop, the strike targets and a pair of bandits; a new pair comes 30 s after the last one falls, the targets are rebuilt 30 s after the last one burns, and stopping on the ground rearms, refuels and repairs the jet. Only a crash or a shootdown ends it | 2 AIM-9M, 2 AIM-120C, 2 Mk-82 | none |
+| FREE FLIGHT | Practice with no end: the gate rings on a loop, the strike targets and a pair of bandits, none of which shoot back; a new pair comes 30 s after the last one falls, the targets are rebuilt 30 s after the last one burns, and stopping on the ground rearms, refuels and repairs the jet. Only a crash ends it | 2 AIM-9M, 2 AIM-120C, 2 Mk-82 | none |
 
 `CLOCK: ON / OFF` on the start screen (saved with the settings) switches the
 clock off for every mission: nothing times out, the HUD counts the time flown

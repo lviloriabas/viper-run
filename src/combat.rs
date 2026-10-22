@@ -406,6 +406,9 @@ pub struct Combat {
     next_wave: Option<f64>,
     rebuild_at: Option<f64>,
     rearmed: bool,
+    /// Bandits and ground sites shoot at the player; in free flight they
+    /// are only targets.
+    hostile: bool,
 }
 
 /// A trimmed F-16 at a point, heading (radians clockwise from north) and speed.
@@ -573,6 +576,7 @@ impl Combat {
             next_wave: None,
             rebuild_at: None,
             rearmed: true,
+            hostile: kind != MissionKind::Free,
         };
         // Free flight never runs a clock; an untimed run keeps none to score.
         m.timed &= kind != MissionKind::Free;
@@ -1064,7 +1068,7 @@ impl Combat {
                 continue;
             }
             let mut shots = Vec::new();
-            if o.gun && b.rounds > 0 && !self.player_dead {
+            if self.hostile && o.gun && b.rounds > 0 && !self.player_dead {
                 b.gun_acc += GUN_RATE * dt;
                 while b.gun_acc >= 1.0 && b.rounds > 0 {
                     b.gun_acc -= 1.0;
@@ -1081,7 +1085,7 @@ impl Combat {
                 self.rounds.push(Round::new(p, v + jitter, tracer, Who::Bandit(i), 6.0));
             }
             let b = &mut self.bandits[i];
-            if o.missile && b.missiles > 0 && !self.player_dead {
+            if self.hostile && o.missile && b.missiles > 0 && !self.player_dead {
                 b.missiles -= 1;
                 let side = if b.missiles % 2 == 0 { -1.0 } else { 1.0 };
                 let t = crate::airframe::AIM9_TIP;
@@ -1330,6 +1334,9 @@ impl Combat {
     /// in bursts, leading him from a lagging track; the SA-6 battery fires
     /// while its radar sees him above the valley clutter.
     fn step_sites(&mut self, dt: f64, a: &Aircraft) {
+        if !self.hostile {
+            return;
+        }
         self.sam_clock -= dt;
         let radar = self.sites.iter().position(|s| s.kind == Kind::Radar && !s.dead);
         for k in 0..self.sites.len() {
@@ -1480,15 +1487,15 @@ impl Combat {
         for b in self.bandits.iter().filter(|b| b.alive) {
             let r = (a.pos - b.jet.pos).len();
             if r < 60000.0 {
-                let locked = r < 15000.0 && b.jet.q.axes().forward.dot((a.pos - b.jet.pos).norm()) > 0.85;
+                let locked = self.hostile && r < 15000.0 && b.jet.q.axes().forward.dot((a.pos - b.jet.pos).norm()) > 0.85;
                 v.push((b.jet.pos, if b.jet.kind == Type::Mig29 { "29" } else { "16" }, locked));
             }
         }
         for s in self.sites.iter().filter(|s| !s.dead) {
             let r = (a.pos - s.pos).len();
             match s.kind {
-                Kind::Zsu if r < 6000.0 => v.push((s.pos, "A", r < 2500.0)),
-                Kind::Radar if r < 30000.0 => v.push((s.pos, "6", r < 14000.0 && a.agl > 300.0)),
+                Kind::Zsu if r < 6000.0 => v.push((s.pos, "A", self.hostile && r < 2500.0)),
+                Kind::Radar if r < 30000.0 => v.push((s.pos, "6", self.hostile && r < 14000.0 && a.agl > 300.0)),
                 _ => {}
             }
         }
@@ -1753,6 +1760,26 @@ mod tests {
         a.speed = 0.0;
         c.practice(&mut a);
         assert!(c.loadout.count(Store::Aim9) == 2 && c.hp == 100.0);
+    }
+
+    /// In free flight a bandit nose-on at gun range and the guns along the
+    /// river hold their fire.
+    #[test]
+    fn free_flight_enemies_hold_fire() {
+        terrain::init();
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Free, &mut m);
+        let zsu = c.sites.iter().find(|s| s.kind == Kind::Zsu).unwrap().pos;
+        let mut a = spawn(zsu + v3(0.0, 600.0, 1200.0), 0.0, 200.0);
+        let fwd = a.q.axes().forward;
+        c.bandits[0].jet = spawn(a.pos + fwd * 700.0, std::f64::consts::PI, 200.0);
+        for _ in 0..(8.0 / FIXED_DT_TEST) as usize {
+            a.pos += a.vel * FIXED_DT_TEST;
+            c.step(FIXED_DT_TEST, &mut a, false, &mut m);
+        }
+        assert!(c.rounds.is_empty() && c.missiles.is_empty() && c.hp == 100.0 && !c.player_dead);
+        assert!(c.bandits.iter().all(|b| b.rounds == GUN_ROUNDS && b.missiles == 2));
+        assert!(c.emitters(&a).iter().all(|e| !e.2));
     }
 
     const FIXED_DT_TEST: f64 = crate::sim::FIXED_DT;

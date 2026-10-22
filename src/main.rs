@@ -562,7 +562,7 @@ impl App {
                 MissionKind::Dogfight => "DOGFIGHT // 3 BANDITS // T LOCK, X WEAPON",
                 MissionKind::Strike => "STRIKE // BRIDGE AND SA-6 // X WEAPON, T DESIGNATE",
                 MissionKind::Airfield => "RUNWAY A // THROTTLE UP, ROTATE AT 150 KT, G GEAR UP",
-                MissionKind::Free => "FREE FLIGHT // NO CLOCK // STOP ON RWY A TO REARM",
+                MissionKind::Free => "FREE FLIGHT // NOBODY SHOOTS BACK // STOP ON RWY A TO REARM",
             },
             3.4,
         );

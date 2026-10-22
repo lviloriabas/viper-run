@@ -207,7 +207,7 @@ impl<'a> Ui<'a> {
             MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
             MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B."),
             MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
-            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits is coming. Whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
+            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits is coming. Nobody shoots back, and whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
         yy += 2.0 * s;
@@ -259,7 +259,7 @@ impl<'a> Ui<'a> {
             MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", if cfg.aggressor == crate::sim::Type::Mig29 { "MIG-29A FULCRUM, AIM-9, GUN" } else { "AGGRESSOR F-16, AIM-9, GUN" }), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
             MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
             MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
-            MissionKind::Free => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, ON A LOOP"), ("THREAT", "2 BANDITS, SA-6", "BACK 30 SEC AFTER CLEARED"), ("CLOCK", "OFF", "STOP ON RWY A TO REARM")],
+            MissionKind::Free => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, ON A LOOP"), ("TARGETS", "2 BANDITS, SA-6", "HOLD FIRE, BACK IN 30 SEC"), ("CLOCK", "OFF", "STOP ON RWY A TO REARM")],
         };
         let rows = rows.map(|r| if !clock && r.0 == "CLOCK" { ("CLOCK", "OFF", "NO TIME LIMIT") } else { r });
         let mut ry = byy + 20.0 * s;
@@ -480,14 +480,13 @@ impl<'a> Ui<'a> {
             return;
         }
         if r.mission == MissionKind::Free {
-            // Only a crash or a shootdown ends free flight.
-            let (title, text) = if r.kind == Outcome::ShotDown { ("SHOT DOWN", "The jet came apart around you and the seat did its job.") } else { ("TERRAIN WINS", "The gorge is unforgiving.") };
+            // Nothing shoots back in free flight: only a crash ends it.
             self.status_panel(
                 "// FREE FLIGHT, AIRFRAME LOST",
                 RED,
-                title,
+                "TERRAIN WINS",
                 RED,
-                &format!("{text} You flew {} and took down {} bandits and {} ground targets.", format_time(r.time), r.done, r.total),
+                &format!("The gorge is unforgiving. You flew {} and took down {} bandits and {} ground targets.", format_time(r.time), r.done, r.total),
                 [("FLOWN", format_time(r.time), CREAM), ("KILLS", r.done.to_string(), GREEN), ("TARGETS", r.total.to_string(), GREEN), ("SCORE", pad(r.score, 5), AMBER)],
                 &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
                 "R RESTART, ESC MENU",
