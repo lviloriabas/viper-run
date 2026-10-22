@@ -17,16 +17,19 @@ pub enum MissionKind {
     Gates,
     Dogfight,
     Strike,
+    /// Take off from the airbase, fly out to a steerpoint, come back and land.
+    Airfield,
 }
 
 impl MissionKind {
-    pub const ALL: [MissionKind; 3] = [MissionKind::Gates, MissionKind::Dogfight, MissionKind::Strike];
+    pub const ALL: [MissionKind; 4] = [MissionKind::Gates, MissionKind::Dogfight, MissionKind::Strike, MissionKind::Airfield];
 
     pub fn name(self) -> &'static str {
         match self {
             MissionKind::Gates => "GATE RUN",
             MissionKind::Dogfight => "DOGFIGHT",
             MissionKind::Strike => "STRIKE",
+            MissionKind::Airfield => "AIRFIELD",
         }
     }
 
@@ -35,6 +38,7 @@ impl MissionKind {
             "gates" | "gate" | "run" => Some(MissionKind::Gates),
             "dogfight" | "aa" => Some(MissionKind::Dogfight),
             "strike" | "ag" => Some(MissionKind::Strike),
+            "airfield" | "circuit" | "land" => Some(MissionKind::Airfield),
             _ => None,
         }
     }
@@ -45,6 +49,7 @@ impl MissionKind {
             MissionKind::Gates => crate::sim::MISSION_TIME,
             MissionKind::Dogfight => 360.0,
             MissionKind::Strike => 420.0,
+            MissionKind::Airfield => 600.0,
         }
     }
 }
@@ -133,6 +138,7 @@ impl Config {
     pub fn for_mission(kind: MissionKind) -> Config {
         match kind {
             MissionKind::Gates => Config { outboard: None, inboard: None, fuel: 1.0 },
+            MissionKind::Airfield => Config { outboard: None, inboard: None, fuel: 0.6 },
             MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0 },
             MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0 },
         }
@@ -329,6 +335,8 @@ pub enum Event {
     Lock { text: String },
     /// A countermeasure program: a flare and a chaff bundle thrown out.
     Decoy { pos: V3, vel: V3 },
+    /// A line for the pilot, such as an airfield sortie's next leg.
+    Toast(String),
 }
 
 pub struct Combat {
@@ -377,6 +385,11 @@ pub struct Combat {
     player_trail: Option<usize>,
     sam_clock: f64,
     rnd: Lcg,
+    /// Airfield sortie: legs done (takeoff, steerpoint, landing), whether the
+    /// wheels are on the runway, and the vertical speed a step ago.
+    pub leg: u8,
+    touched: bool,
+    last_vs: f64,
 }
 
 /// A trimmed jet at a point, heading (radians clockwise from north) and speed.
@@ -466,7 +479,7 @@ impl Combat {
         let mut c = Combat {
             kind,
             mode: match kind {
-                MissionKind::Gates => Mode::Nav,
+                MissionKind::Gates | MissionKind::Airfield => Mode::Nav,
                 MissionKind::Dogfight => Mode::Srm,
                 MissionKind::Strike => Mode::Ccip,
             },
@@ -503,11 +516,31 @@ impl Combat {
             player_trail: None,
             sam_clock: 25.0,
             rnd: Lcg(90210),
+            leg: 0,
+            touched: false,
+            last_vs: 0.0,
         };
         m.time_left = kind.time();
         let fwd = m.start_vel.norm();
         match kind {
             MissionKind::Gates => {}
+            MissionKind::Airfield => {
+                // Lined up on runway A, 150 m in from the threshold, brakes off;
+                // the steerpoint is 9 km past the far end at 3,000 ft above
+                // the field, then the touchdown zone of runway A again.
+                let (dx, dz) = terrain::runway_dir();
+                let fwd = v3(dx, 0.0, dz);
+                let e = terrain::base_elevation();
+                let (sx, sz) = terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH + 150.0, 0.0);
+                m.start_pos = v3(sx, e + crate::sim::WHEELS[0].local.y.abs() - 0.1, sz);
+                m.start_vel = V3::ZERO;
+                m.start_q = Quat::from_forward_up(fwd, V3::Y);
+                m.start_throttle = 0.0;
+                let (wx, wz) = terrain::runway_point(terrain::RUNWAY_HALF_LENGTH + 9000.0, 0.0);
+                let (tx, tz) = terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH + 320.0, 0.0);
+                m.gates = vec![Gate { pos: v3(wx, e + 900.0, wz), radius: 0.0, axis: fwd, passed: false }, Gate { pos: v3(tx, e, tz), radius: 0.0, axis: fwd, passed: false }];
+                m.gate_index = 0;
+            }
             MissionKind::Dogfight => {
                 // A pair 20 km down the gorge coming head-on, high over the
                 // ridges and spread 3 km apart, so the merge opens out and the
@@ -696,6 +729,56 @@ impl Combat {
         }
         self.damage_smoke(a);
         self.objectives(m);
+        if self.kind == MissionKind::Airfield && alive {
+            self.circuit(a, m);
+        }
+    }
+
+    /// The airfield sortie: airborne and climbing through 500 ft, then the
+    /// steerpoint within 1.5 km, then a landing on runway A brought to a full
+    /// stop on the runway. Touchdown is scored on the sink rate and on how far
+    /// from the aim point the wheels meet the runway.
+    fn circuit(&mut self, a: &Aircraft, m: &mut Mission) {
+        let e = terrain::base_elevation();
+        match self.leg {
+            0 if !a.on_ground && a.pos.y - e > 150.0 => {
+                self.leg = 1;
+                self.points += 500.0;
+                self.events.push(Event::Toast("AIRBORNE // GEAR UP, FLY TO STPT 1".to_string()));
+            }
+            1 if m.gates.first().is_some_and(|g| (v3(g.pos.x, 0.0, g.pos.z) - v3(a.pos.x, 0.0, a.pos.z)).len() < 1500.0) => {
+                self.leg = 2;
+                m.gate_index = 1;
+                self.points += 500.0;
+                self.events.push(Event::Toast("STPT 1 // RETURN AND LAND RUNWAY A".to_string()));
+            }
+            2 => {
+                let (u, v) = terrain::runway_local(a.pos.x, a.pos.z);
+                if a.on_ground && !self.touched {
+                    self.touched = true;
+                    let aim = (u - (-terrain::RUNWAY_HALF_LENGTH + 320.0)).abs();
+                    let sink = -self.last_vs;
+                    let firm = if sink < 1.0 { "GREASED" } else if sink < 2.0 { "FIRM" } else { "HARD" };
+                    self.points += (1000.0 - sink * 250.0).max(0.0) + (500.0 - aim).max(0.0);
+                    self.events.push(Event::Toast(format!("TOUCHDOWN {firm} // {} FPM // {} FT FROM AIM POINT", (sink * 196.85).round() as i64, (aim * 3.28084).round() as i64)));
+                }
+                if !a.on_ground {
+                    self.touched = false;
+                }
+                let on_runway = u.abs() < terrain::RUNWAY_HALF_LENGTH + 60.0 && v.abs() < terrain::RUNWAY_HALF_WIDTH;
+                if a.on_ground && a.speed < 3.0 && self.done_at.is_none() {
+                    if on_runway {
+                        self.leg = 3;
+                        self.points += 1000.0;
+                        self.done_at = Some(self.clock);
+                    } else {
+                        self.events.push(Event::Toast("OFF THE RUNWAY // TAXI BACK ONTO IT".to_string()));
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.last_vs = a.vs;
     }
 
     fn player_weapons(&mut self, dt: f64, a: &Aircraft, trigger: bool, pressed: bool) {
@@ -1234,7 +1317,7 @@ impl Combat {
 
     fn objectives(&mut self, m: &mut Mission) {
         match self.kind {
-            MissionKind::Gates => {}
+            MissionKind::Gates | MissionKind::Airfield => {}
             MissionKind::Dogfight => {
                 if self.done_at.is_none() && self.reserve.is_empty() && self.bandits.iter().all(|b| !b.alive) {
                     self.done_at = Some(self.clock);
@@ -1267,6 +1350,7 @@ impl Combat {
     pub fn tally(&self) -> (usize, usize) {
         match self.kind {
             MissionKind::Gates => (0, 0),
+            MissionKind::Airfield => (self.leg as usize, 3),
             MissionKind::Dogfight => (self.kills, self.bandits.len() + self.reserve.len()),
             MissionKind::Strike => (self.sites.iter().filter(|s| s.primary && s.dead).count(), self.sites.iter().filter(|s| s.primary).count()),
         }

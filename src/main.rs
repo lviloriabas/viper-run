@@ -15,6 +15,7 @@ mod fx;
 mod gamepad;
 mod gfx;
 mod icon;
+mod keymap;
 mod math;
 mod mesh;
 mod physio;
@@ -37,6 +38,7 @@ use canvas::{rgba, Canvas};
 use cockpit::{Cockpit, Hands, Page};
 use combat::{Combat, MissionKind, Mode};
 use gamepad::Gamepad;
+use keymap::Bind;
 use math::*;
 use miniquad::*;
 use physio::Pilot;
@@ -136,6 +138,9 @@ fn parse_opts() -> Opts {
                         }
                         "throttle" => o.input.throttle_up = true,
                         "brake" => o.input.airbrake = true,
+                        "gear" => o.input.gear_down = true,
+                        "flaps" => o.input.flaps = true,
+                        "wheelbrake" => o.input.wheel_brake = true,
                         "fire" => o.fire = true,
                         "lock" => o.lock = true,
                         "auto" => o.auto = true,
@@ -241,6 +246,11 @@ struct App {
     /// Keyboard pitch, ramped so a tap gives a partial pull and a hold a full one.
     key_pitch: f64,
     airbrake: bool,
+    /// Landing gear handle down, and the flaps switch.
+    gear_lever: bool,
+    flaps_switch: bool,
+    /// Action and slot waiting for a key in the controls drawer.
+    rebinding: Option<(usize, usize)>,
     mouse_pos: (f32, f32),
     grabbed: bool,
     look: (f64, f64),
@@ -361,6 +371,9 @@ impl App {
             mouse: (0.0, 0.0),
             key_pitch: 0.0,
             airbrake: false,
+            gear_lever: false,
+            flaps_switch: false,
+            rebinding: None,
             mouse_pos: (0.0, 0.0),
             grabbed: false,
             look: (0.0, LOOK_PITCH),
@@ -412,7 +425,8 @@ impl App {
                                 self.combat.designate(a);
                             }
                         }
-                        let input = if self.opts.auto { self.autopilot() } else { self.opts.input };
+                        let mut input = if self.opts.auto { self.autopilot() } else { self.opts.input };
+                        input.gear_down |= self.gear_lever;
                         self.step(FIXED_DT, input);
                         self.advance_effects(FIXED_DT);
                     }
@@ -497,10 +511,18 @@ impl App {
             self.combat.select(w);
         }
         let mut a = Aircraft::new(&self.mission);
+        // Only the airfield sortie starts on the ground, gear down.
+        self.gear_lever = a.on_ground;
+        self.flaps_switch = false;
         if self.kind != MissionKind::Gates {
             a.fuel = sim::spec::FUEL_MAX * self.config.fuel;
         }
-        combat::load(&mut a, &self.combat.loadout);
+        if !a.on_ground {
+            combat::load(&mut a, &self.combat.loadout);
+        } else {
+            a.stores_mass = self.combat.loadout.mass();
+            a.mass = sim::spec::EMPTY_MASS + a.stores_mass + a.fuel;
+        }
         self.mission.start_throttle = a.throttle;
         self.aircraft = Some(a);
         self.trigger_mouse = false;
@@ -524,6 +546,7 @@ impl App {
                 MissionKind::Gates => "COLD RIVER // 10 GATES // MOUSE CAPTURED",
                 MissionKind::Dogfight => "DOGFIGHT // 3 BANDITS // T LOCK, X WEAPON",
                 MissionKind::Strike => "STRIKE // BRIDGE AND SA-6 // X WEAPON, T DESIGNATE",
+                MissionKind::Airfield => "RUNWAY A // THROTTLE UP, ROTATE AT 150 KT, G GEAR UP",
             },
             3.4,
         );
@@ -615,13 +638,13 @@ impl App {
     }
 
     fn act(&mut self, a: Action) {
-        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Fullscreen | Action::Reset) {
+        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Fullscreen | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
         }
         match a {
             Action::Controls => self.toggle_controls(None),
             // Combat sorties go through the loadout screen first.
-            Action::Start if self.state == State::Attract && self.kind != MissionKind::Gates => {
+            Action::Start if self.state == State::Attract && !matches!(self.kind, MissionKind::Gates | MissionKind::Airfield) => {
                 self.state = State::Loadout;
                 self.selected = 0;
             }
@@ -652,10 +675,16 @@ impl App {
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
-                self.settings = Settings { fullscreen: fs, muted, ..Settings::default() };
+                let keys = self.settings.keys;
+                self.settings = Settings { fullscreen: fs, muted, keys, ..Settings::default() };
             }
+            Action::Rebind(i, slot) => {
+                self.rebinding = Some((i as usize, slot as usize));
+                self.flash_toast("PRESS A KEY // ESC CANCELS, BACKSPACE CLEARS", 4.0);
+            }
+            Action::ResetKeys => self.settings.keys = keymap::Keymap::default(),
         }
-        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Reset) {
+        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Reset | Action::ResetKeys) {
             self.mouse = (0.0, 0.0);
             self.save();
         }
@@ -771,7 +800,8 @@ impl App {
 
     /// Control positions before pitch inversion, for the on-screen stick cue.
     fn read_control_positions(&self) -> Input {
-        let k = |c: KeyCode| self.keys.contains(&c);
+        let km = &self.settings.keys;
+        let k = |b: Bind| km.held(b, &self.keys);
         let mouse = if self.grabbed { self.mouse } else { (0.0, 0.0) };
         // Exactly one pitch source is live: mouse Y (down = pull) or W/S.
         let pitch_axis = match self.settings.pitch {
@@ -783,17 +813,20 @@ impl App {
         // the stop asks for afterburner. Flight input applies inversion later.
         let pad = &self.pad;
         Input {
-            roll_left: k(KeyCode::A) || k(KeyCode::Left),
-            roll_right: k(KeyCode::D) || k(KeyCode::Right),
-            yaw_left: k(KeyCode::Q) || pad.held(gamepad::LB),
-            yaw_right: k(KeyCode::E) || pad.held(gamepad::RB),
+            roll_left: k(Bind::RollLeft),
+            roll_right: k(Bind::RollRight),
+            yaw_left: k(Bind::YawLeft) || pad.held(gamepad::LB),
+            yaw_right: k(Bind::YawRight) || pad.held(gamepad::RB),
             pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
             roll_axis: pad_curve(pad.state.left.0),
             yaw_axis: stick_curve(mouse.0),
-            throttle_up: k(KeyCode::LeftShift) || k(KeyCode::RightShift) || pad.state.rt > 0.3,
-            throttle_down: k(KeyCode::LeftControl) || k(KeyCode::RightControl) || pad.state.lt > 0.3,
-            afterburner: k(KeyCode::Space) || pad.state.rt > 0.9,
+            throttle_up: k(Bind::ThrottleUp) || pad.state.rt > 0.3,
+            throttle_down: k(Bind::ThrottleDown) || pad.state.lt > 0.3,
+            afterburner: k(Bind::Afterburner) || pad.state.rt > 0.9,
             airbrake: self.airbrake,
+            gear_down: self.gear_lever,
+            flaps: self.flaps_switch,
+            wheel_brake: k(Bind::WheelBrake) || pad.state.lt > 0.3 && pad.state.rt < 0.05 && self.aircraft.as_ref().is_some_and(|a| a.on_ground),
             ..Default::default()
         }
     }
@@ -801,9 +834,9 @@ impl App {
     /// Ramps the keyboard pitch: full deflection after 0.11 s held, back to
     /// neutral in under 0.08 s, so taps make small corrections.
     fn ramp_key_pitch(&mut self, dt: f64) {
-        let k = |c: KeyCode| self.keys.contains(&c);
+        let k = |b: Bind| self.settings.keys.held(b, &self.keys);
         let want = if self.settings.pitch == PitchSource::Keys {
-            (k(KeyCode::S) || k(KeyCode::Down)) as i32 as f64 - (k(KeyCode::W) || k(KeyCode::Up)) as i32 as f64
+            k(Bind::PitchUp) as i32 as f64 - k(Bind::PitchDown) as i32 as f64
         } else {
             0.0
         };
@@ -820,17 +853,32 @@ impl App {
             self.act(if self.state == State::Loadout { Action::Launch } else { Action::Start });
             return;
         }
+        // Menu buttons go through the fixed menu keys; flight buttons go
+        // straight to their actions, whatever keys those are bound to.
         let binds = if menu {
             let start = if self.controls_open { KeyCode::Escape } else if self.state == State::Result { KeyCode::R } else { KeyCode::P };
             vec![(A, KeyCode::Enter), (B, KeyCode::Escape), (START, start), (BACK, KeyCode::K)]
         } else {
-            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2), (UP, KeyCode::X), (DOWN, KeyCode::T), (LS, KeyCode::Z)]
+            let mut v = vec![(START, KeyCode::P), (BACK, KeyCode::K)];
+            if self.state == State::Frozen {
+                v.push((B, KeyCode::Escape));
+            }
+            v
         };
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
         keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
         for k in keys {
             self.key_down_event(k, KeyMods::default(), false);
+        }
+        if !menu {
+            let speedbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Speedbrake)) };
+            let actions = [(Y, Bind::View), (X, Bind::Center), (RS, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)];
+            for (button, b) in actions.into_iter().chain(speedbrake) {
+                if self.pad.pressed(button) {
+                    self.bind_pressed(b);
+                }
+            }
         }
     }
 
@@ -923,7 +971,7 @@ impl App {
     /// Trigger and pickle: F, the left mouse button while flying, the pad's A,
     /// or --input fire.
     fn trigger(&self) -> bool {
-        self.keys.contains(&KeyCode::F) || self.trigger_mouse || self.pad.held(gamepad::A) || self.opts.fire
+        self.settings.keys.held(Bind::Trigger, &self.keys) || self.trigger_mouse || self.pad.held(gamepad::A) || self.opts.fire
     }
 
     /// The combat step after the jet has moved: weapons, bandits, targets
@@ -975,6 +1023,7 @@ impl App {
             MissionKind::Gates => None,
             MissionKind::Dogfight => Some(Objective { label: format!("KILLS {done}/{total}"), score: self.combat.score(&self.mission), cue: "BULLSEYE" }),
             MissionKind::Strike => Some(Objective { label: format!("TARGETS {done}/{total}"), score: self.combat.score(&self.mission), cue: "STPT" }),
+            MissionKind::Airfield => Some(Objective { label: ["TAKE OFF", "STPT 1", "LAND RWY A", "STOPPED"][done.min(3)].to_string(), score: self.combat.score(&self.mission), cue: if done == 0 { "RWY" } else { "STPT" } }),
         }
     }
 
@@ -1149,6 +1198,67 @@ impl App {
             p.master *= 1.0 - 0.8 * self.pilot.vision().black as f32;
         }
         self.audio.set(p);
+    }
+
+    /// A one-shot flight action from its key or the controller. Returns
+    /// false for held actions (stick, throttle, trigger, brakes), which
+    /// the caller tracks as keys held down.
+    fn bind_pressed(&mut self, b: Bind) -> bool {
+        let flying = self.state == State::Flying;
+        let looking = matches!(self.state, State::Flying | State::Frozen);
+        match b {
+            Bind::LeftMfd | Bind::RightMfd if looking => {
+                let i = if b == Bind::LeftMfd { 0 } else { 1 };
+                self.pages[i] = self.pages[i].next();
+            }
+            Bind::View if looking || self.state == State::Transition => {
+                self.view = if self.view == View::Chase { View::Cockpit } else { View::Chase };
+                // Cutting to a camera already inside the cone is no boom.
+                self.in_cone = true;
+                self.flash_toast(if self.view == View::Chase { "CHASE VIEW" } else { "COCKPIT VIEW" }, 1.8);
+            }
+            Bind::Center if looking => {
+                self.center_stick();
+                self.flash_toast("MOUSE STICK CENTERED", 1.1);
+            }
+            Bind::Weapon if flying => {
+                self.combat.cycle_weapon();
+                self.flash_toast(&format!("{} // {}", self.combat.mode.label(), symbology::stores_line(&self.combat)), 1.6);
+            }
+            Bind::Lock if flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.designate(a);
+                }
+            }
+            Bind::Countermeasures if flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.countermeasures(a);
+                }
+            }
+            Bind::Speedbrake if flying => {
+                self.airbrake = !self.airbrake;
+                self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT" } else { "SPEEDBRAKE IN" }, 1.4);
+            }
+            Bind::Gear if flying => self.toggle_gear(),
+            Bind::Flaps if flying => {
+                self.flaps_switch = !self.flaps_switch;
+                self.flash_toast(if self.flaps_switch { "ALT FLAPS EXTEND" } else { "ALT FLAPS NORM" }, 1.4);
+            }
+            Bind::PitchUp | Bind::PitchDown | Bind::RollLeft | Bind::RollRight | Bind::YawLeft | Bind::YawRight | Bind::ThrottleUp | Bind::ThrottleDown | Bind::Afterburner | Bind::Trigger | Bind::WheelBrake => return false,
+            _ => {}
+        }
+        true
+    }
+
+    /// Gear handle: it will not come up with weight on the wheels.
+    fn toggle_gear(&mut self) {
+        let on_ground = self.aircraft.as_ref().is_some_and(|a| a.on_ground);
+        if self.gear_lever && on_ground {
+            self.flash_toast("GEAR HANDLE LOCKED // WEIGHT ON WHEELS", 1.6);
+            return;
+        }
+        self.gear_lever = !self.gear_lever;
+        self.flash_toast(if self.gear_lever { "GEAR DOWN" } else { "GEAR UP" }, 1.4);
     }
 }
 
@@ -1365,7 +1475,7 @@ impl EventHandler for App {
                     _ => {}
                 }
             } else {
-                u.controls_drawer(&self.settings, self.controls_was_flying);
+                u.controls_drawer(&self.settings, self.controls_was_flying, self.rebinding);
             }
             buttons.append(&mut u.buttons);
         }
@@ -1465,6 +1575,29 @@ impl EventHandler for App {
             self.toggle_fullscreen();
             return;
         }
+        // A binding row in the drawer is waiting for its key.
+        if let Some((i, slot)) = self.rebinding {
+            if repeat {
+                return;
+            }
+            self.rebinding = None;
+            let b = keymap::BINDS[i];
+            match key {
+                KeyCode::Escape => self.flash_toast("BINDING UNCHANGED", 1.2),
+                KeyCode::Backspace | KeyCode::Delete => {
+                    self.settings.keys.set(b, slot, None);
+                    self.save();
+                    self.flash_toast(&format!("{} CLEARED", b.label()), 1.4);
+                }
+                k if keymap::bindable(k) => {
+                    self.settings.keys.set(b, slot, Some(k));
+                    self.save();
+                    self.flash_toast(&format!("{} // {}", b.label(), keymap::key_name(k)), 1.6);
+                }
+                _ => self.flash_toast("THAT KEY IS RESERVED", 1.4),
+            }
+            return;
+        }
         if key == KeyCode::K && !repeat {
             self.toggle_controls(None);
             return;
@@ -1507,40 +1640,13 @@ impl EventHandler for App {
         if repeat {
             return;
         }
+        if let Some(b) = self.settings.keys.lookup(key) {
+            if self.bind_pressed(b) {
+                return;
+            }
+        }
         match key {
-            KeyCode::F1 | KeyCode::F2 if matches!(self.state, State::Flying | State::Frozen) => {
-                let i = if key == KeyCode::F1 { 0 } else { 1 };
-                self.pages[i] = self.pages[i].next();
-            }
             KeyCode::M => self.toggle_mute(),
-            KeyCode::V if matches!(self.state, State::Flying | State::Frozen | State::Transition) => {
-                self.view = if self.view == View::Chase { View::Cockpit } else { View::Chase };
-                // Cutting to a camera already inside the cone is no boom.
-                self.in_cone = true;
-                self.flash_toast(if self.view == View::Chase { "CHASE VIEW // V COCKPIT" } else { "COCKPIT VIEW // V CHASE" }, 1.8);
-            }
-            KeyCode::C if matches!(self.state, State::Flying | State::Frozen) => {
-                self.center_stick();
-                self.flash_toast("MOUSE STICK CENTERED", 1.1);
-            }
-            KeyCode::X if self.state == State::Flying => {
-                self.combat.cycle_weapon();
-                self.flash_toast(&format!("{} // {}", self.combat.mode.label(), symbology::stores_line(&self.combat)), 1.6);
-            }
-            KeyCode::T if self.state == State::Flying => {
-                if let Some(a) = &self.aircraft {
-                    self.combat.designate(a);
-                }
-            }
-            KeyCode::Z if self.state == State::Flying => {
-                if let Some(a) = &self.aircraft {
-                    self.combat.countermeasures(a);
-                }
-            }
-            KeyCode::H if self.state == State::Flying => {
-                self.airbrake = !self.airbrake;
-                self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT // H RETRACT" } else { "SPEEDBRAKE IN" }, 1.4);
-            }
             KeyCode::P => match self.state {
                 State::Flying | State::Frozen => self.toggle_freeze(),
                 State::Paused => self.resume(),

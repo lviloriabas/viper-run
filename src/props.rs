@@ -281,7 +281,7 @@ pub fn present(c: &mut Combat, fx: &mut Fx, audio: &Audio, ear: V3, muted: bool)
                 out.toast = Some("DUD // FUZE NOT ARMED".to_string());
             }
             Event::Kill { text } => out.toast = Some(text),
-            Event::Lock { text } => out.toast = Some(text),
+            Event::Lock { text } | Event::Toast(text) => out.toast = Some(text),
             Event::Decoy { pos, vel } => {
                 fx.decoy(pos, vel);
                 if !muted && (pos - ear).len() < 100.0 {

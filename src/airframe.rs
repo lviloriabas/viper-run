@@ -10,7 +10,7 @@
 //! the origin is the flight model's centre of gravity.
 use crate::font;
 use crate::math::*;
-use crate::mesh::{Mesh, Rgb, STRIDE};
+use crate::mesh::{Frame, Mesh, Rgb, STRIDE};
 
 const WHITE: Rgb = Rgb(1.0, 1.0, 1.0);
 const DUCT: Rgb = Rgb(0.05, 0.06, 0.065);
@@ -282,6 +282,8 @@ pub struct Airframe {
     pub brakes: [Mesh; 4],
     /// Left and right wingtip AIM-9s.
     pub tips: [Mesh; 2],
+    /// Nose, left main and right main landing gear legs, extended.
+    pub gear: [Mesh; 3],
     /// Paint texture, `SKIN_W` x `SKIN_H` RGBA.
     pub skin: Vec<u8>,
 }
@@ -714,7 +716,45 @@ pub fn build() -> Airframe {
     for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()).chain(tips.iter_mut()) {
         mend_normals(m);
     }
-    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, skin: paint_skin() }
+    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear: landing_gear(), skin: paint_skin() }
+}
+
+/// Retraction pivots of the nose and main gear legs, and the angle each
+/// swings through about the body x axis (negative: the wheel goes aft).
+pub const GEAR_PIVOTS: [(V3, f64); 3] = [(v3(0.0, -0.50, -3.45), -100.0 * DEG), (v3(-0.95, -0.38, 0.55), 95.0 * DEG), (v3(0.95, -0.38, 0.55), 95.0 * DEG)];
+
+/// Landing gear legs fully down: nose leg with its single wheel under the
+/// intake, main legs with the larger wheels under the wing roots. The tyres
+/// meet the ground at the sim's wheel points (sim::WHEELS), 1.55 m under the
+/// datum.
+fn landing_gear() -> [Mesh; 3] {
+    let strut = Rgb(0.78, 0.78, 0.76);
+    let tyre = Rgb(0.07, 0.07, 0.075);
+    let hub = Rgb(0.55, 0.56, 0.55);
+    let door = Rgb(0.62, 0.64, 0.66);
+    let wheel = |m: &mut Mesh, c: V3, r: f64, w: f64| {
+        m.lathe(c - V3::X * (w * 0.5), V3::X, &[(0.0, 0.0), (0.0, r * 0.82), (0.02, r), (w - 0.02, r), (w, r * 0.82), (w, 0.0)], 10, tyre);
+        m.lathe(c - V3::X * (w * 0.5 + 0.005), V3::X, &[(0.0, 0.0), (0.0, r * 0.5), (w + 0.01, r * 0.5), (w + 0.01, 0.0)], 8, hub);
+    };
+    let mut nose = Mesh::new();
+    let (p, _) = GEAR_PIVOTS[0];
+    nose.lathe(p, -V3::Y, &[(0.0, 0.0), (0.0, 0.055), (0.55, 0.055), (0.56, 0.045), (0.83, 0.045), (0.84, 0.0)], 6, strut);
+    nose.block(&Frame { o: p + v3(0.0, -0.68, 0.10), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.03, 0.10, 0.07), strut.scale(0.85));
+    wheel(&mut nose, v3(0.0, -1.33, -3.45), 0.22, 0.16);
+    nose.block(&Frame { o: p + v3(0.18, -0.30, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.28, 0.32), door);
+    let main = |side: f64| {
+        let mut m = Mesh::new();
+        let (p, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
+        let foot = v3(side * 1.06, -1.20, 0.55);
+        m.lathe(p, (foot - p).norm(), &[(0.0, 0.0), (0.0, 0.07), (0.50, 0.07), (0.51, 0.055), ((foot - p).len(), 0.055), ((foot - p).len() + 0.01, 0.0)], 6, strut);
+        // Drag brace from the axle forward and up into the wheel well.
+        let brace = v3(side * 0.85, -0.40, 0.05);
+        m.lathe(brace, (foot - brace).norm(), &[(0.0, 0.0), (0.0, 0.03), ((foot - brace).len(), 0.03), ((foot - brace).len(), 0.0)], 5, strut.scale(0.85));
+        wheel(&mut m, v3(side * 1.18, -1.20, 0.55), 0.35, 0.21);
+        m.block(&Frame { o: p + v3(side * 0.10, -0.36, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.34, 0.42), door);
+        m
+    };
+    [nose, main(-1.0), main(1.0)]
 }
 
 /// Nose of the right wingtip AIM-9 (the left one mirrors it).

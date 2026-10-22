@@ -181,6 +181,40 @@ void main() {
         light = 0.95;
     }
 
+    // The airbase (terrain::RUNWAY_*): mown grass round a runway with its
+    // markings, the parallel taxiway with its links and the apron.
+    vec2 rw = v_world.xz - vec2(1045.0, 9800.0);
+    float ru = dot(rw, vec2(-0.095983, -0.995383));
+    float rv = dot(rw, vec2(0.995383, -0.095983));
+    float au = abs(ru);
+    if (au < 1600.0 && rv > -360.0 && rv < 110.0) {
+        col = grass * vec3(0.92, 1.0, 0.85);
+        float grit = vnoise(v_world.xz * 0.35) * 0.05;
+        vec3 asphalt = vec3(0.21, 0.215, 0.22) + grit;
+        vec3 paint = vec3(0.86, 0.86, 0.82);
+        // Apron, and the taxiway with links at both ends and the middle.
+        if (rv > -340.0 && rv < -185.0 && abs(ru) < 520.0) col = vec3(0.50, 0.50, 0.47) + grit;
+        bool link = (abs(au - 1360.0) < 12.0 || au < 12.0) && rv > -170.0 && rv < 0.0;
+        if ((abs(rv + 165.0) < 11.0 && au < 1372.0) || link) {
+            col = asphalt * 1.15;
+            if (abs(rv + 165.0) < 0.5 || (link && abs(au - (au < 12.0 ? 0.0 : 1360.0)) < 0.5)) col = vec3(0.85, 0.72, 0.18);
+        }
+        if (au < 1400.0 && abs(rv) < 22.5) {
+            col = asphalt;
+            float edge = abs(rv) > 21.4 ? 1.0 : 0.0;
+            float centre = (abs(rv) < 0.6 && fract(ru / 60.0) < 0.5 && au < 1300.0) ? 1.0 : 0.0;
+            float keys = (au > 1355.0 && au < 1385.0 && abs(rv) < 19.0 && fract((rv + 19.0) / 3.8) < 0.55) ? 1.0 : 0.0;
+            float aim = (au > 1020.0 && au < 1065.0 && abs(rv) > 6.0 && abs(rv) < 11.0) ? 1.0 : 0.0;
+            float zone = (au > 1150.0 && au < 1300.0 && abs(rv) > 4.0 && abs(rv) < 7.0 && fract(au / 50.0) < 0.45) ? 1.0 : 0.0;
+            if (edge + centre + keys + aim + zone > 0.0) col = paint;
+            // Tyre marks in the touchdown zones.
+            if (au > 900.0 && au < 1330.0 && abs(abs(rv) - 3.0) < 1.5 && vnoise(v_world.xz * vec2(0.05, 0.5)) > 0.55) col *= 0.55;
+        } else if (au < 1460.0 && abs(rv) < 22.5) {
+            col = asphalt * 0.85;
+            if (abs(rv) < 18.0 && abs(fract(au / 14.0 + abs(rv) / 28.0) - 0.5) < 0.18) col = vec3(0.85, 0.72, 0.18);
+        }
+    }
+
     vec3 lit = col * light;
     float dist = length(rel);
     float fog = clamp(1.0 - exp(-dist * 0.000075), 0.0, 1.0);
@@ -188,7 +222,8 @@ void main() {
     frag = vec4(mix(lit, u_fog, fog), 1.0);
 }"#;
 
-const VS_OCEAN: &str = r#"
+const VS_OCEAN
+: &str = r#"
 in vec2 pos;
 uniform mat4 u_vp;
 uniform vec3 u_eye;
@@ -589,6 +624,7 @@ pub struct World {
     stab: [Part; 2],
     rudder: Part,
     brakes: [Part; 4],
+    gear: [Part; 3],
     post: Pipeline,
     vision: Pipeline,
     post_bind: Bindings,
@@ -749,6 +785,7 @@ impl World {
         let stab = [skinned(&airframe.stab[0]), skinned(&airframe.stab[1])];
         let rudder = skinned(&airframe.rudder);
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
+        let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
         World {
             post_bind: fullscreen.clone(),
             fullscreen,
@@ -780,6 +817,7 @@ impl World {
             stab,
             rudder,
             brakes,
+            gear,
             post,
             vision,
             fx: Fx::new(ctx),
@@ -912,6 +950,7 @@ impl World {
                 let local = rotate_about(hinge, Quat::axis_angle(V3::X, angle));
                 self.draw_part(ctx, b, &base, &mat_mul(&model, &local));
             }
+            self.draw_gear(ctx, a, &base, &model);
             if !cockpit {
                 self.draw_part(ctx, &self.crew, &base, &model);
             }
@@ -987,8 +1026,24 @@ impl World {
         let (hinge, axis) = airframe::rudder_axis();
         let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
         self.draw_part(ctx, &self.rudder, &base, &mat_mul(&model, &local));
+        self.draw_gear(ctx, a, &base, &model);
         // Opaque canopy: the gold tint reads at a distance without the glass passes.
         self.draw_part(ctx, &self.canopy, &base, &model);
+    }
+
+    /// Landing gear legs, swung up toward their wells as the gear retracts,
+    /// and gone once it is up and locked.
+    fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+        if a.gear < 0.01 {
+            return;
+        }
+        for (i, part) in self.gear.iter().enumerate() {
+            let (pivot, swing) = airframe::GEAR_PIVOTS[i];
+            // The nose leg leads, the mains follow, as the sequence runs.
+            let t = smoothstep(if i == 0 { 0.0 } else { 0.15 }, if i == 0 { 0.85 } else { 1.0 }, a.gear);
+            let local = rotate_about(pivot, Quat::axis_angle(V3::X, (1.0 - t) * swing));
+            self.draw_part(ctx, part, base, &mat_mul(model, &local));
+        }
     }
 
     /// A prop part (store, missile, bomb or ground target) at a model

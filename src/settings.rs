@@ -1,5 +1,6 @@
 //! Settings and best score, stored as plain `key=value` lines in the user's
 //! config directory. Missing or unreadable files fall back to defaults.
+use crate::keymap::Keymap;
 use crate::math::clamp;
 use std::path::PathBuf;
 
@@ -20,11 +21,12 @@ pub struct Settings {
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
+    pub keys: Keymap,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, fov: 58.0, muted: false, fullscreen: false }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, fov: 58.0, muted: false, fullscreen: false, keys: Keymap::default() }
     }
 }
 
@@ -63,6 +65,7 @@ pub fn load() -> (Settings, Best) {
             ("fullscreen", _) => s.fullscreen = v == "true",
             ("best_score", Some(n)) => b.score = n.max(0.0),
             ("best_time", Some(n)) => b.time = n.max(0.0),
+            (k, _) if k.starts_with("key_") => s.keys.load(&k[4..], &v),
             _ => {}
         }
     }
@@ -78,5 +81,6 @@ pub fn save(s: &Settings, b: &Best) {
         "sensitivity={:.1}\npitch={}\ninvert_pitch={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
         s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
     );
+    let text = text + &s.keys.save();
     let _ = std::fs::write(d.join("settings.txt"), text);
 }

@@ -68,7 +68,61 @@ pub fn terrain_at(x: f64, z: f64) -> f64 {
     let river_n = fbm(x / 1300.0 + 5.5, z / 1300.0 + 1.7);
     let floor = 300.0 + river_n * 130.0 + 0.012 * (z + 3000.0);
     let wall = smoothstep(420.0, 1650.0, d);
-    mix(floor, h, wall)
+    let h = mix(floor, h, wall);
+    // The airbase: runway, taxiway and apron levelled into the valley floor,
+    // blending back into the land over 300 m.
+    let (u, v) = runway_local(x, z);
+    let out_u = (u.abs() - (RUNWAY_HALF_LENGTH + 250.0)).max(0.0);
+    let out_v = (v - 90.0).max(-340.0 - v).max(0.0);
+    let off = (out_u * out_u + out_v * out_v).sqrt();
+    if off < 300.0 {
+        mix(h, base_elevation(), 1.0 - smoothstep(0.0, 300.0, off))
+    } else {
+        h
+    }
+}
+
+/// Runway: a 9,200 ft (2,800 m) strip 45 m wide down the west bank of the
+/// valley floor, about 200 m from the river, from threshold A in the south
+/// (z 11,200) to threshold B in the north (z 8,400). The world shader paints
+/// it with the same numbers (world.rs FS_TERRAIN).
+pub const RUNWAY_A: (f64, f64) = (1180.0, 11200.0);
+pub const RUNWAY_B: (f64, f64) = (910.0, 8400.0);
+pub const RUNWAY_HALF_LENGTH: f64 = 1400.0;
+pub const RUNWAY_HALF_WIDTH: f64 = 22.5;
+
+/// Unit direction from threshold A to B, as (x, z).
+pub fn runway_dir() -> (f64, f64) {
+    let (dx, dz) = (RUNWAY_B.0 - RUNWAY_A.0, RUNWAY_B.1 - RUNWAY_A.1);
+    let l = (dx * dx + dz * dz).sqrt();
+    (dx / l, dz / l)
+}
+
+/// Runway coordinates of a ground point: metres along from the centre
+/// toward threshold B, and metres to the right of the centre line facing B
+/// (east, toward the river).
+pub fn runway_local(x: f64, z: f64) -> (f64, f64) {
+    let (ax, az) = runway_dir();
+    let (cx, cz) = ((RUNWAY_A.0 + RUNWAY_B.0) * 0.5, (RUNWAY_A.1 + RUNWAY_B.1) * 0.5);
+    let (rx, rz) = (x - cx, z - cz);
+    (rx * ax + rz * az, -rx * az + rz * ax)
+}
+
+/// World (x, z) of runway coordinates `u` along and `v` across.
+pub fn runway_point(u: f64, v: f64) -> (f64, f64) {
+    let (ax, az) = runway_dir();
+    let (cx, cz) = ((RUNWAY_A.0 + RUNWAY_B.0) * 0.5, (RUNWAY_A.1 + RUNWAY_B.1) * 0.5);
+    (cx + ax * u - az * v, cz + az * u + ax * v)
+}
+
+/// Elevation of the levelled airbase, metres: the valley floor at the
+/// runway's centre.
+pub fn base_elevation() -> f64 {
+    static E: OnceLock<f64> = OnceLock::new();
+    *E.get_or_init(|| {
+        let (x, z) = runway_point(0.0, 0.0);
+        300.0 + fbm(x / 1300.0 + 5.5, z / 1300.0 + 1.7) * 130.0 + 0.012 * (z + 3000.0)
+    })
 }
 
 // ----------------------------------------------------------------- grid

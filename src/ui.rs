@@ -4,6 +4,7 @@ use crate::air::AirData;
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::cockpit::pad;
 use crate::combat::{Config, MissionKind, Store};
+use crate::keymap::{key_name, Keymap, BINDS};
 use crate::math::*;
 use crate::settings::{Best, PitchSource, Settings};
 use crate::sim::{Aircraft, Mission};
@@ -45,6 +46,9 @@ pub enum Action {
     Station(u8),
     Fuel,
     Launch,
+    /// Wait for a key for an action (index into keymap::BINDS) and slot.
+    Rebind(u8, u8),
+    ResetKeys,
 }
 
 #[derive(Clone, Copy)]
@@ -136,6 +140,19 @@ impl<'a> Ui<'a> {
         w
     }
 
+    /// A fixed-width key cap in the small font, for the bindings table.
+    fn key_cap(&mut self, label: &str, x: f32, y: f32, w: f32, hot: bool, action: Action) {
+        let sm = self.s.max(2.0) - 1.0;
+        let h = 11.0 * sm;
+        let i = self.buttons.len();
+        let focus = hot || i == self.selected || Button { x, y, w, h, action }.hit(self.mouse.0, self.mouse.1);
+        let (bg, fg, border) = if focus { (rgba(0x1a, 0x2a, 0x20, 0.95), ACID, ACID) } else { (rgba(0x0a, 0x11, 0x0e, 0.6), GREEN, LINE_HOT) };
+        self.cv.rect(x, y, w, h, bg);
+        self.cv.stroke_rect(x, y, w, h, 1.0, border);
+        self.cv.text(label, x + w * 0.5, y + h * 0.5, sm, fg, Align::Center);
+        self.buttons.push(Button { x, y, w, h, action });
+    }
+
     fn frame(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.cv.rect(x, y, w, h, PANEL);
         self.cv.stroke_rect(x, y, w, h, 1.0, LINE_HOT);
@@ -180,6 +197,7 @@ impl<'a> Ui<'a> {
         let (copy, tag) = match mission {
             MissionKind::Gates => ("You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
             MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
+            MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B."),
             MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
@@ -214,6 +232,7 @@ impl<'a> Ui<'a> {
         let rows = match mission {
             MissionKind::Gates => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")],
             MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", "AGGRESSOR F-16, AIM-9, GUN"), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "05:00", "SPLASH ALL THREE")],
+            MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
             MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
         };
         let mut ry = byy + 20.0 * s;
@@ -415,6 +434,20 @@ impl<'a> Ui<'a> {
 
     /// Result of a DOGFIGHT or STRIKE sortie.
     fn combat_result(&mut self, r: &RunResult) {
+        if r.mission == MissionKind::Airfield && r.kind == Outcome::Win {
+            let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)];
+            self.status_panel(
+                "// FULL STOP, RUNWAY A",
+                DIM,
+                "ON THE GROUND",
+                ACID,
+                "Wheels up, out to the steerpoint and back down on the same runway. The tower has logged your landing.",
+                [("TIME", format_time(r.time), GREEN), ("LEGS", format!("{} / {}", r.done, r.total), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", if r.score > 4200.0 { "ACE" } else if r.score > 3500.0 { "VIPER" } else { "QUALIFIED" }.to_string(), CREAM)],
+                again,
+                "R RESTART, ESC MENU",
+            );
+            return;
+        }
         let fight = r.mission == MissionKind::Dogfight;
         let (what, unit) = if fight { ("KILLS", "bandits") } else { ("TARGETS", "primary targets") };
         let tally = format!("{} / {}", r.done, r.total);
@@ -469,7 +502,7 @@ impl<'a> Ui<'a> {
     }
 
     /// Left drawer with the control reference and live settings.
-    pub fn controls_drawer(&mut self, st: &Settings, paused_flight: bool) {
+    pub fn controls_drawer(&mut self, st: &Settings, paused_flight: bool, waiting: Option<(usize, usize)>) {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         let w = (200.0 * s).min(self.w * 0.94);
@@ -496,9 +529,9 @@ impl<'a> Ui<'a> {
             (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
         };
         let rest: &[(&str, &str)] = if self.pad {
-            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("L3", "Chaff and flare"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
+            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("LT", "Wheel brakes on the ground"), ("B", "Airbrake out / in"), ("X", "Center view"), ("R3", "Landing gear"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("L3", "Chaff and flare"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
         } else {
-            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("F L-CLICK", "Fire / pickle"), ("X", "Cycle weapon"), ("T", "Lock / next target"), ("Z", "Chaff and flare"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
+            &[("MOUSE X", "Yaw, springs back"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire / pickle"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen"), ("KEYS", "Rebind in the panel at right")]
         };
         for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
             self.cv.text(k, m, y, sm, ACID, Align::Left);
@@ -532,6 +565,44 @@ impl<'a> Ui<'a> {
         y += 16.0 * s;
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
         self.cv.paragraph(if self.pad { "Press K or BACK to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        self.key_bindings(&st.keys, w, waiting);
+    }
+
+    /// Key bindings beside the drawer: every flight action with its key and
+    /// its alternate. Clicking a key waits for the next key press.
+    fn key_bindings(&mut self, keys: &Keymap, x0: f32, waiting: Option<(usize, usize)>) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let m = 8.0 * s;
+        let row = 13.0 * sm;
+        let w = (240.0 * s).min(self.w - x0 - 4.0);
+        if w < 120.0 * s {
+            return;
+        }
+        let h = (BINDS.len() as f32 + 3.6) * row + 2.0 * m;
+        let (x, y0) = (x0 + 4.0, (12.0 * s).min((self.h - h).max(0.0)));
+        self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
+        self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
+        let mut y = y0 + m + 4.0 * s;
+        self.cv.text("KEY BINDINGS", x + m, y, s, CREAM, Align::Left);
+        y += 12.0 * s;
+        let c1 = x + m + 108.0 * sm;
+        let cw = (w - 2.0 * m - 108.0 * sm - 4.0 * sm) * 0.5;
+        for (i, &b) in BINDS.iter().enumerate() {
+            self.cv.text(b.label(), x + m, y + 5.5 * sm, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
+            for slot in 0..2 {
+                let label = if waiting == Some((i, slot)) {
+                    "PRESS KEY".to_string()
+                } else {
+                    keys.get(b)[slot].map(key_name).unwrap_or_else(|| "-".to_string())
+                };
+                self.key_cap(&label, c1 + slot as f32 * (cw + 4.0 * sm), y, cw, waiting == Some((i, slot)), Action::Rebind(i as u8, slot as u8));
+            }
+            y += row;
+        }
+        y += 4.0 * s;
+        self.button("RESET KEYS", "", x + m, y, false, Action::ResetKeys);
+        self.cv.text("BACKSPACE CLEARS, ESC CANCELS", x + w - m, y + 7.0 * s, sm, DIM, Align::Right);
     }
 }
 
@@ -562,6 +633,12 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if stall(a) {
         w.push(Warn { text: "STALL", color: RED });
     }
+    if a.gear < 0.95 && !a.on_ground && a.agl < 300.0 && a.vs < -2.0 && a.airspeed_kt < 220.0 {
+        w.push(Warn { text: "GEAR UP", color: RED });
+    }
+    if a.gear > 0.0 && a.airspeed_kt > crate::sim::spec::GEAR_LIMIT_KT {
+        w.push(Warn { text: "GEAR SPEED", color: AMBER });
+    }
     // The wing buzzing towards its flutter boundary, or past the placard.
     if a.structure.amplitude > 0.03 || a.structure.margin > 0.97 {
         w.push(Warn { text: "FLUTTER", color: RED });
@@ -584,6 +661,10 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
 }
 
 pub fn pull_up(a: &Aircraft) -> bool {
+    // With the gear down a gentle sink toward the ground is a landing.
+    if a.on_ground || (a.gear > 0.9 && a.vs > -8.0) {
+        return false;
+    }
     let clearance = a.agl.min(if a.clearance > 0.0 { a.clearance } else { a.agl });
     let sink = -a.vs;
     let tti = if sink > 1.0 { clearance / sink } else { 99.0 };
@@ -594,6 +675,9 @@ pub fn pull_up(a: &Aircraft) -> bool {
 /// condition, or too slow for the wing to hold much more than 1 g at this
 /// weight and altitude.
 pub fn stall(a: &Aircraft) -> bool {
+    if a.on_ground {
+        return false;
+    }
     a.stall > 0.05 || a.alpha_deg.abs() > a.alpha_crit - 1.2 || a.g_avail < 1.25
 }
 
@@ -764,6 +848,11 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     }
     cv.text(if cue.pad { "X CENTER  //  R STICK ORBIT" } else { "C CENTER  //  ALT + MOUSE ORBIT" }, edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
     cv.text(&format!("FUEL {} LB", pad(a.fuel * 2.20462, 4)), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
+    if a.gear > 0.0 || a.flaps > 0.0 {
+        let gear = if a.gear >= 1.0 { "GEAR DN" } else if a.gear > 0.0 { "GEAR TRANSIT" } else { "GEAR UP" };
+        let text = format!("{gear}  FLAPS {}{}", (a.flaps * crate::sim::spec::FLAP_MAX).round() as i64, if a.wheel_brake > 0.1 { "  BRAKES" } else { "" });
+        cv.text(&text, edge, h - 34.0 * s, sm, if a.gear > 0.0 && a.gear < 1.0 { AMBER } else { with_alpha(HUD, 0.6) }, Align::Left);
+    }
     cv.text(if cue.pad { "Y  COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     let hint = match (cue.pad, cue.source) {
         (true, _) => "L STICK  PITCH / ROLL  ,  LB RB  RUDDER",

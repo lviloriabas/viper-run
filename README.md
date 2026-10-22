@@ -38,12 +38,22 @@ at start-up in about half a second.
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
 | `H` | Speedbrake out / in (toggle) |
+| `G` | Landing gear handle up / down (it will not come up with weight on the wheels) |
+| `L` | ALT FLAPS: trailing-edge flaps down with the gear up (they droop on their own with the gear down) |
+| `B` (held) | Wheel brakes |
 | `P` | Freeze the flight; the mouse still looks around and `V`, `C`, `F1` / `F2` still work, for screenshots |
 | `Esc` | Open / close the pause menu |
 | `R` | Restart from the pause menu or a result screen |
 | `M` | Audio on / off |
 | `F11` | Fullscreen |
 | `Enter`, `Tab`, arrows, mouse | Menu navigation; `Ctrl+Q` quits from a menu |
+
+Every flight key above, from the stick to the MFD pages, can be rebound: the
+K drawer opens a KEY BINDINGS panel with a primary and an alternate key per
+action. Click a key and press the new one (Backspace clears it, Esc keeps the
+old one); a key taken from another action leaves that action. `Esc`, `Enter`,
+`P`, `K`, `M`, `F11` and `Alt` stay fixed. The bindings are saved with the
+other settings.
 
 An Xbox controller (or any XInput pad) works alongside the keyboard and
 mouse. It is detected when it is plugged in, and the menus and the K drawer
@@ -59,7 +69,9 @@ then list its bindings:
 | `A` | Fire / pickle (held for the gun) |
 | D-pad up / down | Cycle weapon / lock or step target |
 | Left-stick click | Countermeasures: chaff and flare |
-| `X` or right-stick click | Center the view |
+| `X` | Center the view |
+| Right-stick click | Landing gear up / down |
+| `LT` on the ground | Wheel brakes |
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
 | `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
@@ -75,8 +87,8 @@ Pitch comes from one input at a time, chosen in the K drawer: the mouse
 (default) or W/S. The other one does nothing, so a resting mouse offset can
 never fight a held key. Moving the mouse down pulls the nose up, like a
 flight-sim stick; a small dead band around centre makes neutral easy to find,
-and C or right-click recentres it. W/S reach full deflection after 0.15 s held
-and return in under 0.1 s, so a tap is a small correction. Mouse X works the
+and C or right-click recentres it. W/S reach full deflection after 0.11 s held
+and return in under 0.08 s, so a tap is a small correction. Mouse X works the
 rudder and springs back to centre when the mouse stops; A/D roll the jet. A
 small box at the bottom right shows the stick position, the pitch input in
 use and SPD BRK while the speedbrake is out.
@@ -113,6 +125,7 @@ thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
 | DOGFIGHT | Shoot down three aggressor F-16s; two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
+| AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 60 % fuel | 10:00 |
 
 Kills score 1,500 points; ground targets 200 (truck) to 1,500 (bridge); a
 completed sortie adds 10 points per second left and 5 per point of airframe
@@ -178,6 +191,32 @@ fuel tanks. Armour decides what the gun can kill; the bridge only falls to a
 bomb. The ZSU-23-4s fire tracer bursts at a jet within 2.5 km in their line of
 sight; the SA-6 fires when its radar sees the jet more than 300 m above the
 ground, so the gorge is the way in.
+
+### Airbase, take-off and landing
+
+An airbase sits on the west bank of the valley floor, north of the gate run's
+start: a 9,200 ft runway 45 m wide (threshold A in the south, B in the north)
+with edge and centre lines, piano keys, aim-point and touchdown-zone marks
+and tyre scuffs, overruns with chevrons, a parallel taxiway with three links
+and an apron. The ground under it is levelled into the terrain, so the wheels
+roll on what you see.
+
+- Landing gear: three oleo legs (nose 3.45 m ahead of the centre of gravity,
+  mains 0.55 m behind it on a 2.36 m track) with springs, dampers and a 30 cm
+  stroke. The jet stands on them with about 14 % of its weight on the nose
+  wheel. Tyres roll with a little resistance, grip sideways up to their
+  limit, the mains brake and the nose wheel steers with the rudder input (32
+  degrees at a taxi, a few at speed). A sink rate that bottoms a strut breaks
+  the leg; a touchdown with the gear up is a belly landing and ends the run.
+- The gear takes 5 s to cycle, the nose leg leading, and adds drag; above 300
+  KCAS the HUD shows GEAR SPEED. GEAR UP flashes when the jet sinks toward the
+  ground below 220 KCAS with the gear still up.
+- Trailing-edge flaps droop 20 degrees with the gear handle down, or with ALT
+  FLAPS, adding lift (lower stall and approach speeds), drag and a nose-down
+  moment the FLCS trims out; they blow back up above 370 KCAS.
+- On the wheels the FLCS rests its g integrator, so the stick commands pitch
+  rate for the rotation. In full afterburner the jet rotates at about 150 KCAS
+  and lifts off after roughly 12 s.
 
 ## Objective
 
@@ -389,7 +428,7 @@ viper-run/
 ├── docs/F16-REFERENCES.md
 └── src/
     ├── main.rs         # game states, input, cameras, frame composition
-    ├── sim.rs          # 6-DOF rigid body, FLCS, engine, collision, mission
+    ├── sim.rs          # 6-DOF rigid body, FLCS, engine, landing gear, collision, mission
     ├── physio.rs       # pilot G tolerance, G-LOC, redout, Auto-GCAS
     ├── structure.rs    # wing aeroelasticity, flutter, divergence, load limits
     ├── vapor.rs        # condensation, vapor cone, shock cones, sonic boom
@@ -400,7 +439,7 @@ viper-run/
     ├── props.rs        # combat models, smoke trails, tracers, effects and sounds
     ├── symbology.rs    # HUD weapon symbols, helmet display, FCR, RWR, overlays
     ├── aero.rs         # F-16 aerodynamic tables and F110 thrust tables
-    ├── terrain.rs      # analytic terrain, height grid, LOD chunk meshes
+    ├── terrain.rs      # analytic terrain, airbase, height grid, LOD chunk meshes
     ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, pixel pass
     ├── texture.rs      # procedural pixel-art terrain and cloud textures
     ├── airframe.rs     # F-16 exterior, moving surfaces and painted skin
@@ -415,6 +454,7 @@ viper-run/
     ├── font.rs         # 5x7 pixel font
     ├── gfx.rs          # shader and render-target helpers
     ├── settings.rs     # settings and best-run persistence
+    ├── keymap.rs       # remappable flight keys
     ├── math.rs         # vectors, quaternions, matrices
     └── png.rs          # screenshot writer
 ```

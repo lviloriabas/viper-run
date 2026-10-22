@@ -55,6 +55,19 @@ pub mod spec {
     pub const ALPHA_CRIT: f64 = 27.0;
     pub const PANEL_ARM: f64 = 2.3;
     pub const STALL_LIFT_LOSS: f64 = 0.3;
+    /// Landing gear: seconds to cycle, zero-lift drag added fully down, and
+    /// the limit speed (KCAS) past which the doors and struts take damage.
+    pub const GEAR_TIME: f64 = 5.0;
+    pub const GEAR_DRAG: f64 = 0.021;
+    pub const GEAR_LIMIT_KT: f64 = 300.0;
+    /// Trailing-edge flaps (the flaperons drooped together): full travel in
+    /// degrees, the lift and drag they add fully down, seconds to travel,
+    /// and the speed where they blow back up (KCAS).
+    pub const FLAP_MAX: f64 = 20.0;
+    pub const FLAP_CL: f64 = 0.24;
+    pub const FLAP_CD: f64 = 0.028;
+    pub const FLAP_TIME: f64 = 2.5;
+    pub const FLAP_BLOWBACK_KT: f64 = 370.0;
 }
 use spec::*;
 
@@ -63,6 +76,27 @@ use spec::*;
 const SUBSTEPS: usize = 4;
 
 pub use crate::air::{atmosphere_at, calibrated_airspeed};
+
+/// A landing-gear leg: the tyre's lowest point at full extension (body
+/// axes), the oleo's spring and damping, its stroke, and whether it brakes
+/// or steers. Nose gear 3.45 m ahead of the centre of gravity, main gear
+/// 0.55 m behind it on a 2.36 m track: the jet stands 5.09 m to the fin tip
+/// with about 14 % of its weight on the nose wheel.
+pub struct Wheel {
+    pub name: &'static str,
+    pub local: V3,
+    k: f64,
+    d: f64,
+    stroke: f64,
+    brakes: bool,
+    steers: bool,
+}
+
+pub const WHEELS: [Wheel; 3] = [
+    Wheel { name: "nose gear", local: v3(0.0, -1.55, -3.45), k: 1.6e5, d: 1.7e4, stroke: 0.30, brakes: false, steers: true },
+    Wheel { name: "left main gear", local: v3(-1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, brakes: true, steers: false },
+    Wheel { name: "right main gear", local: v3(1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, brakes: true, steers: false },
+];
 
 pub struct ContactPoint {
     pub name: &'static str,
@@ -101,6 +135,10 @@ pub struct Input {
     /// Slams the throttle to the stop, past the military detent.
     pub afterburner: bool,
     pub airbrake: bool,
+    /// Landing gear handle down; flaps switch on; toe brakes pressed.
+    pub gear_down: bool,
+    pub flaps: bool,
+    pub wheel_brake: bool,
 }
 
 impl Input {
@@ -363,6 +401,8 @@ struct Sensors {
     up_y: f64,
     inertia: (f64, f64, f64, f64),
     rotor: f64,
+    /// Weight on wheels: the g integrator rests, as the FLCS ground mode does.
+    ground: bool,
 }
 
 /// Surface deflection that makes a monotonically falling coefficient reach a
@@ -399,7 +439,9 @@ impl Flcs {
         let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
         let demand = self.n_cmd - 2.0 * (lead - ALPHA_LIMITER).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
         let err = demand - (s.nz - 1.0);
-        if err.abs() < 3.0 {
+        if s.ground {
+            self.n_int = 0.0;
+        } else if err.abs() < 3.0 {
             self.n_int = clamp(self.n_int + err * 2.5 * dt, -1.5, 1.5);
         }
         // Pitch rate that turns the flight path at the demanded load factor,
@@ -525,13 +567,25 @@ pub struct Aircraft {
     pub wing_stores: f64,
     /// Uncommanded roll and yaw while stalled (a wing drop or spin entry), 0..1.
     pub departure: f64,
+    /// Landing gear 0 up and locked to 1 down and locked, and the flaps 0..1.
+    pub gear: f64,
+    pub flaps: f64,
+    /// Weight on wheels, the strut compression of each leg (m) and the
+    /// brakes applied 0..1.
+    pub on_ground: bool,
+    pub compression: [f64; 3],
+    pub wheel_brake: f64,
+    /// Gear lowered or held down past its limit speed: the doors are bent.
+    pub gear_overspeed: bool,
 }
 
 impl Aircraft {
     pub fn new(m: &Mission) -> Aircraft {
         let mass = EMPTY_MASS + STORES_MASS + FUEL_MAX;
         let speed = m.start_vel.len();
-        let t = trim(m.start_pos.y, speed, mass);
+        // A start at rest is on the runway, gear down, engine at idle.
+        let parked = speed < 1.0;
+        let t = if parked { Trim { alpha: 0.0, el: 0.0, power: 0.0, throttle: 0.0 } } else { trim(m.start_pos.y, speed, mass) };
         let flcs = Flcs { alpha_f: t.alpha * RAD, el: t.el, ..Default::default() };
         let mut a = Aircraft {
             pos: m.start_pos,
@@ -596,6 +650,12 @@ impl Aircraft {
             alpha_crit: ALPHA_CRIT,
             departure: 0.0,
             structure: Structure::default(),
+            gear: if parked { 1.0 } else { 0.0 },
+            flaps: if parked { 1.0 } else { 0.0 },
+            on_ground: parked,
+            compression: [0.0; 3],
+            wheel_brake: 0.0,
+            gear_overspeed: false,
             wing_stores: 0.0,
         };
         a.update(0.0, &Input::default());
@@ -629,6 +689,59 @@ impl Aircraft {
             self.omega = V3::ZERO;
             self.pos.y = self.pos.y.max(floor + 0.8);
         }
+    }
+
+    /// Tyre and oleo forces on the legs that touch the ground, as force and
+    /// moment in aircraft axes (x forward, y right, z down). Each strut is a
+    /// spring and damper; the tyres roll with a little resistance, the main
+    /// wheels brake, the nose wheel steers with the pedals (32 degrees at a
+    /// taxi, a few at speed) and every tyre grips sideways up to its limit.
+    fn wheel_forces(&mut self, input: &Input, dt: f64) -> (V3, V3) {
+        let mut force = V3::ZERO;
+        let mut moment = V3::ZERO;
+        self.on_ground = false;
+        if self.gear < 0.98 {
+            self.compression = [0.0; 3];
+            return (force, moment);
+        }
+        let w_world = self.q.rotate(self.omega);
+        let ground_speed = v3(self.vel.x, 0.0, self.vel.z).len();
+        let steer = -input.yaw() * mix(32.0, 4.0, smoothstep(8.0, 45.0, ground_speed)) * DEG;
+        for (i, wh) in WHEELS.iter().enumerate() {
+            let r = self.q.rotate(wh.local);
+            let p = self.pos + r;
+            let c = terrain::floor(p.x, p.z) - p.y;
+            if c <= 0.0 {
+                self.compression[i] = 0.0;
+                continue;
+            }
+            self.compression[i] = c;
+            if c > wh.stroke && dt > 0.0 {
+                self.structure.failed = Some(wh.name);
+            }
+            let v = self.vel + w_world.cross(r);
+            let normal = (wh.k * c - wh.d * v.y).max(0.0);
+            if normal <= 0.0 {
+                continue;
+            }
+            self.on_ground = true;
+            let mut fwd = self.q.axes().forward;
+            if wh.steers {
+                fwd = Quat::axis_angle(self.q.axes().up, steer).rotate(fwd);
+            }
+            let fw = v3(fwd.x, 0.0, fwd.z).norm();
+            let side = fw.cross(V3::Y).norm();
+            let (v_long, v_lat) = (v.dot(fw), v.dot(side));
+            let mu = 0.015 + if wh.brakes { 0.55 * self.wheel_brake } else { 0.0 };
+            let f_long = -clamp(v_long * 8.0, -1.0, 1.0) * mu * normal;
+            let f_lat = -clamp(v_lat * 2.0, -1.0, 1.0) * 0.75 * normal;
+            let f = V3::Y * normal + fw * f_long + side * f_lat;
+            let fb = self.q.conj().rotate(f);
+            let mb = wh.local.cross(fb);
+            force += v3(-fb.z, fb.x, -fb.y);
+            moment += v3(-mb.z, mb.x, -mb.y);
+        }
+        (force, moment)
     }
 
     /// Air-data angles and rates in aircraft axes (x forward, y right, z down).
@@ -707,6 +820,7 @@ impl Aircraft {
             up_y: self.q.axes().up.y,
             inertia: inertia(self.fuel),
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
+            ground: self.on_ground,
         };
         self.flcs.update(dt, input, &sensors);
 
@@ -722,12 +836,21 @@ impl Aircraft {
         let keas = speed * (atm.rho / RHO0).sqrt() * KT;
         self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet, self.wing_stores);
         c.cl += self.structure.roll();
+        // Gear legs and doors drag; the flaps add lift, drag and a nose-down
+        // moment the FLCS trims out.
+        let fl = self.flaps;
+        c.cx -= (GEAR_DRAG * self.gear + FLAP_CD * fl) * alpha.cos();
+        c.cz -= (GEAR_DRAG * self.gear + FLAP_CD * fl) * alpha.sin() + FLAP_CL * fl * alpha.cos();
+        c.cm -= 0.025 * fl;
         // Bombs and missiles on the pylons drag along the wind.
         c.cx -= self.stores_drag * alpha.cos();
         c.cz -= self.stores_drag * alpha.sin();
         let qs = qbar * aero::WING_AREA;
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
+        let (gf, gm) = self.wheel_forces(input, dt);
+        let (fx, fy, fz) = (fx + gf.x, fy + gf.y, fz + gf.z);
+        let (l, m, n) = (l + gm.x, m + gm.y, n + gm.z);
 
         // Translation in the world frame; the accelerometer reads the specific
         // force along the body's up axis.
@@ -772,6 +895,16 @@ impl Aircraft {
         }
         if input.afterburner {
             self.throttle = 1.0;
+        }
+        // The gear runs to the handle; the trailing-edge flaps droop with the
+        // gear handle down or the ALT FLAPS switch, and blow back up at speed.
+        self.gear = approach(self.gear, if input.gear_down { 1.0 } else { 0.0 }, dt / GEAR_TIME);
+        let blown = self.airspeed_kt > FLAP_BLOWBACK_KT;
+        let flaps = if (input.gear_down || input.flaps) && !blown { 1.0 } else { 0.0 };
+        self.flaps = approach(self.flaps, flaps, dt / FLAP_TIME);
+        self.wheel_brake = approach(self.wheel_brake, if input.wheel_brake { 1.0 } else { 0.0 }, dt * 4.0);
+        if self.gear > 0.0 && self.airspeed_kt > GEAR_LIMIT_KT + 40.0 {
+            self.gear_overspeed = true;
         }
         let fueled = self.fuel > 0.0;
         // Full throttle is the afterburner; anything short of the stop is dry.
@@ -834,7 +967,7 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = G_LIMIT.min(self.qbar * aero::WING_AREA * aero::cl_max() / (self.mass * G0)).max(0.0);
+        self.g_avail = G_LIMIT.min(self.qbar * aero::WING_AREA * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
@@ -1234,5 +1367,45 @@ mod tests {
         assert!(held > 0.2, "2 deg below critical lets go too early: {held:.2}");
         let gone = (0..240).fold(sep, |s, _| separate(s, 20.0, 28.0, DT));
         assert!(gone < 0.01, "8 deg below critical: {gone:.2}");
+    }
+
+    fn on_runway() -> Aircraft {
+        terrain::init();
+        let mut m = Mission::new();
+        let _ = crate::combat::Combat::new(crate::combat::MissionKind::Airfield, &mut m);
+        Aircraft::new(&m)
+    }
+
+    #[test]
+    fn parked_jet_rests_on_its_struts() {
+        let mut a = on_runway();
+        let input = Input { gear_down: true, wheel_brake: true, ..Default::default() };
+        for _ in 0..(6.0 / DT) as usize {
+            a.update(DT, &input);
+        }
+        assert!(!a.crashed, "{}", a.collision_label);
+        assert!(a.on_ground && a.speed < 0.3, "rolling at {:.2} m/s", a.speed);
+        for (i, c) in a.compression.iter().enumerate() {
+            assert!(*c > 0.04 && *c < 0.2, "{} compressed {c:.3} m", WHEELS[i].name);
+        }
+        assert!(a.pitch.abs() < 1.5 && a.bank.abs() < 0.5, "pitch {:.1} bank {:.1}", a.pitch, a.bank);
+    }
+
+    #[test]
+    fn takeoff_roll_rotates_and_lifts_off() {
+        let mut a = on_runway();
+        let start = a.pos;
+        let mut lift_off = None;
+        for k in 0..(60.0 / DT) as usize {
+            let rotate = a.airspeed_kt > 150.0 && a.pitch < 10.0;
+            let input = Input { gear_down: true, afterburner: true, pitch_axis: if rotate { 0.35 } else { 0.0 }, ..Default::default() };
+            a.update(DT, &input);
+            assert!(!a.crashed, "{} at {:.0} kt", a.collision_label, a.airspeed_kt);
+            if lift_off.is_none() && a.agl > 10.0 {
+                lift_off = Some((k as f64 * DT, (a.pos - start).len(), a.airspeed_kt));
+            }
+        }
+        let (t, d, kt) = lift_off.expect("never left the ground");
+        assert!(d < 1500.0 && t < 25.0, "lift-off after {t:.1} s and {d:.0} m at {kt:.0} kt");
     }
 }
