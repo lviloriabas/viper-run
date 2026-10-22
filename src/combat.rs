@@ -43,7 +43,7 @@ impl MissionKind {
     pub fn time(self) -> f64 {
         match self {
             MissionKind::Gates => crate::sim::MISSION_TIME,
-            MissionKind::Dogfight => 300.0,
+            MissionKind::Dogfight => 360.0,
             MissionKind::Strike => 420.0,
         }
     }
@@ -509,22 +509,24 @@ impl Combat {
         match kind {
             MissionKind::Gates => {}
             MissionKind::Dogfight => {
-                // A pair 12 km down the gorge coming head-on, high over the
-                // ridges; a third jet joins from the flank after the first kill.
+                // A pair 20 km down the gorge coming head-on, high over the
+                // ridges and spread 3 km apart, so the merge opens out and the
+                // fight has room; a third jet joins from the flank after the
+                // first kill.
                 // The player starts above the ridges too, not down by the river.
                 m.start_pos.y = m.start_pos.y.max(2700.0);
                 let level = flat_of(fwd);
                 m.start_vel = level * m.start_vel.len();
                 m.start_q = Quat::from_forward_up(level, V3::Y);
-                let centre = m.start_pos + fwd * 12000.0;
+                let centre = m.start_pos + fwd * 20000.0;
                 let side = fwd.cross(V3::Y).norm();
                 let alt = |p: V3, over: f64| (terrain::floor(p.x, p.z) + over).max(2600.0);
                 let back = heading_of(-fwd);
-                let lead = centre + side * 350.0;
-                let wing = centre - side * 450.0 + fwd * 900.0;
+                let lead = centre + side * 1400.0;
+                let wing = centre - side * 1600.0 + fwd * 2500.0;
                 c.bandits.push(bandit(spawn(v3(lead.x, alt(lead, 1300.0), lead.z), back, 235.0), 0.55, "BANDIT 1"));
                 c.bandits.push(bandit(spawn(v3(wing.x, alt(wing, 1300.0) + 300.0, wing.z), back, 235.0), 0.35, "BANDIT 2"));
-                let late = m.start_pos + fwd * 6000.0 + side * 9000.0;
+                let late = m.start_pos + fwd * 9000.0 + side * 14000.0;
                 c.reserve.push(bandit(spawn(v3(late.x, alt(late, 1500.0) + 600.0, late.z), heading_of(-side), 240.0), 0.8, "BANDIT 3"));
                 m.gates = vec![Gate { pos: v3(centre.x, alt(centre, 1300.0), centre.z), radius: 0.0, axis: fwd, passed: false }];
                 m.gate_index = 0;

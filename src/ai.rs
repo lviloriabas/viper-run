@@ -115,7 +115,11 @@ impl Pilot {
                 Tactic::Evade
             } else if foe_ata < 40.0 * DEG && range < 3500.0 && ata > 100.0 * DEG {
                 Tactic::Break
-            } else if me.speed < 135.0 && ata > 60.0 * DEG {
+            } else if (me.speed < 135.0 && ata > 60.0 * DEG) || (range < 800.0 && ata > 70.0 * DEG && foe_ata > 70.0 * DEG)
+                || (self.tactic == Tactic::Extend && range < 2200.0 && foe_ata > 60.0 * DEG && me.speed > 135.0)
+            {
+                // Slow and out of position, or a neutral pass close aboard:
+                // extend out past 2 km and come back with room to turn.
                 Tactic::Extend
             } else if range < 1600.0 && ata < 60.0 * DEG {
                 if closure > 70.0 && range < 900.0 && foe_ata > 90.0 * DEG {
@@ -154,7 +158,7 @@ impl Pilot {
                     (beam, n_max * 0.8, false)
                 }
             }
-            Tactic::Lag => (((foe.pos - foe.q.axes().forward * 450.0) - me.pos).norm(), n_max, false),
+            Tactic::Lag => (((foe.pos - foe.q.axes().forward * 900.0) - me.pos).norm(), n_max, false),
             Tactic::Lead => {
                 // Point the gun line, not the flight path, at the lead point.
                 let off = bore - me.vel.norm();

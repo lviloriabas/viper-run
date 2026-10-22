@@ -111,7 +111,7 @@ thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 | Mission | Objective | Default stores | Clock |
 | --- | --- | --- | --- |
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
-| DOGFIGHT | Shoot down three aggressor F-16s; two come head-on, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 05:00 |
+| DOGFIGHT | Shoot down three aggressor F-16s; two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
 
 Kills score 1,500 points; ground targets 200 (truck) to 1,500 (bridge); a
@@ -156,7 +156,8 @@ Bandits fly the same six-degree-of-freedom F-16 and FLCS as the player, in
 desert splinter paint. Their AI pilot only moves the stick and throttle: lead
 pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
 overshoot, a max-g break when the player is at its six, beaming and then
-breaking into missiles, unloading to regain speed, and an Auto-GCAS-style
+breaking into missiles, unloading to regain speed, extending past 2 km
+after a close pass so the fight keeps room to turn, and an Auto-GCAS-style
 recovery that predicts the pull-up and overrides everything near the terrain.
 They shoot the gun inside 900 m on a lead solution and fire AIM-9s from
 inside the launch zone. Hit points take 6 per 20 mm round; a warhead's damage
