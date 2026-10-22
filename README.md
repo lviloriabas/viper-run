@@ -189,7 +189,8 @@ out of margin.
   sharp legends and chunky toggles, guards, knobs and trim wheels, the tops
   tilted 10 degrees toward the pilot), the throttle in its quadrant and the
   pressure sidestick on its mount, both where they sit in the jet beside the
-  pilot (below the default forward view), a reclined ACES II seat and the pilot's arms, hands
+  pilot (the stick head shows at the bottom of the default view, which looks
+  24 degrees down), a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
 - Low-poly pixel art: the jet is a few hundred Gouraud-
   shaded polygons wearing a small hand-painted texture (FS 36270 / 36375

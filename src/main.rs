@@ -40,10 +40,10 @@ use ui::{Action, Button, Outcome, RunResult, Ui};
 use world::{Camera, World};
 
 /// Default cockpit head pitch. The stick and throttle sit close beside the
-/// pilot as in the jet, 60 degrees and more under the horizon, so with the
-/// 58 degree field the gloves stay out of this view: no pitch shows them
-/// and still keeps the HUD in view.
-const LOOK_PITCH: f64 = -12.0 * DEG;
+/// pilot as in the jet, 60 degrees and more under the horizon; looking 24
+/// degrees down shows the stick head at the bottom of the 58 degree field
+/// while the whole HUD stays in view.
+const LOOK_PITCH: f64 = -24.0 * DEG;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
