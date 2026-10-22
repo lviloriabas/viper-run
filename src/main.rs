@@ -79,6 +79,8 @@ struct Opts {
     /// Hold the trigger, and lock the nearest target, through a scripted run.
     fire: bool,
     lock: bool,
+    /// Fly the scripted run with the AI pilot toward the steerpoint.
+    auto: bool,
     weapon: Option<Mode>,
 }
 
@@ -121,6 +123,7 @@ fn parse_opts() -> Opts {
                         "brake" => o.input.airbrake = true,
                         "fire" => o.fire = true,
                         "lock" => o.lock = true,
+                        "auto" => o.auto = true,
                         _ => {}
                     }
                 }
@@ -147,7 +150,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--controls] [--mission gates|dogfight|strike] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--controls] [--mission gates|dogfight|strike] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -179,6 +182,7 @@ struct App {
     models: props::Models,
     /// Left mouse button held as the trigger.
     trigger_mouse: bool,
+    auto_pilot: Option<ai::Pilot>,
     aircraft: Option<Aircraft>,
     camera: Camera,
     time: f64,
@@ -298,6 +302,7 @@ impl App {
             combat,
             models,
             trigger_mouse: false,
+            auto_pilot: None,
             aircraft: None,
             camera: Camera { eye: V3::ZERO, forward: -V3::Z, right: V3::X, up: V3::Y, fov: 1.0 },
             time: 0.0,
@@ -368,7 +373,8 @@ impl App {
                                 self.combat.designate(a);
                             }
                         }
-                        self.step(FIXED_DT, self.opts.input)
+                        let input = if self.opts.auto { self.autopilot() } else { self.opts.input };
+                        self.step(FIXED_DT, input)
                     }
                     // Let an impact play out, so a screenshot can show it.
                     State::Transition => {
@@ -441,8 +447,8 @@ impl App {
             self.combat.select(w);
         }
         let mut a = Aircraft::new(&self.mission);
-        a.stores_mass = self.combat.loadout.mass();
-        a.stores_drag = self.combat.loadout.drag();
+        combat::load(&mut a, &self.combat.loadout);
+        self.mission.start_throttle = a.throttle;
         self.aircraft = Some(a);
         self.trigger_mouse = false;
         self.state = State::Flying;
@@ -869,6 +875,18 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// --input auto: the AI pilot flies the player's jet toward a point
+    /// 250 m over the steerpoint, for scripted screenshots of a mission.
+    fn autopilot(&mut self) -> Input {
+        let Some(a) = &self.aircraft else { return Input::default() };
+        let mut mark = a.clone();
+        mark.pos = self.mission.current_gate().pos + V3::Y * 250.0;
+        mark.vel = V3::ZERO;
+        let pic = ai::Picture { foe: &mark, missile: None, missiles: 0, missile_spec: &weapons::AIM9M, rounds: 0 };
+        let pilot = self.auto_pilot.get_or_insert_with(|| ai::Pilot::new(0.6));
+        pilot.fly(a, &pic, FIXED_DT).input
     }
 
     /// Objective line for the overlays in a combat mission.

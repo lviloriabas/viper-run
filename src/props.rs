@@ -209,10 +209,12 @@ pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera) {
         if d > 6000.0 || r.age < 0.02 {
             continue;
         }
-        let col = if matches!(r.from, Who::Ground(_)) { [1.0, 0.42, 0.22] } else { [1.0, 0.86, 0.45] };
-        let tail = r.pos - r.vel * 0.028;
-        let w = (d * 0.0016).max(0.25);
-        strip(&mut fx.extra_glow, eye, tail, r.pos, w * 0.4, w, col, 0.2, 1.0);
+        // A saturated core that reads against the bright sky, and a glow over it.
+        let (core, glow) = if matches!(r.from, Who::Ground(_)) { ([1.0, 0.30, 0.12], [1.0, 0.5, 0.3]) } else { ([1.0, 0.62, 0.15], [1.0, 0.9, 0.55]) };
+        let tail = r.pos - r.vel * 0.04;
+        let w = (d * 0.003).max(0.45);
+        strip(&mut fx.extra_blend, eye, tail, r.pos, w * 0.5, w, core, 0.5, 1.0);
+        strip(&mut fx.extra_glow, eye, tail, r.pos, w * 0.3, w * 0.6, glow, 0.2, 0.9);
     }
     for m in c.missiles.iter().filter(|m| m.burning()) {
         let back = m.vel.norm() * -1.0;

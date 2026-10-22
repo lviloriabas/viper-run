@@ -342,6 +342,43 @@ pub fn spawn(pos: V3, heading: f64, speed: f64) -> Aircraft {
     a
 }
 
+/// Hangs a loadout on a jet and trims it again for 1 g at the new weight
+/// and drag, so a loaded start flies hands-off like the clean one.
+pub fn load(a: &mut Aircraft, l: &Loadout) {
+    a.stores_mass = l.mass();
+    a.stores_drag = l.drag();
+    a.mass = crate::sim::spec::EMPTY_MASS + a.stores_mass + a.fuel;
+    if a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 {
+        return;
+    }
+    // Trim balances the clean airframe at the new weight; the stores' drag
+    // then takes the power that adds its thrust.
+    let mut t = trim(a.pos.y, a.speed, a.mass);
+    let atm = crate::sim::atmosphere_at(a.pos.y);
+    let mach = a.speed / atm.sound;
+    let need = crate::aero::thrust(t.power, mach, a.pos.y) + 0.5 * atm.rho * a.speed * a.speed * crate::aero::WING_AREA * a.stores_drag;
+    let (mut lo, mut hi) = (0.0, 100.0);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if crate::aero::thrust(mid, mach, a.pos.y) < need {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    t.power = 0.5 * (lo + hi);
+    t.throttle = (t.power / 50.0).min(0.99);
+    let fwd = a.vel.norm();
+    a.q = Quat::from_forward_up(fwd, V3::Y).mul(Quat::axis_angle(V3::X, t.alpha));
+    let mut f = Flcs::default();
+    f.alpha_f = t.alpha * RAD;
+    f.el = t.el;
+    a.flcs = f;
+    a.power = t.power;
+    a.throttle = t.throttle;
+    a.update(0.0, &Input::default());
+}
+
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
     Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None }
 }
@@ -416,6 +453,11 @@ impl Combat {
             MissionKind::Dogfight => {
                 // A pair 12 km down the gorge coming head-on, high over the
                 // ridges; a third jet joins from the flank after the first kill.
+                // The player starts above the ridges too, not down by the river.
+                m.start_pos.y = m.start_pos.y.max(2700.0);
+                let level = flat_of(fwd);
+                m.start_vel = level * m.start_vel.len();
+                m.start_q = Quat::from_forward_up(level, V3::Y);
                 let centre = m.start_pos + fwd * 12000.0;
                 let side = fwd.cross(V3::Y).norm();
                 let alt = |p: V3, over: f64| (terrain::floor(p.x, p.z) + over).max(2600.0);
@@ -1021,20 +1063,21 @@ impl Combat {
             s.aim = lead;
             return;
         }
-        // The turret follows with a lag of about half a second.
-        s.aim = (s.aim + (lead - s.aim) * clamp(dt / 0.5, 0.0, 1.0)).norm();
+        // The turret follows with a lag of most of a second, so a jinking jet
+        // stays ahead of it.
+        s.aim = (s.aim + (lead - s.aim) * clamp(dt / 0.8, 0.0, 1.0)).norm();
         s.clock += dt;
-        // Bursts of two seconds, then two and a half seconds to re-lay.
-        if s.clock % 4.5 > 2.0 {
+        // Bursts of a second and a half, then three seconds to re-lay.
+        if s.clock % 4.5 > 1.5 {
             return;
         }
         let aim = s.aim;
         // Four barrels, 3,400 rounds per minute together.
         if self.rnd.next() < 57.0 * dt {
             let v = aim * 970.0;
-            let v = v + self.dispersion(v, 0.006);
+            let v = v + self.dispersion(v, 0.010);
             let tracer = self.rnd.next() < 0.33;
-            self.rounds.push(Round::new(gun, v, tracer, Who::Ground(k), 5.0));
+            self.rounds.push(Round::new(gun, v, tracer, Who::Ground(k), 3.0));
         }
     }
 

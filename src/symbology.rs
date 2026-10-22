@@ -326,7 +326,7 @@ fn brackets(cv: &mut Canvas, x: f32, y: f32, s: f32, lw: f32, col: Col) {
 #[allow(clippy::too_many_arguments)]
 pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, cam: &Camera, time: f64, chase: bool) {
     let sm = (s - 1.0).max(1.0);
-    let mut mark = |p: V3, who: Who, col: Col, label: Option<&str>| {
+    let mut mark = |p: V3, who: Who, col: Col, label: Option<&str>, detail: bool| {
         let d = (p - cam.eye).len();
         let Some((x, y)) = project(cam, w, h, p) else { return };
         let locked = c.lock == Some(who);
@@ -337,7 +337,7 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, cam: &Camera
         } else {
             brackets(cv, x, y, size, 1.0, with_alpha(col, alpha * 0.85));
         }
-        if chase || locked {
+        if (chase && detail) || locked {
             let text = if d < 1852.0 { format!("{} M", d.round() as i64) } else { format!("{:.1} NM", d / 1852.0) };
             cv.text(&text, x, y + size + 6.0 * sm, sm, with_alpha(if locked { AMBER } else { col }, alpha), Align::Center);
             if let Some(l) = label.filter(|_| chase) {
@@ -347,12 +347,14 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, cam: &Camera
     };
     for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
         if (b.jet.pos - cam.eye).len() < 40000.0 {
-            mark(b.jet.pos, Who::Bandit(i), RED, Some(b.callsign));
+            mark(b.jet.pos, Who::Bandit(i), RED, Some(b.callsign), true);
         }
     }
     for (i, st) in c.sites.iter().enumerate().filter(|(_, st)| !st.dead) {
-        if (st.pos - cam.eye).len() < 9000.0 {
-            mark(st.centre(), Who::Ground(i), AMBER, Some(st.kind.name()));
+        let d = (st.pos - cam.eye).len();
+        if d < 9000.0 {
+            // Names and ranges only up close, where the groups spread apart.
+            mark(st.centre(), Who::Ground(i), AMBER, Some(st.kind.name()), d < 2500.0);
         }
     }
     if c.kind == crate::combat::MissionKind::Gates && c.mode == Mode::Nav {

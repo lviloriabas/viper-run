@@ -3,7 +3,7 @@
 //! 1S91 radar) with its own guns, the road bridge over the river and a
 //! supply depot. Each has hit points, an armour factor against 20 mm rounds
 //! and a hit box; the models are a few dozen flat-shaded polygons in plain
-//! paint colours, like the vehicles of Tiny Combat Arena.
+//! paint colours, in the same low-poly style as the jet.
 use crate::math::*;
 use crate::mesh::{Frame, Mesh, Rgb};
 use crate::terrain::{self, river_x};

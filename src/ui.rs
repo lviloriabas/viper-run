@@ -182,11 +182,9 @@ impl<'a> Ui<'a> {
         yy += self.cv.paragraph(tag, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, CREAM);
         yy += 8.0 * s;
         let bx = x + m;
-        let mut mx = bx;
-        for k in MissionKind::ALL {
-            let label = if k == mission { format!("[X] {}", k.name()) } else { format!("[ ] {}", k.name()) };
-            mx += self.button(&label, "", mx, yy, false, Action::Pick(k)) + 4.0 * s;
-        }
+        // The mission row sits above ENGAGE but comes after it in the
+        // keyboard order, so Enter still starts the flight.
+        let picks_y = yy;
         yy += 19.0 * s;
         let w1 = self.button("ENGAGE", "ENTER", bx, yy, true, Action::Start);
         let w2 = self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
@@ -194,6 +192,11 @@ impl<'a> Ui<'a> {
         yy += 19.0 * s;
         let w3 = self.button("CONTROLS / CONFIG", "K", bx, yy, false, Action::Controls);
         self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
+        let mut mx = bx;
+        for k in MissionKind::ALL {
+            let label = if k == mission { format!("[X] {}", k.name()) } else { format!("[ ] {}", k.name()) };
+            mx += self.button(&label, "", mx, picks_y, false, Action::Pick(k)) + 4.0 * s;
+        }
 
         // Briefing card.
         let (bxx, byy, bw) = (x + left_w + 6.0 * s, y + 30.0 * s, pw - left_w - m - 6.0 * s);
