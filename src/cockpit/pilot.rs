@@ -1,8 +1,8 @@
 //! The pilot, the ACES II seat, the sidestick and the throttle. Limbs are
 //! lofts through chamfered cross-sections that change size along the limb,
 //! so the flight suit, G-suit, boots and gloves read as shapes instead of
-//! joined tubes. The controls sit far enough forward on the side consoles
-//! that both gloved hands show in the lower corners of the forward view.
+//! joined tubes. The stick and throttle stand where they do in the jet,
+//! close beside the pilot, under the shoulders in the forward view.
 use super::{consoles, screen, Hands, METALC, R_KNEE, SEAT};
 use crate::math::*;
 use crate::mesh::{Frame, Mesh, Rgb};
@@ -21,10 +21,9 @@ const GRIP: Rgb = Rgb(0.115, 0.12, 0.125);
 const RED: Rgb = Rgb(0.62, 0.12, 0.08);
 
 /// Sidestick pivot over its mount at the inboard front corner of the right
-/// console, 0.29 m right of the centreline as in the jet. The mount stands
-/// taller than the real one (about 15 cm instead of 9) so the hand on the
-/// grip stays in the default forward view.
-const STICK: V3 = v3(0.29, 0.668, -3.82);
+/// console, where it sits in the jet: grip 0.32 m ahead of the design eye,
+/// 0.29 m right of the centreline, its head 0.50 m under the eye.
+const STICK: V3 = v3(0.29, 0.565, -3.565);
 const SHOULDER: V3 = v3(0.19, 1.00, -3.26);
 /// Upper arm and forearm (elbow to wrist) lengths, then thigh and shin.
 const ARM: (f64, f64) = (0.30, 0.31);
@@ -340,11 +339,12 @@ fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
 /// mitten falling over the front, thumb along the aft face to the
 /// cursor control and speed brake. Returns the wrist.
 /// Throttle grip frame: `g` along the grip toward the head, `fwd` forward,
-/// `out` up. The grip travels 20 cm, from 4 to 24 cm behind the front of
-/// the console as in the jet.
+/// `out` up. As in the jet the grip travels 20 cm, from 27 to 7 cm behind
+/// the front of the console; at mid travel it is 0.19 m ahead of the design
+/// eye, 0.41 m left of the centreline and 0.59 m under the eye.
 fn throttle_grip(h: &Hands) -> Grip {
-    let z = -3.62 - h.throttle * 0.20;
-    Grip::new(v3(-0.41, 0.80, z - 0.01), v3(0.95, 0.26, -0.10).norm(), -1.0)
+    let z = -3.323 - h.throttle * 0.20;
+    Grip::new(v3(-0.41, 0.657, z - 0.01), v3(0.95, 0.26, -0.10).norm(), -1.0)
 }
 
 /// Centre of the left hand lying on the grip.
@@ -411,20 +411,16 @@ mod tests {
     use crate::airframe::EYE;
 
     #[test]
-    fn both_hands_show_in_the_default_view() {
-        // Default cockpit look: 12 degrees down with a 58 degree vertical
-        // field, so the bottom edge is 41 degrees under the horizon. Over the
-        // cruise throttle range each hand's centre stays inside it and the
-        // back of the hand 2 degrees above it.
-        let below = |p: V3| (EYE.y - p.y).atan2(EYE.z - p.z) / DEG;
-        for t in [0.6, 0.82, 1.0] {
-            let h = Hands { throttle: t, ..Default::default() };
-            let k = stick_grip(&h).0;
-            let p = palm(&throttle_grip(&h));
-            for (centre, back) in [(k.o, k.p(0.0, 0.035, 0.0)), (p, p + V3::Y * 0.016)] {
-                assert!(below(centre) < 41.0 && below(back) < 39.0, "hand {:.1} and {:.1} degrees under the horizon (throttle {t})", below(centre), below(back));
-            }
-        }
+    fn controls_sit_where_they_do_in_the_jet() {
+        // Reference positions from the design eye (FlightGear F-16 cockpit):
+        // stick grip 0.32 m ahead, 0.29 m right, head 0.50 m under the eye;
+        // throttle grip at mid travel 0.19 m ahead, 0.41 m left, 0.59 m under.
+        let h = Hands { throttle: 0.5, ..Default::default() };
+        let k = stick_grip(&h).0;
+        let head = k.p(0.006, 0.087, 0.0);
+        assert!((EYE.z - k.o.z - 0.32).abs() < 0.02 && (k.o.x - 0.29).abs() < 0.02 && (EYE.y - head.y - 0.50).abs() < 0.02);
+        let t = throttle_grip(&h).o;
+        assert!((EYE.z - t.z - 0.19).abs() < 0.02 && (t.x + 0.41).abs() < 0.02 && (EYE.y - t.y - 0.59).abs() < 0.02);
     }
 
     #[test]

@@ -39,6 +39,12 @@ use std::collections::HashSet;
 use ui::{Action, Button, Outcome, RunResult, Ui};
 use world::{Camera, World};
 
+/// Default cockpit head pitch. The stick and throttle sit close beside the
+/// pilot as in the jet, 60 degrees and more under the horizon, so with the
+/// 58 degree field the gloves stay out of this view: no pitch shows them
+/// and still keeps the HUD in view.
+const LOOK_PITCH: f64 = -12.0 * DEG;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     Attract,
@@ -308,7 +314,7 @@ impl App {
             airbrake: false,
             mouse_pos: (0.0, 0.0),
             grabbed: false,
-            look: (0.0, -12.0 * DEG),
+            look: (0.0, LOOK_PITCH),
             chase_look: (0.0, 0.0),
             controls_open: false,
             controls_was_flying: false,
@@ -413,7 +419,7 @@ impl App {
 
     fn center_stick(&mut self) {
         self.mouse = (0.0, 0.0);
-        self.look = (0.0, -12.0 * DEG);
+        self.look = (0.0, LOOK_PITCH);
         self.chase_look = (0.0, 0.0);
     }
 
@@ -727,13 +733,13 @@ impl App {
         if x == 0.0 && y == 0.0 && self.pad_look.0.abs() + self.pad_look.1.abs() < 0.002 {
             if self.pad_look != (0.0, 0.0) {
                 self.pad_look = (0.0, 0.0);
-                self.look = (0.0, -12.0 * DEG);
+                self.look = (0.0, LOOK_PITCH);
                 self.chase_look = (0.0, 0.0);
             }
             return;
         }
         let (lx, ly) = self.pad_look;
-        self.look = (lx * 150.0 * DEG, clamp(-12.0 * DEG + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
+        self.look = (lx * 150.0 * DEG, clamp(LOOK_PITCH + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
         self.chase_look = (lx * PI, -ly * 60.0 * DEG);
     }
 

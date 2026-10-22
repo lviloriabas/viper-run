@@ -98,17 +98,20 @@ sus mandos en geometría: interruptores de palanca con tuerca hexagonal,
 tapas rojas o negras, perillas con línea índice, pulsadores, ruedas de
 compensación y las tres palancas del regulador de oxígeno.
 
-Desviación deliberada: con las posiciones reales, las manos quedarían entre
-57 y 72 grados por debajo del horizonte, fuera de la vista frontal por
-defecto (12 grados hacia abajo, 58 de campo, borde inferior a 41). Por eso
-las consolas están 0,25 m más adelante que en el avión y la palanca y el
-throttle conservan su lugar real sobre ellas: la palanca 5 cm detrás del
-borde delantero y el throttle entre 4 y 24 cm detrás. Además, el soporte de
-la palanca mide unos 15 cm en lugar de 9 y la carcasa del cuadrante del
-throttle se eleva unos 8 cm, porque ambos mandos siguen a la altura en que
-las manos se ven. Una prueba verifica que las dos manos quedan dentro de la
-vista por defecto. Las consolas auxiliares delanteras no se añadieron: ese
-espacio lo ocupan las esquinas inferiores del panel principal estilo F-16V.
+Las consolas, la palanca y el throttle están en su sitio real respecto al
+ojo: la palanca 5 cm detrás del borde delantero de la consola derecha, sobre
+un soporte de unos 9 cm, y el throttle entre 27 y 7 cm detrás del borde de la
+izquierda, con la carcasa del cuadrante apenas 2 a 4 cm sobre la consola.
+Así las manos quedan entre 58 y 70 grados por debajo del horizonte y, bajo
+los hombros y los brazos del piloto, fuera de la vista frontal por defecto
+(cabeza 12 grados hacia abajo, 58 grados de campo, borde inferior a 41).
+Ninguna inclinación de cabeza las muestra sin sacar el HUD de la vista: a
+37 grados hacia abajo el HUD ya queda cortado y los guantes siguen tapados
+por el torso. La inclinación por defecto es una sola constante,
+`LOOK_PITCH` en `src/main.rs`. Una prueba fija las posiciones de referencia
+de la palanca y el throttle. Las consolas auxiliares delanteras no se
+añadieron: ese espacio lo ocupan las esquinas inferiores del panel
+principal estilo F-16V.
 
 La [ficha de la USAF sobre el F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirma el asiento inclinado 30 grados, la palanca lateral sensible a presión,
@@ -348,7 +351,7 @@ estáticas.
 - `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
   vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
   triángulos que se dibujan.
-- `src/cockpit/consoles.rs` y `src/cockpit/pilot.rs`: los paneles no se solapan, caben en su consola y en el atlas, miden múltiplos de 3/8 de pulgada, las caras superiores tienen la altura e inclinación de referencia, y las dos manos quedan en la vista frontal por defecto.
+- `src/cockpit/consoles.rs` y `src/cockpit/pilot.rs`: los paneles no se solapan, caben en su consola y en el atlas, miden múltiplos de 3/8 de pulgada, las caras superiores tienen la altura e inclinación de referencia, y la palanca y el throttle están en su posición de referencia respecto al ojo.
 - `src/airframe.rs`: dimensiones y proporciones medidas, geometría finita,
   normales unitarias, coordenadas de textura válidas y ojo de diseño dentro de
   la cúpula.

@@ -3,10 +3,9 @@
 //! section 1.5); every panel is a Dzus-rail lightplate 5.75 in wide with a
 //! height in 0.375 in steps. Heights, the 10 degree inboard tilt of the tops
 //! and the forward sections pitched up toward the front come from the
-//! FlightGear F-16 cockpit model, measured from the design eye. The consoles
-//! sit 0.25 m further forward than in the jet, so that the stick and throttle
-//! keep their real places on them while both gloved hands stay in the
-//! default forward view (see docs/F16-REFERENCES.md).
+//! FlightGear F-16 cockpit model, measured from the design eye, and so do the
+//! places of the consoles, the stick and the throttle (see
+//! docs/F16-REFERENCES.md).
 //!
 //! Each panel face is drawn into the right half of the instrument atlas, so
 //! `Cockpit::draw_faces` redraws its legends sharp, and carries chunky
@@ -18,7 +17,7 @@ use crate::mesh::{Frame, Mesh, Rgb};
 
 const IN: f64 = 0.0254;
 /// Front edge of both consoles, where the stick mount and throttle quadrant start.
-pub(super) const FRONT_Z: f64 = -3.87;
+pub(super) const FRONT_Z: f64 = -3.605;
 /// Inboard edge of both consoles, against the seat bucket.
 const X_IN: f64 = 0.262;
 /// Side walls of the tub at console height, and the top of their vertical part.
@@ -32,12 +31,12 @@ const PITCH: f64 = 4.6 * DEG;
 const FWD: [f64; 2] = [14.25 * IN, 12.0 * IN];
 const Y_FRONT: [f64; 2] = [0.513, 0.51];
 /// Overall console length along the top, in inches.
-const LEN: f64 = 38.0;
+const LEN: f64 = 34.0;
 /// Width along the top from the inboard edge to the wall, in inches.
 const WID: f64 = 12.7;
 /// Throttle quadrant: top of its housing on the outboard side of the left
 /// console, and the lever slot.
-pub(super) const QUADRANT_TOP: f64 = 0.625;
+pub(super) const QUADRANT_TOP: f64 = 0.575;
 pub(super) const SLOT_X: f64 = -0.495;
 /// Panel faces stand this far proud of the console top.
 const LIFT: f64 = 0.0015;
