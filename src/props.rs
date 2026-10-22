@@ -9,7 +9,7 @@ use crate::combat::{Combat, Event, Smoke, Store};
 use crate::fx::{Fx, Impact};
 use crate::math::*;
 use crate::mesh::{Mesh, Rgb};
-use crate::sim::Aircraft;
+use crate::sim::{Aircraft, Type};
 use crate::targets::{self, Kind, KINDS};
 use crate::weapons::{Who, AIM120C};
 use crate::world::{self, Camera, Part, Props, World};
@@ -99,10 +99,16 @@ fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
 impl Props for Scene<'_> {
     fn draw(&self, w: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera) {
         let (m, c, eye) = (self.models, self.combat, cam.eye);
+        // The stations sit where the F-16 hangs them; a MiG carries them on its own pylons.
+        let shift = |a: &Aircraft, at: V3| if a.kind == Type::Mig29 { crate::mig29::store_shift(at) } else { V3::ZERO };
+        let tip_at = |i: usize| {
+            let t = crate::airframe::AIM9_TIP;
+            v3(if i == 0 { -t.x } else { t.x }, t.y, t.z)
+        };
         if let Some(a) = self.player {
             for (i, st) in c.loadout.stations.iter().enumerate().filter(|(_, s)| s.loaded) {
                 if st.tip {
-                    w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, V3::ZERO, eye), NONE);
+                    w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st.at), eye), NONE);
                     continue;
                 }
                 let part = match st.store {
@@ -110,7 +116,7 @@ impl Props for Scene<'_> {
                     Store::Aim120 => &m.aim120,
                     Store::Mk82 => &m.mk82,
                 };
-                w.draw_prop(ctx, vp, part, jet_model(a, st.at, eye), NONE);
+                w.draw_prop(ctx, vp, part, jet_model(a, st.at + shift(a, st.at), eye), NONE);
             }
         }
         for b in c.bandits.iter().filter(|b| b.alive) {
@@ -118,8 +124,8 @@ impl Props for Scene<'_> {
                 continue;
             }
             w.draw_jet(ctx, vp, cam, &b.jet, AGGRESSOR);
-            for tip in m.tips.iter().take(b.missiles as usize) {
-                w.draw_prop(ctx, vp, tip, jet_model(&b.jet, V3::ZERO, eye), NONE);
+            for (i, tip) in m.tips.iter().enumerate().take(b.missiles as usize) {
+                w.draw_prop(ctx, vp, tip, jet_model(&b.jet, shift(&b.jet, tip_at(i)), eye), NONE);
             }
         }
         for wr in &c.wrecks {

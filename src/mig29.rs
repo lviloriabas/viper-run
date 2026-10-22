@@ -1,29 +1,132 @@
-//! MiG-29A (9.12) Fulcrum, low-poly, after the published three-view: 17.3 m
-//! long, 11.4 m span, 4.7 m tall. A slim forward fuselage with the radome
-//! and a bubble canopy blends through the leading-edge root extensions into
-//! a flat lifting centre body between two widely spaced engine nacelles,
-//! with the wedge intakes under the LERX, 42 degree swept wings, all-moving
-//! stabilators and twin fins canted out 6 degrees. Vertex colours only, in
-//! the two-tone grey of the type, with red stars on the fins and the wings.
-//! Body axes as for the F-16 model: x right, y up, z aft, the centre of
-//! gravity at the origin.
+//! MiG-29A (9.12) Fulcrum, low-poly, measured off a scale three-view: 17.32 m
+//! from the pitot tip to the stabilator tips, 11.36 m span, 4.73 m tall on
+//! its gear. A slim forward fuselage with a white radome, the IRST ball and
+//! a bubble canopy runs back into a narrow dorsal spine and the beaver tail
+//! between the nozzles. Broad, curved leading-edge root extensions flow into
+//! the flat lifting centre body, which sits on two engine nacelles splayed a
+//! little apart and fed by steeply raked intakes under the LERX. The 42
+//! degree wings droop 3 degrees from the tail booms, which carry the
+//! all-moving stabilators and the twin fins, canted out 6 degrees over their
+//! root extensions. Smooth (Gouraud) surfaces in vertex colours: grey-green
+//! camouflage over light grey, a pale belly, bare-metal engine bays and red
+//! stars on the fins and under the wings. Body axes as for the F-16 model:
+//! x right, y up, z aft, the centre of gravity at the origin.
 use crate::math::*;
-use crate::mesh::{Mesh, Rgb};
+use crate::mesh::{Frame, Mesh, Rgb};
 
-const LIGHT: Rgb = Rgb(0.66, 0.70, 0.73);
-const DARK: Rgb = Rgb(0.46, 0.52, 0.57);
-const BELLY: Rgb = Rgb(0.74, 0.77, 0.79);
-const RADOME: Rgb = Rgb(0.80, 0.80, 0.75);
-const GLASS: Rgb = Rgb(0.16, 0.22, 0.26);
-const FRAME: Rgb = Rgb(0.40, 0.45, 0.48);
-const INTAKE: Rgb = Rgb(0.05, 0.05, 0.06);
-const METAL: Rgb = Rgb(0.30, 0.29, 0.28);
+const LIGHT: Rgb = Rgb(0.69, 0.72, 0.73);
+const CAMO: Rgb = Rgb(0.48, 0.56, 0.53);
+const BELLY: Rgb = Rgb(0.76, 0.80, 0.82);
+const RADOME: Rgb = Rgb(0.86, 0.87, 0.83);
+const GLASS: Rgb = Rgb(0.13, 0.19, 0.23);
+const FRAME: Rgb = Rgb(0.52, 0.58, 0.57);
+const DUCT: Rgb = Rgb(0.05, 0.05, 0.06);
+const METAL: Rgb = Rgb(0.34, 0.32, 0.30);
+const BARE: Rgb = Rgb(0.52, 0.50, 0.47);
+const SOOT: Rgb = Rgb(0.17, 0.16, 0.15);
 const STAR: Rgb = Rgb(0.78, 0.12, 0.10);
+const WHITE: Rgb = Rgb(0.90, 0.90, 0.88);
 
 /// Stabilator pivot (right side; the left mirrors it) and its hinge axis.
-pub const STAB_PIVOT: V3 = v3(1.75, 0.0, 6.95);
+pub const STAB_PIVOT: V3 = v3(1.95, 0.36, 6.55);
 /// Right nozzle exit (the left mirrors it).
-pub const NOZZLE: V3 = v3(1.25, -0.30, 8.0);
+pub const NOZZLE: V3 = v3(1.11, 0.05, 7.25);
+/// Gear leg pivots and their retraction swings about x: the nose leg folds
+/// aft between the intake ducts, the main legs forward into the wing roots.
+pub const GEAR_PIVOTS: [(V3, f64); 3] = [(v3(0.0, 0.14, -1.72), -95.0 * DEG), (v3(-1.50, 0.30, 1.95), 88.0 * DEG), (v3(1.50, 0.30, 1.95), 88.0 * DEG)];
+
+/// Pilot design eye, about 0.2 m under the canopy over the helmet.
+pub const EYE: V3 = v3(0.0, 1.38, -3.55);
+/// Box the first-person view cuts out of the skin, so the cockpit model
+/// shows inside: half width, floor, and from the windscreen to the spine.
+pub const CUTOUT: (f64, f64, f64, f64) = (0.44, 0.55, -4.78, -2.0);
+
+pub struct Fulcrum {
+    /// The airframe without its moving parts.
+    pub body: Mesh,
+    /// Canopy and windscreen, apart so the cockpit view can leave them out.
+    pub canopy: Mesh,
+    /// Right and left stabilators.
+    pub stabs: [Mesh; 2],
+    /// Nose, left main and right main gear legs, fully down.
+    pub gear: [Mesh; 3],
+}
+
+/// Underwing pylons on each side, inboard to outboard.
+const PYLONS: [f64; 3] = [2.55, 3.35, 4.20];
+
+/// Centre of the lower face of the right-hand pylon at span station `x`.
+fn pylon(x: f64) -> V3 {
+    v3(x, wing_point(1.0, x, 0.42, false).y - 0.24, mix(wing_le(x), wing_te(x), 0.42))
+}
+
+/// Offset that carries a store from the F-16 station `at` (as the loadout
+/// places it) onto the matching MiG pylon: the wingtip AIM-9s to the outer
+/// pylons, under their launch rails, the outboard pair to the middle pylons
+/// and the inboard pair to the inner ones.
+pub fn store_shift(at: V3) -> V3 {
+    let side = if at.x < 0.0 { -1.0 } else { 1.0 };
+    let x = at.x.abs();
+    let tip = crate::airframe::AIM9_TIP;
+    let (from, to) = if x > 4.0 {
+        (v3(tip.x, tip.y, tip.z + 1.43), pylon(PYLONS[2]) - V3::Y * 0.15)
+    } else if x > 2.9 {
+        (v3(3.50, 0.08, 2.35), pylon(PYLONS[1]))
+    } else {
+        (v3(2.30, 0.08, 1.85), pylon(PYLONS[0]))
+    };
+    let d = to - from;
+    v3(side * d.x, d.y, d.z)
+}
+
+/// Catmull-Rom through the rows of `table` (first column z) at `z`.
+fn spline<const N: usize>(table: &[[f64; N]], z: f64) -> [f64; N] {
+    let mut k = 0;
+    while k < table.len() - 2 && z > table[k + 1][0] {
+        k += 1;
+    }
+    let t = clamp((z - table[k][0]) / (table[k + 1][0] - table[k][0]), 0.0, 1.0);
+    let (a, b, c, d) = (&table[k.saturating_sub(1)], &table[k], &table[k + 1], &table[(k + 2).min(table.len() - 1)]);
+    let mut out = [0.0; N];
+    for i in 0..N {
+        out[i] = 0.5 * ((2.0 * b[i]) + (-a[i] + c[i]) * t + (2.0 * a[i] - 5.0 * b[i] + 4.0 * c[i] - d[i]) * t * t
+            + (-a[i] + 3.0 * b[i] - 3.0 * c[i] + d[i]) * t * t * t);
+    }
+    out
+}
+
+/// Piecewise-linear map of a surface parameter in [0, 1] onto the
+/// breakpoints `t`, one cell between each pair, so cell edges (and colour
+/// changes) land on the panel lines.
+fn steps(t: &[f64], u: f64) -> f64 {
+    let n = t.len() - 1;
+    let f = clamp(u, 0.0, 1.0) * n as f64;
+    let k = (f.floor() as usize).min(n - 1);
+    mix(t[k], t[k + 1], f - k as f64)
+}
+
+/// NACA 4-digit half thickness at chord fraction `c`, for unit thickness.
+fn naca(c: f64) -> f64 {
+    5.0 * (0.2969 * c.sqrt() - 0.1260 * c - 0.3516 * c * c + 0.2843 * c.powi(3) - 0.1036 * c.powi(4))
+}
+
+/// Grey-green blotches over the light grey, in body coordinates, so the
+/// pattern runs on across the joins between parts.
+fn camo(p: V3) -> bool {
+    let a = (0.62 * p.z + 1.1 * (0.5 * p.x + 0.3 * p.y).sin()).sin();
+    let b = (0.9 * p.x - 0.45 * p.z + 0.8 * p.y + 1.3).sin();
+    a + 0.75 * b > 0.45
+}
+
+fn skin(p: V3, n: V3) -> Rgb {
+    if n.y < -0.4 {
+        BELLY
+    } else if camo(p) {
+        CAMO
+    } else {
+        LIGHT
+    }
+}
 
 /// Flat polygon facing `out`, wound so its normal points that way.
 fn face(m: &mut Mesh, pts: &[V3], out: V3, col: Rgb) {
@@ -36,173 +139,510 @@ fn face(m: &mut Mesh, pts: &[V3], out: V3, col: Rgb) {
     }
 }
 
-/// A thin lifting surface: top and bottom faces over the outline and the
-/// edges between them. `up` is the surface normal on the top side.
-fn panel(m: &mut Mesh, outline: &[V3], up: V3, half: f64, top: Rgb, bottom: Rgb) {
-    let t: Vec<V3> = outline.iter().map(|&p| p + up * half).collect();
-    let b: Vec<V3> = outline.iter().map(|&p| p - up * half).collect();
-    face(m, &t, up, top);
-    face(m, &b, -up, bottom);
-    let c = outline.iter().fold(V3::ZERO, |s, &p| s + p) / outline.len() as f64;
-    for k in 0..outline.len() {
-        let j = (k + 1) % outline.len();
-        let out = ((t[k] + t[j]) * 0.5 - c).norm();
-        face(m, &[t[k], t[j], b[j], b[k]], out, top.scale(0.85));
-    }
-}
-
-/// Red star of radius `r` centred on `c`, lying on a plane through `c`
-/// with normal `n`, lifted a few millimetres off it.
+/// Red star with a white border, of radius `r` centred on `c`, lying on a
+/// plane through `c` with normal `n`, lifted a little off it.
 fn star(m: &mut Mesh, c: V3, n: V3, r: f64) {
     let e1 = n.cross(if n.y.abs() > 0.9 { V3::X } else { V3::Y }).norm();
     let e2 = n.cross(e1);
-    let p = |k: usize, rad: f64| {
-        let a = k as f64 * PI / 5.0;
-        c + n * 0.01 + (e2 * a.cos() + e1 * a.sin()) * rad
-    };
-    for k in 0..5 {
-        face(m, &[c + n * 0.01, p(2 * k, r), p(2 * k + 1, r * 0.4)], n, STAR);
-        face(m, &[c + n * 0.01, p(2 * k + 1, r * 0.4), p(2 * k + 2, r)], n, STAR);
-    }
-}
-
-/// Fuselage cross-section half width and half height, and its centre
-/// height, along z: the slim nose to the cockpit, widening into the centre
-/// body. Behind the LERX the body is the flat deck between the nacelles.
-const FUSE: [(f64, f64, f64, f64); 9] = [
-    // z, half width, half height, centre y
-    (-8.70, 0.00, 0.00, 0.30),
-    (-8.10, 0.20, 0.20, 0.30),
-    (-7.10, 0.40, 0.40, 0.32),
-    (-5.80, 0.55, 0.55, 0.38),
-    (-4.40, 0.62, 0.66, 0.44),
-    (-3.00, 0.70, 0.66, 0.42),
-    (-1.20, 0.95, 0.52, 0.36),
-    (3.50, 1.05, 0.40, 0.30),
-    (7.00, 0.55, 0.28, 0.30),
-];
-
-fn fuse_point(i: usize, k: usize, sides: usize) -> V3 {
-    let (z, w, h, y) = FUSE[i];
-    let t = k as f64 * TAU / sides as f64;
-    // A squarish section (superellipse) that reads as the flat Fulcrum body.
-    let (c, s) = (t.cos(), t.sin());
-    let e = 0.6;
-    v3(w * c.signum() * c.abs().powf(e), y + h * s.signum() * s.abs().powf(e), z)
-}
-
-/// The airframe without its stabilators, and the right and left stabilators.
-pub fn build() -> (Mesh, [Mesh; 2]) {
-    let mut m = Mesh::new();
-    let sides = 10;
-    for i in 0..FUSE.len() - 1 {
-        for k in 0..sides {
-            let (a, b) = (fuse_point(i, k, sides), fuse_point(i, k + 1, sides));
-            let (c, d) = (fuse_point(i + 1, k + 1, sides), fuse_point(i + 1, k, sides));
-            let mid = (a + b + c + d) * 0.25;
-            let axis = v3(0.0, (FUSE[i].3 + FUSE[i + 1].3) * 0.5, mid.z);
-            let col = if i == 0 { RADOME } else if mid.y < axis.y - 0.1 { BELLY } else if (k + i) % 3 == 0 { DARK } else { LIGHT };
-            face(&mut m, &[a, b, c, d], (mid - axis).norm(), col);
+    for (r, lift, col) in [(r * 1.2, 0.012, WHITE), (r, 0.02, STAR)] {
+        let o = c + n * lift;
+        let p = |k: usize, rad: f64| {
+            let a = k as f64 * PI / 5.0;
+            o + (e2 * a.cos() + e1 * a.sin()) * rad
+        };
+        for k in 0..5 {
+            face(m, &[o, p(2 * k, r), p(2 * k + 1, r * 0.4)], n, col);
+            face(m, &[o, p(2 * k + 1, r * 0.4), p(2 * k + 2, r)], n, col);
         }
     }
-    let tail: Vec<V3> = (0..sides).map(|k| fuse_point(FUSE.len() - 1, k, sides)).collect();
-    face(&mut m, &tail, V3::Z, METAL);
+}
 
-    // Bubble canopy over the cockpit, and its frame bow.
-    m.ellipsoid(v3(0.0, 1.02, -4.25), v3(0.40, 0.36, 1.25), GLASS, 5, 8);
-    m.capsule(v3(-0.38, 0.95, -3.55), v3(0.38, 0.95, -3.55), 0.03, 0.03, FRAME, 5);
-    // Spine behind the canopy, tapering down onto the deck.
-    face(&mut m, &[v3(-0.32, 1.05, -3.1), v3(0.32, 1.05, -3.1), v3(0.25, 0.75, 3.0), v3(-0.25, 0.75, 3.0)], V3::Y, LIGHT);
+// ------------------------------------------------------------------ fuselage
+// z, half width, centre height, upper and lower half heights, superellipse
+// exponents: round at the radome, squarer under the cockpit, then the
+// shallow body between the nacelles and the flat beaver tail.
+const FUSE: [[f64; 7]; 15] = [
+    [-7.50, 0.02, 0.27, 0.02, 0.02, 2.0, 2.0],
+    [-7.10, 0.17, 0.30, 0.17, 0.17, 2.0, 2.0],
+    [-6.50, 0.30, 0.37, 0.31, 0.31, 2.0, 2.0],
+    [-5.80, 0.42, 0.46, 0.46, 0.44, 2.1, 2.2],
+    [-5.00, 0.50, 0.55, 0.58, 0.56, 2.2, 2.4],
+    [-4.20, 0.56, 0.57, 0.60, 0.56, 2.3, 2.5],
+    [-3.20, 0.60, 0.57, 0.58, 0.52, 2.4, 2.4],
+    [-2.20, 0.62, 0.58, 0.52, 0.44, 2.5, 2.2],
+    [-1.00, 0.62, 0.55, 0.45, 0.40, 2.6, 2.2],
+    [0.50, 0.60, 0.52, 0.43, 0.38, 2.6, 2.4],
+    [2.00, 0.58, 0.50, 0.37, 0.36, 2.6, 2.6],
+    [3.35, 0.52, 0.48, 0.27, 0.32, 2.6, 2.6],
+    [5.00, 0.42, 0.45, 0.20, 0.26, 2.5, 2.5],
+    [6.10, 0.36, 0.44, 0.13, 0.18, 2.3, 2.3],
+    [6.80, 0.30, 0.44, 0.08, 0.11, 2.2, 2.2],
+];
+const FUSE_Z: (f64, f64) = (-7.50, 6.80);
+/// Radome joint.
+const RADOME_Z: f64 = -5.80;
+
+/// Dorsal spine behind the canopy: height over the fuselage and half width.
+fn spine(z: f64) -> (f64, f64) {
+    let [_, h, w] = spline(&[[-2.40, 0.0, 0.36], [-1.90, 0.45, 0.36], [-1.00, 0.45, 0.35], [0.50, 0.31, 0.34], [2.00, 0.22, 0.32], [3.35, 0.15, 0.30], [5.00, 0.07, 0.26], [6.40, 0.0, 0.22], [6.80, 0.0, 0.22]], z);
+    (h.max(0.0), w)
+}
+
+fn fuselage_point(z: f64, th: f64) -> V3 {
+    let [_, w, yc, hu, hl, nu, nl] = spline(&FUSE, z);
+    let (c, s) = (th.cos(), th.sin());
+    let n = if s >= 0.0 { nu } else { nl };
+    let x = w.max(0.0) * c.signum() * c.abs().powf(2.0 / n);
+    let mut y = yc + if s >= 0.0 { hu } else { hl }.max(0.0) * s.signum() * s.abs().powf(2.0 / n);
+    if s > 0.0 {
+        let (h, ws) = spine(z);
+        let k = 1.0 - (x / ws).powi(2);
+        if h > 0.0 && k > 0.0 {
+            y += h * k.powf(1.5);
+        }
+    }
+    v3(x, y, z)
+}
+
+/// Height of the upper fuselage skin at a lateral offset (no spine).
+fn fuselage_top_at(z: f64, x: f64) -> f64 {
+    let [_, w, yc, hu, _, nu, _] = spline(&FUSE, z);
+    let r = (x.abs() / w).min(1.0);
+    yc + hu * (1.0 - r.powf(nu)).max(0.0).powf(1.0 / nu)
+}
+
+// -------------------------------------------------------------------- canopy
+// z, half width at the sill, height of the top.
+const CANOPY: [[f64; 3]; 6] = [[-4.80, 0.28, 1.17], [-4.35, 0.40, 1.44], [-3.80, 0.46, 1.66], [-3.10, 0.47, 1.74], [-2.50, 0.44, 1.70], [-1.90, 0.34, 1.56]];
+/// Windscreen arch and rear end of the canopy, with a frame cell between.
+pub const CANOPY_Z: [f64; 10] = [-4.80, -4.50, -4.20, -4.10, -3.65, -3.20, -2.75, -2.35, -2.12, -1.90];
+/// Around the canopy from the right sill to the left, fine enough that the
+/// flat cells stay clear of the skin under them: the sill frames and the
+/// two windscreen posts (between CANOPY_POST) get their own thin cells.
+pub const CANOPY_PHI: [f64; 15] = [0.0, CANOPY_SILL, 0.36, 0.62, CANOPY_POST.0, CANOPY_POST.1, 1.26, PI / 2.0, PI - 1.26, PI - CANOPY_POST.1, PI - CANOPY_POST.0, PI - 0.62, PI - 0.36, PI - CANOPY_SILL, PI];
+pub const CANOPY_SILL: f64 = 0.10;
+pub const CANOPY_POST: (f64, f64) = (0.86, 0.96);
+
+pub fn canopy_point(z: f64, phi: f64) -> V3 {
+    let [_, hw, top] = spline(&CANOPY, z);
+    let x = hw * phi.cos();
+    let y = fuselage_top_at(z, x) - 0.02 + (top - fuselage_top_at(z, 0.0)).max(0.0) * phi.sin().max(0.0).powf(0.85);
+    v3(x, y, z)
+}
+
+fn canopy_colour(p: V3, n: V3) -> Rgb {
+    let [_, hw, _] = spline(&CANOPY, p.z);
+    let phi = clamp(p.x / hw, -1.0, 1.0).acos();
+    let sill = phi < CANOPY_SILL || phi > PI - CANOPY_SILL;
+    let side = phi.min(PI - phi);
+    let post = p.z < CANOPY_Z[2] && side > CANOPY_POST.0 && side < CANOPY_POST.1;
+    let arch = p.z > CANOPY_Z[2] && p.z < CANOPY_Z[3];
+    if sill || post || arch {
+        FRAME
+    } else {
+        // A paler band along the top, where the glass catches the sky.
+        GLASS.scale(1.0 + 0.5 * n.y.max(0.0).powi(4))
+    }
+}
+
+// --------------------------------------------------- LERX and centre body
+// z, half width of the outer edge, height at the fuselage side and at the
+// edge, and thickness at the fuselage side. Ahead of the intakes it is the
+// thin, drooped LERX; behind, the flat lifting body over the nacelles out
+// to the tail booms.
+const DECK: [[f64; 5]; 9] = [
+    [-5.70, 0.38, 0.66, 0.62, 0.10],
+    [-4.60, 0.80, 0.68, 0.60, 0.14],
+    [-3.50, 1.10, 0.68, 0.57, 0.20],
+    [-2.20, 1.40, 0.68, 0.55, 0.30],
+    [-0.80, 1.62, 0.67, 0.52, 0.40],
+    [0.40, 1.76, 0.66, 0.50, 0.40],
+    [2.00, 1.78, 0.65, 0.50, 0.40],
+    [4.50, 1.78, 0.62, 0.48, 0.30],
+    [6.30, 1.70, 0.56, 0.46, 0.0],
+];
+const DECK_Z: (f64, f64) = (-5.70, 6.30);
+/// Inboard edge of the deck surfaces, inside the fuselage.
+const DECK_IN: f64 = 0.30;
+
+fn deck_point(side: f64, z: f64, s: f64, upper: bool) -> V3 {
+    let [_, w, y_root, y_edge, th] = spline(&DECK, z);
+    let k = 1.0 - s * s;
+    let top = y_edge + (y_root - y_edge) * k;
+    let y = if upper { top } else { top - th.max(0.0) * k.powf(0.6) };
+    v3(side * mix(DECK_IN, w, s), y, z)
+}
+
+// ------------------------------------------------------------------ nacelles
+// z, half width, centre height, half height, superellipse exponent: squarish
+// behind the intakes, round at the nozzles.
+const NACELLE: [[f64; 5]; 5] = [
+    [-2.00, 0.42, -0.10, 0.44, 3.4],
+    [0.50, 0.45, -0.10, 0.46, 3.0],
+    [3.50, 0.47, -0.06, 0.48, 2.6],
+    [5.00, 0.50, 0.00, 0.50, 2.2],
+    [5.95, 0.53, 0.05, 0.53, 2.0],
+];
+const NACELLE_END: f64 = 5.95;
+
+/// Engine axis offset: the nacelles splay out 1.5 degrees toward the nozzles.
+fn nacelle_x(z: f64) -> f64 {
+    0.86 + (z + 2.0) * 0.027
+}
+
+/// The intake mouth is raked: the top lip under the LERX sits 1.25 m ahead
+/// of the bottom lip, so the opening faces forward and down.
+fn intake_lip(th: f64) -> f64 {
+    mix(-0.70, -1.95, (th.sin() + 1.0) * 0.5)
+}
+
+fn nacelle_axis(side: f64, z: f64) -> V3 {
+    v3(side * nacelle_x(z), spline(&NACELLE, z)[2], z)
+}
+
+fn nacelle_point(side: f64, z: f64, th: f64, scale: f64) -> V3 {
+    let [_, w, _, h, n] = spline(&NACELLE, z);
+    let (c, s) = (th.cos(), th.sin());
+    let e = 2.0 / n;
+    nacelle_axis(side, z) + v3(side * w * scale * c.signum() * c.abs().powf(e), h * scale * s.signum() * s.abs().powf(e), 0.0)
+}
+
+// --------------------------------------------------------------- tail booms
+// z, half width, half height.
+const BOOM: [[f64; 3]; 6] = [[0.30, 0.02, 0.02], [1.30, 0.17, 0.19], [3.00, 0.20, 0.22], [6.20, 0.20, 0.22], [7.20, 0.14, 0.14], [7.75, 0.02, 0.02]];
+const BOOM_X: f64 = 1.80;
+const BOOM_Y: f64 = 0.48;
+
+fn boom_point(side: f64, z: f64, th: f64) -> V3 {
+    let [_, w, h] = spline(&BOOM, z);
+    v3(side * (BOOM_X + w.max(0.0) * th.cos()), BOOM_Y + h.max(0.0) * th.sin(), z)
+}
+
+// --------------------------------------------------------------------- wings
+const WING_ROOT: f64 = 1.70;
+const WING_TIP: f64 = 5.68;
+/// Spanwise panel breaks: slat root, flap and aileron ends.
+const WING_X: [f64; 6] = [WING_ROOT, 2.38, 3.29, 4.01, 4.88, WING_TIP];
+/// Chordwise breaks: slat hinge, spar lines, flap and aileron hinge.
+const WING_C: [f64; 8] = [0.0, 0.03, 0.14, 0.35, 0.55, 0.76, 0.88, 1.0];
+
+fn wing_le(x: f64) -> f64 {
+    0.45 + (x - WING_ROOT) * (42.0 * DEG).tan()
+}
+
+fn wing_te(x: f64) -> f64 {
+    4.90 + (x - WING_ROOT) * 0.075
+}
+
+/// Wing surface at span station `x` (positive) and chord fraction `c`:
+/// 6 percent thick at the root thinning to 4.5 at the tip, 3 degrees anhedral.
+fn wing_point(side: f64, x: f64, c: f64, upper: bool) -> V3 {
+    let (le, te) = (wing_le(x), wing_te(x));
+    let tc = mix(0.06, 0.045, (x - WING_ROOT) / (WING_TIP - WING_ROOT));
+    let y = 0.46 - (x - WING_ROOT) * (3.0 * DEG).tan() + if upper { 1.0 } else { -1.0 } * naca(c) * tc * (te - le);
+    v3(side * x, y, mix(le, te, c))
+}
+
+fn wing_colour(p: V3, n: V3) -> Rgb {
+    let x = p.x.abs();
+    let c = (p.z - wing_le(x)) / (wing_te(x) - wing_le(x));
+    let moving = (c < WING_C[2] && x > WING_X[1]) || c > WING_C[5];
+    skin(p, n).scale(if moving { 0.9 } else { 1.0 })
+}
+
+// ---------------------------------------------------------------------- fins
+const FIN_ROOT_Y: f64 = 0.64;
+const FIN_H: f64 = 2.55;
+/// Height breaks: top of the root extension, rudder ends, dielectric cap.
+const FIN_HS: [f64; 7] = [0.0, 0.42, 1.0, 1.6, 2.1, 2.42, FIN_H];
+const FIN_C: [f64; 8] = [0.0, 0.04, 0.15, 0.35, 0.55, 0.72, 0.86, 1.0];
+
+/// Fin surface at height `h` along the canted span and chord fraction `c`,
+/// on the outer (`sign` 1) or inner face. The leading edge kinks where the
+/// low root extension meets the fin proper.
+fn fin_point(side: f64, h: f64, c: f64, sign: f64) -> V3 {
+    let cant = 6.0 * DEG;
+    let up = v3(side * cant.sin(), cant.cos(), 0.0);
+    let out = v3(side * cant.cos(), -cant.sin(), 0.0);
+    let le = if h < FIN_HS[1] { mix(3.0, 4.3, h / FIN_HS[1]) } else { mix(4.3, 6.55, (h - FIN_HS[1]) / (FIN_H - FIN_HS[1])) };
+    let te = mix(7.15, 7.22, h / FIN_H);
+    let t = naca(c) * 0.045 * (te - le).min(3.2);
+    v3(side * BOOM_X, FIN_ROOT_Y, 0.0) + up * h + V3::Z * mix(le, te, c) + out * (t * sign)
+}
+
+fn fin_colour(p: V3, n: V3) -> Rgb {
+    let side = p.x.signum();
+    let h = (p.y - FIN_ROOT_Y) / (6.0 * DEG).cos();
+    if h > FIN_HS[5] {
+        return WHITE;
+    }
+    let le = fin_point(side, h, 0.0, 0.0).z;
+    let te = fin_point(side, h, 1.0, 0.0).z;
+    let rudder = h > 0.5 && (p.z - le) / (te - le) > FIN_C[5];
+    skin(p, n).scale(if rudder { 0.9 } else { 1.0 })
+}
+
+// --------------------------------------------------------------- stabilators
+fn stab_point(side: f64, s: f64, c: f64, upper: bool) -> V3 {
+    let x = mix(STAB_PIVOT.x, 3.82, s);
+    let (le, te) = (mix(5.42, 7.70, s), mix(7.85, 8.65, s));
+    let y = STAB_PIVOT.y + if upper { 1.0 } else { -1.0 } * naca(c) * 0.045 * (te - le);
+    v3(side * x, y, mix(le, te, c))
+}
+
+/// Closing cap over the tip of a thin surface, from its upper and lower edges.
+fn tip_cap(m: &mut Mesh, upper: &[V3], lower: &[V3], out: V3, col: Rgb) {
+    let mut pts = upper.to_vec();
+    pts.extend(lower.iter().rev().skip(1).take(lower.len() - 2));
+    face(m, &pts, out, col);
+}
+
+pub fn build() -> Fulcrum {
+    let mut m = Mesh::new();
+
+    // Fuselage, nose to beaver tail, and the brake-chute fairing closing it.
+    let axis = |p: V3| v3(0.0, spline(&FUSE, p.z)[2], p.z);
+    let fuse_z = |u: f64| mix(FUSE_Z.0, FUSE_Z.1, 0.5 * u + 0.5 * u * u);
+    m.surface(34, 14, |u, v| fuselage_point(fuse_z(u), v * TAU), |p, n| if p.z < RADOME_Z { RADOME } else { skin(p, n) }, Some(&axis));
+    let tail: Vec<V3> = (0..14).map(|k| fuselage_point(FUSE_Z.1, k as f64 * TAU / 14.0)).collect();
+    face(&mut m, &tail, V3::Z, SOOT);
+    // Pitot boom on the radome tip, with its vane collar.
+    m.capsule(v3(0.0, 0.27, -7.42), v3(0.0, 0.27, -8.65), 0.04, 0.018, METAL, 5);
+    m.capsule(v3(0.0, 0.27, -8.12), v3(0.0, 0.27, -8.22), 0.035, 0.035, METAL, 5);
+
+    // Canopy, the IRST ball ahead of it (offset to starboard) and a blade
+    // antenna on the spine.
+    let mut canopy = Mesh::new();
+    canopy.surface(CANOPY_Z.len() - 1, CANOPY_PHI.len() - 1, |u, v| canopy_point(steps(&CANOPY_Z, u), steps(&CANOPY_PHI, v)), canopy_colour, Some(&|p: V3| v3(0.0, 0.9, p.z)));
+    let irst = v3(0.17, fuselage_top_at(-4.98, 0.17) - 0.02, -4.98);
+    m.ellipsoid(irst, v3(0.13, 0.12, 0.15), Rgb(0.25, 0.33, 0.36), 4, 8);
+    m.ellipsoid(irst + v3(0.0, -0.03, 0.10), v3(0.15, 0.08, 0.20), LIGHT, 3, 8);
+    let top = fuselage_point(0.1, PI / 2.0).y - 0.02;
     for s in [-1.0, 1.0] {
-        face(&mut m, &[v3(s * 0.32, 1.05, -3.1), v3(s * 0.25, 0.75, 3.0), v3(s * 0.9, 0.62, 3.0), v3(s * 0.66, 0.92, -2.8)], v3(s, 1.0, 0.0), DARK);
+        face(&mut m, &[v3(s * 0.01, top, 0.0), v3(s * 0.01, top, 0.36), v3(s * 0.01, top + 0.30, 0.48), v3(s * 0.01, top + 0.30, 0.38)], v3(s, 0.0, 0.0), METAL);
     }
 
-    // Leading-edge root extensions, from the cockpit sides out to the wing
-    // roots, and the flat centre body deck between the nacelles.
-    for s in [-1.0, 1.0] {
-        let lerx = [v3(s * 0.60, 0.52, -5.4), v3(s * 2.10, 0.40, -0.6), v3(s * 2.10, 0.40, 1.6), v3(s * 0.95, 0.52, 1.6)];
-        panel(&mut m, &lerx, V3::Y, 0.06, if s < 0.0 { DARK } else { LIGHT }, BELLY);
-        let deck = [v3(s * 0.95, 0.55, 1.6), v3(s * 2.05, 0.42, 1.6), v3(s * 1.85, 0.36, 6.4), v3(s * 0.55, 0.45, 6.4)];
-        panel(&mut m, &deck, V3::Y, 0.07, LIGHT, BELLY);
+    for side in [-1.0, 1.0] {
+        // LERX and the centre body deck.
+        let deck_z = |u: f64| mix(DECK_Z.0, DECK_Z.1, u);
+        for upper in [true, false] {
+            let out = move |p: V3| p - V3::Y * if upper { 1.0 } else { -1.0 };
+            m.surface(24, 5, move |u, v| deck_point(side, deck_z(u), v, upper), |p, n| if upper { skin(p, n) } else { BELLY }, Some(&out));
+        }
+        // Auxiliary intake louvres on top of the LERX, used on the ground.
+        for k in 0..5 {
+            let z0 = -1.60 + k as f64 * 0.25;
+            let q = |x: f64, z: f64| {
+                let s = (x - DECK_IN) / (spline(&DECK, z)[1] - DECK_IN);
+                deck_point(side, z, s, true) + V3::Y * 0.012
+            };
+            face(&mut m, &[q(0.62, z0), q(1.08, z0), q(1.08, z0 + 0.17), q(0.62, z0 + 0.17)], V3::Y, Rgb(0.22, 0.24, 0.24));
+        }
+        // Gun muzzle in the port LERX root.
+        if side < 0.0 {
+            m.ellipsoid(v3(-0.63, 0.69, -3.40), v3(0.08, 0.06, 0.40), METAL, 3, 6);
+            m.ellipsoid(v3(-0.63, 0.69, -3.74), v3(0.05, 0.04, 0.08), DUCT, 3, 6);
+        }
+
+        // Engine nacelle from the raked intake to the nozzle, its intake
+        // lip and the dark duct inside, and the afterburner nozzle.
+        let n_axis = move |p: V3| nacelle_axis(side, p.z);
+        m.surface(18, 14, move |u, v| {
+            let th = v * TAU;
+            nacelle_point(side, mix(intake_lip(th), NACELLE_END, u), th, 1.0)
+        }, |p, n| if p.z > 4.8 { BARE } else { skin(p, n) }, Some(&n_axis));
+        m.surface(1, 14, move |u, v| {
+            let th = v * TAU;
+            nacelle_point(side, intake_lip(th), th, mix(1.0, 0.80, u))
+        }, |_, _| LIGHT, Some(&|p: V3| p + v3(0.0, 0.5, 1.0)));
+        m.surface(3, 14, move |u, v| {
+            let th = v * TAU;
+            nacelle_point(side, intake_lip(th) + 1.1 * u, th, 0.80 * (1.0 - u.powi(3)))
+        }, |_, _| DUCT, Some(&move |p: V3| n_axis(p) * 2.0 - p));
+        let base = nacelle_axis(side, NACELLE_END);
+        let dir = v3(side * 0.027, 0.0, 1.0).norm();
+        m.lathe(base, dir, &[(0.0, 0.53), (0.30, 0.52), (1.30, 0.46)], 14, METAL);
+        m.lathe(base, dir, &[(1.30, 0.46), (1.31, 0.40), (0.70, 0.34), (0.60, 0.0)], 14, SOOT);
+
+        // Tail boom carrying the fin and the stabilator.
+        let b_axis = move |p: V3| v3(side * BOOM_X, BOOM_Y, p.z);
+        m.surface(16, 8, move |u, v| boom_point(side, mix(BOOM[0][0], BOOM[5][0], u), v * TAU), skin, Some(&b_axis));
+
+        // Wing.
+        for upper in [true, false] {
+            let out = move |p: V3| p - V3::Y * if upper { 1.0 } else { -1.0 };
+            m.surface(WING_X.len() - 1, WING_C.len() - 1, move |u, v| wing_point(side, steps(&WING_X, u), steps(&WING_C, v), upper), move |p, n| if upper { wing_colour(p, n) } else { BELLY }, Some(&out));
+        }
+        let edge = |upper: bool| -> Vec<V3> { WING_C.iter().map(|&c| wing_point(side, WING_TIP, c, upper)).collect() };
+        tip_cap(&mut m, &edge(true), &edge(false), V3::X * side, LIGHT);
+        let p = wing_point(side, 4.95, 0.38, false);
+        star(&mut m, p, -V3::Y, 0.36);
+        // Pylons, with launch rails under the outer two for the missiles.
+        for (k, &x) in PYLONS.iter().enumerate() {
+            let p = pylon(x);
+            let at = |dy: f64, dz: f64| Frame { o: v3(side * p.x, p.y + dy, p.z + dz), x: V3::X, y: V3::Y, z: V3::Z };
+            m.block(&at(0.15, 0.0), v3(0.05, 0.15, 0.62), LIGHT);
+            if k > 0 {
+                m.block(&at(-0.04, -0.15), v3(0.035, 0.04, 0.80), METAL);
+            }
+        }
+
+        // Fin, its root extension and the dielectric cap on top.
+        for sign in [1.0, -1.0] {
+            let out = move |p: V3| p - v3(side * (6.0 * DEG).cos(), -(6.0 * DEG).sin(), 0.0) * sign;
+            m.surface(FIN_HS.len() - 1, FIN_C.len() - 1, move |u, v| fin_point(side, steps(&FIN_HS, u), steps(&FIN_C, v), sign), fin_colour, Some(&out));
+            let n = v3(side * (6.0 * DEG).cos(), -(6.0 * DEG).sin(), 0.0) * sign;
+            star(&mut m, fin_point(side, 1.35, 0.45, sign), n, 0.36);
+        }
+        let edge = |sign: f64| -> Vec<V3> { FIN_C.iter().map(|&c| fin_point(side, FIN_H, c, sign)).collect() };
+        tip_cap(&mut m, &edge(1.0), &edge(-1.0), v3(side * (6.0 * DEG).sin(), (6.0 * DEG).cos(), 0.0), WHITE);
     }
 
-    // Engine nacelles under the deck, with the wedge intakes under the LERX
-    // and the afterburner nozzles.
-    for s in [-1.0, 1.0] {
-        let x = s * 1.25;
-        let y = -0.30;
-        // Intake box: open front, raked; the ramp splits it from the body.
-        let (z0, z1) = (-2.4, -0.6);
-        let (hw, hh) = (0.42, 0.40);
-        let corners = |z: f64, rake: f64| [v3(x - hw, y + hh, z), v3(x + hw, y + hh, z), v3(x + hw, y - hh, z + rake), v3(x - hw, y - hh, z + rake)];
-        let f = corners(z0, 0.35);
-        let b = corners(z1, 0.0);
-        face(&mut m, &[f[0], f[1], f[2], f[3]], -V3::Z, INTAKE);
-        face(&mut m, &[f[0], f[1], b[1], b[0]], V3::Y, BELLY);
-        face(&mut m, &[f[3], f[2], b[2], b[3]], -V3::Y, BELLY);
-        face(&mut m, &[f[1], f[2], b[2], b[1]], V3::X, BELLY);
-        face(&mut m, &[f[0], f[3], b[3], b[0]], -V3::X, BELLY);
-        // Nacelle and nozzle.
-        m.lathe(v3(x, y, z1), V3::Z, &[(0.0, 0.50), (3.0, 0.56), (6.6, 0.52), (7.9, 0.44)], 8, BELLY);
-        m.lathe(v3(x, y, z1 + 7.9), V3::Z, &[(0.0, 0.44), (0.7, 0.40), (0.7, 0.30), (0.2, 0.0)], 8, METAL);
-    }
-
-    // Wings: 42 degree leading-edge sweep from the LERX junction to the tips.
-    for s in [-1.0, 1.0] {
-        let wing = [v3(s * 2.0, 0.38, -0.6), v3(s * 5.68, 0.28, 3.25), v3(s * 5.68, 0.28, 4.35), v3(s * 4.2, 0.30, 4.5), v3(s * 2.0, 0.36, 4.3)];
-        panel(&mut m, &wing, V3::Y, 0.05, if s < 0.0 { LIGHT } else { DARK }, BELLY);
-        star(&mut m, v3(s * 4.3, 0.33, 3.0), V3::Y, 0.42);
-        star(&mut m, v3(s * 4.3, 0.23, 3.0), -V3::Y, 0.42);
-    }
-
-    // Twin fins on the nacelle shoulders, canted out 6 degrees.
-    for s in [-1.0, 1.0] {
-        let cant = 6.0 * DEG;
-        let up = v3(s * cant.sin(), cant.cos(), 0.0);
-        let root = v3(s * 1.30, 0.50, 0.0);
-        let p = |dz: f64, h: f64| root + up * h + V3::Z * dz;
-        let fin = [p(4.0, 0.0), p(7.6, 0.0), p(8.1, 2.75), p(6.9, 2.75)];
-        let side = v3(s * cant.cos(), -cant.sin(), 0.0);
-        panel(&mut m, &fin, side, 0.05, DARK, DARK);
-        star(&mut m, p(6.6, 1.4) + side * 0.05, side, 0.36);
-        star(&mut m, p(6.6, 1.4) - side * 0.05, -side, 0.36);
-    }
-    // Ventral strakes under the nacelles.
-    for s in [-1.0, 1.0] {
-        let x = s * 1.6;
-        face(&mut m, &[v3(x, -0.55, 4.5), v3(x, -0.55, 6.8), v3(x + s * 0.12, -1.1, 6.6)], v3(s, 0.0, 0.0), DARK);
-    }
-    m.facet();
-
-    let stab = |s: f64| {
+    let stab = |side: f64| {
         let mut st = Mesh::new();
-        let outline = [v3(s * 1.75, 0.05, 6.0), v3(s * 3.85, -0.05, 7.95), v3(s * 3.85, -0.05, 8.65), v3(s * 1.75, 0.05, 8.45)];
-        panel(&mut st, &outline, V3::Y, 0.04, LIGHT, BELLY);
-        st.facet();
+        let cs = [0.0, 0.05, 0.2, 0.45, 0.7, 1.0];
+        for upper in [true, false] {
+            let out = move |p: V3| p - V3::Y * if upper { 1.0 } else { -1.0 };
+            st.surface(4, cs.len() - 1, move |u, v| stab_point(side, u, steps(&cs, v), upper), move |p, n| if upper { skin(p, n) } else { BELLY }, Some(&out));
+        }
+        let edge = |upper: bool| -> Vec<V3> { cs.iter().map(|&c| stab_point(side, 1.0, c, upper)).collect() };
+        tip_cap(&mut st, &edge(true), &edge(false), V3::X * side, LIGHT);
         st
     };
-    (m, [stab(1.0), stab(-1.0)])
+    Fulcrum { body: m, canopy, stabs: [stab(1.0), stab(-1.0)], gear: landing_gear() }
+}
+
+/// Landing gear legs fully down: the nose leg with its twin wheels and mud
+/// guard well aft, under the intakes; the main legs with single wheels under
+/// the wing roots, 3.1 m apart. The tyres meet the ground 1.55 m under the
+/// datum, where the sim puts its wheels.
+fn landing_gear() -> [Mesh; 3] {
+    let strut = Rgb(0.72, 0.74, 0.72);
+    let tyre = Rgb(0.07, 0.07, 0.075);
+    let hub = Rgb(0.30, 0.47, 0.32);
+    let wheel = |m: &mut Mesh, c: V3, r: f64, w: f64| {
+        m.lathe(c - V3::X * (w * 0.5), V3::X, &[(0.0, 0.0), (0.0, r * 0.82), (0.02, r), (w - 0.02, r), (w, r * 0.82), (w, 0.0)], 10, tyre);
+        m.lathe(c - V3::X * (w * 0.5 + 0.005), V3::X, &[(0.0, 0.0), (0.0, r * 0.55), (w + 0.01, r * 0.55), (w + 0.01, 0.0)], 8, hub);
+    };
+    let leg = |m: &mut Mesh, a: V3, b: V3, r: f64| {
+        let l = (b - a).len();
+        m.lathe(a, (b - a).norm(), &[(0.0, 0.0), (0.0, r), (l * 0.55, r), (l * 0.56, r * 0.75), (l, r * 0.75), (l + 0.01, 0.0)], 6, strut);
+    };
+    let plate = |m: &mut Mesh, o: V3, half: V3, col: Rgb| m.block(&Frame { o, x: V3::X, y: V3::Y, z: V3::Z }, half, col);
+
+    let mut nose = Mesh::new();
+    let (p, _) = GEAR_PIVOTS[0];
+    // Ten-sided tyres rest on a flat, r cos 18 degrees under the axle.
+    let axle = v3(0.0, -1.55 + 0.285 * (PI / 10.0).cos(), -1.50);
+    leg(&mut nose, p, axle, 0.06);
+    nose.lathe(axle - V3::X * 0.22, V3::X, &[(0.0, 0.0), (0.0, 0.035), (0.44, 0.035), (0.44, 0.0)], 5, strut);
+    for s in [-1.0, 1.0] {
+        wheel(&mut nose, axle + V3::X * (s * 0.16), 0.285, 0.14);
+        plate(&mut nose, p + v3(s * 0.20, -0.32, 0.05), v3(0.008, 0.28, 0.42), BELLY);
+    }
+    // The mud guard that keeps the wheels from throwing debris into the intakes.
+    plate(&mut nose, axle + v3(0.0, 0.34, 0.26), v3(0.30, 0.015, 0.20), strut.scale(0.9));
+
+    let main = |side: f64| {
+        let mut m = Mesh::new();
+        let (p, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
+        let axle = v3(side * 1.55, -1.55 + 0.42 * (PI / 10.0).cos(), 2.16);
+        let foot = axle - V3::X * (side * 0.20);
+        leg(&mut m, p, foot, 0.08);
+        m.lathe(foot, V3::X * side, &[(0.0, 0.0), (0.0, 0.04), (0.2, 0.04), (0.2, 0.0)], 5, strut);
+        // Drag brace from the leg forward into the well.
+        let (brace, mid) = (p + v3(0.0, -0.05, -0.75), p.lerp(foot, 0.55));
+        let l = (mid - brace).len();
+        m.lathe(brace, (mid - brace).norm(), &[(0.0, 0.0), (0.0, 0.035), (l, 0.035), (l, 0.0)], 5, strut.scale(0.85));
+        wheel(&mut m, axle, 0.42, 0.26);
+        plate(&mut m, p.lerp(foot, 0.4) + V3::X * (side * 0.11), v3(0.008, 0.45, 0.35), BELLY);
+        m
+    };
+    [nose, main(-1.0), main(1.0)]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh::STRIDE;
 
-    #[test]
-    fn fulcrum_matches_its_three_view() {
-        let (m, stabs) = build();
+    fn extent(meshes: &[&Mesh]) -> (V3, V3) {
         let (mut lo, mut hi) = (v3(f64::INFINITY, f64::INFINITY, f64::INFINITY), v3(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
-        for mesh in std::iter::once(&m).chain(stabs.iter()) {
-            for v in mesh.v.chunks(crate::mesh::STRIDE) {
+        for mesh in meshes {
+            for v in mesh.v.chunks(STRIDE) {
                 let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
                 lo = v3(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
                 hi = v3(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
             }
         }
+        (lo, hi)
+    }
+
+    #[test]
+    fn fulcrum_matches_its_three_view() {
+        let f = build();
+        let (lo, hi) = extent(&[&f.body, &f.stabs[0], &f.stabs[1]]);
         let (span, length) = (hi.x - lo.x, hi.z - lo.z);
-        assert!((span - 11.36).abs() < 0.3, "span {span:.2} m");
-        assert!((length - 17.32).abs() < 0.5, "length {length:.2} m");
+        assert!((span - 11.36).abs() < 0.1, "span {span:.2} m");
+        assert!((length - 17.32).abs() < 0.1, "length {length:.2} m");
         // Fin tip 4.73 m above the ground with the sim's gear down (1.55 m).
-        assert!((hi.y + 1.55 - 4.73).abs() < 0.3, "height {:.2} m", hi.y + 1.55);
+        assert!((hi.y + 1.55 - 4.73).abs() < 0.1, "height {:.2} m", hi.y + 1.55);
+    }
+
+    #[test]
+    fn wheels_stand_on_the_ground() {
+        let f = build();
+        for (i, g) in f.gear.iter().enumerate() {
+            let (lo, _) = extent(&[g]);
+            assert!((lo.y + 1.55).abs() < 0.02, "gear {i} bottom at {:.3} m", lo.y);
+        }
+    }
+
+    #[test]
+    fn geometry_is_finite_with_unit_normals() {
+        let f = build();
+        for mesh in [&f.body, &f.canopy, &f.stabs[0], &f.stabs[1], &f.gear[0], &f.gear[1], &f.gear[2]] {
+            assert!(mesh.count() > 0 && mesh.count() % 3 == 0);
+            for v in mesh.v.chunks(STRIDE) {
+                let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
+                let n = v3(v[3] as f64, v[4] as f64, v[5] as f64);
+                assert!(p.is_finite() && n.is_finite(), "bad vertex at {p:?}");
+                assert!((n.len() - 1.0).abs() < 0.02 || n.len() < 1e-6, "normal {:.3} at {p:?}", n.len());
+            }
+        }
+    }
+
+    #[test]
+    fn canopy_covers_the_fuselage_and_spine() {
+        // Centres of the flat canopy cells as drawn, against the true skin.
+        for i in 0..CANOPY_Z.len() - 2 {
+            for j in 0..CANOPY_PHI.len() - 1 {
+                let (z0, z1, f0, f1) = (CANOPY_Z[i], CANOPY_Z[i + 1], CANOPY_PHI[j], CANOPY_PHI[j + 1]);
+                let p = (canopy_point(z0, f0) + canopy_point(z0, f1) + canopy_point(z1, f0) + canopy_point(z1, f1)) * 0.25;
+                let z = p.z;
+                // The skin under the glass at the same x, spine included.
+                let mut th = PI / 2.0;
+                for _ in 0..40 {
+                    let q = fuselage_point(z, th);
+                    th += (q.x - p.x) * 0.5;
+                }
+                let skin = fuselage_point(z, th);
+                assert!(p.y > skin.y - 0.025, "glass {p:?} under skin {skin:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn intakes_clear_the_fuselage() {
+        // The upper inner corner of each intake mouth stays below the belly,
+        // so the fuselage never shows inside the opening.
+        for side in [-1.0, 1.0] {
+            let th = 3.0 * PI / 4.0;
+            let corner = nacelle_point(side, intake_lip(th), th, 0.8);
+            let [_, w, yc, _, hl, _, nl] = spline(&FUSE, corner.z);
+            let r = (corner.x.abs() / w).min(1.0);
+            let belly = yc - hl * (1.0 - r.powf(nl)).max(0.0).powf(1.0 / nl);
+            assert!(corner.y < belly, "corner {corner:?} belly {belly:.2}");
+        }
     }
 }

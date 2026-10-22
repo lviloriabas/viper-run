@@ -405,7 +405,10 @@ uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
     // From the seat, the cockpit model replaces the skin inside the canopy.
-    if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
+    // The MiG-29 box is mig29::CUTOUT.
+    if (u_cutout > 1.5) {
+        if (abs(v_local.x) < 0.44 && v_local.y > 0.55 && v_local.z > -4.78 && v_local.z < -2.0) discard;
+    } else if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
     vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
     // Repaint: 1 lays two-tone splinter camouflage of the paint colour over
     // the grey skin (aggressors); 2 tints everything (burnt wrecks).
@@ -625,9 +628,11 @@ pub struct World {
     rudder: Part,
     brakes: [Part; 4],
     gear: [Part; 3],
-    /// MiG-29: airframe and the right and left stabilators.
+    /// MiG-29: airframe, the right and left stabilators and its own gear legs.
     mig: Part,
     mig_stab: [Part; 2],
+    mig_gear: [Part; 3],
+    mig_canopy: Part,
     /// Buildings, trees and pylons (scenery.rs), each at its cluster origin.
     scenery: Vec<(V3, Part)>,
     post: Pipeline,
@@ -791,8 +796,10 @@ impl World {
         let rudder = skinned(&airframe.rudder);
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
-        let (mig_body, mig_stabs) = crate::mig29::build();
-        let (mig, mig_stab) = (skinned(&mig_body), [skinned(&mig_stabs[0]), skinned(&mig_stabs[1])]);
+        let fulcrum = crate::mig29::build();
+        let (mig, mig_stab) = (skinned(&fulcrum.body), [skinned(&fulcrum.stabs[0]), skinned(&fulcrum.stabs[1])]);
+        let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
+        let mig_canopy = skinned(&fulcrum.canopy);
         let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
         World {
             post_bind: fullscreen.clone(),
@@ -828,6 +835,8 @@ impl World {
             gear,
             mig,
             mig_stab,
+            mig_gear,
+            mig_canopy,
             scenery,
             post,
             vision,
@@ -946,7 +955,7 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if cockpit { 1.0 } else { 0.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.air);
             if a.kind == Type::Mig29 {
                 self.draw_mig(ctx, a, &base, &model);
@@ -971,8 +980,8 @@ impl World {
                 let local = rotate_about(hinge, Quat::axis_angle(V3::X, angle));
                 self.draw_part(ctx, b, &base, &mat_mul(&model, &local));
             }
-            }
             self.draw_gear(ctx, a, &base, &model);
+            }
             if !cockpit && a.kind == Type::F16 {
                 self.draw_part(ctx, &self.crew, &base, &model);
             }
@@ -1018,7 +1027,8 @@ impl World {
         self.fx.draw(ctx, vp, Layer::Particles);
 
         // Chase canopy: back faces first, then front faces, for correct layering.
-        if let (Some(a), false) = (aircraft, cockpit) {
+        // The MiG-29 draws its own canopy with the airframe.
+        if let (Some(a), false) = (aircraft.filter(|a| a.kind == Type::F16), cockpit) {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
             let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint: [0.0; 4] };
@@ -1067,8 +1077,13 @@ impl World {
     }
 
     /// The MiG-29 with its stabilators at their deflection and its gear.
+    /// The wing flex is shaped to the F-16's planform, so the MiG stays rigid.
     fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+        let base = &AirU { flex: [0.0; 2], ..*base };
         self.draw_part(ctx, &self.mig, base, model);
+        if base.cutout < 0.5 {
+            self.draw_part(ctx, &self.mig_canopy, base, model);
+        }
         let pitch = clamp(a.surf_pitch, -1.0, 1.0);
         let roll = clamp(a.surf_roll, -1.0, 1.0);
         for (i, side) in [1.0, -1.0].iter().enumerate() {
@@ -1077,17 +1092,21 @@ impl World {
             let local = rotate_about(v3(side * p.x, p.y, p.z), Quat::axis_angle(V3::X, angle));
             self.draw_part(ctx, &self.mig_stab[i], base, &mat_mul(model, &local));
         }
-        self.draw_gear(ctx, a, base, model);
+        self.draw_legs(ctx, a, base, model, &self.mig_gear, &crate::mig29::GEAR_PIVOTS);
+    }
+
+    fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+        self.draw_legs(ctx, a, base, model, &self.gear, &airframe::GEAR_PIVOTS);
     }
 
     /// Landing gear legs, swung up toward their wells as the gear retracts,
     /// and gone once it is up and locked.
-    fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+    fn draw_legs(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, legs: &[Part; 3], pivots: &[(V3, f64); 3]) {
         if a.gear < 0.01 {
             return;
         }
-        for (i, part) in self.gear.iter().enumerate() {
-            let (pivot, swing) = airframe::GEAR_PIVOTS[i];
+        for (i, part) in legs.iter().enumerate() {
+            let (pivot, swing) = pivots[i];
             // The nose leg leads, the mains follow, as the sequence runs.
             let t = smoothstep(if i == 0 { 0.0 } else { 0.15 }, if i == 0 { 0.85 } else { 1.0 }, a.gear);
             let local = rotate_about(pivot, Quat::axis_angle(V3::X, (1.0 - t) * swing));
