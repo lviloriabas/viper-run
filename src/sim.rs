@@ -290,10 +290,12 @@ pub fn trim(altitude: f64, speed: f64, mass: f64) -> Trim {
 }
 
 /// Inertia about the body axes (roll, pitch, yaw, roll-yaw product), with
-/// the wingtip missiles and the fuel in the fuselage and wing tanks.
-fn inertia(fuel: f64) -> (f64, f64, f64, f64) {
+/// the wingtip missiles, the fuel in the fuselage and wing tanks and the
+/// stores on the underwing pylons, about 2.9 m out on average: a bomb load
+/// makes the jet slower to start and stop a roll.
+fn inertia(fuel: f64, pylons: f64) -> (f64, f64, f64, f64) {
     let f = fuel / FUEL_MAX;
-    let tips = 2.0 * 95.0 * 4.8 * 4.8;
+    let tips = 2.0 * 95.0 * 4.8 * 4.8 + pylons * 2.9 * 2.9;
     let body = f * 1157.0 * (1.31f64.powi(2) + 1.74f64.powi(2));
     let wings = f * 2.0 * 249.0 * 2.03f64.powi(2);
     (IXX + tips + wings, IYY + body, IZZ + tips + body + wings, IXZ)
@@ -818,7 +820,7 @@ impl Aircraft {
             nz: self.g_load,
             qbar,
             up_y: self.q.axes().up.y,
-            inertia: inertia(self.fuel),
+            inertia: inertia(self.fuel, self.wing_stores),
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
             ground: self.on_ground,
         };
@@ -859,7 +861,7 @@ impl Aircraft {
 
         // Rotation: body-axis moment equations with the roll-yaw product of
         // inertia and the engine rotor's gyroscopic moment.
-        let (ixx, iyy, izz, ixz) = inertia(self.fuel);
+        let (ixx, iyy, izz, ixz) = inertia(self.fuel, self.wing_stores);
         let h = aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0;
         let gam = ixx * izz - ixz * ixz;
         let xpq = ixz * (ixx - iyy + izz);

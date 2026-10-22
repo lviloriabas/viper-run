@@ -895,6 +895,8 @@ fn air_panel(cv: &mut Canvas, x: f32, y: f32, s: f32, a: &Aircraft) {
         format!("PA {}  DA {} FT", ad.pressure_alt_ft.round() as i64, ad.density_alt_ft.round() as i64),
         format!("OAT {:+.0}°C  TAT {:+.0}°C", ad.oat_c, ad.tat_c),
         format!("RHO {:.3} ({:.0}%)  Q {:.0}KPA", ad.atm.rho, ad.sigma * 100.0, ad.qbar / 1000.0),
+        // Gross weight and the drag the stores, gear and flaps add, in counts.
+        format!("GW {} LB  DRAG +{}  T/W {:.2}", (a.mass * 2.20462 / 10.0).round() as i64 * 10, ((a.stores_drag + crate::sim::spec::GEAR_DRAG * a.gear + crate::sim::spec::FLAP_CD * a.flaps) * 10000.0).round() as i64, a.thrust_n / (a.mass * crate::sim::G0)),
     ];
     let rows_y = y + 34.0 * u;
     cv.rect(x - 4.0 * u, y - 5.0 * u, w + 8.0 * u, rows_y - y + rows.len() as f32 * line + 2.0 * u, rgba(4, 10, 6, 0.45));

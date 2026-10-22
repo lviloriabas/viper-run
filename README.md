@@ -243,8 +243,13 @@ out of margin.
   equations with the inertia tensor, the roll-yaw product of inertia and the
   engine's gyroscopic moment. Mass and inertia follow the FlightGear Block 50
   model plus the stores on the stations and the fuel, which burns off as you
-  fly; bombs and underwing missiles add mass and drag, and releasing them
-  takes it off again.
+  fly; bombs and underwing missiles add mass, drag and roll inertia (they
+  hang about 2.9 m out on the pylons), and releasing them takes it off again.
+  The weight sets the AoA every manoeuvre needs and the drag eats the
+  thrust, so a loaded jet accelerates, climbs, sustains g and rolls worse.
+  The data box at the top left shows the gross weight, the drag the stores,
+  gear and flaps add (in counts) and the thrust-to-weight ratio of the
+  moment.
 - F110-GE-129 thrust from FlightGear's tables (17,000 / 29,000 lbf), lapse with
   altitude and Mach, normal-shock inlet recovery, slow core spool and quick
   afterburner light-off, fuel flow from TSFC. Full-afterburner level speed is

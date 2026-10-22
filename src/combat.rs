@@ -1411,6 +1411,30 @@ mod tests {
         assert_eq!((fight.count(Store::Aim9), fight.count(Store::Aim120)), (2, 2));
     }
 
+    /// The same jet at the same throttle: four Mk-82s, their weight and drag,
+    /// bleed speed in a sustained turn and slow the roll.
+    #[test]
+    fn stores_cost_turn_and_roll_performance() {
+        crate::terrain::init();
+        let fly = |l: &Loadout, input: Input, secs: f64| {
+            let mut a = spawn(v3(0.0, 5000.0, 0.0), 0.0, 220.0);
+            load(&mut a, l);
+            a.throttle = 0.95;
+            for _ in 0..(secs / crate::sim::FIXED_DT) as usize {
+                a.update(crate::sim::FIXED_DT, &input);
+            }
+            a
+        };
+        let clean = Loadout::for_mission(MissionKind::Gates);
+        let bombs = Loadout::for_mission(MissionKind::Strike);
+        let pull = Input { pitch_axis: 0.3, ..Default::default() };
+        let (c, b) = (fly(&clean, pull, 10.0), fly(&bombs, pull, 10.0));
+        assert!(c.speed > b.speed + 5.0, "after a 10 s turn: clean {:.0} m/s, bombed {:.0} m/s", c.speed, b.speed);
+        let roll = Input { roll_axis: 1.0, ..Default::default() };
+        let (c, b) = (fly(&clean, roll, 0.25), fly(&bombs, roll, 0.25));
+        assert!(c.bank.abs() > b.bank.abs() + 1.0, "bank after 0.25 s: clean {:.1}, bombed {:.1}", c.bank, b.bank);
+    }
+
     #[test]
     fn modes_cycle_through_the_stores_on_board() {
         let mut m = Mission::new();
