@@ -10,7 +10,7 @@
 //! Each panel face is drawn into the right half of the instrument atlas, so
 //! `Cockpit::draw_faces` redraws its legends sharp, and carries chunky
 //! toggles, guards, knobs, buttons and wheels in low-poly geometry.
-use super::{uv, R, WHITE};
+use super::{uv, R, R_AUX_DIALS, WHITE};
 use crate::canvas::{rgba, Align, Canvas, Col};
 use crate::math::*;
 use crate::mesh::{Frame, Mesh, Rgb};
@@ -104,6 +104,12 @@ enum It {
     Rl(f64, f64),
     /// Data transfer cartridge.
     Ct(f64, f64, f64, f64),
+    /// Live lamp: size, legend and its index in `Lamps`.
+    Lp(f64, f64, f64, f64, &'static str, usize),
+    /// Round dial: radius (in) and its face in `R_AUX_DIALS`.
+    Ga(f64, f64, f64, usize),
+    /// Yellow and black T-handle, such as ALT GEAR.
+    Th(f64, f64),
 }
 use It::*;
 
@@ -322,6 +328,74 @@ const PANELS: [Panel; 28] = [
     ]),
 ];
 
+/// What the live lamps show, refreshed with the instruments: gear down
+/// and locked (nose, left, right), flaps, wheel brakes, then the warning
+/// row: ENG FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY.
+#[derive(Clone, Copy, Default)]
+pub struct Lamps {
+    pub on: [bool; 12],
+}
+
+/// Auxiliary consoles: a 10 x 20 in plate on each folded face beside the
+/// panel (cockpit::aux_face), left with the landing gear controls and
+/// stores jettison, right with the hydraulic, EPU, oxygen and cabin dials,
+/// the clock and the warning lights.
+struct Aux {
+    side: f64,
+    rect: R,
+    items: &'static [It],
+}
+
+const AUX_W: f64 = 10.0;
+const AUX_H: f64 = 20.0;
+
+#[rustfmt::skip]
+const AUX: [Aux; 2] = [
+    Aux { side: L, rect: R { x: 1024.0, y: 1024.0, w: 360.0, h: 720.0 }, items: &[
+        T(5.0, 0.35, "LANDING GEAR"),
+        Lp(5.0, 1.2, 1.3, 0.55, "NOSE", 0), Lp(3.4, 2.1, 1.3, 0.55, "LEFT", 1), Lp(6.6, 2.1, 1.3, 0.55, "RIGHT", 2),
+        Ln(7.4, 3.6, 7.4, 8.8), T(8.7, 3.9, "LG UP"), T(8.7, 8.5, "DN"), T(5.8, 9.2, "DN LOCK REL"), Pb(7.4, 9.7, 0.14),
+        T(2.3, 3.6, "HOOK"), Tg(2.3, 4.3, 1), T(2.3, 5.0, "UP"),
+        T(2.3, 5.9, "ALT FLAPS"), Tg(2.3, 6.6, 1), T(2.3, 7.3, "NORM"), Lp(2.3, 8.1, 1.4, 0.5, "FLAPS", 3),
+        Ln(0.5, 10.4, 9.5, 10.4),
+        T(2.3, 10.9, "ANTI-SKID"), Tg(2.3, 11.6, 0), T(2.3, 12.3, "PARKING"), Lp(2.3, 13.1, 1.4, 0.5, "BRAKES", 4),
+        T(5.6, 10.9, "LANDING"), T(5.6, 11.15, "TAXI LIGHTS"), Tg(5.6, 11.8, 1), T(5.6, 12.5, "OFF"),
+        T(8.4, 10.9, "BRAKES"), T(8.4, 11.15, "CHAN"), Tw(8.4, 11.8, -1), T(7.7, 12.5, "1"), T(9.1, 12.5, "2"),
+        T(6.4, 13.6, "STORES CONFIG"), Tw(6.4, 14.3, -1), T(5.2, 14.3, "CAT I"), T(7.7, 14.3, "CAT III"),
+        Ln(0.5, 15.2, 9.5, 15.2),
+        T(3.6, 15.7, "EMER STORES"), T(3.6, 15.95, "JETTISON"), Sq(3.6, 17.2, 2.3, 1.5, "JETT"),
+        T(3.6, 18.7, "GND JETT"), Gd(3.6, 19.4, false),
+        T(8.2, 15.9, "ALT GEAR"), Th(8.2, 17.4), T(8.2, 18.9, "PULL"),
+    ]},
+    Aux { side: RT, rect: R { x: 1392.0, y: 1024.0, w: 360.0, h: 720.0 }, items: &[
+        T(5.0, 0.35, "HYD PRESS"),
+        Ga(2.7, 2.1, 1.35, 0), Ga(7.3, 2.1, 1.35, 1),
+        T(2.7, 3.9, "EPU FUEL"), Ga(2.7, 5.3, 1.1, 2), T(7.3, 3.9, "OXYGEN"), Ga(7.3, 5.3, 1.1, 3),
+        T(2.7, 6.9, "CABIN PRESS"), Ga(2.7, 8.3, 1.1, 4), T(7.3, 6.9, "CLOCK"), Ga(7.3, 8.3, 1.2, 5),
+        Ln(0.5, 10.0, 9.5, 10.0),
+        T(2.6, 10.5, "FUEL QTY SEL"), Kn(2.6, 11.7, 0.36, -30.0), T(1.2, 11.1, "TEST"), T(4.0, 11.1, "NORM"), T(1.3, 12.4, "RSVR"), T(3.9, 12.4, "INT WING"),
+        T(7.4, 10.5, "EXT FUEL"), T(7.4, 10.75, "TRANS"), Tg(7.4, 11.5, 1), T(7.4, 12.3, "NORM"),
+        Ln(0.5, 13.1, 9.5, 13.1),
+        Lp(2.7, 13.9, 3.6, 0.65, "ENG FIRE", 5), Lp(7.3, 13.9, 3.6, 0.65, "ENGINE", 6),
+        Lp(2.7, 14.75, 3.6, 0.65, "HYD/OIL PRESS", 7), Lp(7.3, 14.75, 3.6, 0.65, "FLCS", 8),
+        Lp(2.7, 15.6, 3.6, 0.65, "DBU ON", 9), Lp(7.3, 15.6, 3.6, 0.65, "TO/LDG CONFIG", 10),
+        Lp(2.7, 16.45, 3.6, 0.65, "CANOPY", 11), Lp(7.3, 16.45, 3.6, 0.65, "OXY LOW", 11),
+        T(2.7, 17.6, "MAL & IND"), Pb(2.7, 18.3, 0.15), T(7.3, 17.6, "HMCS"), Kn(7.3, 18.4, 0.3, 40.0), T(7.3, 19.2, "OFF   BRT"),
+    ]},
+];
+
+/// Face frame of an auxiliary plate (top-left corner, x along the legends,
+/// y up the plate, z out of it) and its outline on the folded face.
+pub(super) fn aux_frame(side: f64) -> Frame {
+    let (o, x, y, n, w, h) = super::aux_face(side);
+    let corner = o + x * ((w - AUX_W * IN) * 0.5) + y * (h - (h - AUX_H * IN) * 0.5);
+    Frame { o: corner + n * LIFT, x, y, z: n }
+}
+
+/// Gear handle travel on the left auxiliary plate: the knob's place (in)
+/// with the handle up and down.
+pub(super) const GEAR_HANDLE: (f64, f64, f64) = (7.4, 4.3, 8.2);
+
 /// Cover plates over the empty Dzus spaces: side, s, l, len, wid (inches).
 #[rustfmt::skip]
 const BLANKS: [(f64, f64, f64, f64, f64); 18] = [
@@ -504,6 +578,26 @@ fn item_geometry(m: &mut Mesh, f: &Frame, it: &It) {
         Gg(u, v, r) => m.ring(&Frame { o: at(u, v) + f.z * 0.004, ..*f }, r * IN, r * IN + 0.003, 0.004, NUT.scale(0.7), 12),
         Cn(u, v, r) => m.ring(&Frame { o: at(u, v) + f.z * 0.006, ..*f }, r * IN * 0.75, r * IN, 0.006, NUT.scale(0.8), 12),
         Rl(u, v) => cuboid(m, &Frame { o: at(u, v) + f.z * 0.009, ..*f }, v3(0.0015, 0.016, 0.009), GUARD_BLACK),
+        Ga(u, v, r, idx) => super::gauge(m, &Frame { o: at(u, v), ..*f }, r * IN, R_AUX_DIALS[idx]),
+        Th(u, v) => {
+            // A T-handle in black and yellow bands on a short shaft.
+            let c = at(u, v);
+            prism(m, c, c + f.z * 0.03, 0.006, 0.006, 6, f.y, NUT);
+            for k in 0..6 {
+                let x0 = -0.03 + k as f64 * 0.01;
+                let col = if k % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
+                prism(m, c + f.z * 0.036 + f.x * x0, c + f.z * 0.036 + f.x * (x0 + 0.01), 0.008, 0.008, 6, f.y, col);
+            }
+        }
+        Lp(u, v, w, h, _, _) => {
+            // Lamp housing proud of the plate; the lit face stays the atlas.
+            let c = at(u, v) + f.z * 0.002;
+            let (hw, hh) = (w * IN * 0.5, h * IN * 0.5);
+            for s in [-1.0, 1.0] {
+                cuboid(m, &Frame { o: c + f.x * (s * (hw + 0.001)), ..*f }, v3(0.001, hh + 0.002, 0.002), KNOB.scale(1.2));
+                cuboid(m, &Frame { o: c + f.y * (s * (hh + 0.001)), ..*f }, v3(hw, 0.001, 0.002), KNOB.scale(1.2));
+            }
+        }
         Ct(u, v, w, h) => {
             // Cartridge seated in the receptacle, with its pull handle.
             let c = at(u, v);
@@ -550,6 +644,13 @@ pub fn build(m: &mut Mesh) {
             item_geometry(m, &f, it);
         }
     }
+    for a in AUX.iter() {
+        let f = aux_frame(a.side);
+        face(m, &f, AUX_W, AUX_H, a.rect);
+        for it in a.items {
+            item_geometry(m, &f, it);
+        }
+    }
     for &(side, s, l, len, wid) in BLANKS.iter() {
         let (f, w, h) = plate_frame(side, s, l, len, wid, false);
         face(m, &f, w, h, BLANK);
@@ -587,7 +688,7 @@ fn lightplate(cv: &mut Canvas, r: R) {
     }
 }
 
-fn item_legend(cv: &mut Canvas, r: R, h: f64, it: &It) {
+fn item_legend(cv: &mut Canvas, r: R, h: f64, it: &It, lamps: &Lamps) {
     let px = |u: f64| (r.x + u as f32 * PPI).round();
     let py = |v: f64| (r.y + v as f32 * PPI).round();
     let sz = |w: f64| (w as f32 * PPI).round();
@@ -670,18 +771,36 @@ fn item_legend(cv: &mut Canvas, r: R, h: f64, it: &It) {
             cv.disc(px(u), py(v), 2.0, WHITE);
         }
         Ct(u, v, w, hh) => cv.rect(px(u) - sz(w) * 0.5, py(v) - sz(hh) * 0.5, sz(w), sz(hh), HOLE),
+        Ga(u, v, rr, _) => cv.disc(px(u), py(v), (rr as f32 + 0.08) * PPI, HOLE),
+        Th(u, v) => cv.rect(px(u) - sz(1.4), py(v) - sz(0.3), sz(2.8), sz(0.6), HOLE),
+        Lp(u, v, w, hh, s, idx) => {
+            let lit = lamps.on[idx];
+            let (on, off, ink) = match idx {
+                0..=2 => (rgba(0x4c, 0xe0, 0x5a, 1.0), rgba(0x14, 0x30, 0x18, 1.0), rgba(0x06, 0x1c, 0x08, 1.0)),
+                3 | 4 => (rgba(0xf0, 0xb0, 0x40, 1.0), AMBER_OFF, rgba(0x2a, 0x1c, 0x04, 1.0)),
+                _ => (rgba(0xff, 0x48, 0x38, 1.0), rgba(0x22, 0x10, 0x0e, 1.0), rgba(0x2a, 0x06, 0x04, 1.0)),
+            };
+            cv.rect(px(u) - sz(w) * 0.5, py(v) - sz(hh) * 0.5, sz(w), sz(hh), if lit { on } else { off });
+            cv.text(s, px(u), py(v), 1.0, if lit { ink } else { rgba(0x80, 0x6c, 0x3c, 1.0) }, Align::Center);
+        }
         Rl(..) => {}
     }
 }
 
 /// Draws every lightplate into the right half of the atlas.
-pub fn draw(cv: &mut Canvas) {
+pub fn draw(cv: &mut Canvas, lamps: &Lamps) {
     cv.rect(BLANK.x, BLANK.y, BLANK.w, BLANK.h, FACE);
     for (p, r) in PANELS.iter().zip(rects()) {
         lightplate(cv, r);
         let h = if p.rot { p.wid } else { p.len };
         for it in p.items {
-            item_legend(cv, r, h, it);
+            item_legend(cv, r, h, it, lamps);
+        }
+    }
+    for a in AUX.iter() {
+        lightplate(cv, a.rect);
+        for it in a.items {
+            item_legend(cv, a.rect, AUX_H, it, lamps);
         }
     }
 }

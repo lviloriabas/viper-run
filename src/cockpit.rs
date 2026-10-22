@@ -18,7 +18,7 @@ mod pilot;
 
 /// Atlas height; the instrument pages fill the left 1024 square and the
 /// console lightplates the right half.
-pub const ATLAS: u32 = 1024;
+pub const ATLAS: u32 = 2048;
 pub const ATLAS_W: u32 = 2048;
 const A: f64 = ATLAS as f64;
 const AW: f64 = ATLAS_W as f64;
@@ -58,6 +58,20 @@ const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
 const R_ARM: R = r(256.0, 448.0, 256.0, 128.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
 const R_KNEE: R = r(560.0, 448.0, 192.0, 240.0);
+/// Dials on the right auxiliary console: hydraulic pressure A and B, EPU
+/// fuel, oxygen, cabin altitude and the clock.
+const R_AUX_DIALS: [R; 6] = [
+    r(0.0, 1024.0, 128.0, 128.0),
+    r(128.0, 1024.0, 128.0, 128.0),
+    r(256.0, 1024.0, 128.0, 128.0),
+    r(384.0, 1024.0, 128.0, 128.0),
+    r(512.0, 1024.0, 128.0, 128.0),
+    r(640.0, 1024.0, 128.0, 128.0),
+];
+const R_FUEL: R = r(768.0, 1024.0, 128.0, 128.0);
+const R_VVI: R = r(896.0, 1024.0, 128.0, 128.0);
+const R_TWP: R = r(0.0, 1152.0, 256.0, 96.0);
+const R_FFLOW: R = r(256.0, 1152.0, 192.0, 64.0);
 
 const GREEN: Col = rgba(0x98, 0xff, 0xa3, 1.0);
 const WHITE: Col = rgba(0xdd, 0xdc, 0xcf, 1.0);
@@ -85,12 +99,58 @@ fn panel() -> Frame {
 fn pv(y: f64) -> f64 {
     (y - 0.40) / TILT.cos()
 }
-fn panel_at(u: f64, y: f64, w: f64) -> Frame {
-    panel().at(u, pv(y), w)
+/// The outboard parts of the panel fold toward the pilot about vertical
+/// hinges just outside the MFDs, so the gauge columns on them face the seat.
+const HINGE: f64 = 0.322;
+const CANT: f64 = 30.0 * DEG;
+
+/// Axes of the folded wing on side `s`: across it (to the right) and its normal.
+fn wing_axes(s: f64) -> (V3, V3) {
+    let p = panel();
+    let x = p.x * CANT.cos() + p.z * (s * CANT.sin());
+    (x, x.cross(p.y))
 }
-const OUTLINE: [(f64, f64); 12] = [
-    (-0.47, 0.0), (0.47, 0.0), (0.47, 0.36), (0.45, 0.44), (0.40, 0.52), (0.34, 0.57),
-    (0.28, 0.60), (-0.28, 0.60), (-0.34, 0.57), (-0.40, 0.52), (-0.45, 0.44), (-0.47, 0.36),
+
+/// Point on the panel at face coordinates (`u` across, `v` up the tilted
+/// face, `w` out of it), folding with the wings.
+fn pp(u: f64, v: f64, w: f64) -> V3 {
+    let p = panel();
+    if u.abs() <= HINGE {
+        return p.p(u, v, w);
+    }
+    let s = u.signum();
+    let (x, n) = wing_axes(s);
+    p.p(s * HINGE, v, 0.0) + x * (u - s * HINGE) + n * w
+}
+
+fn panel_at(u: f64, y: f64, w: f64) -> Frame {
+    if u.abs() <= HINGE {
+        return panel().at(u, pv(y), w);
+    }
+    let (x, n) = wing_axes(u.signum());
+    Frame { o: pp(u, pv(y), w), x, y: panel().y, z: n }
+}
+
+/// Auxiliary consoles: below and outboard of the panel wings, folded
+/// further toward the pilot from the wing edge back to the tub wall, from
+/// knee height up toward the canopy sill. Returns the face's bottom-left
+/// corner, its axes across (to the right), up and out, and its width and
+/// height in metres.
+fn aux_face(s: f64) -> (V3, V3, V3, V3, f64, f64) {
+    const AUX_CANT: f64 = 62.0 * DEG;
+    let p = panel();
+    let edge = pp(s * 0.47, pv(0.21), 0.0);
+    let d = p.x * (s * AUX_CANT.cos()) + p.z * AUX_CANT.sin();
+    let len = (consoles::WALL_X - edge.x.abs()) / AUX_CANT.cos();
+    let height = (0.73 - 0.21) / TILT.cos();
+    let across = if s > 0.0 { d } else { -d };
+    let corner = if s > 0.0 { edge } else { edge + d * len };
+    (corner, across, p.y, across.cross(p.y), len, height)
+}
+/// Panel outline in face coordinates, with points at the wing hinges.
+const OUTLINE: [(f64, f64); 16] = [
+    (-0.47, 0.0), (-HINGE, 0.0), (HINGE, 0.0), (0.47, 0.0), (0.47, 0.36), (0.45, 0.44), (0.40, 0.52), (0.34, 0.57),
+    (HINGE, 0.579), (0.28, 0.60), (-0.28, 0.60), (-HINGE, 0.579), (-0.34, 0.57), (-0.40, 0.52), (-0.45, 0.44), (-0.47, 0.36),
 ];
 
 /// Combiner glass corners in body coordinates: bottom-left, bottom-right, top-right, top-left.
@@ -102,6 +162,9 @@ pub struct Hands {
     pub pitch: f64,
     pub throttle: f64,
     pub rudder: f64,
+    /// Landing gear handle, 0 up to 1 down, and its warning light.
+    pub gear: f64,
+    pub gear_warn: bool,
 }
 
 #[repr(C)]
@@ -403,17 +466,19 @@ fn plate(m: &mut Mesh, f: &Frame, w: f64, h: f64, rect: R) {
 }
 
 fn build_static(m: &mut Mesh) {
-    let p = panel();
-    // Panel face and its shoulder rim.
-    let face: Vec<V3> = OUTLINE.iter().map(|&(u, v)| p.p(u, v, 0.0)).collect();
-    m.polygon(&face, PANEL);
+    // Panel face in three parts, the centre and the two folded wings, and
+    // its shoulder rim.
+    let face = |pts: &[(f64, f64)]| -> Vec<V3> { pts.iter().map(|&(u, v)| pp(u, v, 0.0)).collect() };
+    m.polygon(&face(&[OUTLINE[1], OUTLINE[2], OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
+    m.polygon(&face(&OUTLINE[2..9]), PANEL.scale(0.96));
+    m.polygon(&face(&[OUTLINE[0], OUTLINE[1], OUTLINE[11], OUTLINE[12], OUTLINE[13], OUTLINE[14], OUTLINE[15]]), PANEL.scale(0.96));
     for k in 0..OUTLINE.len() {
         let (a, b) = (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()]);
-        m.quad(p.p(a.0, a.1, 0.0), p.p(b.0, b.1, 0.0), p.p(b.0, b.1, -0.20), p.p(a.0, a.1, -0.20), PANEL.scale(0.7));
+        m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), pp(b.0, b.1, -0.20), pp(a.0, a.1, -0.20), PANEL.scale(0.7));
     }
     // Glare shield: a hood from the panel top edge up toward the windscreen.
-    let top: Vec<(f64, f64)> = OUTLINE[2..].iter().chain(OUTLINE[..1].iter().skip(1)).copied().collect();
-    let shield = |u: f64, v: f64, t: f64| p.p(u * (1.0 - 0.06 * t), v + 0.012 + 0.05 * t, 0.045 - 0.42 * t);
+    let top = &OUTLINE[4..];
+    let shield = |u: f64, v: f64, t: f64| pp(u * (1.0 - 0.06 * t), v + 0.012 + 0.05 * t, 0.045 - 0.42 * t);
     for k in 0..top.len() - 1 {
         let (a, b) = (top[k], top[k + 1]);
         for s in 0..4 {
@@ -421,7 +486,7 @@ fn build_static(m: &mut Mesh) {
             m.quad(shield(a.0, a.1, t0), shield(b.0, b.1, t0), shield(b.0, b.1, t1), shield(a.0, a.1, t1), GLARE);
         }
         m.capsule(shield(a.0, a.1, 0.0), shield(b.0, b.1, 0.0), 0.011, 0.011, GLARE.scale(1.6), 6);
-        m.quad(p.p(a.0, a.1, 0.0), p.p(b.0, b.1, 0.0), shield(b.0, b.1, 0.0), shield(a.0, a.1, 0.0), GLARE.scale(1.2));
+        m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), shield(b.0, b.1, 0.0), shield(a.0, a.1, 0.0), GLARE.scale(1.2));
     }
 
     // Displays: two portrait MFDs and the large centre pedestal display.
@@ -466,6 +531,13 @@ fn build_static(m: &mut Mesh) {
     }
     plate(m, &panel_at(0.222, 0.88, 0.0), 0.13, 0.065, R_CAUTION);
     plate(m, &panel_at(-0.222, 0.88, 0.0), 0.13, 0.065, R_ARM);
+    // Under the MFDs: the vertical velocity indicator on the left, the fuel
+    // quantity indicator on the right; over the wing columns, the threat
+    // warning prime lights and the fuel flow counter.
+    gauge(m, &panel_at(-0.24, 0.535, 0.0), 0.036, R_VVI);
+    gauge(m, &panel_at(0.24, 0.535, 0.0), 0.040, R_FUEL);
+    plate(m, &panel_at(-0.40, 0.845, 0.0), 0.088, 0.033, R_TWP);
+    plate(m, &panel_at(0.40, 0.84, 0.0), 0.070, 0.024, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -482,22 +554,66 @@ fn build_static(m: &mut Mesh) {
     m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.22, -2.40), v3(-wx, 0.22, -2.40), WALL.scale(0.55));
     m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.42, -4.12), v3(-wx, 0.42, -4.12), WALL.scale(0.45));
     for &s in &[-1.0, 1.0] {
+        // The walls start behind the auxiliary consoles, which close the tub
+        // in front of them.
+        let (ao, ax, _, _, aw, _) = aux_face(s);
+        let aux_aft = ao.z.max((ao + ax * aw).z);
         let n = 12;
         for k in 0..n {
             let (z0, z1) = (mix(-4.30, -2.30, k as f64 / n as f64), mix(-4.30, -2.30, (k + 1) as f64 / n as f64));
             let (b0, b1) = (airframe::canopy_profile(z0).1, airframe::canopy_profile(z1).1);
             let (w0, w1) = (airframe::canopy_profile(z0).0.max(0.47), airframe::canopy_profile(z1).0.max(0.47));
-            m.quad(v3(s * wx, 0.22, z0), v3(s * wx, 0.22, z1), v3(s * wx, wy, z1), v3(s * wx, wy, z0), WALL);
-            m.quad(v3(s * wx, wy, z0), v3(s * wx, wy, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL.scale(1.08));
+            if z1 > aux_aft + 0.02 {
+                let (z0, b0) = if z0 < aux_aft { (aux_aft, airframe::canopy_profile(aux_aft).1) } else { (z0, b0) };
+                m.quad(v3(s * wx, 0.22, z0), v3(s * wx, 0.22, z1), v3(s * wx, wy, z1), v3(s * wx, wy, z0), WALL);
+                m.quad(v3(s * wx, wy, z0), v3(s * wx, wy, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL.scale(1.08));
+            }
             m.quad(v3(s * 0.47, b0 - 0.03, z0), v3(s * 0.47, b1 - 0.03, z1), v3(s * w1, b1, z1), v3(s * w0, b0, z0), WALL.scale(1.15));
             let d = (v3(s * w1, b1, z1) - v3(s * w0, b0, z0)).norm() * 0.012;
             pilot::bar(m, v3(s * w0, b0, z0) - d, v3(s * w1, b1, z1) + d, 0.024, 0.018, V3::Y, Rgb(0.12, 0.13, 0.14));
         }
-        // Cheek between the panel edge and the wall, closing the tub in front.
-        let b = airframe::canopy_profile(-4.12).1 - 0.03;
-        let cheek = [panel_at(s * 0.47, 0.40, 0.0).o, panel_at(s * wx, 0.40, 0.0).o, panel_at(s * wx, wy, 0.0).o, panel_at(s * 0.47, b, 0.0).o];
-        m.polygon(&cheek, PANEL.scale(0.8));
+        // Auxiliary console from the wing edge to the wall: its face, a
+        // skirt down to the floor and a plain cheek up to the canopy sill.
+        let (o, x, y, n, w, h) = aux_face(s);
+        let c = |a: f64, b: f64| o + x * a + y * b;
+        m.quad(c(0.0, 0.0), c(w, 0.0), c(w, h), c(0.0, h), PANEL.scale(0.92));
+        for (a, b) in [((0.0, 0.0), (w, 0.0)), ((w, 0.0), (w, h)), ((w, h), (0.0, h)), ((0.0, h), (0.0, 0.0))] {
+            m.quad(c(a.0, a.1), c(b.0, b.1), c(b.0, b.1) - n * 0.02, c(a.0, a.1) - n * 0.02, PANEL.scale(0.7));
+        }
+        let floor = |p: V3| v3(p.x, 0.22, p.z);
+        m.quad(floor(c(0.0, 0.0)), floor(c(w, 0.0)), c(w, 0.0), c(0.0, 0.0), WALL.scale(0.6));
+        let b = airframe::canopy_profile(-3.9).1 - 0.03;
+        let (inner, outer) = if s > 0.0 { (c(0.0, h), c(w, h)) } else { (c(w, h), c(0.0, h)) };
+        let sill = |p: V3| v3(s * 0.47, b, p.z);
+        m.polygon(&[inner, outer, v3(s * wx, wy.max(outer.y), outer.z), sill(outer), sill(inner), pp(s * 0.47, pv(b), 0.0)], PANEL.scale(0.8));
     }
+    // On the walls leaning in above the consoles: the canopy jettison
+    // T-handle and the map light on the left, the canopy switch box and the
+    // map case on the right.
+    let wall = |s: f64, t: f64, z: f64| -> Frame {
+        let b = airframe::canopy_profile(z).1 - 0.03;
+        let (lo, hi) = (v3(s * wx, wy, z), v3(s * 0.47, b, z));
+        let up = (hi - lo).norm();
+        let n = (V3::Z.cross(up) * s).norm();
+        Frame { o: lo.lerp(hi, t) + n * 0.004, x: V3::Z * -s, y: up, z: n }
+    };
+    let f = wall(-1.0, 0.35, -3.0);
+    m.block(&f.at(0.0, 0.0, 0.004), v3(0.07, 0.045, 0.004), BEZEL.scale(0.9));
+    for k in 0..6 {
+        let x0 = -0.045 + k as f64 * 0.015;
+        let col = if k % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
+        m.block(&f.at(x0 + 0.0075, 0.0, 0.03), v3(0.0075, 0.012, 0.01), col);
+    }
+    m.capsule(f.p(0.0, 0.0, 0.006), f.p(0.0, 0.0, 0.022), 0.006, 0.006, METALC, 6);
+    let f = wall(-1.0, 0.4, -2.6);
+    m.block(&f.at(0.0, 0.0, 0.01), v3(0.03, 0.02, 0.01), BEZEL);
+    m.capsule(f.p(0.0, 0.0, 0.02), f.p(0.0, 0.03, 0.05), 0.006, 0.01, Rgb(0.10, 0.10, 0.10), 6);
+    let f = wall(1.0, 0.35, -3.45);
+    m.block(&f.at(0.0, 0.0, 0.008), v3(0.045, 0.03, 0.008), BEZEL);
+    m.capsule(f.p(0.0, 0.0, 0.016), f.p(0.0, 0.02, 0.036), 0.003, 0.0025, METALC, 6);
+    let f = wall(1.0, 0.25, -2.85);
+    m.block(&f.at(0.0, 0.0, 0.025), v3(0.15, 0.08, 0.025), Rgb(0.13, 0.15, 0.13));
+    m.block(&f.at(0.0, 0.05, 0.052), v3(0.15, 0.035, 0.004), Rgb(0.17, 0.19, 0.16));
     consoles::build(m);
     pilot::build_static(m);
 
@@ -920,8 +1036,79 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         cv.text(s, r.x + 10.0, r.y + 46.0 + i as f32 * 24.0, 1.0, ink, Align::Left);
     }
 
-    // Side console lightplates.
-    consoles::draw(cv);
+    // Vertical velocity: thousands of feet a minute, 0 at nine o'clock.
+    let (x, y, rad) = gauge_face(cv, R_VVI);
+    let ang = |fpm: f64| (180.0 + clamp(fpm / 1000.0, -6.0, 6.0) * 26.0) * DEG;
+    for k in -6i32..=6 {
+        spoke(cv, x, y, ang(k as f64 * 1000.0), rad * if k % 2 == 0 { 0.72 } else { 0.80 }, rad * 0.90, 2.0, WHITE);
+        if k % 2 == 0 {
+            spoke_text(cv, x, y, ang(k as f64 * 1000.0), rad * 0.58, &format!("{}", k.abs()), WHITE);
+        }
+    }
+    cv.text("VVI", x + rad * 0.25, y - rad * 0.3, 1.0, WHITE, Align::Center);
+    spoke(cv, x, y, ang(ad.vs_fpm), -rad * 0.12, rad * 0.86, 3.0, POINTER);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+
+    // Fuel quantity: aft-left and forward-right pointers, totalizer below.
+    let (x, y, rad) = gauge_face(cv, R_FUEL);
+    let lb = a.fuel * 2.20462;
+    let ang = |t: f64| (-225.0 + 270.0 * clamp(t, 0.0, 1.0)) * DEG;
+    for k in 0..=8 {
+        spoke(cv, x, y, ang(k as f64 / 8.0), rad * 0.74, rad * 0.90, 2.0, WHITE);
+        if k % 2 == 0 {
+            spoke_text(cv, x, y, ang(k as f64 / 8.0), rad * 0.60, &format!("{}", k / 2), WHITE);
+        }
+    }
+    cv.rect(x - 26.0, y + rad * 0.30 - 8.0, 52.0, 16.0, rgba(0, 0, 0, 1.0));
+    cv.text(&pad(lb, 4), x, y + rad * 0.30, 1.0, WHITE, Align::Center);
+    cv.text("FUEL", x, y - rad * 0.28, 1.0, WHITE, Align::Center);
+    spoke(cv, x, y, ang(lb * 0.45 / 4000.0), -rad * 0.1, rad * 0.84, 3.0, rgba(0xf0, 0x60, 0x50, 1.0));
+    spoke(cv, x, y, ang(lb * 0.55 / 4000.0), -rad * 0.1, rad * 0.78, 3.0, POINTER);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+
+    // Threat warning prime: LAUNCH lights with a missile in the air.
+    let r = R_TWP;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x20, 0x27, 0x29, 1.0));
+    let launch = c.warn > 0.0 || c.inbound().next().is_some();
+    for (i, (s, lit)) in [("HANDOFF", false), ("LAUNCH", launch), ("PRI MODE", true), ("UNKNOWN", false)].iter().enumerate() {
+        let (x, y) = (r.x + (i % 2) as f32 * 128.0, r.y + (i / 2) as f32 * 48.0);
+        let on = if *lit { if i == 1 { rgba(0xff, 0x55, 0x40, 1.0) } else { GREEN } } else { rgba(0x0c, 0x14, 0x14, 1.0) };
+        cv.rect(x + 3.0, y + 3.0, 122.0, 42.0, on);
+        cv.text(s, x + 64.0, y + 24.0, 1.0, if *lit { rgba(0x10, 0x10, 0x08, 1.0) } else { rgba(0x6b, 0x75, 0x69, 1.0) }, Align::Center);
+    }
+
+    // Fuel flow counter, pounds an hour.
+    let r = R_FFLOW;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x08, 0x0a, 0x0a, 1.0));
+    cv.text("FUEL FLOW", r.x + r.w / 2.0, r.y + 12.0, 1.0, WHITE, Align::Center);
+    cv.text(&format!("{} PPH", pad(a.fuel_flow * 7936.6, 5)), r.x + r.w / 2.0, r.y + 40.0, 2.0, WHITE, Align::Center);
+
+    // Right auxiliary console dials.
+    let hyd = if a.rpm > 55.0 { 3000.0 } else { a.rpm * 50.0 };
+    dial(cv, R_AUX_DIALS[0], hyd, 0.0, 4000.0, "HYD A", &pad(hyd, 4), 9);
+    dial(cv, R_AUX_DIALS[1], hyd * 0.99, 0.0, 4000.0, "HYD B", &pad(hyd * 0.99, 4), 9);
+    dial(cv, R_AUX_DIALS[2], 100.0, 0.0, 100.0, "EPU %", "100", 11);
+    dial(cv, R_AUX_DIALS[3], 4.6, 0.0, 5.0, "OXY L", "4.6", 11);
+    // Cabin altitude: 8,000 ft until the 5 psi schedule takes over near 23,000.
+    let cabin = if ad.pressure_alt_ft < 23000.0 { ad.pressure_alt_ft.min(8000.0) } else { 8000.0 + (ad.pressure_alt_ft - 23000.0) * 0.45 };
+    dial(cv, R_AUX_DIALS[4], cabin, 0.0, 50000.0, "CABIN", &pad(cabin / 1000.0, 2), 9);
+    let (x, y, rad) = gauge_face(cv, R_AUX_DIALS[5]);
+    for k in 0..12 {
+        spoke(cv, x, y, (k as f64 * 30.0 - 90.0) * DEG, rad * 0.74, rad * 0.90, 2.0, WHITE);
+    }
+    let t = 7.0 * 3600.0 + 15.0 * 60.0 + m.elapsed;
+    spoke(cv, x, y, ((t / 43200.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.5, 3.0, POINTER);
+    spoke(cv, x, y, ((t / 3600.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.8, 2.0, POINTER);
+    spoke(cv, x, y, ((t / 60.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.85, 1.0, RED);
+    cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
+
+    // Side and auxiliary console lightplates, with their lamps.
+    let gear_down = a.gear >= 0.999;
+    let low_slow = a.agl < 3000.0 && a.airspeed_kt < 190.0 && !a.on_ground;
+    let lamps = consoles::Lamps {
+        on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, false, a.fuel <= 0.0, a.oil_psi < 20.0, a.alpha_deg > 25.0, false, low_slow && !gear_down, false],
+    };
+    consoles::draw(cv, &lamps);
 }
 
 /// Standby attitude indicator: rotating sky/ground ball with a fixed aircraft symbol.

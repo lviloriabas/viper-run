@@ -393,8 +393,23 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     wrist
 }
 
+/// Landing gear handle on the left auxiliary console: a stalk out of its
+/// slot to the white wheel-shaped knob, with the red light in the knob.
+fn gear_handle(m: &mut Mesh, h: &Hands) {
+    let f = consoles::aux_frame(-1.0);
+    let (u, up, down) = consoles::GEAR_HANDLE;
+    let v = mix(up, down, h.gear);
+    let base = f.p(u * 0.0254, -v * 0.0254, 0.0);
+    let tip = base + f.z * 0.075 + f.y * 0.01;
+    loft(m, &[St(base, 0.006, 0.006, METALC), St(tip, 0.005, 0.005, METALC)], f.x, &OCT);
+    loft(m, &[St(tip - f.z * 0.004, 0.024, 0.024, Rgb(0.86, 0.86, 0.82)), St(tip + f.z * 0.012, 0.024, 0.024, Rgb(0.86, 0.86, 0.82))], f.x, &OCT);
+    let lamp = if h.gear_warn { Rgb(1.6, 0.22, 0.12) } else { Rgb(0.32, 0.08, 0.06) };
+    loft(m, &[St(tip + f.z * 0.012, 0.010, 0.010, lamp), St(tip + f.z * 0.016, 0.008, 0.008, lamp)], f.x, &OCT);
+}
+
 /// Legs on the pedals, both arms and the two controls under the hands.
 pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
+    gear_handle(m, h);
     for s in [-1.0, 1.0] {
         leg(m, s, h.rudder);
     }

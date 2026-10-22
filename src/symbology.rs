@@ -391,12 +391,15 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
 /// azimuth either side, and elevation from its bottom to its top edge.
 pub const HUD_FOV: (f64, f64, f64) = (7.6 * DEG, -12.6 * DEG, 7.9 * DEG);
 
-/// True when a body-axis line of sight passes through the HUD combiner,
-/// where the helmet blanks its own symbology, as JHMCS does.
+/// True when a body-axis line of sight passes through the HUD combiner or
+/// falls inside the cockpit (well below the canopy rail), where the helmet
+/// blanks its own symbology, as JHMCS does with its cockpit mask.
 pub fn through_hud(los_body: V3) -> bool {
     let az = los_body.x.atan2(-los_body.z);
     let el = los_body.y.atan2((los_body.x * los_body.x + los_body.z * los_body.z).sqrt());
-    az.abs() < HUD_FOV.0 && el > HUD_FOV.1 && el < HUD_FOV.2
+    let hud = az.abs() < HUD_FOV.0 && el > HUD_FOV.1 && el < HUD_FOV.2;
+    let cockpit = el < -20.0 * DEG && az.abs() < 110.0 * DEG;
+    hud || cockpit
 }
 
 /// Helmet-mounted display, in the manner of JHMCS. Visor-fixed: the aiming

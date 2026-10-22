@@ -323,7 +323,7 @@ impl App {
         let models = props::Models::new(&mut *ctx, &frame, &world);
         let cockpit = Cockpit::new(&mut *ctx, &frame.canopy);
         let overlay = Canvas::new(&mut *ctx, font_tex, 240_000);
-        let atlas_canvas = Canvas::new(&mut *ctx, font_tex, 240_000);
+        let atlas_canvas = Canvas::new(&mut *ctx, font_tex, 400_000);
         let (w, h) = window::screen_size();
         let (rw, rh) = render_size(w, h);
         let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Nearest);
@@ -1062,6 +1062,11 @@ impl App {
         h.rudder += (rudder - h.rudder) * rr;
         let throttle = if active { self.aircraft.as_ref().unwrap().throttle } else { self.hands.throttle };
         self.hands.throttle += (throttle - self.hands.throttle) * tr;
+        // The gear handle snaps over in a quarter second; its light burns
+        // while the gear runs.
+        let lever = if self.gear_lever { 1.0 } else { 0.0 };
+        self.hands.gear = approach(self.hands.gear, lever, dt.max(0.0) * 4.0);
+        self.hands.gear_warn = self.aircraft.as_ref().is_some_and(|a| a.gear > 0.0 && a.gear < 1.0);
     }
 
     // ------------------------------------------------------------ cameras

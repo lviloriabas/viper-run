@@ -353,14 +353,21 @@ out of margin.
   F-16V-style panel with two portrait MFDs and a large centre display, the UFC
   (DED over the ICP keypad) under a tall HUD combiner, RWR scope, standby ADI,
   airspeed and altimeter, RPM / FTIT / nozzle / oil gauges in round bezels,
-  caution panel, AOA indexer, master caution, side consoles after the F-16C
+  caution panel, AOA indexer, master caution, VVI, fuel quantity, fuel flow
+  and threat warning prime lights, the outboard thirds of the panel folded 30
+  degrees toward the pilot and, beyond them, the auxiliary consoles folded
+  further from knee height (landing gear handle and lights, ALT GEAR, hook,
+  flaps, brakes and jettison on the left; hydraulic, EPU, oxygen and cabin
+  dials, the clock and the warning lights on the right), side consoles after the F-16C
   Block 50 layout (every Dzus lightplate in its real place and size, with
   sharp legends and chunky toggles, guards, knobs and trim wheels, the tops
   tilted 10 degrees toward the pilot), the throttle in its quadrant and the
-  pressure sidestick on its mount, both where they sit in the jet beside the
-  pilot (the default view looks 14 degrees down: HUD, panel and sky in
-  view, the stick and throttle heads at the bottom corners), a reclined ACES II seat and the pilot's arms, hands
-  and legs following the live controls.
+  pressure sidestick on its mount, beside the pilot and a little forward of
+  the reference positions so they show (the default view looks 14 degrees
+  down: HUD, panel and sky in
+  view, the stick and throttle heads at the bottom corners), a reclined
+  ACES II seat, the canopy jettison handle and map case on the walls, and the
+  pilot's arms, hands and legs following the live controls.
 - Low-poly pixel art: the jet is a few hundred Gouraud-
   shaded polygons wearing a small hand-painted texture (FS 36270 / 36375
   greys, panel lines, low-vis star-and-bars, AV tail code, green fin band),

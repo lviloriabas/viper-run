@@ -92,7 +92,7 @@ ANTI ICE y ANT SEL (1,5); y la DTU (4,5). Los huecos llevan tapas lisas.
 
 Cada panel tiene su rotulación real (interruptores, mandos giratorios,
 pulsadores, luces y pantallas) dibujada en la mitad derecha del atlas de
-instrumentos (2048 x 1024, a 36 píxeles por pulgada; la fuente 5x7 queda
+instrumentos (2048 x 2048, a 36 píxeles por pulgada; la fuente 5x7 queda
 de unos 0,19 pulgadas, la mitad más grande que la real para que se lea) y
 sus mandos en geometría: interruptores de palanca con tuerca hexagonal,
 tapas rojas o negras, perillas con línea índice, pulsadores, ruedas de
@@ -109,9 +109,19 @@ las cabezas de la palanca y el throttle asoman en las esquinas inferiores. La
 palanca, el throttle y las consolas están 12 cm más adelante que en el modelo
 de FlightGear para que se vean como desde el asiento real. La inclinación por defecto es una sola constante,
 `LOOK_PITCH` en `src/main.rs`. Una prueba fija las posiciones de referencia
-de la palanca y el throttle. Las consolas auxiliares delanteras no se
-añadieron: ese espacio lo ocupan las esquinas inferiores del panel
-principal estilo F-16V.
+de la palanca y el throttle. Los tercios exteriores del panel principal se pliegan 30 grados hacia el
+piloto sobre bisagras verticales junto a las MFD, y fuera de ellos las
+consolas auxiliares se pliegan 62 grados, del borde del panel a la pared,
+desde la altura de las rodillas: la izquierda con el tren (manija con luz
+roja en tránsito, luces verdes NOSE LEFT RIGHT, ALT GEAR, gancho, ALT
+FLAPS, frenos, luces de aterrizaje, STORES CONFIG y lanzamiento de
+emergencia), la derecha con presión hidráulica A y B, combustible del EPU,
+oxígeno, altitud de cabina, reloj, selector de combustible y las luces de
+aviso (ENG FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY,
+OXY LOW). Bajo las MFD quedan el VVI y el indicador de combustible, sobre
+las columnas el TWP y el caudal de combustible, y en las paredes la
+manija de eyección de la cúpula, la luz de mapas, el interruptor de la
+cúpula y el portamapas.
 
 La [ficha de la USAF sobre el F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirma el asiento inclinado 30 grados, la palanca lateral sensible a presión,
