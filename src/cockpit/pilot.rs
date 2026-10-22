@@ -3,7 +3,7 @@
 //! so the flight suit, G-suit, boots and gloves read as shapes instead of
 //! joined tubes. The controls sit far enough forward on the side consoles
 //! that both gloved hands show in the lower corners of the forward view.
-use super::{screen, Hands, METALC, R_KNEE, SEAT};
+use super::{consoles, screen, Hands, METALC, R_KNEE, SEAT};
 use crate::math::*;
 use crate::mesh::{Frame, Mesh, Rgb};
 
@@ -20,8 +20,11 @@ const RUBBER: Rgb = Rgb(0.055, 0.06, 0.065);
 const GRIP: Rgb = Rgb(0.115, 0.12, 0.125);
 const RED: Rgb = Rgb(0.62, 0.12, 0.08);
 
-/// Sidestick pivot on its raised mount at the front of the right console.
-const STICK: V3 = v3(0.365, 0.668, -3.81);
+/// Sidestick pivot over its mount at the inboard front corner of the right
+/// console, 0.29 m right of the centreline as in the jet. The mount stands
+/// taller than the real one (about 15 cm instead of 9) so the hand on the
+/// grip stays in the default forward view.
+const STICK: V3 = v3(0.29, 0.668, -3.82);
 const SHOULDER: V3 = v3(0.19, 1.00, -3.26);
 /// Upper arm and forearm (elbow to wrist) lengths, then thigh and shin.
 const ARM: (f64, f64) = (0.30, 0.31);
@@ -277,13 +280,18 @@ pub fn build_static(m: &mut Mesh) {
     }
     m.block(&chest(0.07, 0.106, 0.0), v3(0.036, 0.03, 0.009), METALC);
 
-    // Raised sidestick mount, the right arm rest under the neutral elbow, and
-    // the throttle slot along the outboard edge of the left console.
-    m.block(&Frame { o: STICK - V3::Y * 0.014, x: V3::X, y: V3::Y, z: V3::Z }, v3(0.058, 0.014, 0.06), Rgb(0.10, 0.11, 0.11));
-    let e = joint(SHOULDER, stick_grip(&Hands::default()).1, ARM, pole(1.0));
-    bar(m, v3(0.36, e.y - 0.075, e.z + 0.09), v3(0.36, e.y - 0.08, e.z - 0.20), 0.045, 0.022, V3::Y, Rgb(0.12, 0.12, 0.11));
-    bar(m, v3(0.36, 0.64, e.z), v3(0.36, e.y - 0.08, e.z - 0.04), 0.03, 0.02, V3::Z, Rgb(0.09, 0.10, 0.10));
-    m.block(&Frame { o: v3(-0.445, 0.645, -3.74), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.022, 0.006, 0.135), Rgb(0.06, 0.065, 0.07));
+    // Sidestick mount standing on the right console, with its top plate, and
+    // the arm rest under the neutral forearm on a post from the console.
+    let (mount, top) = (Rgb(0.10, 0.11, 0.11), STICK.y - 0.004);
+    let foot = consoles::top_y(STICK.x, STICK.z) - 0.01;
+    m.block(&Frame { o: v3(STICK.x, (foot + top) * 0.5, STICK.z), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.032, (top - foot) * 0.5, 0.047), mount);
+    m.block(&Frame { o: STICK - V3::Y * 0.014, x: V3::X, y: V3::Y, z: V3::Z }, v3(0.04, 0.012, 0.052), mount.scale(1.2));
+    let w = stick_grip(&Hands::default()).1;
+    let e = joint(SHOULDER, w, ARM, pole(1.0));
+    let (a, b) = (e.lerp(w, 0.12) - V3::Y * 0.058, e.lerp(w, 0.78) - V3::Y * 0.058);
+    bar(m, a, b, 0.036, 0.018, V3::Y, Rgb(0.12, 0.12, 0.11));
+    let c = a.lerp(b, 0.5);
+    bar(m, v3(c.x, consoles::top_y(c.x, c.z) - 0.01, c.z), c - V3::Y * 0.015, 0.024, 0.02, V3::Z, mount);
 }
 
 fn pole(side: f64) -> V3 {
@@ -331,15 +339,26 @@ fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
 /// end. The left hand lies level on top of it: back of the hand up, the
 /// mitten falling over the front, thumb along the aft face to the
 /// cursor control and speed brake. Returns the wrist.
-fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
-    let z = -3.64 - h.throttle * 0.20;
-    let a = v3(0.95, 0.26, -0.10).norm();
-    // Grip frame: `g` along the grip toward the head, `fwd` forward, `out` up.
-    let k = Grip::new(v3(-0.36, 0.80, z - 0.01), a, -1.0);
+/// Throttle grip frame: `g` along the grip toward the head, `fwd` forward,
+/// `out` up. The grip travels 20 cm, from 4 to 24 cm behind the front of
+/// the console as in the jet.
+fn throttle_grip(h: &Hands) -> Grip {
+    let z = -3.62 - h.throttle * 0.20;
+    Grip::new(v3(-0.41, 0.80, z - 0.01), v3(0.95, 0.26, -0.10).norm(), -1.0)
+}
 
-    // Broad lever from the slot to a pivot under the root, and the cutoff
-    // release trigger on its outboard side.
-    let foot = v3(-0.445, 0.64, z + 0.02);
+/// Centre of the left hand lying on the grip.
+fn palm(k: &Grip) -> V3 {
+    k.p(-0.004, -0.030, 0.0) + V3::Y * 0.054
+}
+
+fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
+    let k = throttle_grip(h);
+    let z = k.o.z + 0.01;
+
+    // Broad lever from the quadrant slot to a pivot under the root, and the
+    // cutoff release trigger on its outboard side.
+    let foot = v3(consoles::SLOT_X, consoles::QUADRANT_TOP, z + 0.02);
     bar(m, foot, k.p(0.0, -0.090, -0.032), 0.017, 0.034, V3::Z, Rgb(0.20, 0.22, 0.22));
     strap(m, &[foot + v3(-0.018, 0.03, 0.0), foot + v3(-0.026, 0.06, -0.01), foot + v3(-0.022, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
 
@@ -363,7 +382,7 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     // down in front, the thumb along the aft face.
     let hf = v3(0.10, 0.0, -1.0).norm();
     let hs = V3::Y.cross(hf);
-    let c = k.p(-0.004, -0.030, 0.0) + V3::Y * 0.054;
+    let c = palm(&k);
     let at = |s: f64, y: f64| c + hf * s + V3::Y * y;
     let wrist = at(-0.078, -0.012);
     loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.036, -0.008), 0.046, 0.013, GLOVE), St(at(0.054, -0.032), 0.044, 0.012, GLOVE), St(at(0.058, -0.058), 0.040, 0.011, GLOVE)], hs, &OCT);
@@ -384,4 +403,38 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     let wrist = throttle(m, h);
     arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.018));
     m.facet();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::airframe::EYE;
+
+    #[test]
+    fn both_hands_show_in_the_default_view() {
+        // Default cockpit look: 12 degrees down with a 58 degree vertical
+        // field, so the bottom edge is 41 degrees under the horizon. Over the
+        // cruise throttle range each hand's centre stays inside it and the
+        // back of the hand 2 degrees above it.
+        let below = |p: V3| (EYE.y - p.y).atan2(EYE.z - p.z) / DEG;
+        for t in [0.6, 0.82, 1.0] {
+            let h = Hands { throttle: t, ..Default::default() };
+            let k = stick_grip(&h).0;
+            let p = palm(&throttle_grip(&h));
+            for (centre, back) in [(k.o, k.p(0.0, 0.035, 0.0)), (p, p + V3::Y * 0.016)] {
+                assert!(below(centre) < 41.0 && below(back) < 39.0, "hand {:.1} and {:.1} degrees under the horizon (throttle {t})", below(centre), below(back));
+            }
+        }
+    }
+
+    #[test]
+    fn controls_stand_on_their_consoles() {
+        // Stick at the inboard front corner of the right console, throttle
+        // lever in the slot along the outboard side of the left one.
+        assert!(STICK.x > 0.262 && STICK.x < 0.33 && STICK.z > consoles::FRONT_Z && STICK.z < consoles::FRONT_Z + 0.1);
+        for t in [0.0, 1.0] {
+            let k = throttle_grip(&Hands { throttle: t, ..Default::default() });
+            assert!(k.o.z > consoles::FRONT_Z && (k.p(0.0, -0.09, 0.0).x - consoles::SLOT_X).abs() < 0.02);
+        }
+    }
 }

@@ -11,10 +11,15 @@ use crate::sim::{Aircraft, Mission};
 use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
+mod consoles;
 mod pilot;
 
+/// Atlas height; the instrument pages fill the left 1024 square and the
+/// console lightplates the right half.
 pub const ATLAS: u32 = 1024;
+pub const ATLAS_W: u32 = 2048;
 const A: f64 = ATLAS as f64;
+const AW: f64 = ATLAS_W as f64;
 
 #[derive(Clone, Copy)]
 struct R {
@@ -27,7 +32,7 @@ const fn r(x: f32, y: f32, w: f32, h: f32) -> R {
     R { x, y, w, h }
 }
 fn uv(r: R) -> (f64, f64, f64, f64) {
-    (r.x as f64 / A, 1.0 - r.y as f64 / A, (r.x + r.w) as f64 / A, 1.0 - (r.y + r.h) as f64 / A)
+    (r.x as f64 / AW, 1.0 - r.y as f64 / A, (r.x + r.w) as f64 / AW, 1.0 - (r.y + r.h) as f64 / A)
 }
 
 const R_MFD_L: R = r(0.0, 0.0, 256.0, 320.0);
@@ -51,9 +56,6 @@ const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
 const R_ARM: R = r(256.0, 448.0, 256.0, 128.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
 const R_KNEE: R = r(560.0, 448.0, 192.0, 240.0);
-fn r_console(i: usize) -> R {
-    r((i % 8) as f32 * 128.0, 704.0 + (i / 8) as f32 * 160.0, 128.0, 160.0)
-}
 
 const GREEN: Col = rgba(0x98, 0xff, 0xa3, 1.0);
 const WHITE: Col = rgba(0xdd, 0xdc, 0xcf, 1.0);
@@ -67,7 +69,6 @@ const PANEL: Rgb = Rgb(0.165, 0.185, 0.195);
 const BEZEL: Rgb = Rgb(0.215, 0.235, 0.245);
 const GLARE: Rgb = Rgb(0.075, 0.085, 0.095);
 const WALL: Rgb = Rgb(0.19, 0.21, 0.215);
-const CONSOLE: Rgb = Rgb(0.15, 0.17, 0.18);
 const SEAT: Rgb = Rgb(0.17, 0.20, 0.17);
 const METALC: Rgb = Rgb(0.55, 0.57, 0.56);
 
@@ -259,7 +260,7 @@ impl Cockpit {
         let fs = gfx::shader(ctx, FACE_VS, FACE_FS, &["u_atlas"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_res", Float2), ("u_gloc", Float1)]);
         let face_pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, fs, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
         let atlas_tex = ctx.new_render_texture(TextureParams {
-            width: ATLAS,
+            width: ATLAS_W,
             height: ATLAS,
             format: TextureFormat::RGBA8,
             min_filter: FilterMode::Linear,
@@ -269,7 +270,7 @@ impl Cockpit {
             ..Default::default()
         });
         let atlas_pass = ctx.new_render_pass(atlas_tex, None);
-        let atlas = gfx::Target { pass: atlas_pass, color: atlas_tex, w: ATLAS, h: ATLAS };
+        let atlas = gfx::Target { pass: atlas_pass, color: atlas_tex, w: ATLAS_W, h: ATLAS };
 
         let mut m = Mesh::new();
         build_static(&mut m);
@@ -295,7 +296,7 @@ impl Cockpit {
     pub fn update_atlas(&mut self, ctx: &mut dyn RenderingBackend, cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2], time: f64) {
         ctx.begin_pass(Some(self.atlas_pass), PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
         draw_instruments(cv, a, m, pages, time);
-        cv.flush(ctx, A as f32, A as f32);
+        cv.flush(ctx, AW as f32, A as f32);
         ctx.end_render_pass();
         ctx.texture_generate_mipmaps(self.atlas.color);
     }
@@ -472,42 +473,30 @@ fn build_static(m: &mut Mesh) {
         }
     }
 
-    // Tub: floor, footwell, side walls, sills and the canopy rails.
-    m.quad(v3(-0.47, 0.22, -4.40), v3(0.47, 0.22, -4.40), v3(0.47, 0.22, -2.40), v3(-0.47, 0.22, -2.40), WALL.scale(0.55));
-    m.quad(v3(-0.47, 0.22, -4.40), v3(0.47, 0.22, -4.40), v3(0.47, 0.42, -4.12), v3(-0.47, 0.42, -4.12), WALL.scale(0.45));
+    // Tub: floor, footwell, side walls, sills and the canopy rails. The tub is
+    // wider than the canopy below the sills, where the side consoles run out
+    // to the walls; above the consoles the walls lean in to the sills.
+    let (wx, wy) = (consoles::WALL_X, consoles::WALL_Y);
+    m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.22, -2.40), v3(-wx, 0.22, -2.40), WALL.scale(0.55));
+    m.quad(v3(-wx, 0.22, -4.40), v3(wx, 0.22, -4.40), v3(wx, 0.42, -4.12), v3(-wx, 0.42, -4.12), WALL.scale(0.45));
     for &s in &[-1.0, 1.0] {
         let n = 12;
         for k in 0..n {
             let (z0, z1) = (mix(-4.30, -2.30, k as f64 / n as f64), mix(-4.30, -2.30, (k + 1) as f64 / n as f64));
             let (b0, b1) = (airframe::canopy_profile(z0).1, airframe::canopy_profile(z1).1);
             let (w0, w1) = (airframe::canopy_profile(z0).0.max(0.47), airframe::canopy_profile(z1).0.max(0.47));
-            m.quad(v3(s * 0.47, 0.22, z0), v3(s * 0.47, 0.22, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL);
+            m.quad(v3(s * wx, 0.22, z0), v3(s * wx, 0.22, z1), v3(s * wx, wy, z1), v3(s * wx, wy, z0), WALL);
+            m.quad(v3(s * wx, wy, z0), v3(s * wx, wy, z1), v3(s * 0.47, b1 - 0.03, z1), v3(s * 0.47, b0 - 0.03, z0), WALL.scale(1.08));
             m.quad(v3(s * 0.47, b0 - 0.03, z0), v3(s * 0.47, b1 - 0.03, z1), v3(s * w1, b1, z1), v3(s * w0, b0, z0), WALL.scale(1.15));
             let d = (v3(s * w1, b1, z1) - v3(s * w0, b0, z0)).norm() * 0.012;
             pilot::bar(m, v3(s * w0, b0, z0) - d, v3(s * w1, b1, z1) + d, 0.024, 0.018, V3::Y, Rgb(0.12, 0.13, 0.14));
         }
-
-        // Side consoles with labelled panels, running forward to the stick
-        // mount and the throttle quadrant.
-        let base = Frame { o: v3(s * 0.38, 0.52, -3.25), x: V3::X, y: V3::Y, z: V3::Z };
-        m.block(&base, v3(0.09, 0.12, 0.63), CONSOLE);
-        let names = if s < 0.0 { 0 } else { 5 };
-        for j in 0..5 {
-            let z = -3.66 + j as f64 * 0.23;
-            let top = Frame { o: v3(s * 0.38, 0.6415, z), x: V3::X, y: V3::Z * -1.0, z: V3::Y };
-            let (u0, v0, u1, v1) = uv(r_console(names + j));
-            let (hw, hh) = (0.082, 0.105);
-            m.quad_uv(top.p(-hw, hh, 0.0), top.p(hw, hh, 0.0), top.p(hw, -hh, 0.0), top.p(-hw, -hh, 0.0), [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]);
-            // No toggles under the throttle or the right arm rest.
-            if (s < 0.0 && j > 0) || (s > 0.0 && j > 1) {
-                for k in 0..2 {
-                    let x = s * 0.38 + (k as f64 - 0.5) * 0.055;
-                    m.capsule(v3(x, 0.645, z + 0.03), v3(x, 0.67, z + 0.022), 0.004, 0.003, METALC, 6);
-                    m.ellipsoid(v3(x, 0.672, z + 0.021), v3(0.006, 0.006, 0.006), METALC.scale(0.9), 3, 6);
-                }
-            }
-        }
+        // Cheek between the panel edge and the wall, closing the tub in front.
+        let b = airframe::canopy_profile(-4.12).1 - 0.03;
+        let cheek = [panel_at(s * 0.47, 0.40, 0.0).o, panel_at(s * wx, 0.40, 0.0).o, panel_at(s * wx, wy, 0.0).o, panel_at(s * 0.47, b, 0.0).o];
+        m.polygon(&cheek, PANEL.scale(0.8));
     }
+    consoles::build(m);
     pilot::build_static(m);
 
     // Canopy aft bow and bulkhead behind the seat, on the canopy's facet lines.
@@ -922,26 +911,8 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         cv.text(s, r.x + 10.0, r.y + 46.0 + i as f32 * 24.0, 1.0, ink, Align::Left);
     }
 
-    // Console panels.
-    let names = ["FUEL", "EPU / JFS", "UHF / VHF", "AUDIO", "EXT LIGHTS", "POWER", "FLCS", "SENSOR PWR", "AVIONICS", "ECS"];
-    for (i, n) in names.iter().enumerate() {
-        let r = r_console(i);
-        hardware(cv, r, "");
-        cv.text(n, r.x + r.w / 2.0, r.y + 16.0, 1.0, rgba(0xc7, 0xcf, 0xc5, 1.0), Align::Center);
-        for k in 0..3 {
-            let x = r.x + 26.0 + k as f32 * 38.0;
-            cv.stroke_rect(x - 13.0, r.y + 38.0, 26.0, 46.0, 1.0, rgba(0x77, 0x83, 0x7c, 1.0));
-            cv.text(["ON", "NRM", "AUT"][k], x, r.y + 31.0, 1.0, WHITE, Align::Center);
-            cv.text("OFF", x, r.y + 92.0, 1.0, rgba(0x9d, 0xaa, 0xa0, 1.0), Align::Center);
-        }
-        if i == 2 {
-            cv.rect(r.x + 14.0, r.y + 108.0, r.w - 28.0, 26.0, rgba(0x07, 0x14, 0x10, 1.0));
-            cv.text("305.000", r.x + r.w / 2.0, r.y + 121.0, 2.0, GREEN, Align::Center);
-        } else {
-            cv.line(r.x + 14.0, r.y + 112.0, r.x + r.w - 14.0, r.y + 112.0, 1.0, rgba(0x6f, 0x7b, 0x72, 1.0));
-            cv.text("TEST  RESET", r.x + r.w / 2.0, r.y + 128.0, 1.0, rgba(0xaf, 0xb9, 0xb0, 1.0), Align::Center);
-        }
-    }
+    // Side console lightplates.
+    consoles::draw(cv);
 }
 
 /// Standby attitude indicator: rotating sky/ground ball with a fixed aircraft symbol.

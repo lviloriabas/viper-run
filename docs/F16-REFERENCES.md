@@ -44,6 +44,72 @@ visual y no se incluyen como texturas ni se redistribuyen.
   Variante de motor y parámetros de vuelo de referencia. La disposición del
   panel actual se inspira en la modernización posterior, no en el panel básico de ese Block.
 
+### Consolas laterales
+
+Fuentes:
+
+- [T.O. 1F-16CM/AM-1, edición de Falcon BMS 4.37](https://cdn.falcon-bms.com/docs/4.37/TO%201F-16CMAM-1%20BMS.pdf),
+  sección 1.5 (figuras de consola izquierda, consolas auxiliares y consola
+  derecha). Fija el orden de los paneles, su disposición en columnas y
+  cuáles van girados.
+- Modelo de cabina del F-16 de FlightGear
+  ([NikolaiVChr/f16](https://github.com/NikolaiVChr/f16), `Models/Cockpit/Main/`
+  y `cockpit.xml`), con el ojo del piloto en la vista 0. Se midieron las
+  cajas de cada panel, la palanca y el throttle respecto al ojo. Da las
+  alturas, la inclinación y los anchos.
+- [Panel Dzus estándar](https://shaddack.mauriceward.com/notes/panels.webt):
+  5,75 pulgadas de ancho y alturas en pasos de 3/8 de pulgada.
+- [Henkie's ViperPit](https://pdp-11.nl/viperpit/), paneles reales montados
+  en una consola izquierda: aspecto, color y proporciones de EXT LIGHTING,
+  ECM, EPU y ENG & JET START.
+
+Medidas respecto al ojo de diseño (FlightGear): la cara superior de las dos
+consolas está 0,74 a 0,77 m por debajo del ojo en el borde interior; está
+inclinada 10 grados hacia el piloto (borde exterior más alto) y su sección
+delantera sube unos 4,6 grados hacia delante. El borde interior queda a
+0,26 m del eje, junto al asiento, y el exterior a unos 0,58 m. La consola
+tiene 0,86 m de largo; los paneles ocupan los primeros 0,74 m. La empuñadura
+de la palanca lateral está 0,32 m por delante del ojo, 0,29 m a la derecha y
+con la parte alta 0,50 m por debajo; el throttle, a mitad de recorrido, 0,19 m
+por delante, 0,41 m a la izquierda y 0,59 m por debajo, con la palanca en una
+ranura junto al borde exterior de la consola izquierda.
+
+Consola izquierda, de delante hacia atrás (alto x ancho en pulgadas):
+columna interior UHF (4,875), AUDIO 1 (3), AUDIO 2 (1,5), ECM (2,625) y AVTR
+(2,25), todos de 5,75 de ancho; columna exterior de 3 de ancho con MANUAL
+PITCH (2,625), ENG & JET START (7,875) y ELEC (3,75); EPU de 2,125 de ancho
+junto a ELEC; fuera de ellos, el cuadrante del throttle. Detrás, paneles
+girados 90 grados (se leen desde fuera, con 5,75 en sentido longitudinal):
+EXT LIGHTING (3,375), IFF (3,75) y FUEL (2,25); después MANUAL TRIM (4,125)
+y FLT CONTROL (4,875); al final ANTI-G y TEST (3).
+
+Consola derecha: la palanca sobre su soporte en la esquina interior
+delantera; detrás, en la franja interior, ZEROIZE y VOICE MESSAGE; columna
+principal con SNSR PWR (1,5), HUD (2,625), LIGHTING (5,625) y AIR COND
+(2,25); NUCLEAR CONSENT en la franja exterior. Detrás, girados: OXYGEN
+REGULATOR (3,375) y SECURE VOICE (3,75); AVIONIC POWER (4,125) con ENGINE
+ANTI ICE y ANT SEL (1,5); y la DTU (4,5). Los huecos llevan tapas lisas.
+
+Cada panel tiene su rotulación real (interruptores, mandos giratorios,
+pulsadores, luces y pantallas) dibujada en la mitad derecha del atlas de
+instrumentos (2048 x 1024, a 36 píxeles por pulgada; la fuente 5x7 queda
+de unos 0,19 pulgadas, la mitad más grande que la real para que se lea) y
+sus mandos en geometría: interruptores de palanca con tuerca hexagonal,
+tapas rojas o negras, perillas con línea índice, pulsadores, ruedas de
+compensación y las tres palancas del regulador de oxígeno.
+
+Desviación deliberada: con las posiciones reales, las manos quedarían entre
+57 y 72 grados por debajo del horizonte, fuera de la vista frontal por
+defecto (12 grados hacia abajo, 58 de campo, borde inferior a 41). Por eso
+las consolas están 0,25 m más adelante que en el avión y la palanca y el
+throttle conservan su lugar real sobre ellas: la palanca 5 cm detrás del
+borde delantero y el throttle entre 4 y 24 cm detrás. Además, el soporte de
+la palanca mide unos 15 cm en lugar de 9 y la carcasa del cuadrante del
+throttle se eleva unos 8 cm, porque ambos mandos siguen a la altura en que
+las manos se ven. Una prueba verifica que las dos manos quedan dentro de la
+vista por defecto. Las consolas auxiliares delanteras no se añadieron: ese
+espacio lo ocupan las esquinas inferiores del panel principal estilo F-16V.
+
 La [ficha de la USAF sobre el F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirma el asiento inclinado 30 grados, la palanca lateral sensible a presión,
 la visibilidad de la cúpula y la capacidad de 9 G. El ojo de diseño está en
@@ -282,6 +348,7 @@ estáticas.
 - `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
   vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
   triángulos que se dibujan.
+- `src/cockpit/consoles.rs` y `src/cockpit/pilot.rs`: los paneles no se solapan, caben en su consola y en el atlas, miden múltiplos de 3/8 de pulgada, las caras superiores tienen la altura e inclinación de referencia, y las dos manos quedan en la vista frontal por defecto.
 - `src/airframe.rs`: dimensiones y proporciones medidas, geometría finita,
   normales unitarias, coordenadas de textura válidas y ojo de diseño dentro de
   la cúpula.
