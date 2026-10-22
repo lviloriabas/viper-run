@@ -169,9 +169,9 @@ out of margin.
   towards Mach 0.95, the altimeter's Mach jump as the bow shock passes the
   static ports, faint bow and tail shock cones past Mach 1, and the double
   crack of the sonic boom when the Mach cone sweeps over an outside camera.
-- Exterior proportioned from a scale three-view (the shapes the War Thunder
-  model reproduces) and measured by the test suite: 15.06 m overall length,
-  9.96 m span over the wingtip AIM-9s, 4.88 m height, canopy, intake and wing
+- Exterior proportioned from a scale three-view and measured by the test
+  suite: 15.06 m overall length, 9.96 m span over the wingtip AIM-9s, 4.88 m
+  height, canopy, intake and wing
   stations along the body and the forebody depth. Long radome, D-shaped chin
   intake flush with the lower fuselage, blended leading-edge root extensions,
   40-degree cropped-delta wing with a NACA 4 % section, swept fin with
@@ -190,7 +190,7 @@ out of margin.
   tilted 10 degrees toward the pilot), the throttle in its quadrant and the
   pressure sidestick on its mount, a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
-- Art in the style of Tiny Combat Arena: the jet is a few hundred Gouraud-
+- Low-poly pixel art: the jet is a few hundred Gouraud-
   shaded polygons wearing a small hand-painted texture (FS 36270 / 36375
   greys, panel lines, low-vis star-and-bars, AV tail code, green fin band),
   sampled with nearest filtering; the cockpit is low-poly with chunky gauges.

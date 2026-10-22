@@ -1,4 +1,4 @@
-//! F-16C exterior in the manner of Tiny Combat Arena: a few hundred smooth
+//! F-16C exterior in low-poly pixel-art style: a few hundred smooth
 //! (Gouraud) polygons wearing a small hand-painted texture of panel lines and
 //! markings, sampled with nearest filtering.
 //!

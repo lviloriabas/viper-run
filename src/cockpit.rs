@@ -72,7 +72,7 @@ const WALL: Rgb = Rgb(0.19, 0.21, 0.215);
 const SEAT: Rgb = Rgb(0.17, 0.20, 0.17);
 const METALC: Rgb = Rgb(0.55, 0.57, 0.56);
 
-/// Round gauges are 16-sided, like the polygon cockpits of early-90s sims.
+/// Round gauges are 16-sided, chunky like the rest of the low-poly art.
 const GAUGE_SIDES: usize = 16;
 
 // Main instrument panel: tilted 8.5 degrees, its base 0.4 m above the datum.
