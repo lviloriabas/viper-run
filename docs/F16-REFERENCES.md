@@ -106,11 +106,15 @@ La cabina sigue siendo una adaptación visual para juego.
 | Combustible y caudal | Masa consumida por el modelo; conversión a libras y libras por hora |
 | Alarmas | Combustible bajo, motor sin combustible, AOA, G, exceso de Mach y proximidad al terreno |
 | Manos y pedales | Entradas de control suavizadas; la mano izquierda acompaña el recorrido de potencia |
+| FCR | Contactos dentro de ±60° y de la escala (10 a 80 NM), con aspecto; el blanco fijado con su velocidad y altitud |
+| RWR | Radares de los bandidos (16), AAA (A) y radar del SA-6 (6), rombo si apuntan o disparan, M por misil en vuelo |
+| Interruptor MASTER ARM | SAFE en NAV, ARM con un arma seleccionada |
 
-El HUD corresponde al modo NAV del juego. No se simulan modos de armamento,
-ILS, navegación INS con errores, TACAN, comunicaciones, contactos radar ni
-emisiones enemigas. FCR muestra una exploración sin contactos y RWR muestra
-ausencia de emisores. Los pulsadores del ICP y conmutadores de consola son
+El HUD muestra el modo NAV y, con un arma seleccionada, los modos maestros
+GUN, SRM, MRM y CCIP descritos en la sección de armamento. FCR muestra los
+contactos aéreos (o los objetivos de tierra en CCIP) y RWR las amenazas de la
+misión; en la carrera de puertas no hay contactos ni emisores. No se simulan
+ILS, navegación INS con errores, TACAN ni comunicaciones. Los pulsadores del ICP y conmutadores de consola son
 decorativos; las páginas de los MFD se cambian con F1 y F2. La lectura AGL no
 incluye el haz, los límites de actitud o las averías de un radioaltímetro real.
 
@@ -159,7 +163,9 @@ vuelo nivelado con plena postcombustión y media carga de combustible:
 Limitaciones: no hay programa de flaps de borde de ataque ni tablas de
 pérdida más allá de 45° de AOA (se añade un momento de picado de placa plana),
 el centro de gravedad del modelo visual está algo adelantado respecto al real,
-y no se modelan límites térmicos, cargas externas, daños ni viento.
+y no se modelan límites térmicos ni viento. Las cargas externas cambian la masa
+y la resistencia, pero no las inercias ni la estabilidad; los daños son puntos
+de estructura, sin averías de sistemas.
 
 ### Proporciones del modelo exterior
 
@@ -172,6 +178,88 @@ motor, los estabilizadores y la deriva quedan por encima de la línea del morro.
 La envergadura y la altura usan las cifras publicadas (9,96 m con AIM-9 y
 4,88 m), porque el dibujo no está a escala exacta en esas cotas.
 
+## Armamento, sensores y misiones de combate
+
+Simplificado, pero con las cifras publicadas. La pantalla de inicio elige la
+misión (GATE RUN, DOGFIGHT o STRIKE); las dos de combate pasan antes por una
+pantalla de carga: las parejas de soportes exteriores (estaciones 3 y 7) e
+interiores (4 y 6), el combustible interno (50, 75 o 100 %) y el peso bruto,
+la resistencia añadida y la relación empuje/peso que resultan. La carrera de
+puertas lleva los dos AIM-9 de punta de ala de siempre, de modo que su vuelo
+no cambia.
+
+| Arma | Datos usados | Fuente |
+| --- | --- | --- |
+| Cañón M61A1 | 511 disparos de 20 mm, 6.000 disparos por minuto, unos 1.036 m/s en boca, proyectil PGU-28/B de unos 100 g con Cd 0,28 (quedan unos 600 m/s a 1.000 m); boca en la raíz izquierda del ala, en (-0,72; 0,52; -3,40) m; línea de tiro por la cruz del cañón del HUD; los casquillos vuelven al tambor | [Ficha de la USAF del F-16](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104505/f-16-fighting-falcon/), [M61 Vulcan](https://en.wikipedia.org/wiki/M61_Vulcan), [PGU-28/B](https://www.globalsecurity.org/military/systems/munitions/pgu-28.htm) |
+| AIM-9M Sidewinder | 85,5 kg, 2,87 m, 127 mm; motor Mk 36 Mod 11 de humo reducido, unos 5 s y 10,1 kN; Mach 2,5 a 2,7; 35 G; buscador infrarrojo de aspecto total con cardán de 40°; ojiva WDU-17/B de 9,4 kg con espoleta de proximidad DSU-15 | [Ficha de la Marina de EE. UU.](https://www.navy.mil/Resources/Fact-Files/Display-FactFiles/Article/2169316/aim-9-sidewinder/), [AIM-9](https://en.wikipedia.org/wiki/AIM-9_Sidewinder) |
+| AIM-120C AMRAAM | 161,5 kg, 3,66 m, 178 mm; motor de aceleración y sostenimiento (24 kN 2,6 s, 9,8 kN 6 s) hasta Mach 3 a 4; 40 G; guiado inercial con el blanco del radar y buscador radar activo que busca solo si se lanza sin blanco; ojiva WDU-41/B de 18 kg | [Ficha de la USAF del AIM-120](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104576/aim-120-amraam/), [AIM-120](https://en.wikipedia.org/wiki/AIM-120_AMRAAM) |
+| Mk-82 | 241 kg con espoleta, 2,21 m, 273 mm, 87 kg de Tritonal; Cd 0,22; eyección de 1,5 m/s; espoleta armada a los 2 s; letal hasta 8 m, daño hasta 45 m | [Mk 82](https://en.wikipedia.org/wiki/Mark_82_bomb), [GlobalSecurity](https://www.globalsecurity.org/military/systems/munitions/mk82.htm) |
+| Contramedidas | 30 cartuchos de chaff y 30 bengalas (simplificación de los lanzadores ALE-47); cada pulsación suelta uno de cada | [AN/ALE-47](https://en.wikipedia.org/wiki/AN/ALE-47) |
+
+Los misiles vuelan con navegación proporcional verdadera (N = 4): la
+aceleración lateral es N por la velocidad de cierre por la velocidad angular
+de la línea de visión, más la sustentación que compensa la gravedad. La limitan
+el límite estructural de G y la fuerza normal que el fuselaje da con su ángulo
+de ataque máximo a la presión dinámica del momento, de modo que un misil lento
+o alto gira poco. Esa fuerza normal produce resistencia inducida (N por el
+ángulo de ataque), además de la resistencia de onda que sube en el transónico,
+así que un misil que maniobra mucho pierde energía. La espoleta se arma a los
+0,5 s (AIM-9) o 1 s (AIM-120) y estalla en el punto de máxima aproximación si
+pasa a menos de 9 o 12 m; el daño cae linealmente con la distancia. Las
+pruebas dan alcances con cola de unos 8 km para el AIM-9M a 1.000 m y unos
+11 km para el AIM-120C, más con altitud y de frente.
+
+- El visor del cañón sigue la idea del EEGS: proyectiles virtuales disparados
+  cada 1/30 s con la balística real forman el embudo, escalado para 35 pies de
+  envergadura, y el retículo LCOS está sobre esa corriente a la distancia del
+  blanco fijado (2.000 pies sin blanco). Es exacto si el tirador mantiene el
+  seguimiento durante el tiempo de vuelo.
+- El CCIP vuela una bomba completa con el mismo paso y la misma balística que
+  una real, de modo que la bomba lanzada sobre el retículo cae en él (lo
+  comprueba una prueba). La línea de caída va del marcador de trayectoria al
+  retículo.
+- El AIM-9 busca en un campo de 2,5° a lo largo del eje del avión o donde mira
+  el casco, y se esclaviza al blanco del radar dentro de su cardán de 40°. El
+  aviso IN RNG sale de simular el disparo contra la trayectoria actual del
+  blanco; el piloto artificial usa la misma comprobación.
+- Casco al estilo JHMCS: al girar la cabeza fuera del HUD aparecen una cruz de
+  puntería, datos de vuelo, el recuadro del blanco y el buscador, que el casco
+  orienta fuera del eje. T fija el blanco más cercano a la línea de visión.
+- Las bengalas solo engañan a buscadores infrarrojos (probabilidad 0,35, por
+  la lógica de rechazo del AIM-9M) y el chaff solo a buscadores radar, mejor
+  con el blanco de través (entre 0,08 y 0,63); ninguna funciona con el misil
+  a más de 6 km.
+
+Los bandidos vuelan el mismo modelo de seis grados de libertad y el mismo FLCS
+que el jugador; el piloto artificial solo decide adónde va el vector de
+sustentación, cuánto tirar y dónde va el acelerador. Usa maniobras básicas de
+combate: persecución adelantada para el cañón, pura para cerrar y retrasada
+para no pasarse, viraje máximo cuando el jugador está a sus seis, haz y luego
+viraje hacia un misil, y recuperación de energía. Sobre todo eso manda una
+predicción del tipo Auto-GCAS del F-16: vuela por adelantado el tirón de
+recuperación (alabeo y 6 G) y lo ejecuta cuando quedaría a menos de 180 m del
+terreno, eligiendo entre subir recto o virar si una pared del valle lo exige.
+Dispara el cañón dentro de 900 m con solución de tiro, lanza AIM-9 dentro de
+la zona de lanzamiento y suelta contramedidas cuando un misil se acerca.
+
+Objetivos de tierra en STRIKE, junto al río: convoy de cuatro camiones con un
+ZSU-23-4, batería SA-6 (lanzador 2P25 y radar 1S91) con camión y otro ZSU, el
+puente de la carretera con un tercero, y un depósito con almacenes y tanques.
+El ZSU-23-4 usa cuatro cañones de 23 mm, 3.400 disparos por minuto en total,
+970 m/s y unos 2,5 km de alcance eficaz; dispara ráfagas con trazadoras y
+sigue con retraso. El misil 3M9 del SA-6 pesa 599 kg, mide 5,8 m y 335 mm,
+alcanza Mach 2,8 con su estatorreactor integrado, lleva 57 kg de carga y es
+semiactivo: deja de guiar si el radar muere. La batería solo dispara si su
+radar ve el avión a más de 300 m sobre el terreno, así que el valle protege.
+Fuentes: [2K12 Kub](https://en.wikipedia.org/wiki/2K12_Kub) y
+[ZSU-23-4](https://en.wikipedia.org/wiki/ZSU-23-4_Shilka).
+
+Limitaciones: no hay radar con modos reales (RWS, TWS, ACM), enlace de datos,
+IFF, láser, bombas guiadas ni HARM; las contramedidas no se ven en el radar
+del enemigo; la masa de las cargas no cambia las inercias; el daño es un
+contador de puntos de estructura sin averías de sistemas; los bandidos son
+F-16 con pintura de agresor y su RWR se representa como radar "16".
+
 ## Verificación
 
 - `cargo test --release`, en `src/sim.rs` y `src/aero.rs`: signos de las
@@ -180,6 +268,19 @@ La envergadura y la altura usan las cifras publicadas (9,96 m con AIM-9 y
   AOA a 25°, G negativo, alabeo coordinado de unos 300 °/s, combustible
   agotado, postcombustión, aerofreno, estabilidad numérica en la envolvente,
   velocidad máxima nivelada, cruce de puertas y puntuación.
+- `src/weapons.rs`: tiempo de vuelo, velocidad y caída del proyectil de 20 mm;
+  impactos por barrido contra el elipsoide del avión y cajas; daño por
+  distancia; ambos misiles alcanzan blancos sin maniobra por detrás y de
+  costado; alcances finitos y mínimos; el CCIP coincide con la bomba simulada;
+  los proyectiles disparados al retículo LCOS impactan; cada contramedida
+  engaña solo a su tipo de buscador.
+- `src/ai.rs`: la ley de mando gira a un rumbo; el piloto artificial no choca
+  con el terreno en el valle durante 90 s; dos pilotos combaten dos minutos
+  sin chocar ni pasar de los límites; un as sigue un blanco con el cañón.
+- `src/combat.rs` y `src/targets.rs`: masa y resistencia de las cargas, ciclo
+  de modos, fijación del blanco más cercano al eje, daño y derribos, un AIM-9
+  fijado derriba a un bandido, una Mk-82 lanzada sobre el retículo derriba el
+  puente, objetivos sobre el fondo del valle y blindaje frente al cañón.
 - `src/terrain.rs`: la rejilla de 32 m coincide con la función analítica en los
   vértices y se desvía menos de 6 m entre ellos; la colisión usa los mismos
   triángulos que se dibujan.

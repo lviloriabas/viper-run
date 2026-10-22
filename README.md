@@ -2,7 +2,9 @@
 
 A small, self-contained retro F-16 cockpit flight game. You start airborne in a
 black river gorge with ten navigation gates ahead, two and a half minutes on the
-clock, and a mountain range that does not move.
+clock, and a mountain range that does not move. Or you fly the same gorge armed:
+a dogfight against three AI-flown aggressors, or a strike on a bridge, an SA-6
+battery and a convoy.
 
 The game is a single native executable of about 1 MB, written in Rust:
 
@@ -25,8 +27,12 @@ at start-up in about half a second.
 | `S` / down arrow | Pull, pitch up (when W/S pitch is selected) |
 | `W` / up arrow | Push, pitch down (when W/S pitch is selected) |
 | `Q` / `E` | Rudder left / right |
-| `C` or right-click | Center the mouse stick and the head view |
+| `C` or right-click | Center the mouse stick and the head view (a left click only re-captures the mouse when it is free) |
 | `V` | Toggle cockpit / chase view |
+| `F` or left-click (mouse captured) | Fire the gun, launch a missile, release a bomb (pickle) |
+| `X` | Cycle the weapon and master mode: NAV, GUN, SRM (AIM-9), MRM (AIM-120), CCIP (Mk-82) |
+| `T` | Lock the target nearest the nose (or the helmet line of sight); again for the next |
+| `Z` | Countermeasures: one chaff bundle and one flare |
 | `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
 | `K` | Open / close the controls and configuration drawer |
 | `Shift` / `Ctrl` | Throttle up / down |
@@ -50,6 +56,9 @@ then list its bindings:
 | `RT` / `LT` | Throttle up / down; `RT` pulled to the stop lights the afterburner at full throttle |
 | `LB` / `RB` | Rudder left / right |
 | `B` | Speedbrake out / in |
+| `A` | Fire / pickle (held for the gun) |
+| D-pad up / down | Cycle weapon / lock or step target |
+| Left-stick click | Countermeasures: chaff and flare |
 | `X` or right-stick click | Center the view |
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
@@ -91,6 +100,77 @@ run are saved to `%APPDATA%\viper-run\settings.txt` on Windows and
 Hold a pull rather than tapping it. The F-16 is fly-by-wire, but it still carries
 energy and alpha. Roll into the turn first, then pull through the valley.
 
+## Missions
+
+Pick the mission on the start screen. DOGFIGHT and STRIKE then open a loadout
+screen: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
+pylon pairs, the internal fuel, and the gross weight, stores drag and
+thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
+30 chaff and 30 flares always come along.
+
+| Mission | Objective | Default stores | Clock |
+| --- | --- | --- | --- |
+| GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
+| DOGFIGHT | Shoot down three aggressor F-16s; two come head-on, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 05:00 |
+| STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
+
+Kills score 1,500 points; ground targets 200 (truck) to 1,500 (bridge); a
+completed sortie adds 10 points per second left and 5 per point of airframe
+health. Being shot down ends the run (the pilot ejects), as does hitting the
+ground. The result screen shows the kills or targets, the time and a rating.
+
+### Weapons and sensors
+
+- Master modes follow the weapon (`X`): NAV with the master arm safe, GUN,
+  SRM, MRM and CCIP. The HUD shows the selected weapon and count, the lock's
+  range and closure, a target designator box, or a locator line when the
+  target is outside the HUD.
+- GUN: an EEGS-style funnel drawn from virtual rounds flown with the real
+  ballistics, and an LCOS pipper on that stream at the locked range (2,000 ft
+  without a lock) with a range ring. One round in five is a tracer.
+- SRM: the AIM-9 seeker circle searches its 2.5-degree field along the
+  boresight, or where the helmet looks, and slaves to a radar lock within its
+  40-degree gimbal; a high tone means it tracks. MRM: the AIM-120 steering
+  circle and dot. Both show IN RNG and SHOOT from a launch-zone fly-out
+  against the target's present track.
+- CCIP: the bomb's continuously computed impact point and the bomb fall line
+  from the flight-path marker. The pipper is a real bomb flown ahead of time,
+  so a bomb released on it lands on it. Fuzes arm 2 s after release; a bomb
+  released too low is a dud, and its fragments reach a jet below 160 m.
+- Turning the head (Alt and the mouse, or the right stick) brings up a
+  helmet-mounted display: an aiming cross, air data, the target box and the
+  seeker, which the helmet cues off the boresight. `T` locks the target
+  nearest the helmet line of sight.
+- The FCR page shows air contacts on a B-scope with aspect, or ground targets
+  in CCIP; the RWR shows bandit radars (16), AAA (A) and the SA-6 radar (6),
+  with a diamond on those locked on and a flashing M for missiles in flight.
+  It pings for a new emitter, chirps on a lock and warbles while a missile
+  guides; outside the cockpit a small scope repeats it.
+- Flares fool only infrared seekers (the AIM-9), chaff only radar ones (the
+  AIM-120 and the SA-6), best with the missile on the beam. The bandits use
+  them too.
+
+### Bandits and ground targets
+
+Bandits fly the same six-degree-of-freedom F-16 and FLCS as the player, in
+desert splinter paint. Their AI pilot only moves the stick and throttle: lead
+pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
+overshoot, a max-g break when the player is at its six, beaming and then
+breaking into missiles, unloading to regain speed, and an Auto-GCAS-style
+recovery that predicts the pull-up and overrides everything near the terrain.
+They shoot the gun inside 900 m on a lead solution and fire AIM-9s from
+inside the launch zone. Hit points take 6 per 20 mm round; a warhead's damage
+falls off with the miss distance. A damaged jet trails smoke, and a kill
+leaves a burning wreck tumbling to the ground.
+
+The STRIKE targets stand on the valley floor along the river: a convoy of
+four trucks with a ZSU-23-4, the SA-6 launcher and radar with a resupply truck
+and a second ZSU, the road bridge with a third, and a depot of warehouses and
+fuel tanks. Armour decides what the gun can kill; the bridge only falls to a
+bomb. The ZSU-23-4s fire tracer bursts at a jet within 2.5 km in their line of
+sight; the SA-6 fires when its radar sees the jet more than 300 m above the
+ground, so the gorge is the way in.
+
 ## Objective
 
 Fly through all **10 gates** in order before the clock reaches zero.
@@ -115,7 +195,9 @@ out of margin.
   transonic aerodynamic-centre shift and ground effect, body-axis moment
   equations with the inertia tensor, the roll-yaw product of inertia and the
   engine's gyroscopic moment. Mass and inertia follow the FlightGear Block 50
-  model plus missiles and fuel, which burns off as you fly.
+  model plus the stores on the stations and the fuel, which burns off as you
+  fly; bombs and underwing missiles add mass and drag, and releasing them
+  takes it off again.
 - F110-GE-129 thrust from FlightGear's tables (17,000 / 29,000 lbf), lapse with
   altitude and Mach, normal-shock inlet recovery, slow core spool and quick
   afterburner light-off, fuel flow from TSFC. Full-afterburner level speed is
@@ -145,6 +227,14 @@ out of margin.
   drag-chute housing, all-moving stabilators with 10 degrees of anhedral,
   canted ventral fins, petalled nozzle and tinted bubble canopy. Stabilators,
   rudder and the clamshell speedbrakes show their true deflections.
+- Weapons of the F-16C Block 50, simplified but with the published figures:
+  the M61A1 gun (511 rounds, 6,000 rounds per minute, 1,036 m/s, rounds with
+  gravity and velocity-squared drag), the AIM-9M Sidewinder (85.5 kg, about
+  5 s of motor, 35 g, infrared seeker gimballed to 40 degrees), the AIM-120C
+  AMRAAM (161.5 kg, boost-sustain motor to about Mach 4, 40 g, active radar)
+  and the Mk-82 500 lb bomb (241 kg). Missiles fly proportional navigation
+  with their thrust, wave and induced drag, angle-of-attack and g limits,
+  arming delay and proximity fuze; see the reference document for the data.
 - Collision against ten airframe points: nose, canopy, tail, both wingtips,
   intake, belly, fin and both stabilator tips.
 - Depth-buffered 3D cockpit at realistic distances from the design eye: the
@@ -162,7 +252,8 @@ out of margin.
   and sun glints, drawn once per pixel, so it never washes out the view.
 - Green NAV HUD clipped to the physical combiner glass: inertial pitch ladder,
   flight-path marker, boxed KCAS and barometric altitude, radar altitude,
-  heading tape, Mach, alpha, current and maximum G, steerpoint cue and warnings.
+  heading tape, Mach, alpha, current and maximum G, steerpoint cue and warnings,
+  with the weapon symbology of the selected master mode laid over it.
 - Retro presentation: the world renders at a low internal resolution (320 to
   480 lines) shown as crisp blocks, quantised to 15-bit colour with a 4x4
   ordered dither; the terrain wears pixel tiles (grass, scrub, rock strata,
@@ -171,7 +262,9 @@ out of margin.
   with screen-door clouds. The HUD and menus are drawn crisp at native
   resolution in a 5x7 pixel font; sustained g greys out the view.
 - Procedural audio synthesised on its own thread: engine, wind, rumble and
-  turbine whine follow throttle, speed and afterburner, plus warning tones.
+  turbine whine follow throttle, speed and afterburner, plus warning tones,
+  the gun's buzz, the Sidewinder's growl and lock tone, launches, blasts and
+  the RWR.
 
 The aerodynamic data is the reduced TP-1538 set (no leading-edge flap
 schedule or post-stall tables beyond 45 degrees), and the avionics are a game
@@ -216,7 +309,7 @@ at run time, so building needs no system development packages.
 rustup target add x86_64-pc-windows-gnu
 ./build.sh            # both binaries into dist/
 cargo run --release   # run on the current machine
-cargo test --release  # physics, terrain, mission and airframe checks
+cargo test --release  # physics, weapons, AI, terrain, mission and airframe checks
 ```
 
 `build.sh` uses [Zig](https://ziglang.org) with
@@ -232,6 +325,10 @@ viper-run --shot out.png --sim 3 --chase   # simulate 3 s, save a screenshot, ex
 viper-run --shot out.png --look 120,-20    # cockpit free look (yaw, pitch degrees)
 viper-run --shot out.png --screen pause    # pause | freeze | win | crash | timeout
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
+viper-run --shot out.png --mission dogfight --sim 20 --input lock   # gates | dogfight | strike
+viper-run --shot out.png --mission strike --input auto --sim 20     # AI flies to the steerpoint
+viper-run --shot out.png --weapon gun --input fire --sim 1          # nav | gun | aim9 | aim120 | mk82
+viper-run --shot out.png --mission strike --screen loadout          # also shotdown
 ```
 
 ## Project layout
@@ -245,6 +342,12 @@ viper-run/
 └── src/
     ├── main.rs         # game states, input, cameras, frame composition
     ├── sim.rs          # 6-DOF rigid body, FLCS, engine, collision, mission
+    ├── weapons.rs      # gun, missiles, bombs: ballistics, guidance, sights, decoys
+    ├── combat.rs       # loadouts, master modes, lock, bandits, targets, damage, missions
+    ├── ai.rs           # AI pilot: BFM, weapons employment, terrain recovery
+    ├── targets.rs      # STRIKE ground targets and their models
+    ├── props.rs        # combat models, smoke trails, tracers, effects and sounds
+    ├── symbology.rs    # HUD weapon symbols, helmet display, FCR, RWR, overlays
     ├── aero.rs         # F-16 aerodynamic tables and F110 thrust tables
     ├── terrain.rs      # analytic terrain, height grid, LOD chunk meshes
     ├── world.rs        # sky, terrain, ocean, clouds, gates, aircraft, pixel pass
