@@ -181,8 +181,11 @@ out of margin.
   F-16V-style panel with two portrait MFDs and a large centre display, the UFC
   (DED over the ICP keypad) under a tall HUD combiner, RWR scope, standby ADI,
   airspeed and altimeter, RPM / FTIT / nozzle / oil gauges in round bezels,
-  caution panel, AOA indexer, master caution, labelled side consoles, throttle
-  and pressure sidestick, a reclined ACES II seat and the pilot's arms, hands
+  caution panel, AOA indexer, master caution, side consoles after the F-16C
+  Block 50 layout (every Dzus lightplate in its real place and size, with
+  sharp legends and chunky toggles, guards, knobs and trim wheels, the tops
+  tilted 10 degrees toward the pilot), the throttle in its quadrant and the
+  pressure sidestick on its mount, a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
 - Art in the style of Tiny Combat Arena: the jet is a few hundred Gouraud-
   shaded polygons wearing a small hand-painted texture (FS 36270 / 36375
@@ -286,6 +289,8 @@ viper-run/
     ├── texture.rs      # procedural pixel-art terrain and cloud textures
     ├── airframe.rs     # F-16 exterior, moving surfaces and painted skin
     ├── cockpit.rs      # 3D cockpit, instrument pages and NAV HUD
+    ├── cockpit/consoles.rs  # side consoles: lightplates, legends, switches
+    ├── cockpit/pilot.rs     # pilot, seat, stick and throttle
     ├── ui.rs           # menus, controls drawer, flight overlays
     ├── canvas.rs       # GPU 2D batcher with convex clipping
     ├── mesh.rs         # mesh builder (lofts, lathes, capsules, bezels)
