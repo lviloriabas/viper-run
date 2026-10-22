@@ -44,7 +44,7 @@ use keymap::Bind;
 use math::*;
 use miniquad::*;
 use physio::Pilot;
-use settings::{Best, PitchSource, Settings};
+use settings::{Best, PadLayout, PitchSource, Settings};
 use sim::{gate_crossed, Aircraft, Input, Mission, FIXED_DT, GATE_BONUS};
 use std::collections::HashSet;
 use ui::{Action, Button, Objective, Outcome, RunResult, Ui};
@@ -652,7 +652,7 @@ impl App {
     }
 
     fn act(&mut self, a: Action) {
-        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Fullscreen | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
+        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
         }
         match a {
@@ -681,6 +681,9 @@ impl App {
                 self.settings.invert_pitch = !self.settings.invert_pitch;
                 self.key_pitch = 0.0;
             }
+            Action::PadLayout => {
+                self.settings.pad_layout = if self.settings.pad_layout == PadLayout::Combat { PadLayout::Classic } else { PadLayout::Combat };
+            }
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Pick(k) => {
                 self.kind = k;
@@ -701,7 +704,7 @@ impl App {
             }
             Action::ResetKeys => self.settings.keys = keymap::Keymap::default(),
         }
-        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::Reset | Action::ResetKeys) {
+        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Reset | Action::ResetKeys) {
             self.mouse = (0.0, 0.0);
             self.save();
         }
@@ -826,24 +829,44 @@ impl App {
             PitchSource::Keys => self.key_pitch,
         };
         // The controller adds to the keyboard and mouse and reads zero at
-        // rest. Pulling the left stick back pulls the nose up; RT pulled to
-        // the stop asks for afterburner. Flight input applies inversion later.
+        // rest. Pulling the left stick back pulls the nose up. Flight input
+        // applies inversion later.
         let pad = &self.pad;
+        let on_ground = self.aircraft.as_ref().is_some_and(|a| a.on_ground);
+        let lx = pad_curve(pad.state.left.0);
+        let (roll, yaw, up, down, burner, brake_clear) = match self.settings.pad_layout {
+            // LB / LT run the throttle (held at the stop, LB lights the
+            // burner) and the bumpers are free of the rudder: holding X turns
+            // the stick's X axis into rudder, and on the ground it also steers
+            // the nose wheel.
+            PadLayout::Combat => {
+                let rudder = pad.held(gamepad::X);
+                let roll = if rudder { 0.0 } else { lx };
+                let yaw = if rudder || on_ground { lx } else { 0.0 };
+                (roll, yaw, pad.held(gamepad::LB), pad.state.lt > 0.3, false, !pad.held(gamepad::LB))
+            }
+            // RT / LT run the throttle, RT to the stop asks for afterburner,
+            // and LB / RB work the rudder.
+            PadLayout::Classic => {
+                let yaw = pad.held(gamepad::RB) as i32 as f64 - pad.held(gamepad::LB) as i32 as f64;
+                (lx, yaw, pad.state.rt > 0.3, pad.state.lt > 0.3, pad.state.rt > 0.9, pad.state.rt < 0.05)
+            }
+        };
         Input {
             roll_left: k(Bind::RollLeft),
             roll_right: k(Bind::RollRight),
-            yaw_left: k(Bind::YawLeft) || pad.held(gamepad::LB),
-            yaw_right: k(Bind::YawRight) || pad.held(gamepad::RB),
+            yaw_left: k(Bind::YawLeft),
+            yaw_right: k(Bind::YawRight),
             pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
-            roll_axis: pad_curve(pad.state.left.0),
-            yaw_axis: stick_curve(mouse.0),
-            throttle_up: k(Bind::ThrottleUp) || pad.state.rt > 0.3,
-            throttle_down: k(Bind::ThrottleDown) || pad.state.lt > 0.3,
-            afterburner: k(Bind::Afterburner) || pad.state.rt > 0.9,
+            roll_axis: roll,
+            yaw_axis: clamp(stick_curve(mouse.0) + yaw, -1.0, 1.0),
+            throttle_up: k(Bind::ThrottleUp) || up,
+            throttle_down: k(Bind::ThrottleDown) || down,
+            afterburner: k(Bind::Afterburner) || burner,
             airbrake: self.airbrake,
             gear_down: self.gear_lever,
             flaps: self.flaps_switch,
-            wheel_brake: k(Bind::WheelBrake) || pad.state.lt > 0.3 && pad.state.rt < 0.05 && self.aircraft.as_ref().is_some_and(|a| a.on_ground),
+            wheel_brake: k(Bind::WheelBrake) || pad.state.lt > 0.3 && brake_clear && on_ground,
             ..Default::default()
         }
     }
@@ -864,7 +887,7 @@ impl App {
     /// Controller buttons go through the keyboard handlers, so menus and
     /// flight behave the same whichever is used.
     fn pad_buttons(&mut self) {
-        use gamepad::{A, B, BACK, DOWN, LEFT, LS, RIGHT, RS, START, UP, X, Y};
+        use gamepad::{A, B, BACK, DOWN, LEFT, LS, RB, RIGHT, RS, START, UP, X, Y};
         let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
         if matches!(self.state, State::Attract | State::Loadout) && !self.controls_open && self.pad.pressed(START) {
             self.act(if self.state == State::Loadout { Action::Launch } else { Action::Start });
@@ -890,11 +913,21 @@ impl App {
         }
         if !menu {
             let speedbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Speedbrake)) };
-            let actions = [(Y, Bind::View), (X, Bind::Center), (RS, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)];
+            let actions = match self.settings.pad_layout {
+                // Fire (RT), lock (RB) and countermeasures (L3) never take a
+                // thumb off a stick; the d-pad and face buttons are for what
+                // can wait.
+                PadLayout::Combat => [(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
+                PadLayout::Classic => [(Y, Bind::View), (X, Bind::Center), (RS, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
+            };
             for (button, b) in actions.into_iter().chain(speedbrake) {
                 if self.pad.pressed(button) {
                     self.bind_pressed(b);
                 }
+            }
+            // Holding the lock button half a second drops the lock, like TMS aft.
+            if self.settings.pad_layout == PadLayout::Combat && self.state == State::Flying && self.pad.long_press(RB, 0.5) {
+                self.combat.drop_lock();
             }
         }
     }
@@ -985,10 +1018,14 @@ impl App {
         }
     }
 
-    /// Trigger and pickle: F, the left mouse button while flying, the pad's A,
-    /// or --input fire.
+    /// Trigger and pickle: F, the left mouse button while flying, the pad's RT
+    /// (A in the classic layout), or --input fire.
     fn trigger(&self) -> bool {
-        self.settings.keys.held(Bind::Trigger, &self.keys) || self.trigger_mouse || self.pad.held(gamepad::A) || self.opts.fire
+        let pad = match self.settings.pad_layout {
+            PadLayout::Combat => self.pad.state.rt > 0.5,
+            PadLayout::Classic => self.pad.held(gamepad::A),
+        };
+        self.settings.keys.held(Bind::Trigger, &self.keys) || self.trigger_mouse || pad || self.opts.fire
     }
 
     /// The combat step after the jet has moved: weapons, bandits, targets
@@ -1479,7 +1516,7 @@ impl EventHandler for App {
                 cv.rect(0.0, 0.0, w, h, rgba(c[0], c[1], c[2], (self.flash * 0.34) as f32));
             }
             let s = ui::ui_scale(w, h);
-            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad };
+            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad, layout: self.settings.pad_layout };
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config),

@@ -34,6 +34,10 @@ pub struct Gamepad {
     device: backend::Device,
     pub state: State,
     prev: State,
+    /// When each button went down, by bit, and the previous and current poll times.
+    down_at: [f64; 16],
+    then: f64,
+    now: f64,
 }
 
 /// Radial dead zone, rescaled so the output rises from zero at its edge.
@@ -65,7 +69,7 @@ fn dirs(s: &State) -> u16 {
 
 impl Gamepad {
     pub fn new() -> Gamepad {
-        Gamepad { device: backend::Device::new(), state: State::default(), prev: State::default() }
+        Gamepad { device: backend::Device::new(), state: State::default(), prev: State::default(), down_at: [0.0; 16], then: 0.0, now: 0.0 }
     }
 
     /// Reads the controller; call once per frame. Returns the new connection
@@ -73,6 +77,12 @@ impl Gamepad {
     pub fn poll(&mut self, now: f64) -> Option<bool> {
         self.prev = self.state;
         self.state = self.device.read(now).map(|r| State { left: stick(r.left), right: stick(r.right), lt: trigger(r.lt), rt: trigger(r.rt), ..r }).unwrap_or_default();
+        (self.then, self.now) = (self.now, now);
+        for i in 0..16 {
+            if self.state.buttons & !self.prev.buttons & (1 << i) != 0 {
+                self.down_at[i] = now;
+            }
+        }
         (self.state.connected != self.prev.connected).then_some(self.state.connected)
     }
 
@@ -83,6 +93,12 @@ impl Gamepad {
     /// True on the frame the button goes down.
     pub fn pressed(&self, b: u16) -> bool {
         self.held(b) && self.prev.buttons & b == 0
+    }
+
+    /// True on the frame a held button has been down for `secs`.
+    pub fn long_press(&self, b: u16, secs: f64) -> bool {
+        let t = self.down_at[b.trailing_zeros() as usize] + secs;
+        self.held(b) && self.then < t && self.now >= t
     }
 
     /// Menu directions newly pushed this frame.

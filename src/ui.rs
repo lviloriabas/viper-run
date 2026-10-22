@@ -6,7 +6,7 @@ use crate::cockpit::pad;
 use crate::combat::{Config, MissionKind, Store};
 use crate::keymap::{key_name, Keymap, BINDS};
 use crate::math::*;
-use crate::settings::{Best, PitchSource, Settings};
+use crate::settings::{Best, PadLayout, PitchSource, Settings};
 use crate::sim::{Aircraft, Mission};
 use crate::world::Camera;
 
@@ -37,6 +37,7 @@ pub enum Action {
     FovUp,
     Pitch,
     Invert,
+    PadLayout,
     Fullscreen,
     Reset,
     /// Choose the mission on the start screen.
@@ -79,6 +80,8 @@ pub struct Ui<'a> {
     pub mouse: (f32, f32),
     /// A controller is connected: control lists show its bindings.
     pub pad: bool,
+    /// Which controller layout those lists show.
+    pub layout: PadLayout,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -261,11 +264,15 @@ impl<'a> Ui<'a> {
             PitchSource::Keys => (("W S", "PITCH"), ("MOUSE", "YAW")),
         };
         let keys = if mission != MissionKind::Gates {
-            if self.pad {
+            if self.pad && self.layout == PadLayout::Combat {
+                [("L STICK", "PITCH / ROLL"), ("LB LT", "THROTTLE"), ("X HELD", "RUDDER"), ("RT", "FIRE / PICKLE"), ("A", "WEAPON"), ("RB", "LOCK, HOLD DROP"), ("L3", "CHAFF / FLARE"), ("R STICK", "LOOK / HELMET"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("D-DOWN", "GEAR"), ("START", "PAUSE, B MENU")]
+            } else if self.pad {
                 [("L STICK", "PITCH / ROLL"), ("RT LT", "THROTTLE"), ("LB RB", "RUDDER"), ("A", "FIRE / PICKLE"), ("D-UP", "WEAPON"), ("D-DOWN", "LOCK TARGET"), ("L3", "CHAFF / FLARE"), ("R STICK", "LOOK AROUND"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("START", "PAUSE, B MENU")]
             } else {
                 [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("X", "WEAPON"), ("T", "LOCK TARGET"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("V", "CHASE / COCKPIT"), ("H", "AIRBRAKE"), ("P ESC", "PAUSE, MENU")]
             }
+        } else if self.pad && self.layout == PadLayout::Combat {
+            [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("LB LT", "THROTTLE"), ("LB HELD", "AFTERBURNER"), ("X HELD", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("D-DOWN", "GEAR"), ("D-PAD L R", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
         } else if self.pad {
             [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("RT LT", "THROTTLE"), ("RT FULL", "AFTERBURNER"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("D-PAD", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
         } else {
@@ -540,7 +547,9 @@ impl<'a> Ui<'a> {
             (false, PitchSource::Keys, false) => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
             (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
         };
-        let rest: &[(&str, &str)] = if self.pad {
+        let rest: &[(&str, &str)] = if self.pad && st.pad_layout == PadLayout::Combat {
+            &[("R STICK", "Look / helmet, springs back"), ("RT", "Fire / pickle, hold for gun"), ("RB", "Lock / next, hold to drop"), ("LB", "Throttle up, stop lights AB"), ("LT", "Throttle down, ground brakes"), ("X HELD", "L stick X works the rudder"), ("L3", "Chaff and flare"), ("A", "Cycle weapon"), ("B", "Airbrake out / in"), ("Y", "Cockpit / chase"), ("D-PAD L R", "MFD pages, menus"), ("D-PAD DOWN", "Landing gear"), ("D-PAD UP", "Alt flaps"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
+        } else if self.pad {
             &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("LT", "Wheel brakes on the ground"), ("B", "Airbrake out / in"), ("X", "Center view"), ("R3", "Landing gear"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("L3", "Chaff and flare"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
         } else {
             &[("MOUSE X", "Yaw, springs back"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire / pickle"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen"), ("KEYS", "Rebind in the panel at right")]
@@ -570,6 +579,8 @@ impl<'a> Ui<'a> {
         self.button(if st.pitch == PitchSource::Mouse { "PITCH INPUT: MOUSE" } else { "PITCH INPUT: W / S" }, "", m, y, false, Action::Pitch);
         y += 18.0 * s;
         self.button(if st.invert_pitch { "[X] INVERT PITCH" } else { "[ ] INVERT PITCH" }, "", m, y, false, Action::Invert);
+        y += 18.0 * s;
+        self.button(if st.pad_layout == PadLayout::Combat { "PAD LAYOUT: COMBAT" } else { "PAD LAYOUT: CLASSIC" }, "", m, y, false, Action::PadLayout);
         y += 18.0 * s;
         self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
         y += 18.0 * s;
@@ -758,7 +769,7 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(score, 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
-    let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    X  CENTER    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
+    let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
     // Above the combiner, which the default head pitch lifts high on screen.

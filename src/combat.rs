@@ -694,6 +694,13 @@ impl Combat {
         self.events.push(Event::Lock { text });
     }
 
+    /// Drops the lock or designation, if there is one.
+    pub fn drop_lock(&mut self) {
+        if self.lock.take().is_some() {
+            self.events.push(Event::Lock { text: "LOCK DROPPED".to_string() });
+        }
+    }
+
     /// One countermeasure program from a jet: a flare and a chaff bundle.
     /// Each missile guiding on it may lose its target, by its seeker type.
     fn decoy(&mut self, who: Who, pos: V3, vel: V3) {

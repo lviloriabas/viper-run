@@ -12,12 +12,22 @@ pub enum PitchSource {
     Keys,
 }
 
+/// Controller button layout. COMBAT keeps fire, lock and throttle on the
+/// triggers and bumpers, so both thumbs stay on the sticks while the helmet
+/// looks; CLASSIC is the older layout with the rudder on the bumpers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PadLayout {
+    Combat,
+    Classic,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     pub sensitivity: f64,
     pub pitch: PitchSource,
     /// Flips every pitch input: mouse, W / S and the controller.
     pub invert_pitch: bool,
+    pub pad_layout: PadLayout,
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
@@ -26,7 +36,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, fov: 58.0, muted: false, fullscreen: false, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, fov: 58.0, muted: false, fullscreen: false, keys: Keymap::default() }
     }
 }
 
@@ -61,6 +71,7 @@ pub fn load() -> (Settings, Best) {
             ("pitch", _) => s.pitch = if v == "keys" { PitchSource::Keys } else { PitchSource::Mouse },
             // Older versions saved "invert_y", when only the mouse flipped.
             ("invert_pitch", _) | ("invert_y", _) => s.invert_pitch = v == "true",
+            ("pad_layout", _) => s.pad_layout = if v == "classic" { PadLayout::Classic } else { PadLayout::Combat },
             ("muted", _) => s.muted = v == "true",
             ("fullscreen", _) => s.fullscreen = v == "true",
             ("best_score", Some(n)) => b.score = n.max(0.0),
@@ -78,8 +89,8 @@ pub fn save(s: &Settings, b: &Best) {
         return;
     }
     let text = format!(
-        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
-        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
+        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
+        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
     );
     let text = text + &s.keys.save();
     let _ = std::fs::write(d.join("settings.txt"), text);

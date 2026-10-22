@@ -57,27 +57,35 @@ other settings.
 
 An Xbox controller (or any XInput pad) works alongside the keyboard and
 mouse. It is detected when it is plugged in, and the menus and the K drawer
-then list its bindings:
+then list its bindings. The K drawer's PAD LAYOUT button switches between two
+layouts. COMBAT, the default, keeps everything the fight needs on the
+triggers and bumpers, so the left thumb never leaves the flight stick and
+the right thumb never leaves the helmet: look at a bandit, lock it with `RB`,
+fire with `RT`.
 
-| Controller | Action |
+| Controller (COMBAT) | Action |
 | --- | --- |
-| Left stick | Pitch and roll; pull back to raise the nose (push, with INVERT PITCH on) |
-| Right stick | Look around the cockpit, or orbit the chase camera; springs back |
-| `RT` / `LT` | Throttle up / down; `RT` pulled to the stop lights the afterburner at full throttle |
-| `LB` / `RB` | Rudder left / right |
-| `B` | Speedbrake out / in |
-| `A` | Fire / pickle (held for the gun) |
-| D-pad up / down | Cycle weapon / lock or step target |
-| Left-stick click | Countermeasures: chaff and flare |
-| `X` | Center the view |
-| Right-stick click | Landing gear up / down |
+| Left stick | Pitch and roll; pull back to raise the nose (push, with INVERT PITCH on). On the ground its X axis also steers the nose wheel |
+| Right stick | Look around the cockpit (the helmet line of sight), or orbit the chase camera; springs back |
+| `RT` | Fire / pickle (held for the gun) |
+| `RB` | Lock the target nearest the helmet line of sight or the nose; again for the next; held half a second drops the lock |
+| `LB` / `LT` | Throttle up / down; `LB` held to the stop lights the afterburner |
 | `LT` on the ground | Wheel brakes |
+| `X` (held) | Rudder: the left stick's X axis works the pedals instead of the roll |
+| Left-stick click | Countermeasures: chaff and flare |
+| `A` | Cycle the weapon and master mode |
+| `B` | Speedbrake out / in |
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
+| D-pad down / up | Landing gear / ALT FLAPS |
 | `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
 | `B` while frozen | Open the pause menu |
 | `Back` / `View` | Open / close the controls drawer |
 | D-pad or left stick, `A`, `B` | Menu navigation, select, back |
+
+CLASSIC is the earlier layout: `RT` / `LT` throttle (`RT` to the stop for
+afterburner), `LB` / `RB` rudder, `A` fire, d-pad up / down cycle weapon and
+lock, `X` center view, right-stick click landing gear; the rest is as above.
 
 On Windows the pad is read through XInput; on Linux through the kernel
 joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
