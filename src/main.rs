@@ -46,11 +46,10 @@ use std::collections::HashSet;
 use ui::{Action, Button, Objective, Outcome, RunResult, Ui};
 use world::{Camera, World};
 
-/// Default cockpit head pitch. The stick and throttle sit close beside the
-/// pilot as in the jet, 60 degrees and more under the horizon; looking 24
-/// degrees down shows the stick head at the bottom of the 58 degree field
-/// while the whole HUD stays in view.
-const LOOK_PITCH: f64 = -24.0 * DEG;
+/// Default cockpit head pitch: 14 degrees down keeps the HUD, the panel
+/// and a good slice of sky in view; the stick and throttle heads show at
+/// the bottom corners and the hands mostly below the frame.
+const LOOK_PITCH: f64 = -14.0 * DEG;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
@@ -277,10 +276,10 @@ fn burner_lit(a: &Aircraft) -> bool {
     a.ab_level > 0.05
 }
 
-/// Low internal resolution, shown as crisp blocks: about 2.25 window pixels
-/// per scene pixel, between 320 and 480 lines.
+/// Low internal resolution, shown as crisp blocks: about 1.9 window pixels
+/// per scene pixel, between 360 and 576 lines.
 fn render_size(w: f32, h: f32) -> (u32, u32) {
-    let th = clamp((h as f64 / 2.25).round(), 320.0, 480.0).min(h as f64).max(1.0);
+    let th = clamp((h as f64 / 1.9).round(), 360.0, 576.0).min(h as f64).max(1.0);
     let tw = (th * (w as f64 / h.max(1.0) as f64)).round().max(1.0);
     (tw as u32, th as u32)
 }

@@ -17,7 +17,7 @@ use crate::mesh::{Frame, Mesh, Rgb};
 
 const IN: f64 = 0.0254;
 /// Front edge of both consoles, where the stick mount and throttle quadrant start.
-pub(super) const FRONT_Z: f64 = -3.605;
+pub(super) const FRONT_Z: f64 = -3.725;
 /// Inboard edge of both consoles, against the seat bucket.
 const X_IN: f64 = 0.262;
 /// Side walls of the tub at console height, and the top of their vertical part.

@@ -279,8 +279,8 @@ out of margin.
   sharp legends and chunky toggles, guards, knobs and trim wheels, the tops
   tilted 10 degrees toward the pilot), the throttle in its quadrant and the
   pressure sidestick on its mount, both where they sit in the jet beside the
-  pilot (the stick head shows at the bottom of the default view, which looks
-  24 degrees down), a reclined ACES II seat and the pilot's arms, hands
+  pilot (the default view looks 14 degrees down: HUD, panel and sky in
+  view, the stick and throttle heads at the bottom corners), a reclined ACES II seat and the pilot's arms, hands
   and legs following the live controls.
 - Low-poly pixel art: the jet is a few hundred Gouraud-
   shaded polygons wearing a small hand-painted texture (FS 36270 / 36375
@@ -292,8 +292,8 @@ out of margin.
   flight-path marker, boxed KCAS and barometric altitude, radar altitude,
   heading tape, Mach, alpha, current and maximum G, steerpoint cue and warnings,
   with the weapon symbology of the selected master mode laid over it.
-- Retro presentation: the world renders at a low internal resolution (320 to
-  480 lines) shown as crisp blocks, quantised to 15-bit colour with a 4x4
+- Retro presentation: the world renders at a low internal resolution (360 to
+  576 lines) shown as crisp blocks, quantised to 15-bit colour with a 4x4
   ordered dither; the terrain wears pixel tiles (grass, scrub, rock strata,
   snow, sand, patchwork farmland with hedgerows and the Cold River) with
   Gouraud lighting and dithered material borders, under a clear blue sky

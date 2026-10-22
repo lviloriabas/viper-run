@@ -102,12 +102,12 @@ Las consolas, la palanca y el throttle están en su sitio real respecto al
 ojo: la palanca 5 cm detrás del borde delantero de la consola derecha, sobre
 un soporte de unos 9 cm, y el throttle entre 27 y 7 cm detrás del borde de la
 izquierda, con la carcasa del cuadrante apenas 2 a 4 cm sobre la consola.
-Así las manos quedan entre 58 y 70 grados por debajo del horizonte, en buena
-parte bajo los hombros y los brazos del piloto. La vista por defecto mira 24
-grados hacia abajo (58 grados de campo, borde inferior a 53): asoma la cabeza
-de la palanca abajo a la derecha y el HUD se ve entero, algo más arriba en la
-pantalla. Más abajo el HUD queda cortado y los guantes siguen tapados por el
-torso. La inclinación por defecto es una sola constante,
+Así las manos quedan entre 50 y 62 grados por debajo del horizonte, en buena
+parte bajo los hombros y los brazos del piloto. La vista por defecto mira 14
+grados hacia abajo: el HUD, el panel y bastante cielo quedan a la vista, y
+las cabezas de la palanca y el throttle asoman en las esquinas inferiores. La
+palanca, el throttle y las consolas están 12 cm más adelante que en el modelo
+de FlightGear para que se vean como desde el asiento real. La inclinación por defecto es una sola constante,
 `LOOK_PITCH` en `src/main.rs`. Una prueba fija las posiciones de referencia
 de la palanca y el throttle. Las consolas auxiliares delanteras no se
 añadieron: ese espacio lo ocupan las esquinas inferiores del panel

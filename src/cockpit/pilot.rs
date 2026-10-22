@@ -21,9 +21,11 @@ const GRIP: Rgb = Rgb(0.115, 0.12, 0.125);
 const RED: Rgb = Rgb(0.62, 0.12, 0.08);
 
 /// Sidestick pivot over its mount at the inboard front corner of the right
-/// console, where it sits in the jet: grip 0.32 m ahead of the design eye,
-/// 0.29 m right of the centreline, its head 0.50 m under the eye.
-const STICK: V3 = v3(0.29, 0.565, -3.565);
+/// console: grip 0.44 m ahead of the design eye, 0.29 m right of the
+/// centreline, its head 0.50 m under the eye. The consoles and both controls
+/// sit 12 cm further forward than the FlightGear model puts them, so they
+/// show in the forward view as they do from the real seat.
+const STICK: V3 = v3(0.29, 0.565, -3.685);
 const SHOULDER: V3 = v3(0.19, 1.00, -3.26);
 /// Upper arm and forearm (elbow to wrist) lengths, then thigh and shin.
 const ARM: (f64, f64) = (0.30, 0.31);
@@ -340,10 +342,11 @@ fn knob(m: &mut Mesh, c: V3, axis: V3, r: f64, len: f64, col: Rgb) {
 /// cursor control and speed brake. Returns the wrist.
 /// Throttle grip frame: `g` along the grip toward the head, `fwd` forward,
 /// `out` up. As in the jet the grip travels 20 cm, from 27 to 7 cm behind
-/// the front of the console; at mid travel it is 0.19 m ahead of the design
-/// eye, 0.41 m left of the centreline and 0.59 m under the eye.
+/// the front of the console; at mid travel it is 0.31 m ahead of the design
+/// eye (12 cm forward of the FlightGear model, like the stick), 0.41 m left
+/// of the centreline and 0.59 m under the eye.
 fn throttle_grip(h: &Hands) -> Grip {
-    let z = -3.323 - h.throttle * 0.20;
+    let z = -3.443 - h.throttle * 0.20;
     Grip::new(v3(-0.41, 0.657, z - 0.01), v3(0.95, 0.26, -0.10).norm(), -1.0)
 }
 
@@ -413,14 +416,15 @@ mod tests {
     #[test]
     fn controls_sit_where_they_do_in_the_jet() {
         // Reference positions from the design eye (FlightGear F-16 cockpit):
-        // stick grip 0.32 m ahead, 0.29 m right, head 0.50 m under the eye;
-        // throttle grip at mid travel 0.19 m ahead, 0.41 m left, 0.59 m under.
+        // moved 12 cm forward: stick grip 0.44 m ahead, 0.29 m right, head
+        // 0.50 m under the eye; throttle grip at mid travel 0.31 m ahead,
+        // 0.41 m left, 0.59 m under.
         let h = Hands { throttle: 0.5, ..Default::default() };
         let k = stick_grip(&h).0;
         let head = k.p(0.006, 0.087, 0.0);
-        assert!((EYE.z - k.o.z - 0.32).abs() < 0.02 && (k.o.x - 0.29).abs() < 0.02 && (EYE.y - head.y - 0.50).abs() < 0.02);
+        assert!((EYE.z - k.o.z - 0.44).abs() < 0.02 && (k.o.x - 0.29).abs() < 0.02 && (EYE.y - head.y - 0.50).abs() < 0.02);
         let t = throttle_grip(&h).o;
-        assert!((EYE.z - t.z - 0.19).abs() < 0.02 && (t.x + 0.41).abs() < 0.02 && (EYE.y - t.y - 0.59).abs() < 0.02);
+        assert!((EYE.z - t.z - 0.31).abs() < 0.02 && (t.x + 0.41).abs() < 0.02 && (EYE.y - t.y - 0.59).abs() < 0.02);
     }
 
     #[test]
