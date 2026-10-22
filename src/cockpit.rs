@@ -1048,7 +1048,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     ht(cv, &format!("M {:.2}", ad.mach), -half, 34.0, small, Align::Left);
     ht(cv, &format!("AOA {:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
     ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 58.0, small, Align::Left);
-    ht(cv, c.mode.label(), -half, 70.0, small, Align::Left);
+    ht(cv, &if c.mode == crate::combat::Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) }, -half, 70.0, small, Align::Left);
     ht(cv, &format!("R {}", pad(ad.radar_ft, 5)), half, 34.0, small, Align::Right);
     ht(cv, &format!("VV {:+}", (ad.vs_fpm / 10.0).round() as i64 * 10), half, 46.0, small, Align::Right);
     let gate = m.current_gate();

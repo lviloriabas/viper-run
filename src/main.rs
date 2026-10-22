@@ -1256,9 +1256,11 @@ impl EventHandler for App {
             }
             self.in_cone = inside;
         }
-        // The helmet cues weapons once the head turns off the rest position.
+        // The helmet cues weapons once the head turns off the rest position,
+        // and blanks while its line of sight passes through the HUD.
         let head = self.look.0.abs() > 4.0 * DEG || (self.look.1 - LOOK_PITCH).abs() > 4.0 * DEG;
-        self.combat.helmet = (self.view == View::Cockpit && head && matches!(self.state, State::Flying | State::Frozen)).then_some(self.camera.forward);
+        let hud = self.aircraft.as_ref().is_some_and(|a| symbology::through_hud(a.q.conj().rotate(self.camera.forward)));
+        self.combat.helmet = (self.view == View::Cockpit && head && !hud && matches!(self.state, State::Flying | State::Frozen)).then_some(self.camera.forward);
         self.update_audio();
     }
 

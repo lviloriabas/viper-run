@@ -57,14 +57,19 @@ pub fn stores_line(c: &Combat) -> String {
     format!("{s}GUN {}  CHF {} FLR {}", l.rounds, l.chaff, l.flares)
 }
 
-/// The selected weapon's count, for the HUD.
+/// The selected weapon, its ammunition and what is left of it, for the HUD.
 fn selected(c: &Combat) -> String {
-    match c.mode {
-        Mode::Nav => String::new(),
-        Mode::Gun => format!("{}", c.loadout.rounds),
-        Mode::Srm => format!("{} 9M", c.loadout.count(Store::Aim9)),
-        Mode::Mrm => format!("{} 120C", c.loadout.count(Store::Aim120)),
-        Mode::Ccip => format!("{} MK82", c.loadout.count(Store::Mk82)),
+    let (n, what) = match c.mode {
+        Mode::Nav => return String::new(),
+        Mode::Gun => (c.loadout.rounds, "20MM"),
+        Mode::Srm => (c.loadout.count(Store::Aim9), "AIM-9M"),
+        Mode::Mrm => (c.loadout.count(Store::Aim120), "AIM-120C"),
+        Mode::Ccip => (c.loadout.count(Store::Mk82), "MK-82"),
+    };
+    if n == 0 {
+        format!("{what} EMPTY")
+    } else {
+        format!("{n} {what}")
     }
 }
 
@@ -382,33 +387,102 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
     }
 }
 
-/// Helmet-mounted display, in the manner of JHMCS: with the head turned
-/// away from the HUD, an aiming cross where the pilot looks, the air data
-/// under it, the locked target's box and the Sidewinder seeker, which the
-/// helmet cues off the boresight.
+/// HUD field of view seen from the design eye, radians off the boresight:
+/// azimuth either side, and elevation from its bottom to its top edge.
+pub const HUD_FOV: (f64, f64, f64) = (7.6 * DEG, -12.6 * DEG, 7.9 * DEG);
+
+/// True when a body-axis line of sight passes through the HUD combiner,
+/// where the helmet blanks its own symbology, as JHMCS does.
+pub fn through_hud(los_body: V3) -> bool {
+    let az = los_body.x.atan2(-los_body.z);
+    let el = los_body.y.atan2((los_body.x * los_body.x + los_body.z * los_body.z).sqrt());
+    az.abs() < HUD_FOV.0 && el > HUD_FOV.1 && el < HUD_FOV.2
+}
+
+/// Helmet-mounted display, in the manner of JHMCS. Visor-fixed: the aiming
+/// cross on the helmet line of sight, airspeed and altitude boxes either
+/// side of it, heading above, Mach and G under the airspeed, the master
+/// mode, arm state and weapon count at the bottom, and the off-boresight
+/// angle. World-stabilised: the aircraft boresight cross when it is in the
+/// visor, the locked target's designator box, or a locator line toward it
+/// from the cross with the angle to go, and the Sidewinder seeker, which the
+/// helmet cues off the boresight. It is blanked while the pilot looks
+/// through the HUD (`Combat::helmet` is None then).
 #[allow(clippy::too_many_arguments)]
 pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64) {
     let Some(look) = c.helmet else { return };
     let sm = (s - 1.0).max(1.0);
     let col = with_alpha(HUD, 0.85);
+    let flash = (time * 3.0).fract() < 0.6;
     let (cx, cy) = (w * 0.5, h * 0.5);
     let r = 14.0 * s;
+    // Aiming cross: a ring with four ticks and a centre dot.
     cv.circle(cx, cy, r, 1.5, col);
     for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
         cv.line(cx + dx * r * 0.4, cy + dy * r * 0.4, cx + dx * r * 0.8, cy + dy * r * 0.8, 1.5, col);
     }
+    cv.disc(cx, cy, 1.2, col);
+
+    // Visor-fixed air data round the cross.
     let ad = crate::air::AirData::of(a);
+    let (dx, dy) = (h * 0.20, h * 0.03);
+    let boxed = |cv: &mut Canvas, text: &str, x: f32, y: f32| {
+        let tw = Canvas::text_width(text, s) + 6.0 * s;
+        let th = 9.0 * s;
+        cv.stroke_rect(x - tw * 0.5, y - th * 0.5, tw, th, 1.0, col);
+        cv.text(text, x, y, s, col, Align::Center);
+    };
+    boxed(cv, &format!("{}", ad.kcas.round() as i64), cx - dx, cy - dy);
+    boxed(cv, &format!("{}", ad.baro_ft.round() as i64), cx + dx, cy - dy);
+    boxed(cv, &format!("{:03}", (a.heading.round() as i64).rem_euclid(360)), cx, cy - h * 0.17);
+    cv.text(&format!("M {:.2}", ad.mach), cx - dx, cy + dy + 2.0 * s, sm, col, Align::Center);
+    cv.text(&format!("G {:.1}", a.g_smooth), cx - dx, cy + dy + 11.0 * s, sm, col, Align::Center);
+    if a.agl < 1500.0 {
+        cv.text(&format!("R {}", (a.agl * 3.28084 / 10.0).round() as i64 * 10), cx + dx, cy + dy + 2.0 * s, sm, col, Align::Center);
+    }
     let oba = a.q.axes().forward.dot(look).clamp(-1.0, 1.0).acos() * RAD;
-    cv.text(&format!("{} KT   {} FT   {:03}   OBA {}", ad.kcas.round() as i64, ad.baro_ft.round() as i64, a.heading.round() as i64 % 360, oba.round() as i64), cx, cy + r + 10.0 * sm, sm, col, Align::Center);
-    cv.text(c.mode.label(), cx - r - 6.0 * sm, cy, sm, col, Align::Right);
+    cv.text(&format!("{}", oba.round() as i64), cx + r + 4.0 * s, cy + r, sm, col, Align::Left);
+    let arm = if c.mode == Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) };
+    cv.text(&arm, cx - dx, cy + h * 0.16, sm, col, Align::Center);
+    cv.text(&selected(c), cx + h * 0.06, cy + h * 0.16, sm, col, Align::Left);
+    if (c.warn > 0.0 || c.inbound().next().is_some()) && flash {
+        cv.text("MISSILE", cx, cy - h * 0.11, s, col, Align::Center);
+    }
+
+    // Aircraft boresight cross, where the nose points, when the visor sees it.
+    let ax = a.q.axes();
+    if let Some((x, y)) = project(cam, w, h, cam.eye + ax.forward * 2000.0) {
+        if (x - cx).abs() < h * 0.3 && (y - cy).abs() < h * 0.3 {
+            let k = 6.0 * s;
+            cv.line(x - k, y, x + k, y, 1.5, col);
+            cv.line(x, y - k, x, y + k * 0.5, 1.5, col);
+        }
+    }
+
+    // Locked target: designator box in the visor, or a locator line toward it.
     if let Some((p, _)) = c.lock.and_then(|l| c.track(l, a)) {
-        if let Some((x, y)) = project(cam, w, h, p) {
-            let b = 9.0 * s;
-            cv.stroke_rect(x - b, y - b, 2.0 * b, 2.0 * b, 1.5, col);
+        let range = (p - a.pos).len();
+        let text = if range < 3700.0 { format!("{:.1} KFT", range * 3.28084 / 1000.0) } else { format!("{:.1} NM", range / 1852.0) };
+        cv.text(&text, cx + dx, cy + dy + 11.0 * s, sm, col, Align::Center);
+        let seen = project(cam, w, h, p).filter(|&(x, y)| (x - cx).abs() < h * 0.32 && (y - cy).abs() < h * 0.32);
+        match seen {
+            Some((x, y)) => {
+                let b = 9.0 * s;
+                cv.stroke_rect(x - b, y - b, 2.0 * b, 2.0 * b, 1.5, col);
+            }
+            None => {
+                let d = (p - cam.eye).norm();
+                let (lx, ly) = (d.dot(cam.right), d.dot(cam.up));
+                let k = (lx * lx + ly * ly).sqrt().max(1e-6);
+                let (ux, uy) = ((lx / k) as f32, (-ly / k) as f32);
+                let (x0, y0, x1) = (cx + ux * r, cy + uy * r, cx + ux * r * 3.2);
+                cv.line(x0, y0, x1, cy + uy * r * 3.2, 1.5, col);
+                let off = d.dot(cam.forward).clamp(-1.0, 1.0).acos() * RAD;
+                cv.text(&format!("{}", off.round() as i64), cx + ux * r * 4.0, cy + uy * r * 4.0, sm, col, Align::Center);
+            }
         }
     }
     if c.mode == Mode::Srm && c.loadout.count(Store::Aim9) > 0 {
-        let flash = (time * 3.0).fract() < 0.6;
         match c.seeker.and_then(|w| c.track(w, a)).and_then(|(p, _)| project(cam, w, h, p)) {
             Some((x, y)) => {
                 cv.circle(x, y, 11.0 * s, 2.0, col);

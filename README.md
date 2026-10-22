@@ -122,7 +122,9 @@ ground. The result screen shows the kills or targets, the time and a rating.
 ### Weapons and sensors
 
 - Master modes follow the weapon (`X`): NAV with the master arm safe, GUN,
-  SRM, MRM and CCIP. The HUD shows the selected weapon and count, the lock's
+  SRM, MRM and CCIP. The HUD shows the master mode and arm state (for example
+  SRM ARM), the selected weapon with what is left of it (2 AIM-9M, 511 20MM,
+  or EMPTY), the lock's
   range and closure, a target designator box, or a locator line when the
   target is outside the HUD.
 - GUN: an EEGS-style funnel drawn from virtual rounds flown with the real
@@ -138,9 +140,14 @@ ground. The result screen shows the kills or targets, the time and a rating.
   so a bomb released on it lands on it. Fuzes arm 2 s after release; a bomb
   released too low is a dud, and its fragments reach a jet below 160 m.
 - Turning the head (Alt and the mouse, or the right stick) brings up a
-  helmet-mounted display: an aiming cross, air data, the target box and the
-  seeker, which the helmet cues off the boresight. `T` locks the target
-  nearest the helmet line of sight.
+  helmet-mounted display that works like JHMCS: it blanks while the line of
+  sight passes through the HUD; fixed in the visor are the aiming cross,
+  airspeed and altitude boxes, heading, Mach, G, radar altitude down low, the
+  off-boresight angle and the master mode, arm state and weapon count;
+  stabilised on the world are the aircraft boresight cross, the target box
+  (or a locator line with the angle to go) and the seeker, which the helmet
+  cues off the boresight. `T` locks the target nearest the helmet line of
+  sight.
 - The FCR page shows air contacts on a B-scope with aspect, or ground targets
   in CCIP; the RWR shows bandit radars (16), AAA (A) and the SA-6 radar (6),
   with a diamond on those locked on and a flashing M for missiles in flight.
