@@ -381,3 +381,47 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
         cv.text("MISSILE", w * 0.5, h * 0.36, s * 2.0, RED, Align::Center);
     }
 }
+
+/// Helmet-mounted display, in the manner of JHMCS: with the head turned
+/// away from the HUD, an aiming cross where the pilot looks, the air data
+/// under it, the locked target's box and the Sidewinder seeker, which the
+/// helmet cues off the boresight.
+#[allow(clippy::too_many_arguments)]
+pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64) {
+    let Some(look) = c.helmet else { return };
+    let sm = (s - 1.0).max(1.0);
+    let col = with_alpha(HUD, 0.85);
+    let (cx, cy) = (w * 0.5, h * 0.5);
+    let r = 14.0 * s;
+    cv.circle(cx, cy, r, 1.5, col);
+    for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+        cv.line(cx + dx * r * 0.4, cy + dy * r * 0.4, cx + dx * r * 0.8, cy + dy * r * 0.8, 1.5, col);
+    }
+    let ad = crate::air::AirData::of(a);
+    let oba = a.q.axes().forward.dot(look).clamp(-1.0, 1.0).acos() * RAD;
+    cv.text(&format!("{} KT   {} FT   {:03}   OBA {}", ad.kcas.round() as i64, ad.baro_ft.round() as i64, a.heading.round() as i64 % 360, oba.round() as i64), cx, cy + r + 10.0 * sm, sm, col, Align::Center);
+    cv.text(c.mode.label(), cx - r - 6.0 * sm, cy, sm, col, Align::Right);
+    if let Some((p, _)) = c.lock.and_then(|l| c.track(l, a)) {
+        if let Some((x, y)) = project(cam, w, h, p) {
+            let b = 9.0 * s;
+            cv.stroke_rect(x - b, y - b, 2.0 * b, 2.0 * b, 1.5, col);
+        }
+    }
+    if c.mode == Mode::Srm && c.loadout.count(Store::Aim9) > 0 {
+        let flash = (time * 3.0).fract() < 0.6;
+        match c.seeker.and_then(|w| c.track(w, a)).and_then(|(p, _)| project(cam, w, h, p)) {
+            Some((x, y)) => {
+                cv.circle(x, y, 11.0 * s, 2.0, col);
+                if c.shoot && flash {
+                    cv.text("SHOOT", cx, cy - r - 10.0 * sm, s, col, Align::Center);
+                }
+            }
+            None => {
+                for k in 0..8 {
+                    let a0 = k as f32 * std::f32::consts::TAU / 8.0;
+                    cv.arc(cx, cy, r * 1.6, a0, a0 + 0.4, 1.0, col);
+                }
+            }
+        }
+    }
+}

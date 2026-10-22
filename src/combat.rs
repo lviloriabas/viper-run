@@ -351,6 +351,9 @@ pub struct Combat {
     pub ccip: Option<(V3, f64)>,
     /// The selected missile would hit its target if fired now.
     pub shoot: bool,
+    /// Where the pilot's helmet looks (world direction), in the cockpit view:
+    /// it cues the Sidewinder seeker and the radar lock off the boresight.
+    pub helmet: Option<V3>,
     zone_clock: f64,
     pub clock: f64,
     pub kills: usize,
@@ -477,6 +480,7 @@ impl Combat {
             seeker: None,
             ccip: None,
             shoot: false,
+            helmet: None,
             zone_clock: 0.0,
             clock: 0.0,
             kills: 0,
@@ -581,12 +585,14 @@ impl Combat {
     /// range and not behind terrain, nearest the boresight first.
     fn candidates(&self, a: &Aircraft, ground: bool) -> Vec<(Who, f64)> {
         let fwd = a.q.axes().forward;
+        // The helmet picks among what the radar can see: nearest its line of sight.
+        let look = self.helmet.unwrap_or(fwd);
         let mut v: Vec<(Who, f64)> = Vec::new();
         let mut consider = |who: Who, p: V3, max: f64| {
             let r = p - a.pos;
             let off = fwd.dot(r.norm()).clamp(-1.0, 1.0).acos();
             if off < 60.0 * DEG && r.len() < max && line_of_sight(a.pos, p + V3::Y * 3.0) {
-                v.push((who, off + r.len() / 400000.0));
+                v.push((who, look.dot(r.norm()).clamp(-1.0, 1.0).acos() + r.len() / 400000.0));
             }
         };
         if ground {
@@ -774,15 +780,19 @@ impl Combat {
             }
         }
         if self.mode == Mode::Srm && self.loadout.count(Store::Aim9) > 0 {
-            // Slaved to the radar lock inside 30 degrees, or keeps what it
-            // has, or searches its 2.5-degree field along the boresight.
+            // Slaved to the radar lock inside its 40-degree gimbal, or keeps
+            // what it has, or searches its 2.5-degree field where the helmet
+            // looks (or along the boresight).
+            let gimbal = AIM9M.gimbal;
             let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < 18000.0 && matches!(w, Who::Bandit(_)));
-            let seeker = if let Some(l) = self.lock.filter(|&l| usable(l, 30.0 * DEG)) {
+            let look = self.helmet.unwrap_or(fwd);
+            let near_look = |p: V3| look.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
+            let seeker = if let Some(l) = self.lock.filter(|&l| usable(l, gimbal)) {
                 Some(l)
-            } else if let Some(s) = self.seeker.filter(|&s| usable(s, 30.0 * DEG)) {
+            } else if let Some(s) = self.seeker.filter(|&s| usable(s, gimbal)) {
                 Some(s)
             } else {
-                self.bandits.iter().enumerate().find(|(i, b)| b.alive && off(b.jet.pos) < AIM9M.acquire * 1.6 && usable(Who::Bandit(*i), 30.0 * DEG)).map(|(i, _)| Who::Bandit(i))
+                self.bandits.iter().enumerate().find(|(i, b)| b.alive && near_look(b.jet.pos) < AIM9M.acquire * 1.6 && usable(Who::Bandit(*i), gimbal)).map(|(i, _)| Who::Bandit(i))
             };
             self.seeker = seeker;
         } else {

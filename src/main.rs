@@ -1182,6 +1182,9 @@ impl EventHandler for App {
             self.update_hands(dt, None);
         }
         self.camera = self.current_camera();
+        // The helmet cues weapons once the head turns off the rest position.
+        let head = self.look.0.abs() > 4.0 * DEG || (self.look.1 + 12.0 * DEG).abs() > 4.0 * DEG;
+        self.combat.helmet = (self.view == View::Cockpit && head && matches!(self.state, State::Flying | State::Frozen)).then_some(self.camera.forward);
         self.update_audio();
     }
 
@@ -1252,6 +1255,7 @@ impl EventHandler for App {
                     cockpit::draw_hud(cv, a, &self.mission, &cam, &body, &self.combat);
                     ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue, obj.as_ref());
                     symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, false);
+                    symbology::helmet(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time);
                 } else {
                     ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue, obj.as_ref());
                     symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, true);
