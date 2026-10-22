@@ -2,11 +2,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod aero;
+mod ai;
 mod air;
 mod airframe;
 mod audio;
 mod canvas;
 mod capture;
+mod combat;
 mod cockpit;
 mod font;
 mod fx;
@@ -18,9 +20,11 @@ mod mesh;
 mod png;
 mod settings;
 mod sim;
+mod targets;
 mod terrain;
 mod texture;
 mod ui;
+mod weapons;
 mod world;
 
 use audio::{Audio, Params, Wave};
@@ -1019,7 +1023,7 @@ impl EventHandler for App {
         let aspect = (w / h) as f64;
         self.ctx.begin_pass(Some(self.scene.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
         let mission = if flying_view { Some(&self.mission) } else { Some(&self.preview) };
-        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, if flying_view && !wrecked { self.aircraft.as_ref() } else { None }, cockpit_view);
+        self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, if flying_view && !wrecked { self.aircraft.as_ref() } else { None }, cockpit_view, None);
         self.ctx.end_render_pass();
         if cockpit_view {
             let a = self.aircraft.as_ref().unwrap();
