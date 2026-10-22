@@ -1483,4 +1483,46 @@ mod tests {
         let (t, d, kt) = lift_off.expect("never left the ground");
         assert!(d < 1500.0 && t < 25.0, "lift-off after {t:.1} s and {d:.0} m at {kt:.0} kt");
     }
+
+    /// A stabilised approach to runway A: 3 degree path at 150 KCAS with the
+    /// gear and flaps down, a flare, touchdown on the mains and a full stop
+    /// on the brakes, all on the runway.
+    #[test]
+    fn approach_touchdown_and_stop() {
+        terrain::init();
+        let e = terrain::base_elevation();
+        let (dx, dz) = terrain::runway_dir();
+        let fwd = v3(dx, 0.0, dz);
+        let (tx, tz) = terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH + 320.0, 0.0);
+        let aim = v3(tx, e + 1.6, tz);
+        let start = aim - fwd * 3000.0 + V3::Y * (3000.0 * (3.0 * DEG).tan());
+        let mut a = crate::combat::spawn(start, dx.atan2(-dz), 78.0);
+        let mut touched = false;
+        let mut sink = 0.0;
+        for _ in 0..(90.0 / DT) as usize {
+            let flare = a.agl < 9.0;
+            let (pitch, roll) = if touched {
+                (0.0, 0.0)
+            } else {
+                let target = if flare { a.pos + fwd * 200.0 + V3::Y * (1.0 - a.agl) } else { aim + fwd * 400.0 };
+                crate::ai::steer(&a, (target - a.pos).norm(), 2.0)
+            };
+            let throttle_up = !touched && a.airspeed_kt < 150.0;
+            let input = Input { gear_down: true, pitch_axis: pitch, roll_axis: roll, throttle_up, throttle_down: !throttle_up, wheel_brake: touched, ..Default::default() };
+            let vs = a.vs;
+            a.update(DT, &input);
+            assert!(!a.crashed, "{} at {:.0} kt, sink {:.1} m/s", a.collision_label, a.airspeed_kt, -vs);
+            if a.on_ground && !touched {
+                touched = true;
+                sink = -vs;
+            }
+            if touched && a.speed < 1.0 {
+                break;
+            }
+        }
+        assert!(touched && a.speed < 1.0, "never stopped: {:.0} m/s, agl {:.1}", a.speed, a.agl);
+        let (u, v) = terrain::runway_local(a.pos.x, a.pos.z);
+        assert!(u.abs() < terrain::RUNWAY_HALF_LENGTH && v.abs() < terrain::RUNWAY_HALF_WIDTH, "stopped off the runway at u {u:.0} v {v:.0}");
+        assert!(sink < 3.0, "touchdown sink {sink:.1} m/s");
+    }
 }

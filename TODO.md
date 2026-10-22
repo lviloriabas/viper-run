@@ -10,19 +10,19 @@
 - [x] For ground and dogfight missions, implement a weapon systems and a loadout screen with fuel, weight, and radar and infrared weapons, head-mounted display, targeting systems and countermeasures. Ensure the RWR is working.
 - [x] Controls should be simple enough for keyboard and console control usage.
 - [x] Remove text references to tiny combat arena or other references.
-- [ ] Los controls en teoría están más delante y si se deberían ver mejor
-- [ ] Corregir que los controles se siente sin suficiente autoridad
-- [ ] Agregar modelo de MIG-29 como agressor
-- [ ] Agregar capacidad de aterrizar y despegar
-- [ ] Agregar flaps y tren de aterrizaje
-- [ ] Llena los espacios en blanco de la cabina, con switches e instrumentos aunque no funcionen del todo
-- [ ] El F-16 tiene unos paeneles inclinados a los laterales, en la cabina actual se ve que los paeneles están planos, corregir eso
-- [ ] La vista debe estar más arriba, no importa si no se ven tanto las manos en los controles
-- [ ] Agregar más distancia entre los agressors y el jugador, para que no se sientan tan cerca y se pueda ver mejor la maniobra de combate
-- [ ] Permitir remapear keybinds y guardar las configuraciones
-- [ ] Simulación de peso y drag y que afecte el desempeño de la aeronave
-- [ ] Head mounted display como funcionaría en un F-16 real
-- [ ] Indicación en el hud del sistema de armas actualmente seleccionado, incluyendo el tipo de munición y cantidad restante
-- [ ] Hacer el modelo del MIG-29 seleccionable para el jugador, seleccionar quienes son los agressors
-- [ ] Agregar estructuras en tierra para que no se vea tan vacío.
-- [ ] El filtro de pixelado debe ser un poquito más sutil, solo para mejorar la visibilidad, pero no lo bajes tanto.
+- [x] Los controls en teoría están más delante y si se deberían ver mejor
+- [x] Corregir que los controles se siente sin suficiente autoridad
+- [x] Agregar modelo de MIG-29 como agressor
+- [x] Agregar capacidad de aterrizar y despegar
+- [x] Agregar flaps y tren de aterrizaje
+- [x] Llena los espacios en blanco de la cabina, con switches e instrumentos aunque no funcionen del todo
+- [x] El F-16 tiene unos paeneles inclinados a los laterales, en la cabina actual se ve que los paeneles están planos, corregir eso
+- [x] La vista debe estar más arriba, no importa si no se ven tanto las manos en los controles
+- [x] Agregar más distancia entre los agressors y el jugador, para que no se sientan tan cerca y se pueda ver mejor la maniobra de combate
+- [x] Permitir remapear keybinds y guardar las configuraciones
+- [x] Simulación de peso y drag y que afecte el desempeño de la aeronave
+- [x] Head mounted display como funcionaría en un F-16 real
+- [x] Indicación en el hud del sistema de armas actualmente seleccionado, incluyendo el tipo de munición y cantidad restante
+- [x] Hacer el modelo del MIG-29 seleccionable para el jugador, seleccionar quienes son los agressors
+- [x] Agregar estructuras en tierra para que no se vea tan vacío.
+- [x] El filtro de pixelado debe ser un poquito más sutil, solo para mejorar la visibilidad, pero no lo bajes tanto.

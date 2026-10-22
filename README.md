@@ -123,7 +123,7 @@ thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 | Mission | Objective | Default stores | Clock |
 | --- | --- | --- | --- |
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
-| DOGFIGHT | Shoot down three aggressor F-16s; two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
+| DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
 | AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 60 % fuel | 10:00 |
 

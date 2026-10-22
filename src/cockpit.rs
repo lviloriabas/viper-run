@@ -1032,7 +1032,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     cv.rect(r.x, r.y, r.w, r.h, rgba(0xb7, 0xbc, 0xa0, 1.0));
     let ink = rgba(0x28, 0x3c, 0x30, 1.0);
     cv.text("COLD RIVER", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
-    for (i, s) in ["CHECK FUEL", "10 STEERPOINTS", "H AIRBRAKE", "K CONFIG", "ALT + MOUSE LOOK", "C CENTER VIEW", "V CHASE VIEW"].iter().enumerate() {
+    for (i, s) in ["CHECK FUEL", "H AIRBRAKE  G GEAR", "L FLAPS  B BRAKES", "K CONFIG, KEYS", "ALT + MOUSE LOOK", "C CENTER VIEW", "V CHASE VIEW"].iter().enumerate() {
         cv.text(s, r.x + 10.0, r.y + 46.0 + i as f32 * 24.0, 1.0, ink, Align::Left);
     }
 
