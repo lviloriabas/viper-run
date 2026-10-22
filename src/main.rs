@@ -22,6 +22,7 @@ mod mig29;
 mod physio;
 mod png;
 mod props;
+mod scenery;
 mod settings;
 mod sim;
 mod structure;

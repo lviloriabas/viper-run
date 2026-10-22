@@ -628,6 +628,8 @@ pub struct World {
     /// MiG-29: airframe and the right and left stabilators.
     mig: Part,
     mig_stab: [Part; 2],
+    /// Buildings, trees and pylons (scenery.rs), each at its cluster origin.
+    scenery: Vec<(V3, Part)>,
     post: Pipeline,
     vision: Pipeline,
     post_bind: Bindings,
@@ -791,6 +793,7 @@ impl World {
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
         let (mig_body, mig_stabs) = crate::mig29::build();
         let (mig, mig_stab) = (skinned(&mig_body), [skinned(&mig_stabs[0]), skinned(&mig_stabs[1])]);
+        let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
         World {
             post_bind: fullscreen.clone(),
             fullscreen,
@@ -825,6 +828,7 @@ impl World {
             gear,
             mig,
             mig_stab,
+            scenery,
             post,
             vision,
             fx: Fx::new(ctx),
@@ -925,6 +929,13 @@ impl World {
         ctx.apply_uniforms(UniformsSource::table(&CloudU { vp, eye, right: cam.right.f32(), up: cam.up.f32(), fog: FOG }));
         ctx.draw(0, (self.clouds.len() * 6) as i32, 1);
 
+        // Scenery within 14 km.
+        for (o, part) in &self.scenery {
+            let rel = *o - cam.eye;
+            if rel.len() < 14000.0 && rel.dot(cam.forward) > -600.0 {
+                self.draw_prop(ctx, vp, part, basis(V3::X, V3::Y, V3::Z, rel), [0.0; 4]);
+            }
+        }
         // Bandits, stores, missiles, bombs and ground targets: opaque, with the jet.
         if let Some(p) = props {
             p.draw(self, ctx, vp, cam);

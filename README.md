@@ -193,6 +193,18 @@ bomb. The ZSU-23-4s fire tracer bursts at a jet within 2.5 km in their line of
 sight; the SA-6 fires when its radar sees the jet more than 300 m above the
 ground, so the gorge is the way in.
 
+### Scenery
+
+The valley is lived in. The airbase has a control tower, three arched
+maintenance hangars, four hardened aircraft shelters, a fuel farm, the
+approach radar's dome and a windsock. Seven farming villages stand on the
+valley floor by the river, each a lane of gabled houses with a church, red
+barns and silos and trees round it; groves of conifers and broadleaf trees
+dot the floor and the lower slopes about a kilometre apart, and a power line
+runs down the west side of the valley. All of it is placed once from a fixed
+seed on the terrain grid, clear of the runway and the strike targets, and
+drawn within 14 km.
+
 ### MiG-29
 
 JET on the start screen swaps the player's F-16C for a MiG-29A (9.12), and
@@ -456,6 +468,7 @@ viper-run/
     ├── combat.rs       # loadouts, master modes, lock, bandits, targets, damage, missions
     ├── ai.rs           # AI pilot: BFM, weapons employment, terrain recovery
     ├── targets.rs      # STRIKE ground targets and their models
+    ├── scenery.rs      # airbase buildings, villages, trees, power line
     ├── props.rs        # combat models, smoke trails, tracers, effects and sounds
     ├── symbology.rs    # HUD weapon symbols, helmet display, FCR, RWR, overlays
     ├── aero.rs         # F-16 aerodynamic tables and F110 thrust tables
