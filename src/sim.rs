@@ -298,42 +298,62 @@ pub struct Flcs {
     pub brake: f64,
 }
 
-/// Stick force to g command (lbf to g above 1 g), FlightGear F-16 gradient.
-const PITCH_GRADIENT: [(f64, f64); 6] = [(-17.65, -4.0), (-7.25, -0.44), (-1.75, 0.0), (1.75, 0.0), (7.25, 0.44), (40.0, 10.86)];
-/// Lateral stick force to roll-rate command (lbf to deg/s).
-const ROLL_GRADIENT: [(f64, f64); 5] = [(0.0, 0.0), (1.0, 0.0), (6.0, 20.0), (11.0, 80.0), (17.0, 308.0)];
+/// Stick shaping. The real force gradients (FlightGear F-16) give almost
+/// nothing over the first fifth of the travel and only 50 deg/s of roll at
+/// half stick, which a mouse, keyboard or thumbstick cannot feel: they read
+/// as a stick without authority. These power curves keep the same end
+/// points (8 g above 1 g and -4 g pushing at the stops, 308 deg/s full
+/// lateral) with a small dead band and a firm response from there on.
+const STICK_DEAD: f64 = 0.03;
+const PITCH_EXP: f64 = 1.3;
+const ROLL_EXP: f64 = 1.5;
+
+fn live(s: f64) -> f64 {
+    ((s.abs() - STICK_DEAD) / (1.0 - STICK_DEAD)).max(0.0)
+}
+
+/// Stick (-1 push to 1 pull) to the g command above 1 g.
+fn pitch_command(s: f64) -> f64 {
+    let k = live(s).powf(PITCH_EXP);
+    if s >= 0.0 {
+        8.5 * k
+    } else {
+        -4.2 * k
+    }
+}
+
+/// Lateral stick (-1 left to 1 right) to the roll-rate command, deg/s.
+fn roll_command(s: f64) -> f64 {
+    ROLL_RATE_MAX * live(s).powf(ROLL_EXP) * s.signum()
+}
+
+/// Inverse of `live`: the deflection that leaves `k` of the live travel.
+fn unlive(k: f64) -> f64 {
+    if k <= 0.0 {
+        0.0
+    } else {
+        STICK_DEAD + k * (1.0 - STICK_DEAD)
+    }
+}
 /// Lift coefficient at which shock-induced buffet starts, against Mach: a
 /// typical fighter buffet boundary, lowest just below Mach 1.
 const BUFFET_ONSET: [(f64, f64); 6] = [(0.5, 1.2), (0.7, 0.95), (0.85, 0.7), (0.95, 0.5), (1.05, 0.6), (1.2, 0.9)];
 
-/// Value of `x` where a rising piecewise-linear curve reaches `y`.
-fn inverse(t: &[(f64, f64)], y: f64) -> f64 {
-    for w in t.windows(2) {
-        let ((x0, y0), (x1, y1)) = (w[0], w[1]);
-        if y <= y1 && y1 > y0 {
-            return x0 + (x1 - x0) * clamp((y - y0) / (y1 - y0), 0.0, 1.0);
-        }
-    }
-    t[t.len() - 1].0
-}
-
 /// Stick deflection (-1 push to 1 pull) that commands a load factor, by
-/// inverting the stick-force gradient: what a pilot's hand does for the AI.
+/// inverting the stick shaping: what a pilot's hand does for the AI.
 pub fn stick_for_g(n: f64) -> f64 {
     let above = clamp(n - 1.0, NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
     if above >= 0.0 {
-        inverse(&PITCH_GRADIENT[2..], above) / 40.0
+        unlive((above / 8.5).powf(1.0 / PITCH_EXP))
     } else {
-        -inverse(&[(1.75, 0.0), (7.25, 0.44), (17.65, 4.0)], -above) / 17.65
+        -unlive((-above / 4.2).min(1.0).powf(1.0 / PITCH_EXP))
     }
 }
 
 /// Lateral stick deflection (-1 left to 1 right) that commands a roll rate in deg/s.
 pub fn stick_for_roll(rate: f64) -> f64 {
-    let f = inverse(&ROLL_GRADIENT[1..], rate.abs().min(ROLL_RATE_MAX));
-    rate.signum() * f / 17.0
+    rate.signum() * unlive((rate.abs() / ROLL_RATE_MAX).min(1.0).powf(1.0 / ROLL_EXP))
 }
-
 /// What the FLCS reads each frame: air data, rates, load factor, the
 /// gravity component along the body's up axis and the mass properties.
 struct Sensors {
@@ -373,9 +393,8 @@ impl Flcs {
         // with pitch-rate anticipation, the limiter takes away 2 g per degree,
         // which caps the slow jet near 25.5 degrees at full aft stick.
         let stick = input.pitch();
-        let force = stick * if stick >= 0.0 { 40.0 } else { 17.65 };
-        let n_cmd = clamp(aero::curve(&PITCH_GRADIENT, force), NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
-        self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 8.3, 0.0, 1.0);
+        let n_cmd = clamp(pitch_command(stick), NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
+        self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 12.0, 0.0, 1.0);
         self.alpha_f += (alpha - self.alpha_f) * clamp(dt * 10.0, 0.0, 1.0);
         let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
         let demand = self.n_cmd - 2.0 * (lead - ALPHA_LIMITER).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
@@ -399,10 +418,10 @@ impl Flcs {
         // Roll. Rate command, reduced at high AoA; the flaperons are set for
         // the roll acceleration that closes the rate error in a tenth of a second.
         let lat = input.roll();
-        let mut p_cmd = aero::curve(&ROLL_GRADIENT, lat.abs() * 17.0) * lat.signum();
+        let mut p_cmd = roll_command(lat);
         let p_max = ROLL_RATE_MAX * clamp(1.0 - (self.alpha_f - 15.0) / 22.0, 0.3, 1.0);
         p_cmd = clamp(p_cmd, -p_max, p_max);
-        self.p_cmd += (p_cmd - self.p_cmd) * clamp(dt * 12.0, 0.0, 1.0);
+        self.p_cmd += (p_cmd - self.p_cmd) * clamp(dt * 16.0, 0.0, 1.0);
         let pdot = 10.0 * (self.p_cmd * DEG - p);
         let c0 = aero::coefficients(f);
         let n_now = qsb * c0.cn;

@@ -265,10 +265,10 @@ fn stick_curve(v: f64) -> f64 {
     v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
 }
 
-/// Controller stick shaping: gentle around centre for fine corrections,
-/// still reaching full deflection at the stop.
+/// Controller stick shaping: a little gentler around centre for fine
+/// corrections (the FLCS shaping adds its own), full deflection at the stop.
 fn pad_curve(v: f64) -> f64 {
-    v * (0.45 + 0.55 * v * v)
+    v * (0.7 + 0.3 * v * v)
 }
 
 /// Afterburner alight, for the light-off thump and torch.
@@ -798,8 +798,8 @@ impl App {
         }
     }
 
-    /// Ramps the keyboard pitch: full deflection after 0.15 s held, back to
-    /// neutral in under 0.1 s, so taps make small corrections.
+    /// Ramps the keyboard pitch: full deflection after 0.11 s held, back to
+    /// neutral in under 0.08 s, so taps make small corrections.
     fn ramp_key_pitch(&mut self, dt: f64) {
         let k = |c: KeyCode| self.keys.contains(&c);
         let want = if self.settings.pitch == PitchSource::Keys {
@@ -807,7 +807,7 @@ impl App {
         } else {
             0.0
         };
-        let rate = if want != 0.0 && want * self.key_pitch >= 0.0 { 6.5 } else { 12.0 };
+        let rate = if want != 0.0 && want * self.key_pitch >= 0.0 { 9.0 } else { 14.0 };
         self.key_pitch = approach(self.key_pitch, want, rate * dt);
     }
 

@@ -210,13 +210,17 @@ El modelo sigue al F-16 de FlightGear (repositorio NikolaiVChr/f16, JSBSim):
   y 1,9. La dinámica de potencia es la de Stevens y Lewis. Se añade la
   recuperación de presión de una toma de choque normal fija, que es lo que
   limita al F-16 cerca de Mach 2.
-- FLCS: mismas rutas de mando que `Systems/jsb-controls.xml` (gradiente de
-  fuerza en palanca a G, límites +9/-3 G, limitador de AOA a partir de 22,5°
+- FLCS: mismas rutas de mando que `Systems/jsb-controls.xml` (palanca a G,
+  límites +9/-3 G, limitador de AOA a partir de 22,5°
   con tope cerca de 25°, mando de régimen de alabeo de hasta 308 °/s reducido
   con AOA, interconexión alerón-timón, amortiguador de guiñada) con actuadores
   limitados en recorrido y velocidad. Los lazos internos de cabeceo y alabeo
   invierten las propias tablas aerodinámicas en lugar de reproducir la red de
   ganancias analógica, para que la respuesta sea estable de 120 nudos a Mach 2.
+  La palanca no usa los gradientes de fuerza reales, casi muertos en el primer
+  quinto del recorrido y con solo 50 °/s de alabeo a media palanca: curvas de
+  potencia con los mismos extremos (8,5 G y -4,2 G sobre 1 G, 308 °/s) y una
+  zona muerta del 3 % dan autoridad desde el teclado, el ratón o el mando.
 
 `cargo test --release level_speed -- --nocapture` resuelve el equilibrio de
 vuelo nivelado con plena postcombustión y media carga de combustible:
