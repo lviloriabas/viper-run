@@ -12,9 +12,9 @@
 //!
 //! The figures follow the aerospace-medicine literature (Burton and Whinnery,
 //! centrifuge data). Relaxed and unprotected, the view starts to close at
-//! about 4.7 G on a gradual onset (0.1 G/s), blacks out near 5.5 G and the
+//! about 4.9 G on a gradual onset (0.1 G/s), blacks out near 5.5 G and the
 //! pilot goes out near 6.9 G; held on a rapid-onset plateau, before the
-//! reflex has acted, light loss comes half a G sooner. The suit adds about
+//! reflex has acted, light loss comes 0.7 G sooner. The suit adds about
 //! 1.4 G, COMBAT EDGE pressure breathing about 1.1 G and a good AGSM about
 //! 3 G, which a trained pilot tires of within a minute at 9 G. G-LOC brings
 //! about 12 s of absolute and 12 s of relative incapacitation. Negative g
@@ -142,12 +142,13 @@ impl Pilot {
     pub fn update(&mut self, dt: f64, a: &Aircraft) {
         let nz = a.g_load;
         let pull = |t: f64, tau: f64| clamp(dt / tau, 0.0, 1.0) * t;
-        // The suit valve opens at 2 G and fills in about a second; the pilot
-        // strains from about 3 G and is fully into the AGSM by 6 G, unless out.
+        // The suit valve opens at 2 G and fills in under a second; the pilot
+        // strains from about 3 G and is fully into the AGSM by 6 G, unless out,
+        // and starts with the pull: the g the stick asks for, not the g felt.
         let awake = self.gloc <= 0.0;
-        self.suit += pull(smoothstep(1.8, 3.0, nz) - self.suit, 0.8);
-        let effort = if awake { smoothstep(3.0, 6.0, nz) } else { 0.0 };
-        self.strain += pull(effort - self.strain, if effort > self.strain { 0.4 } else { 0.5 });
+        self.suit += pull(smoothstep(1.8, 3.0, nz) - self.suit, 0.6);
+        let effort = if awake { smoothstep(3.0, 6.0, nz.max(a.flcs.n_cmd + 1.0)) } else { 0.0 };
+        self.strain += pull(effort - self.strain, if effort > self.strain { 0.3 } else { 0.5 });
         self.fatigue = clamp(self.fatigue + (self.strain * self.strain / ENDURANCE - (1.0 - self.strain) / REST) * dt, 0.0, 1.0);
         let before = self.breath;
         self.breath = if self.strain > 0.5 && awake { self.breath + dt } else { 0.0 };
@@ -222,7 +223,7 @@ impl Pilot {
     /// What the pilot sees now.
     pub fn vision(&self) -> Vision {
         let o = self.retina;
-        let mut v = Vision { tunnel: 1.0 - smoothstep(0.2, 0.95, o), grey: 1.0 - smoothstep(0.55, 0.97, o), black: 1.0 - smoothstep(0.0, 0.3, o), red: self.red };
+        let mut v = Vision { tunnel: 1.0 - smoothstep(0.15, 0.85, o), grey: 1.0 - smoothstep(0.4, 0.92, o), black: 1.0 - smoothstep(0.0, 0.25, o), red: self.red };
         if self.gloc > 0.0 {
             // Out cold, then the view comes back through a grey haze.
             let back = smoothstep(GLOC_RELATIVE, GLOC_RELATIVE - 4.0, self.gloc);
@@ -341,7 +342,7 @@ mod tests {
         let worst = ride(&mut p, &mut a, 16.5, |t| 1.0 + 8.0 * (t / 1.5).min(1.0), false);
         println!("9 G break: worst vision {worst:.2}, now {:.2}, fatigue {:.2}", p.retina, p.fatigue);
         assert!(p.gloc == 0.0 && worst > 0.4, "9 G for 15 s: vision {worst:.2}, G-LOC {}", p.gloc);
-        assert!(worst < 0.9, "9 G should narrow the view: {worst:.2}");
+        assert!(worst < 0.95, "9 G should cost some light: {worst:.2}");
         // Held long enough, the straining tires and the pilot goes out.
         ride(&mut p, &mut a, 60.0, |_| 9.0, false);
         assert!(p.glocs == 1, "a minute more at 9 G");

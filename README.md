@@ -141,7 +141,7 @@ out of margin.
   AGSM that tires within a minute at 9 G, and the baroreflex, which after a
   push leaves the pilot less tolerant of the next pull. The retina and the
   brain hold a few seconds of oxygen. Relaxed and unprotected the view closes
-  near 4.7 G, blacks out near 5.5 G and the pilot goes out near 6.9 G; a
+  near 4.9 G, blacks out near 5.5 G and the pilot goes out near 6.9 G; a
   trained, protected pilot holds a 9 G break for 15 s with a narrowed view.
   The view greys, closes into a tunnel and blacks out over the HUD too, and
   negative g reddens it. G-LOC takes the controls away for 12 s and gives

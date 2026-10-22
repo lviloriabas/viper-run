@@ -186,9 +186,9 @@ la maniobra de esfuerzo AGSM (65 mmHg, 3 G, que el piloto agota en unos
 push-pull). La retina deja de perfundirse entre 30 y 0 mmHg y el cerebro
 entre -5 y -25 mmHg; cada uno guarda oxígeno para 3 y 5 s. Con los datos de
 centrífuga de Burton y Whinnery como referencia, el piloto relajado y sin
-protección pierde visión periférica a unos 4,7 G con instauración gradual
+protección pierde visión periférica a unos 4,9 G con instauración gradual
 (0,1 G/s), se queda a oscuras a 5,5 G y pierde la conciencia a 6,9 G; con
-instauración rápida a una meseta, la visión se cierra medio G antes. El
+instauración rápida a una meseta, la visión se cierra 0,7 G antes. El
 piloto entrenado aguanta 9 G durante 15 s con la vista algo estrechada, y se
 desmaya si los mantiene más de un minuto. El G-LOC dura 12 s de
 incapacidad absoluta y 12 s de relativa, en los que los mandos vuelven poco a
