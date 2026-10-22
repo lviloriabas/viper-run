@@ -212,7 +212,7 @@ impl<'a> Ui<'a> {
                 },
             ),
             MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
-            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits is coming. Nobody shoots back, and whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
+            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits flies circuits round the gorge. Nobody chases you or shoots back, and whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
         yy += 2.0 * s;

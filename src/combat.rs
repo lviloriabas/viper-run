@@ -319,7 +319,39 @@ pub struct Bandit {
     /// Countermeasure programs left and seconds to the next.
     programs: u32,
     cm_clock: f64,
+    /// Free flight: the circuit it flies instead of chasing the player.
+    patrol: Option<Patrol>,
 }
+
+/// A racetrack round the gorge: eight points on a circle, flown one way or
+/// the other, at a height over the terrain.
+#[derive(Clone, Copy, Debug)]
+struct Patrol {
+    radius: f64,
+    /// +1 clockwise seen from above, -1 the other way.
+    turn: i32,
+    over: f64,
+    next: usize,
+}
+
+impl Patrol {
+    fn point(&self, k: usize) -> V3 {
+        let z = PATROL_CENTRE_Z;
+        let ang = k as f64 * std::f64::consts::TAU / PATROL_POINTS as f64;
+        let p = v3(river_x(z) + ang.sin() * self.radius, 0.0, z - ang.cos() * self.radius);
+        v3(p.x, high(p, self.over), p.z)
+    }
+
+    fn after(&self, k: usize) -> usize {
+        (k as i32 + self.turn).rem_euclid(PATROL_POINTS as i32) as usize
+    }
+}
+
+const PATROL_POINTS: usize = 8;
+/// Halfway down the gate route, so the circuits ring the gorge.
+const PATROL_CENTRE_Z: f64 = -600.0;
+/// A bandit turns for the next point once within this of it, m.
+const PATROL_REACHED: f64 = 3000.0;
 
 /// A killed jet falling out of the sky, tumbling and burning.
 pub struct Wreck {
@@ -484,7 +516,7 @@ pub fn load(a: &mut Aircraft, l: &Loadout) {
 }
 
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
-    Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0 }
+    Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0, patrol: None }
 }
 
 /// Height `over` the terrain, and never under 2,600 m: above the ridges.
@@ -504,6 +536,21 @@ fn pair(kind: Type, from: V3, fwd: V3, range: f64) -> [Bandit; 2] {
         bandit(spawn_type(kind, v3(lead.x, high(lead, 1300.0), lead.z), back, 235.0), 0.55, "BANDIT 1"),
         bandit(spawn_type(kind, v3(wing.x, high(wing, 1300.0) + 300.0, wing.z), back, 235.0), 0.35, "BANDIT 2"),
     ]
+}
+
+/// Free flight's pair: the lead on a 14 km circuit flown clockwise, the
+/// wing on a 9 km one the other way and 300 m higher, so their paths never
+/// meet. Each starts on its circuit heading for the next point.
+fn patrol_pair(kind: Type) -> [Bandit; 2] {
+    let fly = |radius: f64, turn: i32, over: f64, at: usize, skill: f64, callsign: &'static str| {
+        let mut p = Patrol { radius, turn, over, next: 0 };
+        p.next = p.after(at);
+        let from = p.point(at);
+        let mut b = bandit(spawn_type(kind, from, heading_of(p.point(p.next) - from), 235.0), skill, callsign);
+        b.patrol = Some(p);
+        b
+    };
+    [fly(14000.0, 1, 1300.0, 0, 0.55, "BANDIT 1"), fly(9000.0, -1, 1600.0, 4, 0.35, "BANDIT 2")]
 }
 
 fn heading_of(v: V3) -> f64 {
@@ -625,17 +672,17 @@ impl Combat {
                 m.gate_index = 0;
             }
             // The gate run's start and rings, with the strike's targets along
-            // the river and a pair of bandits up the gorge.
+            // the river and a pair of bandits flying circuits round the gorge.
             MissionKind::Free => {
                 c.sites = targets::place();
-                c.bandits.extend(pair(Type::F16, m.start_pos, fwd, 20000.0));
+                c.bandits.extend(patrol_pair(Type::F16));
             }
         }
         c
     }
 
-    /// Free flight goes on until the pilot quits: a new pair of bandits 15 km
-    /// ahead half a minute after the last one falls, the targets rebuilt
+    /// Free flight goes on until the pilot quits: a new pair of bandits on
+    /// their circuits half a minute after the last one falls, the targets rebuilt
     /// half a minute after the last one burns, and the jet rearmed, refuelled
     /// and repaired once it stops on the ground.
     fn practice(&mut self, a: &mut Aircraft) {
@@ -643,10 +690,8 @@ impl Combat {
             let at = *self.next_wave.get_or_insert(self.clock + 30.0);
             if self.clock >= at {
                 self.next_wave = None;
-                let fwd = flat_of(a.vel);
-                let fwd = if fwd.len() > 0.5 { fwd } else { flat_of(a.q.axes().forward) };
-                self.bandits.extend(pair(self.cfg.aggressor, a.pos, fwd, 15000.0));
-                self.events.push(Event::Lock { text: "NEW PAIR INBOUND".to_string() });
+                self.bandits.extend(patrol_pair(self.cfg.aggressor));
+                self.events.push(Event::Lock { text: "NEW PAIR ON PATROL".to_string() });
             }
         }
         if self.sites.iter().all(|s| s.dead) {
@@ -1054,7 +1099,19 @@ impl Combat {
                 self.decoy(Who::Bandit(i), p, v);
             }
             let b = &mut self.bandits[i];
-            let pic = Picture { foe: a, missile: threat, missiles: b.missiles, missile_spec: &AIM9M, rounds: b.rounds };
+            // On patrol the foe it steers for is a mark parked on its next
+            // point, as the autopilot does; the player is no part of it.
+            let mark = b.patrol.as_mut().map(|p| {
+                let flat = |v: V3| v3(v.x, 0.0, v.z);
+                if flat(p.point(p.next) - b.jet.pos).len() < PATROL_REACHED {
+                    p.next = p.after(p.next);
+                }
+                let mut mark = b.jet.clone();
+                mark.pos = p.point(p.next);
+                mark.vel = V3::ZERO;
+                mark
+            });
+            let pic = Picture { foe: mark.as_ref().unwrap_or(a), missile: threat, missiles: b.missiles, missile_spec: &AIM9M, rounds: b.rounds };
             let o = b.pilot.fly(&b.jet, &pic, dt);
             b.jet.update(dt, &o.input);
             if b.jet.crashed {
@@ -1749,7 +1806,7 @@ mod tests {
         c.clock += 31.0;
         c.practice(&mut a);
         assert_eq!(c.bandits.iter().filter(|b| b.alive).count(), 2);
-        assert!(c.bandits[2].jet.kind == Type::Mig29 && (c.bandits[2].jet.pos - a.pos).len() > 12000.0);
+        assert!(c.bandits[2].jet.kind == Type::Mig29 && c.bandits[2..].iter().all(|b| b.patrol.is_some()));
         assert!(c.sites.iter().all(|s| !s.dead));
         let i = c.loadout.next(Store::Aim9).unwrap();
         c.loadout.stations[i].loaded = false;
@@ -1780,6 +1837,34 @@ mod tests {
         assert!(c.rounds.is_empty() && c.missiles.is_empty() && c.hp == 100.0 && !c.player_dead);
         assert!(c.bandits.iter().all(|b| b.rounds == GUN_ROUNDS && b.missiles == 2));
         assert!(c.emitters(&a).iter().all(|e| !e.2));
+    }
+
+    /// Free flight's bandits fly their circuits round the gorge from point
+    /// to point and pay no mind to a player sitting right beside them.
+    #[test]
+    fn free_flight_bandits_fly_their_circuits() {
+        terrain::init();
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Free, &mut m);
+        let centre = v3(river_x(PATROL_CENTRE_Z), 0.0, PATROL_CENTRE_Z);
+        let start = c.bandits[0].jet.pos;
+        let mut a = spawn(start + v3(600.0, 0.0, 600.0), 0.0, 0.0);
+        let mut next = [0, 1].map(|i| c.bandits[i].patrol.unwrap().next);
+        let mut legs = [0usize; 2];
+        for _ in 0..(150.0 / FIXED_DT_TEST) as usize {
+            c.step(FIXED_DT_TEST, &mut a, false, &mut m);
+            for (i, b) in c.bandits.iter().enumerate() {
+                let p = b.patrol.unwrap();
+                let r = v3(b.jet.pos.x - centre.x, 0.0, b.jet.pos.z - centre.z).len();
+                assert!(b.alive && (r - p.radius).abs() < 5000.0, "bandit {i} {r:.0} m from the centre of a {:.0} m circuit", p.radius);
+                if p.next != next[i] {
+                    next[i] = p.next;
+                    legs[i] += 1;
+                }
+            }
+        }
+        assert!(legs.iter().all(|&n| n >= 2), "points reached {legs:?}");
+        assert!((c.bandits[0].jet.pos - a.pos).len() > 5000.0, "the lead stayed with the player");
     }
 
     const FIXED_DT_TEST: f64 = crate::sim::FIXED_DT;
