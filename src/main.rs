@@ -288,12 +288,6 @@ fn stick_curve(v: f64) -> f64 {
     v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
 }
 
-/// Controller stick shaping: a little gentler around centre for fine
-/// corrections (the FLCS shaping adds its own), full deflection at the stop.
-fn pad_curve(v: f64) -> f64 {
-    v * (0.7 + 0.3 * v * v)
-}
-
 /// Afterburner alight, for the light-off thump and torch.
 fn burner_lit(a: &Aircraft) -> bool {
     a.ab_level > 0.05
@@ -838,7 +832,7 @@ impl App {
         // applies inversion later.
         let pad = &self.pad;
         let on_ground = self.aircraft.as_ref().is_some_and(|a| a.on_ground);
-        let lx = pad_curve(pad.state.left.0);
+        let lx = pad.state.left.0;
         let (roll, yaw, up, down, burner, brake_clear) = match self.settings.pad_layout {
             // LB / LT run the throttle (held at the stop, LB lights the
             // burner) and the bumpers are free of the rudder: holding X turns
@@ -862,7 +856,7 @@ impl App {
             roll_right: k(Bind::RollRight),
             yaw_left: k(Bind::YawLeft),
             yaw_right: k(Bind::YawRight),
-            pitch_axis: pitch_axis - pad_curve(pad.state.left.1),
+            pitch_axis: pitch_axis - pad.state.left.1,
             roll_axis: roll,
             yaw_axis: clamp(stick_curve(mouse.0) + yaw, -1.0, 1.0),
             throttle_up: k(Bind::ThrottleUp) || up,

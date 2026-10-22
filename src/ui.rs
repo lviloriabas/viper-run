@@ -205,7 +205,12 @@ impl<'a> Ui<'a> {
         let (copy, tag) = match mission {
             MissionKind::Gates => ("You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
             MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
-            MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B."),
+            MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", match (self.pad, self.layout) {
+                    (false, _) => "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B.",
+                    (true, PadLayout::Combat) => "GEAR AND FLAPS ARE ON THE D-PAD, WHEEL BRAKES ON LT.",
+                    (true, PadLayout::Classic) => "GEAR IS ON THE RS CLICK, WHEEL BRAKES ON LT.",
+                },
+            ),
             MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
             MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits is coming. Nobody shoots back, and whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
         };
@@ -271,24 +276,20 @@ impl<'a> Ui<'a> {
             self.cv.rect(bxx + 6.0 * s, ry - 5.0 * sm, bw - 12.0 * s, 1.0, with_alpha(LINE, 0.6));
         }
         ry += 2.0 * s;
-        let (k1, k2) = match pitch {
-            PitchSource::Mouse => (("MOUSE", "PITCH / YAW"), ("W S", "PITCH OPTION IN K")),
-            PitchSource::Keys => (("W S", "PITCH"), ("MOUSE", "YAW")),
+        let k1 = match pitch {
+            PitchSource::Mouse => ("MOUSE", "PITCH / RUDDER"),
+            PitchSource::Keys => ("W S", "PITCH"),
         };
-        let keys = if mission != MissionKind::Gates {
-            if self.pad && self.layout == PadLayout::Combat {
-                [("L STICK", "PITCH / ROLL"), ("LB LT", "THROTTLE"), ("X HELD", "RUDDER"), ("RT", "FIRE / PICKLE"), ("A", "WEAPON"), ("RB", "LOCK, HOLD DROP"), ("L3", "CHAFF / FLARE"), ("R STICK", "LOOK / HELMET"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("D-DOWN", "GEAR"), ("START", "PAUSE, B MENU")]
-            } else if self.pad {
-                [("L STICK", "PITCH / ROLL"), ("RT LT", "THROTTLE"), ("LB RB", "RUDDER"), ("A", "FIRE / PICKLE"), ("D-UP", "WEAPON"), ("D-DOWN", "LOCK TARGET"), ("L3", "CHAFF / FLARE"), ("R STICK", "LOOK AROUND"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("START", "PAUSE, B MENU")]
-            } else {
-                [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("X", "WEAPON"), ("T", "LOCK TARGET"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("V", "CHASE / COCKPIT"), ("H", "AIRBRAKE"), ("P ESC", "PAUSE, MENU")]
-            }
-        } else if self.pad && self.layout == PadLayout::Combat {
-            [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("LB LT", "THROTTLE"), ("LB HELD", "AFTERBURNER"), ("X HELD", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("D-DOWN", "GEAR"), ("D-PAD L R", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
-        } else if self.pad {
-            [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("RT LT", "THROTTLE"), ("RT FULL", "AFTERBURNER"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("D-PAD", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
-        } else {
-            [k1, ("A D", "ROLL"), k2, ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("H", "AIRBRAKE ON / OFF"), ("ALT+MOUSE", "LOOK AROUND"), ("V", "CHASE / COCKPIT"), ("F1 F2", "MFD PAGES"), ("C", "CENTER VIEW"), ("P ESC", "PAUSE, MENU")]
+        // Missions with something to shoot list the weapons; the others list
+        // what flying the route and landing need.
+        let armed = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
+        let keys = match (armed, self.pad, self.layout) {
+            (true, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "FIRE"), ("RB", "LOCK TARGET"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("A", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("X + LS", "RUDDER"), ("B", "SPEEDBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
+            (true, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("A", "FIRE"), ("D-PAD DOWN", "LOCK TARGET"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("D-PAD UP", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("LB RB", "RUDDER"), ("B", "SPEEDBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
+            (false, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("X + LS", "RUDDER"), ("B", "SPEEDBRAKE"), ("D-PAD DOWN", "LANDING GEAR"), ("D-PAD UP", "FLAPS"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
+            (false, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("LB RB", "RUDDER"), ("B", "SPEEDBRAKE"), ("RS CLICK", "LANDING GEAR"), ("X", "CENTER VIEW"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
+            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "SPEEDBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE, MENU")],
+            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "SPEEDBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE, MENU")],
         };
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
@@ -566,19 +567,54 @@ impl<'a> Ui<'a> {
         self.cv.text(heading, m, y, sm, rgba(0xbe, 0xd5, 0x8f, 1.0), Align::Left);
         y += 12.0 * s;
         let pitch_rows: &[(&str, &str)] = match (self.pad, st.pitch, st.invert_pitch) {
-            (true, _, false) => &[("L STICK", "Pitch / roll, back pulls")],
-            (true, _, true) => &[("L STICK", "Pitch / roll, back pushes")],
-            (false, PitchSource::Mouse, false) => &[("MOUSE Y", "Pitch, down pulls")],
-            (false, PitchSource::Mouse, true) => &[("MOUSE Y", "Pitch, up pulls")],
-            (false, PitchSource::Keys, false) => &[("S / DOWN", "Pitch up, pull"), ("W / UP", "Pitch down, push")],
-            (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
+            (true, _, false) => &[("LS", "Pitch and roll")],
+            (true, _, true) => &[("LS", "Pitch (inverted) and roll")],
+            (false, PitchSource::Mouse, false) => &[("MOUSE Y", "Pitch")],
+            (false, PitchSource::Mouse, true) => &[("MOUSE Y", "Pitch (inverted)")],
+            (false, PitchSource::Keys, false) => &[("S / DOWN", "Nose up"), ("W / UP", "Nose down")],
+            (false, PitchSource::Keys, true) => &[("W / UP", "Nose up"), ("S / DOWN", "Nose down")],
         };
-        let rest: &[(&str, &str)] = if self.pad && st.pad_layout == PadLayout::Combat {
-            &[("R STICK", "Look / helmet, springs back"), ("RT", "Fire / pickle, hold for gun"), ("RB", "Lock / next, hold to drop"), ("LB", "Throttle up, stop lights AB"), ("LT", "Throttle down, ground brakes"), ("X HELD", "L stick X works the rudder"), ("L3", "Chaff and flare"), ("A", "Cycle weapon"), ("B", "Airbrake out / in"), ("Y", "Cockpit / chase"), ("D-PAD L R", "MFD pages, menus"), ("D-PAD DOWN", "Landing gear"), ("D-PAD UP", "Alt flaps"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
-        } else if self.pad {
-            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("LT", "Wheel brakes on the ground"), ("B", "Airbrake out / in"), ("X", "Center view"), ("R3", "Landing gear"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("L3", "Chaff and flare"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
-        } else {
-            &[("MOUSE X", "Yaw, springs back"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire / pickle"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen"), ("KEYS", "Rebind in the panel at right")]
+        let rest: &[(&str, &str)] = match (self.pad, st.pad_layout) {
+            (true, PadLayout::Combat) => &[
+                ("RS", "Look around"),
+                ("RT", "Fire, hold for gun"),
+                ("RB", "Lock target, again for next"),
+                ("RB HOLD", "Drop lock"),
+                ("LB", "Throttle up, afterburner at the stop"),
+                ("LT", "Throttle down"),
+                ("LT GROUND", "Wheel brakes"),
+                ("X + LS", "Rudder"),
+                ("LS CLICK", "Chaff and flare"),
+                ("A", "Next weapon"),
+                ("B", "Speedbrake"),
+                ("Y", "Cockpit / chase camera"),
+                ("D-PAD L R", "Left / right MFD page"),
+                ("D-PAD DOWN", "Landing gear"),
+                ("D-PAD UP", "Flaps"),
+                ("START", "Freeze flight"),
+                ("B FROZEN", "Pause menu"),
+                ("BACK", "Controls and settings"),
+            ],
+            (true, PadLayout::Classic) => &[
+                ("RS", "Look around"),
+                ("A", "Fire, hold for gun"),
+                ("D-PAD DOWN", "Lock target, again for next"),
+                ("RT", "Throttle up, afterburner at the stop"),
+                ("LT", "Throttle down"),
+                ("LT GROUND", "Wheel brakes"),
+                ("LB RB", "Rudder left / right"),
+                ("LS CLICK", "Chaff and flare"),
+                ("D-PAD UP", "Next weapon"),
+                ("B", "Speedbrake"),
+                ("X", "Center view"),
+                ("RS CLICK", "Landing gear"),
+                ("Y", "Cockpit / chase camera"),
+                ("D-PAD L R", "Left / right MFD page"),
+                ("START", "Freeze flight"),
+                ("B FROZEN", "Pause menu"),
+                ("BACK", "Controls and settings"),
+            ],
+            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("P", "Freeze flight"), ("ESC", "Pause menu"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("KEYS", "Change them at right")],
         };
         for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
             self.cv.text(k, m, y, sm, ACID, Align::Left);
@@ -797,7 +833,7 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     cv.text(&clk, rx, h * 0.058, s, if m.timed && m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(score, 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
-    let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
+    let keys = if cue.pad { "BACK  CONTROLS    RS  LOOK    Y  CAMERA" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
     // Above the combiner, which the default head pitch lifts high on screen.

@@ -40,14 +40,17 @@ pub struct Gamepad {
     now: f64,
 }
 
-/// Radial dead zone, rescaled so the output rises from zero at its edge.
+/// Radial dead zone, rescaled so the output rises linearly from zero at its
+/// edge and reaches full deflection a little short of the rim, where worn
+/// sticks stop. The FLCS adds the only response curve.
 fn stick((x, y): (f64, f64)) -> (f64, f64) {
-    const DEAD: f64 = 0.15;
+    const DEAD: f64 = 0.10;
+    const FULL: f64 = 0.95;
     let m = (x * x + y * y).sqrt();
     if m <= DEAD {
         return (0.0, 0.0);
     }
-    let k = ((m - DEAD) / (1.0 - DEAD)).min(1.0) / m;
+    let k = ((m - DEAD) / (FULL - DEAD)).min(1.0) / m;
     (x * k, y * k)
 }
 
