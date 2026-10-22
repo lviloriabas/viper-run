@@ -188,7 +188,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--mission gates|dogfight|strike|airfield] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -515,6 +515,7 @@ impl App {
             self.toggle_controls(Some(false));
         }
         self.mission = Mission::new();
+        self.mission.timed = self.settings.clock;
         self.combat = Combat::new(self.kind, &mut self.mission);
         if self.kind != MissionKind::Gates {
             self.combat.equip(&self.config);
@@ -561,6 +562,7 @@ impl App {
                 MissionKind::Dogfight => "DOGFIGHT // 3 BANDITS // T LOCK, X WEAPON",
                 MissionKind::Strike => "STRIKE // BRIDGE AND SA-6 // X WEAPON, T DESIGNATE",
                 MissionKind::Airfield => "RUNWAY A // THROTTLE UP, ROTATE AT 150 KT, G GEAR UP",
+                MissionKind::Free => "FREE FLIGHT // NO CLOCK // STOP ON RWY A TO REARM",
             },
             3.4,
         );
@@ -692,11 +694,13 @@ impl App {
             }
             Action::Jet => self.config.jet = self.config.jet.next(),
             Action::Aggressor => self.config.aggressor = self.config.aggressor.next(),
+            Action::Clock => self.settings.clock = !self.settings.clock,
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
                 let keys = self.settings.keys;
-                self.settings = Settings { fullscreen: fs, muted, keys, ..Settings::default() };
+                let clock = self.settings.clock;
+                self.settings = Settings { fullscreen: fs, muted, clock, keys, ..Settings::default() };
             }
             Action::Rebind(i, slot) => {
                 self.rebinding = Some((i as usize, slot as usize));
@@ -704,7 +708,7 @@ impl App {
             }
             Action::ResetKeys => self.settings.keys = keymap::Keymap::default(),
         }
-        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Reset | Action::ResetKeys) {
+        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Clock | Action::Reset | Action::ResetKeys) {
             self.mouse = (0.0, 0.0);
             self.save();
         }
@@ -796,7 +800,8 @@ impl App {
 
     fn complete_transition(&mut self) {
         if let Some(r) = self.result {
-            if r.kind == Outcome::Win && r.mission == MissionKind::Gates {
+            // An untimed run is not a record: it has no clock to beat.
+            if r.kind == Outcome::Win && r.mission == MissionKind::Gates && self.mission.timed {
                 if r.score > self.best.score {
                     self.best.score = r.score.round();
                 }
@@ -970,7 +975,9 @@ impl App {
         let m = &mut self.mission;
         let a = self.aircraft.as_mut().unwrap();
         m.elapsed += dt;
-        m.time_left = (m.time_left - dt).max(0.0);
+        if m.timed {
+            m.time_left = (m.time_left - dt).max(0.0);
+        }
         let input = self.pilot.controls(a, input);
         a.update(dt, &input);
         let (glocs, gcas) = (self.pilot.glocs, self.pilot.gcas);
@@ -983,21 +990,34 @@ impl App {
         let m = &mut self.mission;
         let a = self.aircraft.as_mut().unwrap();
         m.score = m.final_score();
-        if self.kind == MissionKind::Gates && m.gate_index < m.gates.len() {
+        let rings = matches!(self.kind, MissionKind::Gates | MissionKind::Free);
+        if rings && m.gate_index < m.gates.len() {
             let gi = m.gate_index;
             if gate_crossed(a, &m.gates[gi]) {
                 m.gates[gi].passed = true;
                 m.passed += 1;
                 m.gate_index += 1;
-                m.time_left += GATE_BONUS;
+                if m.timed {
+                    m.time_left += GATE_BONUS;
+                }
                 m.score = m.final_score();
-                let passed = m.passed;
+                // The ring just flown, which free flight counts again on each lap.
+                let passed = gi + 1;
                 let done = m.gate_index >= m.gates.len();
+                let timed = m.timed;
+                // Free flight runs the rings again from the first.
+                if done && self.kind == MissionKind::Free {
+                    m.gate_index = 0;
+                    for g in m.gates.iter_mut() {
+                        g.passed = false;
+                    }
+                }
                 self.flash_color = [185, 255, 170];
                 self.flash = 0.36;
-                self.flash_toast(&format!("GATE {:02} CLEAR // +{} SEC", passed, GATE_BONUS), 2.3);
+                let clear = if timed { format!("GATE {:02} CLEAR // +{} SEC", passed, GATE_BONUS) } else { format!("GATE {:02} CLEAR", passed) };
+                self.flash_toast(&clear, 2.3);
                 self.audio.gate();
-                if done {
+                if done && self.kind == MissionKind::Gates {
                     self.begin_finish(Outcome::Win);
                     return;
                 }
@@ -1013,7 +1033,7 @@ impl App {
             }
             return;
         }
-        if self.mission.time_left <= 0.0 {
+        if self.mission.timed && self.mission.time_left <= 0.0 {
             self.begin_finish(Outcome::Timeout);
         }
     }
@@ -1078,6 +1098,7 @@ impl App {
             MissionKind::Dogfight => Some(Objective { label: format!("KILLS {done}/{total}"), score: self.combat.score(&self.mission), cue: "BULLSEYE" }),
             MissionKind::Strike => Some(Objective { label: format!("TARGETS {done}/{total}"), score: self.combat.score(&self.mission), cue: "STPT" }),
             MissionKind::Airfield => Some(Objective { label: ["TAKE OFF", "STPT 1", "LAND RWY A", "STOPPED"][done.min(3)].to_string(), score: self.combat.score(&self.mission), cue: if done == 0 { "RWY" } else { "STPT" } }),
+            MissionKind::Free => Some(Objective { label: format!("KILLS {done}  TGTS {total}"), score: self.combat.score(&self.mission), cue: "GATE" }),
         }
     }
 
@@ -1451,8 +1472,9 @@ impl EventHandler for App {
         // World and cockpit into the low-resolution scene target.
         let aspect = (w / h) as f64;
         self.ctx.begin_pass(Some(self.scene.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
-        // Gate rings only on the gate run; the fight brings its own props and smoke.
-        let mission = if flying_view { (self.kind == MissionKind::Gates).then_some(&self.mission) } else { Some(&self.preview) };
+        // Gate rings only on the gate run and in free flight; the fight brings
+        // its own props and smoke.
+        let mission = if flying_view { matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission) } else { Some(&self.preview) };
         if flying_view {
             props::fill_fx(&self.combat, &mut self.world.fx, &cam);
         } else {
@@ -1519,7 +1541,7 @@ impl EventHandler for App {
             let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad, layout: self.settings.pad_layout };
             if !self.controls_open {
                 match self.state {
-                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config),
+                    State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
                     State::Loadout => u.loadout_screen(self.kind, &self.config),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));

@@ -19,10 +19,13 @@ pub enum MissionKind {
     Strike,
     /// Take off from the airbase, fly out to a steerpoint, come back and land.
     Airfield,
+    /// Practice with no clock and no end: the gate rings, the ground targets
+    /// and a pair of bandits, all coming back once cleared.
+    Free,
 }
 
 impl MissionKind {
-    pub const ALL: [MissionKind; 4] = [MissionKind::Gates, MissionKind::Dogfight, MissionKind::Strike, MissionKind::Airfield];
+    pub const ALL: [MissionKind; 5] = [MissionKind::Gates, MissionKind::Dogfight, MissionKind::Strike, MissionKind::Airfield, MissionKind::Free];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -30,6 +33,7 @@ impl MissionKind {
             MissionKind::Dogfight => "DOGFIGHT",
             MissionKind::Strike => "STRIKE",
             MissionKind::Airfield => "AIRFIELD",
+            MissionKind::Free => "FREE FLIGHT",
         }
     }
 
@@ -39,6 +43,7 @@ impl MissionKind {
             "dogfight" | "aa" => Some(MissionKind::Dogfight),
             "strike" | "ag" => Some(MissionKind::Strike),
             "airfield" | "circuit" | "land" => Some(MissionKind::Airfield),
+            "free" | "practice" => Some(MissionKind::Free),
             _ => None,
         }
     }
@@ -50,6 +55,7 @@ impl MissionKind {
             MissionKind::Dogfight => 360.0,
             MissionKind::Strike => 420.0,
             MissionKind::Airfield => 600.0,
+            MissionKind::Free => 0.0,
         }
     }
 }
@@ -144,6 +150,7 @@ impl Config {
             MissionKind::Airfield => Config { outboard: None, inboard: None, fuel: 0.6, jet: Type::F16, aggressor: Type::Mig29 },
             MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
             MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
+            MissionKind::Free => Config { outboard: Some(Store::Aim120), inboard: Some(Store::Mk82), fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
         }
     }
 
@@ -393,6 +400,12 @@ pub struct Combat {
     pub leg: u8,
     touched: bool,
     last_vs: f64,
+    /// What the loadout screen hung, for a rearm on the ground in free
+    /// flight, and when the next pair of bandits and the rebuilt targets come.
+    cfg: Config,
+    next_wave: Option<f64>,
+    rebuild_at: Option<f64>,
+    rearmed: bool,
 }
 
 /// A trimmed F-16 at a point, heading (radians clockwise from north) and speed.
@@ -471,6 +484,25 @@ fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
     Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0 }
 }
 
+/// Height `over` the terrain, and never under 2,600 m: above the ridges.
+fn high(p: V3, over: f64) -> f64 {
+    (terrain::floor(p.x, p.z) + over).max(2600.0)
+}
+
+/// Two bandits `range` ahead of a point coming head-on, high over the
+/// ridges and spread 3 km apart, so the merge opens out and the fight has room.
+fn pair(kind: Type, from: V3, fwd: V3, range: f64) -> [Bandit; 2] {
+    let centre = from + fwd * range;
+    let side = fwd.cross(V3::Y).norm();
+    let back = heading_of(-fwd);
+    let lead = centre + side * 1400.0;
+    let wing = centre - side * 1600.0 + fwd * 2500.0;
+    [
+        bandit(spawn_type(kind, v3(lead.x, high(lead, 1300.0), lead.z), back, 235.0), 0.55, "BANDIT 1"),
+        bandit(spawn_type(kind, v3(wing.x, high(wing, 1300.0) + 300.0, wing.z), back, 235.0), 0.35, "BANDIT 2"),
+    ]
+}
+
 fn heading_of(v: V3) -> f64 {
     v.x.atan2(-v.z)
 }
@@ -498,7 +530,7 @@ impl Combat {
             kind,
             mode: match kind {
                 MissionKind::Gates | MissionKind::Airfield => Mode::Nav,
-                MissionKind::Dogfight => Mode::Srm,
+                MissionKind::Dogfight | MissionKind::Free => Mode::Srm,
                 MissionKind::Strike => Mode::Ccip,
             },
             loadout: Loadout::for_mission(kind),
@@ -537,8 +569,14 @@ impl Combat {
             leg: 0,
             touched: false,
             last_vs: 0.0,
+            cfg: Config::for_mission(kind),
+            next_wave: None,
+            rebuild_at: None,
+            rearmed: true,
         };
-        m.time_left = kind.time();
+        // Free flight never runs a clock; an untimed run keeps none to score.
+        m.timed &= kind != MissionKind::Free;
+        m.time_left = if m.timed { kind.time() } else { 0.0 };
         let fwd = m.start_vel.norm();
         match kind {
             MissionKind::Gates => {}
@@ -571,15 +609,10 @@ impl Combat {
                 m.start_q = Quat::from_forward_up(level, V3::Y);
                 let centre = m.start_pos + fwd * 20000.0;
                 let side = fwd.cross(V3::Y).norm();
-                let alt = |p: V3, over: f64| (terrain::floor(p.x, p.z) + over).max(2600.0);
-                let back = heading_of(-fwd);
-                let lead = centre + side * 1400.0;
-                let wing = centre - side * 1600.0 + fwd * 2500.0;
-                c.bandits.push(bandit(spawn(v3(lead.x, alt(lead, 1300.0), lead.z), back, 235.0), 0.55, "BANDIT 1"));
-                c.bandits.push(bandit(spawn(v3(wing.x, alt(wing, 1300.0) + 300.0, wing.z), back, 235.0), 0.35, "BANDIT 2"));
+                c.bandits.extend(pair(Type::F16, m.start_pos, fwd, 20000.0));
                 let late = m.start_pos + fwd * 9000.0 + side * 14000.0;
-                c.reserve.push(bandit(spawn(v3(late.x, alt(late, 1500.0) + 600.0, late.z), heading_of(-side), 240.0), 0.8, "BANDIT 3"));
-                m.gates = vec![Gate { pos: v3(centre.x, alt(centre, 1300.0), centre.z), radius: 0.0, axis: fwd, passed: false }];
+                c.reserve.push(bandit(spawn(v3(late.x, high(late, 1500.0) + 600.0, late.z), heading_of(-side), 240.0), 0.8, "BANDIT 3"));
+                m.gates = vec![Gate { pos: v3(centre.x, high(centre, 1300.0), centre.z), radius: 0.0, axis: fwd, passed: false }];
                 m.gate_index = 0;
             }
             MissionKind::Strike => {
@@ -587,8 +620,55 @@ impl Combat {
                 m.gates = (0..targets::GROUPS.len()).filter_map(|g| targets::group_point(&c.sites, g)).map(|pos| Gate { pos, radius: 0.0, axis: fwd, passed: false }).collect();
                 m.gate_index = 0;
             }
+            // The gate run's start and rings, with the strike's targets along
+            // the river and a pair of bandits up the gorge.
+            MissionKind::Free => {
+                c.sites = targets::place();
+                c.bandits.extend(pair(Type::F16, m.start_pos, fwd, 20000.0));
+            }
         }
         c
+    }
+
+    /// Free flight goes on until the pilot quits: a new pair of bandits 15 km
+    /// ahead half a minute after the last one falls, the targets rebuilt
+    /// half a minute after the last one burns, and the jet rearmed, refuelled
+    /// and repaired once it stops on the ground.
+    fn practice(&mut self, a: &mut Aircraft) {
+        if self.bandits.iter().all(|b| !b.alive) {
+            let at = *self.next_wave.get_or_insert(self.clock + 30.0);
+            if self.clock >= at {
+                self.next_wave = None;
+                let fwd = flat_of(a.vel);
+                let fwd = if fwd.len() > 0.5 { fwd } else { flat_of(a.q.axes().forward) };
+                self.bandits.extend(pair(self.cfg.aggressor, a.pos, fwd, 15000.0));
+                self.events.push(Event::Lock { text: "NEW PAIR INBOUND".to_string() });
+            }
+        }
+        if self.sites.iter().all(|s| s.dead) {
+            let at = *self.rebuild_at.get_or_insert(self.clock + 30.0);
+            if self.clock >= at {
+                self.rebuild_at = None;
+                self.sites = targets::place();
+                if matches!(self.lock, Some(Who::Ground(_))) {
+                    self.lock = None;
+                }
+                self.events.push(Event::Toast("GROUND TARGETS REBUILT".to_string()));
+            }
+        }
+        if !a.on_ground {
+            self.rearmed = false;
+        } else if !self.rearmed && a.speed < 1.0 {
+            self.rearmed = true;
+            self.loadout = Loadout::configure(&self.cfg);
+            self.hp = 100.0;
+            a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
+            a.stores_mass = self.loadout.mass();
+            a.wing_stores = self.loadout.wing_mass();
+            a.stores_drag = self.loadout.drag();
+            a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
+            self.events.push(Event::Toast("REARMED, REFUELLED AND REPAIRED".to_string()));
+        }
     }
 
     /// Hangs the stores the loadout screen chose, and selects a master mode
@@ -601,6 +681,7 @@ impl Combat {
                 b.jet = spawn_type(cfg.aggressor, j.pos, heading_of(j.vel), j.speed);
             }
         }
+        self.cfg = *cfg;
         self.loadout = Loadout::configure(cfg);
         if !self.modes().contains(&self.mode) {
             self.mode = *self.modes().iter().rev().find(|&&m| m != Mode::Ccip).unwrap_or(&Mode::Gun);
@@ -763,6 +844,9 @@ impl Combat {
         self.objectives(m);
         if self.kind == MissionKind::Airfield && alive {
             self.circuit(a, m);
+        }
+        if self.kind == MissionKind::Free && alive {
+            self.practice(a);
         }
     }
 
@@ -1349,7 +1433,7 @@ impl Combat {
 
     fn objectives(&mut self, m: &mut Mission) {
         match self.kind {
-            MissionKind::Gates | MissionKind::Airfield => {}
+            MissionKind::Gates | MissionKind::Airfield | MissionKind::Free => {}
             MissionKind::Dogfight => {
                 if self.done_at.is_none() && self.reserve.is_empty() && self.bandits.iter().all(|b| !b.alive) {
                     self.done_at = Some(self.clock);
@@ -1383,6 +1467,8 @@ impl Combat {
         match self.kind {
             MissionKind::Gates => (0, 0),
             MissionKind::Airfield => (self.leg as usize, 3),
+            // Free flight has no total: kills and ground targets destroyed.
+            MissionKind::Free => (self.kills, self.destroyed),
             MissionKind::Dogfight => (self.kills, self.bandits.len() + self.reserve.len()),
             MissionKind::Strike => (self.sites.iter().filter(|s| s.primary && s.dead).count(), self.sites.iter().filter(|s| s.primary).count()),
         }
@@ -1628,6 +1714,45 @@ mod tests {
         assert!(released, "pipper never reached the bridge");
         assert!(c.sites[bridge].dead, "bridge hp {}", c.sites[bridge].hp);
         assert!(c.destroyed >= 1 && c.points >= Kind::Bridge.points());
+    }
+
+    /// Free flight runs no clock, sends a new pair half a minute after the
+    /// sky is clear, rebuilds the targets, and rearms a jet stopped on the
+    /// ground; a mission with the clock switched off keeps no time either.
+    #[test]
+    fn free_flight_comes_back_and_rearms() {
+        terrain::init();
+        let mut m = Mission::new();
+        m.timed = false;
+        Combat::new(MissionKind::Strike, &mut m);
+        assert_eq!(m.time_left, 0.0);
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Free, &mut m);
+        assert!(!m.timed && m.time_left == 0.0);
+        assert!(c.bandits.len() == 2 && !c.sites.is_empty() && m.gates.len() == 10);
+        let mut a = spawn(v3(river_x(0.0), 4200.0, 0.0), 0.0, 240.0);
+        for b in c.bandits.iter_mut() {
+            b.alive = false;
+        }
+        for s in c.sites.iter_mut() {
+            s.dead = true;
+        }
+        c.practice(&mut a);
+        assert_eq!(c.bandits.len(), 2, "no pair before the half minute");
+        c.clock += 31.0;
+        c.practice(&mut a);
+        assert_eq!(c.bandits.iter().filter(|b| b.alive).count(), 2);
+        assert!(c.bandits[2].jet.kind == Type::Mig29 && (c.bandits[2].jet.pos - a.pos).len() > 12000.0);
+        assert!(c.sites.iter().all(|s| !s.dead));
+        let i = c.loadout.next(Store::Aim9).unwrap();
+        c.loadout.stations[i].loaded = false;
+        c.hp = 30.0;
+        c.practice(&mut a);
+        a.on_ground = true;
+        a.vel = V3::ZERO;
+        a.speed = 0.0;
+        c.practice(&mut a);
+        assert!(c.loadout.count(Store::Aim9) == 2 && c.hp == 100.0);
     }
 
     const FIXED_DT_TEST: f64 = crate::sim::FIXED_DT;

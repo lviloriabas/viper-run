@@ -31,12 +31,14 @@ pub struct Settings {
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
+    /// Mission clocks on; off, no mission times out.
+    pub clock: bool,
     pub keys: Keymap,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, fov: 58.0, muted: false, fullscreen: false, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, fov: 58.0, muted: false, fullscreen: false, clock: true, keys: Keymap::default() }
     }
 }
 
@@ -74,6 +76,7 @@ pub fn load() -> (Settings, Best) {
             ("pad_layout", _) => s.pad_layout = if v == "classic" { PadLayout::Classic } else { PadLayout::Combat },
             ("muted", _) => s.muted = v == "true",
             ("fullscreen", _) => s.fullscreen = v == "true",
+            ("clock", _) => s.clock = v != "false",
             ("best_score", Some(n)) => b.score = n.max(0.0),
             ("best_time", Some(n)) => b.time = n.max(0.0),
             (k, _) if k.starts_with("key_") => s.keys.load(&k[4..], &v),
@@ -89,8 +92,8 @@ pub fn save(s: &Settings, b: &Best) {
         return;
     }
     let text = format!(
-        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nbest_score={}\nbest_time={:.3}\n",
-        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, b.score.round(), b.time
+        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
+        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.clock, b.score.round(), b.time
     );
     let text = text + &s.keys.save();
     let _ = std::fs::write(d.join("settings.txt"), text);

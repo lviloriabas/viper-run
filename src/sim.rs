@@ -245,6 +245,9 @@ pub struct Mission {
     pub gates: Vec<Gate>,
     pub gate_index: usize,
     pub time_left: f64,
+    /// The clock counts down and ends the run at zero; off, it never runs
+    /// and the time left stays out of the score.
+    pub timed: bool,
     pub elapsed: f64,
     pub score: f64,
     pub passed: usize,
@@ -284,6 +287,7 @@ impl Mission {
             gates,
             gate_index: 0,
             time_left: MISSION_TIME,
+            timed: true,
             elapsed: 0.0,
             score: 0.0,
             passed: 0,

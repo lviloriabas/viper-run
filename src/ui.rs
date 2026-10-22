@@ -50,6 +50,8 @@ pub enum Action {
     /// Next airframe for the player, and for the bandits.
     Jet,
     Aggressor,
+    /// Mission clocks on or off.
+    Clock,
     /// Wait for a key for an action (index into keymap::BINDS) and slot.
     Rebind(u8, u8),
     ResetKeys,
@@ -170,7 +172,7 @@ impl<'a> Ui<'a> {
     }
 
     // ---------------------------------------------------------- screens
-    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind, cfg: &Config) {
+    pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind, cfg: &Config, clock: bool) {
         let s = self.s;
         let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 20.0 * s).min(250.0 * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
@@ -205,6 +207,7 @@ impl<'a> Ui<'a> {
             MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
             MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B."),
             MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
+            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits is coming. Whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
         yy += 2.0 * s;
@@ -225,12 +228,19 @@ impl<'a> Ui<'a> {
         self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
         let mut mx = bx;
         for k in MissionKind::ALL {
-            // The chosen mission is the lit button.
-            mx += self.button(k.name(), "", mx, picks_y, k == mission, Action::Pick(k)) + 4.0 * s;
+            // The chosen mission is the lit button; free flight's name is cut
+            // short so the row stays clear of the briefing card.
+            let label = if k == MissionKind::Free { "FREE FLT" } else { k.name() };
+            mx += self.button(label, "", mx, picks_y, k == mission, Action::Pick(k)) + 4.0 * s;
         }
-        let jw = self.button(&format!("JET: {}", cfg.jet.name()), "", bx, jets_y, false, Action::Jet);
-        if mission == MissionKind::Dogfight {
-            self.button(&format!("BANDITS: {}", cfg.aggressor.name()), "", bx + jw + 4.0 * s, jets_y, false, Action::Aggressor);
+        let mut jx = bx;
+        jx += self.button(&format!("JET: {}", cfg.jet.name()), "", jx, jets_y, false, Action::Jet) + 4.0 * s;
+        if matches!(mission, MissionKind::Dogfight | MissionKind::Free) {
+            jx += self.button(&format!("BANDITS: {}", cfg.aggressor.name()), "", jx, jets_y, false, Action::Aggressor) + 4.0 * s;
+        }
+        // Free flight never has a clock.
+        if mission != MissionKind::Free {
+            self.button(if clock { "CLOCK: ON" } else { "CLOCK: OFF" }, "", jx, jets_y, false, Action::Clock);
         }
 
         // Briefing card.
@@ -249,7 +259,9 @@ impl<'a> Ui<'a> {
             MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", if cfg.aggressor == crate::sim::Type::Mig29 { "MIG-29A FULCRUM, AIM-9, GUN" } else { "AGGRESSOR F-16, AIM-9, GUN" }), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
             MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
             MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
+            MissionKind::Free => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, ON A LOOP"), ("THREAT", "2 BANDITS, SA-6", "BACK 30 SEC AFTER CLEARED"), ("CLOCK", "OFF", "STOP ON RWY A TO REARM")],
         };
+        let rows = rows.map(|r| if !clock && r.0 == "CLOCK" { ("CLOCK", "OFF", "NO TIME LIMIT") } else { r });
         let mut ry = byy + 20.0 * s;
         for (k, v1, v2) in rows {
             self.cv.text(k, bxx + 6.0 * s, ry, sm, DIM, Align::Left);
@@ -347,7 +359,7 @@ impl<'a> Ui<'a> {
             "Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.",
             [
                 cleared,
-                ("TIME LEFT", format_time(m.time_left), AMBER),
+                if m.timed { ("TIME LEFT", format_time(m.time_left), AMBER) } else { ("ELAPSED", format_time(m.elapsed), AMBER) },
                 ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
                 ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
             ],
@@ -463,6 +475,21 @@ impl<'a> Ui<'a> {
                 "Wheels up, out to the steerpoint and back down on the same runway. The tower has logged your landing.",
                 [("TIME", format_time(r.time), GREEN), ("LEGS", format!("{} / {}", r.done, r.total), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", if r.score > 4200.0 { "ACE" } else if r.score > 3500.0 { "VIPER" } else { "QUALIFIED" }.to_string(), CREAM)],
                 again,
+                "R RESTART, ESC MENU",
+            );
+            return;
+        }
+        if r.mission == MissionKind::Free {
+            // Only a crash or a shootdown ends free flight.
+            let (title, text) = if r.kind == Outcome::ShotDown { ("SHOT DOWN", "The jet came apart around you and the seat did its job.") } else { ("TERRAIN WINS", "The gorge is unforgiving.") };
+            self.status_panel(
+                "// FREE FLIGHT, AIRFRAME LOST",
+                RED,
+                title,
+                RED,
+                &format!("{text} You flew {} and took down {} bandits and {} ground targets.", format_time(r.time), r.done, r.total),
+                [("FLOWN", format_time(r.time), CREAM), ("KILLS", r.done.to_string(), GREEN), ("TARGETS", r.total.to_string(), GREEN), ("SCORE", pad(r.score, 5), AMBER)],
+                &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
                 "R RESTART, ESC MENU",
             );
             return;
@@ -677,7 +704,7 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if a.fuel < 400.0 {
         w.push(Warn { text: "BINGO", color: AMBER });
     }
-    if m.time_left < 20.0 {
+    if m.timed && m.time_left < 20.0 {
         w.push(Warn { text: "TIME CRITICAL", color: AMBER });
     }
     w
@@ -766,7 +793,9 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
         cv.text(&format!("{} {}°  {}{}°", if diff >= 0.0 { "R" } else { "L" }, pad(diff.abs(), 2), if el >= 0.0 { "+" } else { "-" }, pad(el.abs(), 2)), lx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Left);
     }
     air_panel(cv, lx, h * 0.058 + 34.0 * s, s, a);
-    cv.text(&format!("CLK {}", format_time(m.time_left)), rx, h * 0.058, s, if m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
+    // Without a clock the corner counts the time flown instead.
+    let clk = if m.timed { format!("CLK {}", format_time(m.time_left)) } else { format!("ET {}", format_time(m.elapsed)) };
+    cv.text(&clk, rx, h * 0.058, s, if m.timed && m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(score, 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
     let keys = if cue.pad { "BACK  CONTROLS / CONFIG    R STICK  LOOK    Y  CHASE" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
@@ -814,7 +843,8 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     cv.text("COLD RIVER  /  SECTOR 07", edge, 19.0 * s, sm, with_alpha(HUD, 0.48), Align::Left);
     let title = obj.map(|o| o.label.clone()).unwrap_or_else(|| format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)));
     cv.text(&title, w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
-    cv.text(&format_time(m.time_left), w * 0.5, 22.0 * s, s * 2.0, if m.time_left < 20.0 { RED } else { HUD }, Align::Center);
+    let clk = if m.timed { m.time_left } else { m.elapsed };
+    cv.text(&format_time(clk), w * 0.5, 22.0 * s, s * 2.0, if m.timed && m.time_left < 20.0 { RED } else { HUD }, Align::Center);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), w - edge, 10.0 * s, s, HUD, Align::Right);
     cv.text(&format!("ALT {} FT", pad(AirData::of(a).baro_ft, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     cv.text(&format!("AOA {:.0}  GAVL {:.1}", a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);

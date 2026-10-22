@@ -3,8 +3,8 @@
 A small, self-contained retro F-16 cockpit flight game. You start airborne in a
 black river gorge with ten navigation gates ahead, two and a half minutes on the
 clock, and a mountain range that does not move. Or you fly the same gorge armed:
-a dogfight against three AI-flown aggressors, or a strike on a bridge, an SA-6
-battery and a convoy.
+a dogfight against three AI-flown aggressors, a strike on a bridge, an SA-6
+battery and a convoy, or free flight with all of it and no clock.
 
 The game is a single native executable of about 1 MB, written in Rust:
 
@@ -122,7 +122,7 @@ energy and alpha. Roll into the turn first, then pull through the valley.
 
 ## Missions
 
-Pick the mission on the start screen. DOGFIGHT and STRIKE then open a loadout
+Pick the mission on the start screen. DOGFIGHT, STRIKE and FREE FLIGHT then open a loadout
 screen: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
 pylon pairs, the internal fuel, and the gross weight, stores drag and
 thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
@@ -134,6 +134,12 @@ thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 | DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
 | AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 60 % fuel | 10:00 |
+| FREE FLIGHT | Practice with no end: the gate rings on a loop, the strike targets and a pair of bandits; a new pair comes 30 s after the last one falls, the targets are rebuilt 30 s after the last one burns, and stopping on the ground rearms, refuels and repairs the jet. Only a crash or a shootdown ends it | 2 AIM-9M, 2 AIM-120C, 2 Mk-82 | none |
+
+`CLOCK: ON / OFF` on the start screen (saved with the settings) switches the
+clock off for every mission: nothing times out, the HUD counts the time flown
+instead, no seconds-left bonus is scored, and a gate run without a clock does
+not set a best score.
 
 Kills score 1,500 points; ground targets 200 (truck) to 1,500 (bridge); a
 completed sortie adds 10 points per second left and 5 per point of airframe
@@ -463,7 +469,7 @@ viper-run --shot out.png --screen pause    # pause | freeze | win | crash | time
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
 viper-run --shot out.png --mach 0.98       # start at a Mach number (vapor cone, shocks)
 viper-run --shot out.png --vision 0.5,0,0  # pilot state: retinal oxygen, redout, G-LOC s
-viper-run --shot out.png --mission dogfight --sim 20 --input lock   # gates | dogfight | strike
+viper-run --shot out.png --mission dogfight --sim 20 --input lock   # gates | dogfight | strike | airfield | free
 viper-run --shot out.png --mission strike --input auto --sim 20     # AI flies to the steerpoint
 viper-run --shot out.png --weapon gun --input fire --sim 1          # nav | gun | aim9 | aim120 | mk82
 viper-run --shot out.png --mission strike --screen loadout          # also shotdown
