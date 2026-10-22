@@ -16,9 +16,12 @@
 //! pilot goes out near 6.9 G; held on a rapid-onset plateau, before the
 //! reflex has acted, light loss comes 0.7 G sooner. The suit adds about
 //! 1.4 G, COMBAT EDGE pressure breathing about 1.1 G and a good AGSM about
-//! 3 G, which a trained pilot tires of within a minute at 9 G. G-LOC brings
-//! 12 s of absolute and 12 s of relative incapacitation on average (2 to 38 s
-//! measured); the game keeps the short end, 5 s and 4 s. Negative g
+//! 3 G, which a trained pilot tires of within a minute at 9 G. How long a
+//! G-LOC lasts follows the exposure: the longer and deeper the brain went
+//! without blood, the longer the pilot stays out, and nobody wakes while the
+//! g is still on. Centrifuge episodes average 12 s of absolute and 12 s of
+//! relative incapacitation (2 to 38 s measured); a brief spike here costs
+//! about 3 s and 2 s, a long grinding one up to 20 s and 12 s. Negative g
 //! reddens the view from about -1.5 G and fully at the jet's -3 G limit.
 use crate::math::*;
 use crate::sim::{Aircraft, Input, G0};
@@ -55,9 +58,11 @@ const REFLEX_MAX: f64 = 20.0;
 const REFLEX_MIN: f64 = -30.0;
 const REFLEX_UP: f64 = 6.0;
 const REFLEX_DOWN: f64 = 2.0;
-/// G-LOC: absolute, then relative incapacitation (s).
-pub const GLOC_ABSOLUTE: f64 = 5.0;
-pub const GLOC_RELATIVE: f64 = 4.0;
+/// G-LOC: absolute, then relative incapacitation (s), from the shortest
+/// episode, growing with each second of cerebral oxygen debt past a sharp
+/// spike's, up to the longest.
+const GLOC_ABSOLUTE: (f64, f64, f64) = (3.0, 0.5, 20.0);
+const GLOC_RELATIVE: (f64, f64, f64) = (2.0, 0.3, 12.0);
 /// Auto-GCAS recovery: roll rate (deg/s), pull (g) and the clearance it keeps (m).
 const GCAS_ROLL: f64 = 180.0;
 const GCAS_PULL: f64 = 5.0;
@@ -93,8 +98,13 @@ pub struct Pilot {
     pub retina: f64,
     pub brain: f64,
     pub red: f64,
-    /// Seconds of incapacitation left after a G-LOC.
+    /// Cerebral oxygen debt this episode (s): the time the brain has gone
+    /// short of oxygen, weighted by how short.
+    pub hypoxia: f64,
+    /// Seconds of incapacitation left after a G-LOC, and the length of its
+    /// relative (confused) part.
     pub gloc: f64,
+    pub relative: f64,
     /// Number of G-LOC episodes this sortie.
     pub glocs: u32,
     /// Auto-GCAS flying the recovery.
@@ -107,7 +117,7 @@ pub struct Pilot {
 
 impl Default for Pilot {
     fn default() -> Pilot {
-        Pilot { reflex: 0.0, suit: 0.0, strain: 0.0, fatigue: 0.0, eye: MAP_HEART - MMHG_PER_G, retina: 1.0, brain: 1.0, red: 0.0, gloc: 0.0, glocs: 0, gcas: false, breath: 0.0, breaths: 0 }
+        Pilot { reflex: 0.0, suit: 0.0, strain: 0.0, fatigue: 0.0, eye: MAP_HEART - MMHG_PER_G, retina: 1.0, brain: 1.0, red: 0.0, hypoxia: 0.0, gloc: 0.0, relative: GLOC_RELATIVE.0, glocs: 0, gcas: false, breath: 0.0, breaths: 0 }
     }
 }
 
@@ -126,7 +136,7 @@ impl Pilot {
     /// Unconscious (absolute incapacitation).
     #[cfg(test)]
     pub fn out(&self) -> bool {
-        self.gloc > GLOC_RELATIVE
+        self.gloc > self.relative
     }
 
     /// Share of the pilot's control inputs reaching the stick and throttle:
@@ -135,7 +145,7 @@ impl Pilot {
         if self.gloc <= 0.0 {
             1.0
         } else {
-            smoothstep(GLOC_RELATIVE, 0.0, self.gloc)
+            smoothstep(self.relative, 0.0, self.gloc)
         }
     }
 
@@ -169,14 +179,31 @@ impl Pilot {
         self.eye = raw + self.reflex;
 
         self.retina = oxygen(self.retina, perfusion(self.eye, RETINA), RETINA_RESERVE, RETINA_RECOVERY, dt);
-        self.brain = oxygen(self.brain, perfusion(self.eye, BRAIN), BRAIN_RESERVE, BRAIN_RECOVERY, dt);
+        let flow = perfusion(self.eye, BRAIN);
+        self.brain = oxygen(self.brain, flow, BRAIN_RESERVE, BRAIN_RECOVERY, dt);
         let red = smoothstep(-1.5, -3.0, nz);
         self.red += pull(red - self.red, if red > self.red { 1.5 } else { 2.0 });
 
-        if self.gloc > 0.0 {
+        // The deficit builds while the brain is short of blood and is
+        // forgotten once it has refilled.
+        if self.brain < 0.999 || self.gloc > 0.0 {
+            self.hypoxia += (1.0 - self.brain) * dt;
+        } else {
+            self.hypoxia = 0.0;
+        }
+        let (abs, rel) = (GLOC_ABSOLUTE, GLOC_RELATIVE);
+        if self.gloc > self.relative {
+            // Out cold: the clock only runs with blood reaching the brain, and
+            // every second more without it deepens the episode.
+            self.gloc += (abs.1 * (1.0 - flow) - flow) * dt;
+            self.gloc = self.gloc.min(abs.2 + self.relative);
+        } else if self.gloc > 0.0 {
             self.gloc = (self.gloc - dt).max(0.0);
         } else if self.brain <= 0.0 {
-            self.gloc = GLOC_ABSOLUTE + GLOC_RELATIVE;
+            // A straight drain of the reserve leaves half of it as debt.
+            let excess = (self.hypoxia - 0.5 * BRAIN_RESERVE).max(0.0);
+            self.relative = (rel.0 + rel.1 * excess).min(rel.2);
+            self.gloc = (abs.0 + abs.1 * excess).min(abs.2) + self.relative;
             self.glocs += 1;
         }
 
@@ -227,10 +254,10 @@ impl Pilot {
         let mut v = Vision { tunnel: 1.0 - smoothstep(0.15, 0.85, o), grey: 1.0 - smoothstep(0.4, 0.92, o), black: 1.0 - smoothstep(0.0, 0.25, o), red: self.red };
         if self.gloc > 0.0 {
             // Out cold, then the view comes back through a grey haze.
-            let back = smoothstep(GLOC_RELATIVE, GLOC_RELATIVE - 2.0, self.gloc);
+            let back = smoothstep(self.relative, 0.5 * self.relative, self.gloc);
             v.black = v.black.max(1.0 - back);
             v.tunnel = v.tunnel.max(1.0 - back);
-            v.grey = v.grey.max(0.6 * smoothstep(0.0, GLOC_RELATIVE, self.gloc));
+            v.grey = v.grey.max(0.6 * smoothstep(0.0, self.relative, self.gloc));
         }
         v
     }
@@ -360,13 +387,53 @@ mod tests {
         }
         assert!(p.glocs == 1 && p.out() && t > 3.0, "out after {t:.1} s at 7 G");
         assert!(p.vision().black > 0.99 && p.authority() == 0.0);
-        // 5 s out cold, then the controls come back over 4 s more.
-        ride(&mut p, &mut a, GLOC_ABSOLUTE - 0.5, |_| 1.0, true);
-        assert!(p.out() && p.controls(&a, Input { pitch_up: true, ..Default::default() }).pitch() == 0.0);
-        ride(&mut p, &mut a, 1.0, |_| 1.0, true);
-        assert!(!p.out() && p.authority() < 0.1);
-        ride(&mut p, &mut a, GLOC_RELATIVE, |_| 1.0, true);
+        // Relieved at once, a sharp spike costs only a few seconds out cold,
+        // then the controls come back through the confusion.
+        let mut out = 0.0;
+        while p.out() {
+            ride(&mut p, &mut a, DT, |_| 1.0, true);
+            out += DT;
+        }
+        assert!(out > 2.0 && out < 6.0 && p.authority() < 0.1, "out for {out:.1} s");
+        assert!(p.controls(&a, Input { pitch_up: true, ..Default::default() }).pitch().abs() < 0.1);
+        let confused = p.relative + 0.1;
+        ride(&mut p, &mut a, confused, |_| 1.0, true);
         assert!(p.authority() == 1.0 && p.vision().black < 0.01);
+    }
+
+    /// Time out cold after a G-LOC, with the load held for `after` seconds.
+    fn episode(onset: impl Fn(f64) -> f64, after: f64) -> f64 {
+        let mut p = Pilot::default();
+        let mut a = jet();
+        let mut t = 0.0;
+        while p.glocs == 0 && t < 120.0 {
+            let g = onset(t);
+            ride(&mut p, &mut a, DT, |_| g, true);
+            t += DT;
+        }
+        let held = onset(t);
+        ride(&mut p, &mut a, after, |_| held, true);
+        let mut out = after;
+        while p.out() {
+            ride(&mut p, &mut a, DT, |_| 1.0, true);
+            out += DT;
+        }
+        out
+    }
+
+    #[test]
+    fn the_time_under_g_decides_the_g_loc() {
+        // Let go before the brain's reserve runs out and nothing happens.
+        let mut p = Pilot::default();
+        ride(&mut p, &mut jet(), 3.5, |_| 7.5, true);
+        ride(&mut p, &mut jet(), 10.0, |_| 1.0, true);
+        assert!(p.glocs == 0, "3.5 s at 7.5 G");
+        // Past it, every second more under g keeps the pilot out longer.
+        let out: Vec<f64> = [0.0, 3.0, 6.0, 30.0].iter().map(|&s| episode(|_| 7.5, s)).collect();
+        println!("out cold after 0, 3, 6 and 30 s more at 7.5 G: {out:.1?} s");
+        assert!(out[0] > 2.5 && out[0] < 4.0, "a spike: {:.1} s", out[0]);
+        assert!(out[1] > out[0] + 3.0 && out[2] > out[1] + 3.0);
+        assert!(out[3] <= 30.0 + GLOC_ABSOLUTE.2, "capped: {:.1} s", out[3]);
     }
 
     #[test]
@@ -395,7 +462,7 @@ mod tests {
 
     #[test]
     fn hands_off_while_out_and_auto_gcas_pulls_clear() {
-        let mut p = Pilot { gloc: GLOC_ABSOLUTE + GLOC_RELATIVE, ..Default::default() };
+        let mut p = Pilot { gloc: 10.0, ..Default::default() };
         let mut a = jet();
         let input = Input { pitch_down: true, throttle_up: true, ..Default::default() };
         let i = p.controls(&a, input);
@@ -410,7 +477,7 @@ mod tests {
         assert!(p.gcas, "a 50 degree dive at 500 m");
         assert!(p.controls(&a, input).pitch() > 0.4);
         // Level and high above the ground nothing happens.
-        let mut q = Pilot { gloc: GLOC_ABSOLUTE + GLOC_RELATIVE, ..Default::default() };
+        let mut q = Pilot { gloc: 10.0, ..Default::default() };
         let b = jet();
         q.update(DT, &b);
         assert!(!q.gcas);

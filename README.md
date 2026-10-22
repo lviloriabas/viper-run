@@ -144,9 +144,12 @@ out of margin.
   near 4.9 G, blacks out near 5.5 G and the pilot goes out near 6.9 G; a
   trained, protected pilot holds a 9 G break for 15 s with a narrowed view.
   The view greys, closes into a tunnel and blacks out over the HUD too, and
-  negative g reddens it. G-LOC takes the controls away for 5 s and gives
-  them back over 4 s more (the short end of the 2 to 38 s measured);
-  meanwhile Auto-GCAS rolls level and pulls 5 G if the terrain is close.
+  negative g reddens it. Nothing happens if the g comes off before the
+  brain's few seconds of oxygen run out; past that the pilot goes out, for
+  about 3 s if the g comes off at once, and every second more under g adds
+  more (2 to 38 s are measured in centrifuges), up to 20 s; the controls then
+  come back over 2 to 12 s. Meanwhile Auto-GCAS rolls level and pulls 5 G if
+  the terrain is close.
 - Aeroelastic wing: the 40-degree swept wing washes out under load, losing
   lift outboard and flaperon power as the dynamic pressure climbs (the FLCS
   compensates). Its 8 Hz antisymmetric bending-torsion mode loses damping
