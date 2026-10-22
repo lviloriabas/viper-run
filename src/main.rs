@@ -52,6 +52,8 @@ enum State {
     Paused,
     Transition,
     Result,
+    /// Stores and fuel before a combat sortie.
+    Loadout,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -178,10 +180,13 @@ struct App {
     preview: Mission,
     /// Mission chosen on the start screen, and the fight it sets up.
     kind: MissionKind,
+    /// Stores and fuel chosen on the loadout screen.
+    config: combat::Config,
     combat: Combat,
     models: props::Models,
     /// Left mouse button held as the trigger.
     trigger_mouse: bool,
+    rwr_voice: props::RwrVoice,
     auto_pilot: Option<ai::Pilot>,
     aircraft: Option<Aircraft>,
     camera: Camera,
@@ -299,9 +304,11 @@ impl App {
             mission,
             preview,
             kind,
+            config: combat::Config::for_mission(kind),
             combat,
             models,
             trigger_mouse: false,
+            rwr_voice: props::RwrVoice::default(),
             auto_pilot: None,
             aircraft: None,
             camera: Camera { eye: V3::ZERO, forward: -V3::Z, right: V3::X, up: V3::Y, fov: 1.0 },
@@ -349,7 +356,7 @@ impl App {
         if self.opts.bench.is_some() {
             self.start_mission();
         }
-        if self.opts.autostart || self.opts.shot.is_some() && self.opts.screen.as_deref() != Some("menu") {
+        if self.opts.autostart || self.opts.shot.is_some() && !matches!(self.opts.screen.as_deref(), Some("menu") | Some("loadout")) {
             if self.opts.autostart || self.opts.sim_seconds > 0.0 || self.opts.look.is_some() || self.opts.screen.is_some() || self.opts.chase {
                 self.start_mission();
             }
@@ -391,6 +398,7 @@ impl App {
         self.ab_lit = self.aircraft.as_ref().is_some_and(burner_lit);
         match self.opts.screen.as_deref() {
             Some("pause") => self.pause(),
+            Some("loadout") => self.state = State::Loadout,
             Some("freeze") => self.toggle_freeze(),
             Some("win") | Some("crash") | Some("timeout") | Some("shotdown") => {
                 let kind = match self.opts.screen.as_deref() {
@@ -443,10 +451,17 @@ impl App {
         }
         self.mission = Mission::new();
         self.combat = Combat::new(self.kind, &mut self.mission);
+        if self.kind != MissionKind::Gates {
+            self.combat.equip(&self.config);
+        }
+        self.rwr_voice = props::RwrVoice::default();
         if let Some(w) = self.opts.weapon {
             self.combat.select(w);
         }
         let mut a = Aircraft::new(&self.mission);
+        if self.kind != MissionKind::Gates {
+            a.fuel = sim::spec::FUEL_MAX * self.config.fuel;
+        }
         combat::load(&mut a, &self.combat.loadout);
         self.mission.start_throttle = a.throttle;
         self.aircraft = Some(a);
@@ -565,7 +580,14 @@ impl App {
         }
         match a {
             Action::Controls => self.toggle_controls(None),
-            Action::Start | Action::Restart => self.start_mission(),
+            // Combat sorties go through the loadout screen first.
+            Action::Start if self.state == State::Attract && self.kind != MissionKind::Gates => {
+                self.state = State::Loadout;
+                self.selected = 0;
+            }
+            Action::Start | Action::Restart | Action::Launch => self.start_mission(),
+            Action::Station(i) => self.config.cycle(i == 1),
+            Action::Fuel => self.config.cycle_fuel(),
             Action::Resume => self.resume(),
             Action::Menu => self.go_menu(),
             Action::Quit => window::order_quit(),
@@ -583,7 +605,10 @@ impl App {
                 self.key_pitch = 0.0;
             }
             Action::Fullscreen => self.toggle_fullscreen(),
-            Action::Pick(k) => self.kind = k,
+            Action::Pick(k) => {
+                self.kind = k;
+                self.config = combat::Config::for_mission(k);
+            }
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
@@ -749,17 +774,17 @@ impl App {
     /// Controller buttons go through the keyboard handlers, so menus and
     /// flight behave the same whichever is used.
     fn pad_buttons(&mut self) {
-        use gamepad::{A, B, BACK, DOWN, LEFT, RIGHT, RS, START, UP, X, Y};
-        let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result);
-        if self.state == State::Attract && !self.controls_open && self.pad.pressed(START) {
-            self.start_mission();
+        use gamepad::{A, B, BACK, DOWN, LEFT, LS, RIGHT, RS, START, UP, X, Y};
+        let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
+        if matches!(self.state, State::Attract | State::Loadout) && !self.controls_open && self.pad.pressed(START) {
+            self.act(if self.state == State::Loadout { Action::Launch } else { Action::Start });
             return;
         }
         let binds = if menu {
             let start = if self.controls_open { KeyCode::Escape } else if self.state == State::Result { KeyCode::R } else { KeyCode::P };
             vec![(A, KeyCode::Enter), (B, KeyCode::Escape), (START, start), (BACK, KeyCode::K)]
         } else {
-            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2), (UP, KeyCode::X), (DOWN, KeyCode::T)]
+            vec![(START, KeyCode::P), (BACK, KeyCode::K), (B, if self.state == State::Frozen { KeyCode::Escape } else { KeyCode::H }), (Y, KeyCode::V), (X, KeyCode::C), (RS, KeyCode::C), (LEFT, KeyCode::F1), (RIGHT, KeyCode::F2), (UP, KeyCode::X), (DOWN, KeyCode::T), (LS, KeyCode::Z)]
         };
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
@@ -1025,7 +1050,7 @@ impl App {
 
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
-            (_, State::Attract) | (None, _) => self.attract_camera(self.attract_time),
+            (_, State::Attract | State::Loadout) | (None, _) => self.attract_camera(self.attract_time),
             (Some(a), _) if a.crashed => self.wreck_camera(a),
             (Some(a), _) => {
                 if self.view == View::Chase {
@@ -1101,7 +1126,7 @@ impl EventHandler for App {
         self.toast_timer = (self.toast_timer - dt).max(0.0);
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
-            State::Attract => self.attract_time += dt,
+            State::Attract | State::Loadout => self.attract_time += dt,
             State::Flying => {
                 self.accumulator = (self.accumulator + dt).min(0.12);
                 let mut steps = 0;
@@ -1117,6 +1142,9 @@ impl EventHandler for App {
                 }
                 if steps == 8 {
                     self.accumulator = 0.0;
+                }
+                if let (Some(a), false) = (&self.aircraft, self.settings.muted) {
+                    props::rwr_tones(&self.combat, a, &self.audio, &mut self.rwr_voice, dt);
                 }
                 if let Some(a) = &self.aircraft {
                     let lit = burner_lit(a);
@@ -1159,7 +1187,7 @@ impl EventHandler for App {
 
     fn draw(&mut self) {
         let (w, h) = self.win;
-        let flying_view = self.state != State::Attract && self.aircraft.is_some();
+        let flying_view = !matches!(self.state, State::Attract | State::Loadout) && self.aircraft.is_some();
         // A wrecked jet leaves only the fireball and debris, seen from outside.
         let wrecked = self.aircraft.as_ref().is_some_and(|a| a.crashed);
         let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked;
@@ -1223,10 +1251,10 @@ impl EventHandler for App {
                     let body = cockpit::BodyProjector { eye: cam_b.eye, right: cam_b.right, up: cam_b.up, fwd: cam_b.forward, focal, w: w as f64, h: h as f64 };
                     cockpit::draw_hud(cv, a, &self.mission, &cam, &body, &self.combat);
                     ui::cockpit_overlay(cv, w, h, a, &self.mission, &self.toast, self.toast_timer, &cue, obj.as_ref());
-                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), &self.combat, &cam, self.time, false);
+                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, false);
                 } else {
                     ui::chase_overlay(cv, w, h, a, &self.mission, &cam, &self.toast, self.toast_timer, self.time, self.state == State::Flying, &cue, obj.as_ref());
-                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), &self.combat, &cam, self.time, true);
+                    symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, true);
                 }
             }
             if self.flash > 0.005 {
@@ -1238,6 +1266,7 @@ impl EventHandler for App {
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind),
+                    State::Loadout => u.loadout_screen(self.kind, &self.config),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));
                         u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted, obj.as_ref());
@@ -1355,7 +1384,7 @@ impl EventHandler for App {
             self.toggle_controls(None);
             return;
         }
-        let in_menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result);
+        let in_menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
         if in_menu && !self.buttons.is_empty() {
             match key {
                 KeyCode::Tab | KeyCode::Down | KeyCode::Right if !(self.controls_open && matches!(key, KeyCode::Right)) => {
@@ -1416,6 +1445,11 @@ impl EventHandler for App {
                     self.combat.designate(a);
                 }
             }
+            KeyCode::Z if self.state == State::Flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.countermeasures(a);
+                }
+            }
             KeyCode::H if self.state == State::Flying => {
                 self.airbrake = !self.airbrake;
                 self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT // H RETRACT" } else { "SPEEDBRAKE IN" }, 1.4);
@@ -1428,11 +1462,11 @@ impl EventHandler for App {
             KeyCode::Escape => match self.state {
                 State::Flying | State::Frozen => self.pause(),
                 State::Paused => self.resume(),
-                State::Result => self.go_menu(),
+                State::Result | State::Loadout => self.go_menu(),
                 _ => {}
             },
             KeyCode::Enter | KeyCode::KpEnter => {
-                if matches!(self.state, State::Attract | State::Paused | State::Result) {
+                if matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout) {
                     if let Some(b) = self.buttons.get(self.selected).copied() {
                         self.act(b.action);
                     }

@@ -386,6 +386,26 @@ impl Fx {
         }
     }
 
+    /// A countermeasure program: a white-hot flare thrown down and aft,
+    /// burning out as it falls, and a small grey puff of chaff.
+    pub fn decoy(&mut self, pos: V3, vel: V3) {
+        let d = self.dir();
+        let p = Particle {
+            kind: Kind::Fire,
+            pos,
+            vel: vel * 0.55 + V3::Y * -12.0 + d * 6.0,
+            life: self.r(2.2, 3.0),
+            size: (0.9, 0.5),
+            color: ([1.0, 1.0, 0.92], [1.0, 0.55, 0.2]),
+            drag: 0.8,
+            gravity: 9.8,
+            ..BASE
+        };
+        self.push(p);
+        let life = self.r(1.5, 2.2);
+        self.smoke(pos, vel * 0.3 + d * 3.0, (0.6, 3.5), life, (0.62, 0.58), 0.45, 0.0);
+    }
+
     /// A 20 mm round arriving: sparks off a target, a puff of dirt off the
     /// ground, a spout off the water.
     pub fn impact(&mut self, pos: V3, what: Impact) {

@@ -3,7 +3,7 @@
 use crate::air::AirData;
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::cockpit::pad;
-use crate::combat::MissionKind;
+use crate::combat::{Config, MissionKind, Store};
 use crate::math::*;
 use crate::settings::{Best, PitchSource, Settings};
 use crate::sim::{Aircraft, Mission};
@@ -40,6 +40,11 @@ pub enum Action {
     Reset,
     /// Choose the mission on the start screen.
     Pick(MissionKind),
+    /// Loadout screen: next store for a pylon pair (0 outboard, 1 inboard),
+    /// next fuel load, and take off.
+    Station(u8),
+    Fuel,
+    Launch,
 }
 
 #[derive(Clone, Copy)]
@@ -226,9 +231,9 @@ impl<'a> Ui<'a> {
         };
         let keys = if mission != MissionKind::Gates {
             if self.pad {
-                [("L STICK", "PITCH / ROLL"), ("RT LT", "THROTTLE"), ("LB RB", "RUDDER"), ("A", "FIRE / PICKLE"), ("D-UP", "WEAPON"), ("D-DOWN", "LOCK TARGET"), ("R STICK", "LOOK AROUND"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("START", "PAUSE, B MENU"), ("BACK", "CONFIG")]
+                [("L STICK", "PITCH / ROLL"), ("RT LT", "THROTTLE"), ("LB RB", "RUDDER"), ("A", "FIRE / PICKLE"), ("D-UP", "WEAPON"), ("D-DOWN", "LOCK TARGET"), ("L3", "CHAFF / FLARE"), ("R STICK", "LOOK AROUND"), ("B", "AIRBRAKE"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("START", "PAUSE, B MENU")]
             } else {
-                [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("X", "WEAPON"), ("T", "LOCK TARGET"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("V", "CHASE / COCKPIT"), ("H", "AIRBRAKE"), ("C", "CENTER VIEW"), ("P ESC", "PAUSE, MENU")]
+                [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("X", "WEAPON"), ("T", "LOCK TARGET"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("SHIFT CTRL", "THROTTLE"), ("SPACE", "AFTERBURNER"), ("V", "CHASE / COCKPIT"), ("H", "AIRBRAKE"), ("P ESC", "PAUSE, MENU")]
             }
         } else if self.pad {
             [("L STICK", "PITCH / ROLL"), ("R STICK", "LOOK AROUND"), ("RT LT", "THROTTLE"), ("RT FULL", "AFTERBURNER"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE ON / OFF"), ("Y", "CHASE / COCKPIT"), ("X", "CENTER VIEW"), ("D-PAD", "MFD PAGES"), ("START", "PAUSE, B MENU"), ("A", "SELECT"), ("BACK", "CONFIG")]
@@ -356,6 +361,58 @@ impl<'a> Ui<'a> {
         }
     }
 
+    /// Loadout before a DOGFIGHT or STRIKE sortie: the pylon pairs, the fuel,
+    /// and what that does to the weight, drag and thrust-to-weight.
+    pub fn loadout_screen(&mut self, mission: MissionKind, cfg: &Config) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let (pw, ph) = ((self.w - 24.0 * s).min(420.0 * s), (self.h - 20.0 * s).min(250.0 * s));
+        let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
+        self.frame(x, y, pw, ph);
+        let m = 14.0 * s;
+        let mut yy = y + m;
+        self.cv.text(&format!("// ARMAMENT AND FUEL, {}", mission.name()), x + m, yy, sm, DIM, Align::Left);
+        yy += 20.0 * s;
+        self.cv.text("LOADOUT", x + m, yy, s * 3.0, GREEN, Align::Left);
+        yy += 18.0 * s;
+        let name = |st: Option<Store>| match st {
+            None => "EMPTY",
+            Some(Store::Aim9) => "2 X AIM-9M  IR",
+            Some(Store::Aim120) => "2 X AIM-120C  RADAR",
+            Some(Store::Mk82) => "2 X MK-82  500 LB",
+        };
+        let rows: [(&str, String, Option<Action>); 6] = [
+            ("STA 1 / 9  WINGTIP", "2 X AIM-9M  IR".to_string(), None),
+            ("STA 3 / 7  OUTBOARD", name(cfg.outboard).to_string(), Some(Action::Station(0))),
+            ("STA 4 / 6  INBOARD", name(cfg.inboard).to_string(), Some(Action::Station(1))),
+            ("INTERNAL FUEL", format!("{} LB  {}%", (crate::sim::spec::FUEL_MAX * cfg.fuel * 2.20462).round() as i64, (cfg.fuel * 100.0).round() as i64), Some(Action::Fuel)),
+            ("M61A1 GUN", "511 ROUNDS PGU-28".to_string(), None),
+            ("ALE-47", "30 CHAFF  30 FLARES".to_string(), None),
+        ];
+        // LAUNCH comes first in the keyboard order, so Enter takes off.
+        let launch_y = yy + 6.0 * 17.0 * s + 14.0 * s;
+        let w1 = self.button("LAUNCH", "ENTER", x + m, launch_y, true, Action::Launch);
+        self.button("MISSION BOARD", "ESC", x + m + w1 + 6.0 * s, launch_y, false, Action::Menu);
+        let col2 = x + m + 112.0 * sm;
+        for (label, value, act) in rows {
+            self.cv.text(label, x + m, yy + 7.0 * s, sm, DIM, Align::Left);
+            match act {
+                Some(a) => {
+                    self.button(&value, "", col2, yy, false, a);
+                }
+                None => self.cv.text(&value, col2 + 8.0 * s, yy + 7.0 * s, sm, CREAM, Align::Left),
+            }
+            yy += 17.0 * s;
+        }
+        let (mass, drag) = cfg.weight();
+        let lb = mass * 2.20462;
+        // Full afterburner, 29,000 lbf, against the take-off weight.
+        let tw = 29000.0 / lb;
+        let stats = format!("GROSS {} LB   DRAG +{} COUNTS   T/W {:.2}", (lb / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
+        self.cv.text(&stats, x + m, yy + 4.0 * s, sm, AMBER, Align::Left);
+        self.cv.text("CLICK A STORE TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G.", x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+    }
+
     /// Result of a DOGFIGHT or STRIKE sortie.
     fn combat_result(&mut self, r: &RunResult) {
         let fight = r.mission == MissionKind::Dogfight;
@@ -439,9 +496,9 @@ impl<'a> Ui<'a> {
             (false, PitchSource::Keys, true) => &[("W / UP", "Pitch up, pull"), ("S / DOWN", "Pitch down, push")],
         };
         let rest: &[(&str, &str)] = if self.pad {
-            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
+            &[("R STICK", "Look around, springs back"), ("LB RB", "Rudder left / right"), ("RT LT", "Throttle up / down"), ("RT FULL", "Afterburner"), ("B", "Airbrake out / in"), ("X / R3", "Center view"), ("Y", "Cockpit / chase"), ("A", "Fire / pickle"), ("D-PAD UP", "Cycle weapon"), ("D-PAD DOWN", "Lock / next target"), ("L3", "Chaff and flare"), ("D-PAD L R", "MFD pages, menus"), ("A / B", "Select / back"), ("START", "Freeze, look around"), ("START B", "Menu"), ("BACK", "This drawer")]
         } else {
-            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("F L-CLICK", "Fire / pickle"), ("X", "Cycle weapon"), ("T", "Lock / next target"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
+            &[("MOUSE X", "Yaw, springs back"), ("A D", "Roll left / right"), ("Q E", "Rudder left / right"), ("SHIFT CTRL", "Throttle up / down"), ("SPACE", "Afterburner"), ("H", "Airbrake out / in"), ("ALT+MOUSE", "Look around"), ("C / R-CLICK", "Center view / mouse"), ("V", "Cockpit / chase"), ("F1 F2", "MFD pages"), ("F L-CLICK", "Fire / pickle"), ("X", "Cycle weapon"), ("T", "Lock / next target"), ("Z", "Chaff and flare"), ("P", "Freeze, look around"), ("ESC", "Menu / resume"), ("M", "Audio on / off"), ("F11", "Fullscreen")]
         };
         for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
             self.cv.text(k, m, y, sm, ACID, Align::Left);

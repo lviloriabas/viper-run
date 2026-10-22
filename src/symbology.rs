@@ -54,7 +54,7 @@ pub fn stores_line(c: &Combat) -> String {
             s.push_str(&format!("{n}{short} "));
         }
     }
-    format!("{s}GUN {}", l.rounds)
+    format!("{s}GUN {}  CHF {} FLR {}", l.rounds, l.chaff, l.flares)
 }
 
 /// The selected weapon's count, for the HUD.
@@ -324,7 +324,7 @@ fn brackets(cv: &mut Canvas, x: f32, y: f32, s: f32, lw: f32, col: Col) {
 /// Target brackets with range, the stores line and the missile warning
 /// over the flight view. `chase` draws the outside view's fuller set.
 #[allow(clippy::too_many_arguments)]
-pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, cam: &Camera, time: f64, chase: bool) {
+pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64, chase: bool) {
     let sm = (s - 1.0).max(1.0);
     let mut mark = |p: V3, who: Who, col: Col, label: Option<&str>, detail: bool| {
         let d = (p - cam.eye).len();
@@ -366,6 +366,16 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, cam: &Camera
     if c.hp < 100.0 {
         let col = if c.hp < 40.0 { RED } else { AMBER };
         cv.text(&format!("AIRFRAME {}%", c.hp.round() as i64), x, y + 9.0 * sm, sm, col, align);
+    }
+    // Outside the cockpit a small RWR scope repeats the panel's.
+    if chase && c.kind != crate::combat::MissionKind::Gates {
+        let (cx, cy) = (w - 70.0 * s, h * 0.47);
+        cv.disc(cx, cy, 58.0, rgba(4, 10, 6, 0.55));
+        for r in [20.0, 38.0, 56.0] {
+            cv.circle(cx, cy, r, 1.0, with_alpha(HUD, 0.25));
+        }
+        cv.text("RWR", cx, cy + 66.0, sm, with_alpha(HUD, 0.6), Align::Center);
+        rwr(cv, cx, cy, a, c, time);
     }
     if chase && (c.warn > 0.0 || c.inbound().next().is_some()) && (time * 3.0).fract() < 0.6 {
         cv.text("MISSILE", w * 0.5, h * 0.36, s * 2.0, RED, Align::Center);

@@ -117,11 +117,53 @@ pub struct Station {
     pub tip: bool,
 }
 
+/// What the loadout screen sets before a sortie: the stores on the two
+/// pylon pairs and the internal fuel.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Config {
+    /// Stations 3 and 7.
+    pub outboard: Option<Store>,
+    /// Stations 4 and 6, the heavy inboard pylons.
+    pub inboard: Option<Store>,
+    /// Internal fuel, fraction of the 7,000 lb.
+    pub fuel: f64,
+}
+
+impl Config {
+    pub fn for_mission(kind: MissionKind) -> Config {
+        match kind {
+            MissionKind::Gates => Config { outboard: None, inboard: None, fuel: 1.0 },
+            MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0 },
+            MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0 },
+        }
+    }
+
+    /// Next choice for a pylon pair: missiles and bombs outboard, bombs inboard.
+    pub fn cycle(&mut self, inboard: bool) {
+        let order: &[Option<Store>] = if inboard { &[None, Some(Store::Mk82), Some(Store::Aim120)] } else { &[None, Some(Store::Aim9), Some(Store::Aim120), Some(Store::Mk82)] };
+        let slot = if inboard { &mut self.inboard } else { &mut self.outboard };
+        let i = order.iter().position(|s| s == slot).unwrap_or(0);
+        *slot = order[(i + 1) % order.len()];
+    }
+
+    pub fn cycle_fuel(&mut self) {
+        self.fuel = if self.fuel >= 0.99 { 0.5 } else if self.fuel < 0.6 { 0.75 } else { 1.0 };
+    }
+
+    /// Gross weight (kg) and total drag coefficient of the stores.
+    pub fn weight(&self) -> (f64, f64) {
+        let l = Loadout::configure(self);
+        (crate::sim::spec::EMPTY_MASS + l.mass() + crate::sim::spec::FUEL_MAX * self.fuel, l.drag())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Loadout {
     /// In release order, alternating sides.
     pub stations: Vec<Station>,
     pub rounds: u32,
+    pub chaff: u32,
+    pub flares: u32,
 }
 
 /// Wingtip AIM-9 noses (stations 1 and 9).
@@ -132,26 +174,26 @@ fn tips() -> [Station; 2] {
 
 impl Loadout {
     pub fn for_mission(kind: MissionKind) -> Loadout {
+        Loadout::configure(&Config::for_mission(kind))
+    }
+
+    /// Stores hung as the loadout screen chose: the wingtip AIM-9s always,
+    /// the outboard pair on stations 3 and 7, the inboard pair on 4 and 6.
+    pub fn configure(cfg: &Config) -> Loadout {
         let mut stations = tips().to_vec();
-        let side = |s: f64, store: Store, x: f64, y: f64, z: f64| Station { store, at: v3(s * x, y, z), loaded: true, tip: false };
-        match kind {
-            MissionKind::Gates => {}
-            // AIM-120s on stations 3 and 7 (the outboard pylons).
-            MissionKind::Dogfight => {
-                for s in [-1.0, 1.0] {
-                    stations.push(side(s, Store::Aim120, 3.50, -0.06, 0.52));
-                }
-            }
-            // Mk-82s on stations 3, 7, 4 and 6.
-            MissionKind::Strike => {
-                for (x, z) in [(3.50, 2.35), (2.30, 1.85)] {
-                    for s in [-1.0, 1.0] {
-                        stations.push(side(s, Store::Mk82, x, -0.08, z));
-                    }
-                }
+        for (pick, x) in [(cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
+            let Some(store) = pick else { continue };
+            // Missile noses forward of the pylon, bombs centred under it.
+            let (y, z) = match store {
+                Store::Aim9 => (-0.03, x * 0.5 - 0.83),
+                Store::Aim120 => (-0.06, x * 0.5 - 1.23),
+                Store::Mk82 => (-0.08, x * 0.4 + 0.93),
+            };
+            for s in [-1.0, 1.0] {
+                stations.push(Station { store, at: v3(s * x, y, z), loaded: true, tip: false });
             }
         }
-        Loadout { stations, rounds: GUN_ROUNDS }
+        Loadout { stations, rounds: GUN_ROUNDS, chaff: CHAFF, flares: FLARES }
     }
 
     pub fn count(&self, store: Store) -> u32 {
@@ -198,6 +240,7 @@ pub const SA6: Spec = Spec {
     min_range: 3000.0,
     max_range: 22000.0,
     active: false,
+    infrared: false,
 };
 
 /// Smoke left in the air: a missile motor's exhaust, a damaged jet's trail
@@ -252,6 +295,9 @@ pub struct Bandit {
     gun_acc: f64,
     fired: u32,
     trail: Option<usize>,
+    /// Countermeasure programs left and seconds to the next.
+    programs: u32,
+    cm_clock: f64,
 }
 
 /// A killed jet falling out of the sky, tumbling and burning.
@@ -276,6 +322,8 @@ pub enum Event {
     Kill { text: String },
     PlayerHit { damage: f64 },
     Lock { text: String },
+    /// A countermeasure program: a flare and a chaff bundle thrown out.
+    Decoy { pos: V3, vel: V3 },
 }
 
 pub struct Combat {
@@ -348,7 +396,7 @@ pub fn load(a: &mut Aircraft, l: &Loadout) {
     a.stores_mass = l.mass();
     a.stores_drag = l.drag();
     a.mass = crate::sim::spec::EMPTY_MASS + a.stores_mass + a.fuel;
-    if a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 {
+    if a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 && a.fuel == crate::sim::spec::FUEL_MAX {
         return;
     }
     // Trim balances the clean airframe at the new weight; the stores' drag
@@ -380,7 +428,7 @@ pub fn load(a: &mut Aircraft, l: &Loadout) {
 }
 
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
-    Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None }
+    Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0 }
 }
 
 fn heading_of(v: V3) -> f64 {
@@ -480,6 +528,15 @@ impl Combat {
         c
     }
 
+    /// Hangs the stores the loadout screen chose, and selects a master mode
+    /// they allow.
+    pub fn equip(&mut self, cfg: &Config) {
+        self.loadout = Loadout::configure(cfg);
+        if !self.modes().contains(&self.mode) {
+            self.mode = *self.modes().iter().rev().find(|&&m| m != Mode::Ccip).unwrap_or(&Mode::Gun);
+        }
+    }
+
     // ------------------------------------------------------------ controls
     /// Master modes the stores on board allow, in the order X cycles them.
     fn modes(&self) -> Vec<Mode> {
@@ -563,6 +620,35 @@ impl Combat {
             _ => "NO TARGET".to_string(),
         };
         self.events.push(Event::Lock { text });
+    }
+
+    /// One countermeasure program from a jet: a flare and a chaff bundle.
+    /// Each missile guiding on it may lose its target, by its seeker type.
+    fn decoy(&mut self, who: Who, pos: V3, vel: V3) {
+        self.events.push(Event::Decoy { pos, vel });
+        for k in 0..self.missiles.len() {
+            let m = &self.missiles[k];
+            if m.target != Some(who) || !m.tracking {
+                continue;
+            }
+            let p = decoy_chance(m.spec, m.pos, pos, vel);
+            if self.rnd.next() < p {
+                self.missiles[k].tracking = false;
+                if who == Who::Player {
+                    self.events.push(Event::Lock { text: "MISSILE DECOYED".to_string() });
+                }
+            }
+        }
+    }
+
+    /// The countermeasures button: one program, while cartridges last.
+    pub fn countermeasures(&mut self, a: &Aircraft) {
+        if self.player_dead || (self.loadout.chaff == 0 && self.loadout.flares == 0) {
+            return;
+        }
+        self.loadout.chaff = self.loadout.chaff.saturating_sub(1);
+        self.loadout.flares = self.loadout.flares.saturating_sub(1);
+        self.decoy(Who::Player, a.pos, a.vel);
     }
 
     // ------------------------------------------------------------ step
@@ -736,6 +822,15 @@ impl Combat {
                 .filter(|m| m.target == Some(Who::Bandit(i)) && m.tracking)
                 .map(|m| (m.pos, m.vel))
                 .min_by(|x, y| (x.0 - self.bandits[i].jet.pos).len().partial_cmp(&(y.0 - self.bandits[i].jet.pos).len()).unwrap_or(std::cmp::Ordering::Equal));
+            // A missile closing inside 4 km gets a program every second or so.
+            let b = &mut self.bandits[i];
+            b.cm_clock -= dt;
+            if threat.is_some_and(|(p, _)| (p - b.jet.pos).len() < 4000.0) && b.cm_clock <= 0.0 && b.programs > 0 {
+                b.cm_clock = 1.1;
+                b.programs -= 1;
+                let (p, v) = (b.jet.pos, b.jet.vel);
+                self.decoy(Who::Bandit(i), p, v);
+            }
             let b = &mut self.bandits[i];
             let pic = Picture { foe: a, missile: threat, missiles: b.missiles, missile_spec: &AIM9M, rounds: b.rounds };
             let o = b.pilot.fly(&b.jet, &pic, dt);
@@ -1284,6 +1379,8 @@ mod tests {
         let mut a = spawn(v3(river_x(0.0), 4200.0, 0.0), 0.0, 240.0);
         let fwd = a.q.axes().forward;
         c.bandits[0].jet = spawn(a.pos + fwd * 2500.0, 0.0, 220.0);
+        // Out of flares, so the shot is down to the guidance.
+        c.bandits[0].programs = 0;
         c.bandits[1].jet = spawn(a.pos + fwd * 30000.0 + V3::Y * 2000.0, 0.0, 220.0);
         c.reserve.clear();
         let mut m2 = m.clone();

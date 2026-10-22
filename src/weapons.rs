@@ -230,6 +230,8 @@ pub struct Spec {
     /// Active radar seeker that searches by itself (AIM-120); otherwise it
     /// needs a lock at launch (AIM-9).
     pub active: bool,
+    /// Infrared seeker, decoyed by flares; otherwise radar, decoyed by chaff.
+    pub infrared: bool,
 }
 
 /// AIM-9M Sidewinder: 85.5 kg, 2.87 m, 127 mm; Mk 36 Mod 11 reduced-smoke motor
@@ -258,6 +260,7 @@ pub const AIM9M: Spec = Spec {
     min_range: 300.0,
     max_range: 14000.0,
     active: false,
+    infrared: true,
 };
 
 /// AIM-120C AMRAAM: 161.5 kg, 3.66 m, 178 mm; boost-sustain motor to Mach 4;
@@ -286,6 +289,7 @@ pub const AIM120C: Spec = Spec {
     min_range: 1000.0,
     max_range: 35000.0,
     active: true,
+    infrared: false,
 };
 
 impl Spec {
@@ -426,6 +430,32 @@ impl Missile {
             return Fate::Spent(self.pos);
         }
         Fate::Flying
+    }
+}
+
+/// ALE-47 dispenser load: chaff and flare cartridges.
+pub const CHAFF: u32 = 30;
+pub const FLARES: u32 = 30;
+
+/// Chance that one countermeasure program (a flare and a chaff bundle)
+/// pulls a missile's seeker off its target. Flares only fool an infrared
+/// seeker, and the AIM-9M's rejection logic ignores most of them; chaff only
+/// fools a radar seeker, and works best with the target on the beam, where
+/// its Doppler is close to the chaff cloud's. Nothing works on a missile
+/// still far out, which has not yet closed on the decoy's position.
+pub fn decoy_chance(spec: &Spec, missile: V3, target: V3, target_vel: V3) -> f64 {
+    let r = target - missile;
+    let range = r.len();
+    if range > 6000.0 {
+        return 0.0;
+    }
+    let near = 1.0 - smoothstep(2500.0, 6000.0, range);
+    if spec.infrared {
+        0.35 * near
+    } else {
+        let speed = target_vel.len().max(1.0);
+        let beam = 1.0 - (r.dot(target_vel) / (range.max(1.0) * speed)).abs();
+        (0.08 + 0.55 * beam * beam) * near
     }
 }
 
@@ -625,6 +655,20 @@ mod tests {
         assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -10000.0), away, &flat).is_some());
         // Inside minimum range there is no shot.
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -150.0), away, &flat).is_none());
+    }
+
+    /// Flares only fool heat seekers and chaff only radar ones; chaff works
+    /// best on the beam, and nothing works far from the missile.
+    #[test]
+    fn countermeasures_fool_their_own_seeker_type() {
+        let m = v3(0.0, 3000.0, 2000.0);
+        let t = v3(0.0, 3000.0, 0.0);
+        let nose_on = v3(0.0, 0.0, 250.0);
+        let beam = v3(250.0, 0.0, 0.0);
+        assert!(decoy_chance(&AIM9M, m, t, nose_on) > 0.2);
+        let (head, side) = (decoy_chance(&AIM120C, m, t, nose_on), decoy_chance(&AIM120C, m, t, beam));
+        assert!(side > 0.5 && head < 0.15, "beam {side:.2}, nose-on {head:.2}");
+        assert_eq!(decoy_chance(&AIM9M, v3(0.0, 3000.0, 9000.0), t, beam), 0.0);
     }
 
     /// The CCIP pipper is the real bomb's impact point: a bomb released at

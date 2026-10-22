@@ -282,6 +282,12 @@ pub fn present(c: &mut Combat, fx: &mut Fx, audio: &Audio, ear: V3, muted: bool)
             }
             Event::Kill { text } => out.toast = Some(text),
             Event::Lock { text } => out.toast = Some(text),
+            Event::Decoy { pos, vel } => {
+                fx.decoy(pos, vel);
+                if !muted && (pos - ear).len() < 100.0 {
+                    audio.burst(0.12, 0.8, 2400.0, 600.0, 0.0);
+                }
+            }
             Event::PlayerHit { damage } => {
                 out.kick = out.kick.max(clamp(damage / 40.0, 0.15, 1.0));
                 out.flash = Some([255, 90, 50]);
@@ -292,4 +298,36 @@ pub fn present(c: &mut Combat, fx: &mut Fx, audio: &Audio, ear: V3, muted: bool)
         }
     }
     out
+}
+
+/// What the RWR last told the pilot, so it only speaks up on a change.
+#[derive(Default)]
+pub struct RwrVoice {
+    seen: usize,
+    hot: usize,
+    clock: f64,
+}
+
+/// RWR tones: a ping for a new emitter, a quick two-tone when one locks on,
+/// and a fast warble for as long as a missile guides on the jet.
+pub fn rwr_tones(c: &Combat, a: &Aircraft, audio: &Audio, v: &mut RwrVoice, dt: f64) {
+    let e = c.emitters(a);
+    let hot = e.iter().filter(|t| t.2).count();
+    if e.len() > v.seen {
+        audio.tone(820.0, 0.07, 0.03, Wave::Square, 0.0);
+    }
+    if hot > v.hot {
+        audio.tone(1250.0, 0.06, 0.03, Wave::Square, 0.0);
+        audio.tone(950.0, 0.06, 0.03, Wave::Square, 0.08);
+        audio.tone(1250.0, 0.06, 0.03, Wave::Square, 0.16);
+    }
+    v.seen = e.len();
+    v.hot = hot;
+    v.clock -= dt;
+    if c.inbound().next().is_some() && v.clock <= 0.0 {
+        v.clock = 0.45;
+        for k in 0..3 {
+            audio.tone(if k % 2 == 0 { 1500.0 } else { 1100.0 }, 0.07, 0.035, Wave::Square, k as f32 * 0.08);
+        }
+    }
 }
