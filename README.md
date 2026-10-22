@@ -215,9 +215,13 @@ two widely spaced nacelles with wedge intakes, 42 degree wings, twin fins
 canted out 6 degrees, moving stabilators, two afterburner flames, in the
 two-tone grey of the type with red stars. It flies the F-16 aerodynamic
 tables scaled to its own size, weight and engines, an approximation from
-public figures rather than wind-tunnel data: 38 m² of wing, 11,000 kg
-empty, two RD-33s with 22,200 lbf dry and 36,600 lbf in afterburner, and
-about 35 % more inertia. The cockpit stays the F-16's.
+public figures rather than wind-tunnel data: 38.06 m² of wing, 10,900 kg
+empty, 3,630 kg of internal fuel, two RD-33s with 49.4 kN (11,111 lbf) dry
+and 81.8 kN (18,387 lbf) in afterburner each, and about 35 % more inertia.
+The limits follow what the 9.12 flight manuals are cited as giving: the AoA
+held near 25 degrees (24 in the Russian manual, 26 in the German one, against
+26 to 28 critical) and 9 g only below 14,200 kg, 8 g above. The cockpit
+stays the F-16's.
 
 ### Airbase, take-off and landing
 

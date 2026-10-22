@@ -80,8 +80,11 @@ pub use crate::air::{atmosphere_at, calibrated_airspeed};
 /// Which jet: the F-16C the tables describe, or a MiG-29A flown on the same
 /// aerodynamic tables scaled to its size, weight and engines. The MiG-29 is
 /// an approximation built from published figures, not wind-tunnel data:
-/// 38 m^2 of wing against 27.9, 11,000 kg empty, two RD-33s giving 22,200 lbf
-/// dry and 36,600 lbf in afterburner, and about 35 % more inertia.
+/// 38.06 m^2 of wing against 27.9, 10,900 kg empty, 3,630 kg of internal
+/// fuel, two RD-33s giving 22,200 lbf dry and 36,600 lbf in afterburner, and
+/// about 35 % more inertia. The flight manuals cited for the 9.12 limit the
+/// AoA to 24 degrees (Russian) or 26 (German), against 26 to 28 degrees
+/// critical, and allow 9 g only below 14,200 kg, 8 g above.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Type {
     #[default]
@@ -99,14 +102,14 @@ impl Type {
     pub fn empty_mass(self) -> f64 {
         match self {
             Type::F16 => EMPTY_MASS,
-            Type::Mig29 => 11000.0,
+            Type::Mig29 => 10900.0,
         }
     }
     /// Wing reference area, m^2.
     pub fn area(self) -> f64 {
         match self {
             Type::F16 => aero::WING_AREA,
-            Type::Mig29 => 38.0,
+            Type::Mig29 => 38.06,
         }
     }
     /// Thrust against the F110's at the same power setting.
@@ -114,6 +117,29 @@ impl Type {
         match self {
             Type::F16 => 1.0,
             Type::Mig29 => mix(22200.0 / 17000.0, 36600.0 / 29000.0, ((power - 50.0) / 50.0).clamp(0.0, 1.0)),
+        }
+    }
+    /// Internal fuel, kg.
+    pub fn fuel_max(self) -> f64 {
+        match self {
+            Type::F16 => FUEL_MAX,
+            Type::Mig29 => 3630.0,
+        }
+    }
+    /// AoA where the limiter starts trading g for AoA, and the hard stop of
+    /// the AoA protection, degrees: the F-16 caps near 25.5, the MiG-29 at
+    /// the 25 degrees between its two manuals' figures.
+    pub fn alpha_limits(self) -> (f64, f64) {
+        match self {
+            Type::F16 => (ALPHA_LIMITER, 25.0),
+            Type::Mig29 => (22.0, 25.0),
+        }
+    }
+    /// Positive load limit at a gross weight (kg).
+    pub fn g_limit(self, mass: f64) -> f64 {
+        match self {
+            Type::Mig29 if mass > 14200.0 => 8.0,
+            _ => G_LIMIT,
         }
     }
     pub fn inertia_scale(self) -> f64 {
@@ -460,6 +486,9 @@ struct Sensors {
     ground: bool,
     /// Wing reference area of the airframe, m^2.
     area: f64,
+    /// Limiter onset and hard stop (degrees), and the positive g limit.
+    alpha_lim: (f64, f64),
+    g_max: f64,
 }
 
 /// Surface deflection that makes a monotonically falling coefficient reach a
@@ -490,11 +519,11 @@ impl Flcs {
         // with pitch-rate anticipation, the limiter takes away 2 g per degree,
         // which caps the slow jet near 25.5 degrees at full aft stick.
         let stick = input.pitch();
-        let n_cmd = clamp(pitch_command(stick), NEG_G_LIMIT - 1.0, G_LIMIT - 1.0);
+        let n_cmd = clamp(pitch_command(stick), NEG_G_LIMIT - 1.0, s.g_max - 1.0);
         self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 12.0, 0.0, 1.0);
         self.alpha_f += (alpha - self.alpha_f) * clamp(dt * 10.0, 0.0, 1.0);
         let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
-        let demand = self.n_cmd - 2.0 * (lead - ALPHA_LIMITER).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
+        let demand = self.n_cmd - 2.0 * (lead - s.alpha_lim.0).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
         let err = demand - (s.nz - 1.0);
         if s.ground {
             self.n_int = 0.0;
@@ -509,7 +538,7 @@ impl Flcs {
         // AoA where it is (the path turning under the present lift) is allowed.
         let q_hold = g_v * (s.nz - s.up_y);
         let a = alpha * DEG;
-        q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (25.0 * DEG - a));
+        q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (s.alpha_lim.1 * DEG - a));
         let qdot = 7.0 * (q_cmd - q);
         let m_req = iyy * qdot - (izz - ixx) * p * r + ixz * (p * p - r * r) + r * s.rotor;
         let el_cmd = invert(STAB_MAX, m_req / qsc, |el| aero::coefficients(&Flow { el, ..*f }).cm);
@@ -753,7 +782,7 @@ impl Aircraft {
 
     /// Inertia of this airframe with its fuel and pylon stores.
     fn inertia(&self) -> (f64, f64, f64, f64) {
-        let (x, y, z, xz) = inertia(self.fuel, self.wing_stores);
+        let (x, y, z, xz) = inertia(self.fuel / self.kind.fuel_max() * FUEL_MAX, self.wing_stores);
         let k = self.kind.inertia_scale();
         (x * k, y * k, z * k, xz * k)
     }
@@ -761,6 +790,8 @@ impl Aircraft {
     /// Changes the airframe, keeping the state, and retrims for 1 g at the
     /// present speed when flying.
     pub fn set_type(&mut self, kind: Type) {
+        // Same fraction of a full load in the new jet's tanks.
+        self.fuel *= kind.fuel_max() / self.kind.fuel_max();
         self.kind = kind;
         self.mass = kind.empty_mass() + self.stores_mass + self.fuel;
     }
@@ -896,6 +927,8 @@ impl Aircraft {
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
             ground: self.on_ground,
             area: self.kind.area(),
+            alpha_lim: self.kind.alpha_limits(),
+            g_max: self.kind.g_limit(self.mass),
         };
         self.flcs.update(dt, input, &sensors);
 
@@ -1042,7 +1075,7 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = G_LIMIT.min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        self.g_avail = self.kind.g_limit(self.mass).min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);

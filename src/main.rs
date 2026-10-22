@@ -529,7 +529,7 @@ impl App {
         self.gear_lever = a.on_ground;
         self.flaps_switch = false;
         if self.kind != MissionKind::Gates {
-            a.fuel = sim::spec::FUEL_MAX * self.config.fuel;
+            a.fuel = a.kind.fuel_max() * self.config.fuel;
         }
         if !a.on_ground {
             combat::load(&mut a, &self.combat.loadout);

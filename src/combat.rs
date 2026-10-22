@@ -162,7 +162,7 @@ impl Config {
     /// Gross weight (kg) and total drag coefficient of the stores.
     pub fn weight(&self) -> (f64, f64) {
         let l = Loadout::configure(self);
-        (self.jet.empty_mass() + l.mass() + crate::sim::spec::FUEL_MAX * self.fuel, l.drag())
+        (self.jet.empty_mass() + l.mass() + self.jet.fuel_max() * self.fuel, l.drag())
     }
 }
 
@@ -1450,6 +1450,32 @@ mod tests {
         let f16 = spawn(v3(0.0, 3000.0, 0.0), 0.0, 230.0);
         let ab = |k: Type| crate::aero::thrust(100.0, 0.0, 0.0) * k.thrust_scale(100.0) / (k.empty_mass() + 3000.0);
         assert!(ab(Type::Mig29) > ab(Type::F16), "{} vs {}", ab(Type::Mig29), ab(f16.kind));
+    }
+
+    /// The Fulcrum's manual limits: 8 g above 14,200 kg, 9 g below, and the
+    /// AoA held near 25 degrees at full aft stick when slow.
+    #[test]
+    fn fulcrum_limits_follow_the_manual() {
+        crate::terrain::init();
+        let pull = Input { pitch_axis: 1.0, ..Default::default() };
+        let peak = |fuel: f64, speed: f64| {
+            let mut a = spawn_type(Type::Mig29, v3(0.0, 4000.0, 0.0), 0.0, speed);
+            a.fuel = Type::Mig29.fuel_max() * fuel;
+            a.mass = Type::Mig29.empty_mass() + a.stores_mass + a.fuel;
+            let (mut g, mut alpha) = (0.0f64, 0.0f64);
+            for _ in 0..(4.0 / crate::sim::FIXED_DT) as usize {
+                a.update(crate::sim::FIXED_DT, &pull);
+                g = g.max(a.g_load);
+                alpha = alpha.max(a.alpha_deg);
+            }
+            (a.mass, g, alpha)
+        };
+        let (m, g, _) = peak(1.0, 260.0);
+        assert!(m > 14200.0 && g < 8.6 && g > 7.5, "heavy: {m:.0} kg pulled {g:.2} g");
+        let (m, g, _) = peak(0.3, 260.0);
+        assert!(m < 14200.0 && g > 8.6 && g < 9.6, "light: {m:.0} kg pulled {g:.2} g");
+        let (_, _, alpha) = peak(0.5, 120.0);
+        assert!(alpha > 23.0 && alpha < 27.0, "slow pull reached {alpha:.1} deg");
     }
 
     /// The same jet at the same throttle: four Mk-82s, their weight and drag,

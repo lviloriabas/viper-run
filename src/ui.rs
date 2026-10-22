@@ -416,7 +416,7 @@ impl<'a> Ui<'a> {
             ("STA 1 / 9  WINGTIP", "2 X AIM-9M  IR".to_string(), None),
             ("STA 3 / 7  OUTBOARD", name(cfg.outboard).to_string(), Some(Action::Station(0))),
             ("STA 4 / 6  INBOARD", name(cfg.inboard).to_string(), Some(Action::Station(1))),
-            ("INTERNAL FUEL", format!("{} LB  {}%", (crate::sim::spec::FUEL_MAX * cfg.fuel * 2.20462).round() as i64, (cfg.fuel * 100.0).round() as i64), Some(Action::Fuel)),
+            ("INTERNAL FUEL", format!("{} LB  {}%", (cfg.jet.fuel_max() * cfg.fuel * 2.20462).round() as i64, (cfg.fuel * 100.0).round() as i64), Some(Action::Fuel)),
             ("M61A1 GUN", "511 ROUNDS PGU-28".to_string(), None),
             ("ALE-47", "30 CHAFF  30 FLARES".to_string(), None),
         ];
