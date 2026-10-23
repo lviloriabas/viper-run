@@ -454,19 +454,17 @@ impl<'a> Ui<'a> {
         yy += 20.0 * s;
         self.cv.text("LOADOUT", x + m, yy, s * 3.0, GREEN, Align::Left);
         yy += 18.0 * s;
-        let name = |st: Option<Store>| match st {
-            None => "EMPTY",
-            Some(Store::Aim9) => "2 X AIM-9M  IR",
-            Some(Store::Aim120) => "2 X AIM-120C  RADAR",
-            Some(Store::Mk82) => "2 X MK-82  500 LB",
-        };
+        let name = |st: Option<Store>| st.map_or("EMPTY", |s| s.pair());
+        let mig = cfg.jet == crate::sim::Type::Mig29;
+        let gun = crate::weapons::gun_of(cfg.jet);
+        let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7  OUTBOARD", "STA 4 / 6  INBOARD", "PGU-28") };
         let rows: [(&str, String, Option<Action>); 6] = [
-            ("STA 1 / 9  WINGTIP", "2 X AIM-9M  IR".to_string(), None),
-            ("STA 3 / 7  OUTBOARD", name(cfg.outboard).to_string(), Some(Action::Station(0))),
-            ("STA 4 / 6  INBOARD", name(cfg.inboard).to_string(), Some(Action::Station(1))),
+            (tip, crate::combat::tip_store(cfg.jet).pair().to_string(), None),
+            (out, name(cfg.outboard).to_string(), Some(Action::Station(0))),
+            (inb, name(cfg.inboard).to_string(), Some(Action::Station(1))),
             ("INTERNAL FUEL", format!("{} LB  {}%", (cfg.jet.fuel_max() * cfg.fuel * 2.20462).round() as i64, (cfg.fuel * 100.0).round() as i64), Some(Action::Fuel)),
-            ("M61A1 GUN", "511 ROUNDS PGU-28".to_string(), None),
-            ("ALE-47", "30 CHAFF  30 FLARES".to_string(), None),
+            (gun.name, format!("{} ROUNDS {ammo}", gun.rounds), None),
+            (crate::weapons::dispenser_of(cfg.jet), format!("{} CHAFF  {} FLARES", crate::weapons::CHAFF, crate::weapons::FLARES), None),
         ];
         // LAUNCH comes first in the keyboard order, so Enter takes off.
         let launch_y = yy + 6.0 * 17.0 * s + 14.0 * s;

@@ -362,7 +362,7 @@ impl App {
             mission,
             preview,
             kind,
-            config: combat::Config { jet: opts.jet.unwrap_or_default(), aggressor: opts.bandits.unwrap_or(sim::Type::Mig29), ..combat::Config::for_mission(kind) },
+            config: combat::Config { aggressor: opts.bandits.unwrap_or(sim::Type::Mig29), ..combat::Config::for_jet(kind, opts.jet.unwrap_or_default()) },
             combat,
             models,
             trigger_mouse: false,
@@ -711,10 +711,10 @@ impl App {
             Action::Pick(k) => {
                 self.kind = k;
                 let (jet, aggressor, mixed) = (self.config.jet, self.config.aggressor, self.config.threats.mixed);
-                self.config = combat::Config { jet, aggressor, ..combat::Config::for_mission(k) };
+                self.config = combat::Config { aggressor, ..combat::Config::for_jet(k, jet) };
                 self.config.threats.mixed = mixed;
             }
-            Action::Jet => self.config.jet = self.config.jet.next(),
+            Action::Jet => self.config.set_jet(self.config.jet.next()),
             Action::Aggressor => self.config.next_fleet(),
             Action::Layout => {
                 let t = &self.config.threats;
@@ -1327,7 +1327,7 @@ impl App {
             p.gun = if self.combat.firing { 0.11 } else { 0.0 };
             // Sidewinder tone: a low growl while the seeker searches, a high
             // steady tone once it tracks.
-            if self.combat.mode == Mode::Srm && self.combat.loadout.count(combat::Store::Aim9) > 0 {
+            if self.combat.heater().is_some() {
                 let locked = self.combat.seeker.is_some();
                 p.seeker_gain = if locked { 0.035 } else { 0.014 };
                 p.seeker_freq = if locked { 1250.0 } else { 380.0 + 40.0 * (self.time * 23.0).sin() as f32 };
@@ -1364,7 +1364,7 @@ impl App {
             }
             Bind::Weapon if flying => {
                 self.combat.cycle_weapon();
-                self.flash_toast(&symbology::stores_line(&self.combat), 1.6);
+                self.flash_toast(&symbology::weapon_line(&self.combat), 1.6);
             }
             Bind::Lock if flying => {
                 if let Some(a) = &self.aircraft {

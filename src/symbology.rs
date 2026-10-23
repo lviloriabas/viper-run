@@ -4,7 +4,7 @@
 //! contacts and the RWR's threats; and the target brackets and stores line
 //! of the flight overlays.
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
-use crate::combat::{Combat, Mode, Store};
+use crate::combat::{Combat, Mode};
 use crate::math::*;
 use crate::sim::{Aircraft, Type};
 use crate::targets::Kind;
@@ -43,28 +43,26 @@ impl Pen<'_> {
     }
 }
 
-/// Stores line: the selected weapon by its real name and kind (the brevity
-/// code for missiles), what is left of it, and the countermeasures.
+/// The selected weapon by its real name and kind (the brevity code for
+/// missiles) and what is left of it: what the weapon switch shows.
+pub fn weapon_line(c: &Combat) -> String {
+    match c.weapon_left() {
+        ("", _) => c.weapon_name(),
+        (_, left) => format!("{} x{left}", c.weapon_name()),
+    }
+}
+
+/// Stores line: the selected weapon, then the countermeasures apart.
 pub fn stores_line(c: &Combat) -> String {
     let l = &c.loadout;
-    let left = match c.mode {
-        Mode::Nav => return format!("NAV  CHAFF {}  FLARES {}", l.chaff, l.flares),
-        Mode::Gun => l.rounds,
-        Mode::Srm => l.count(Store::Aim9),
-        Mode::Mrm => l.count(Store::Aim120),
-        Mode::Ccip => l.count(Store::Mk82),
-    };
-    format!("{} x{left}  CHAFF {}  FLARES {}", c.mode.weapon(), l.chaff, l.flares)
+    format!("{}  //  CHAFF {}  FLARES {}", weapon_line(c), l.chaff, l.flares)
 }
 
 /// The selected weapon, its ammunition and what is left of it, for the HUD.
 fn selected(c: &Combat) -> String {
-    let (n, what) = match c.mode {
-        Mode::Nav => return String::new(),
-        Mode::Gun => (c.loadout.rounds, "20MM"),
-        Mode::Srm => (c.loadout.count(Store::Aim9), "AIM-9M"),
-        Mode::Mrm => (c.loadout.count(Store::Aim120), "AIM-120C"),
-        Mode::Ccip => (c.loadout.count(Store::Mk82), "MK-82"),
+    let (what, n) = match c.weapon_left() {
+        ("", _) => return String::new(),
+        w => w,
     };
     if n == 0 {
         format!("{what} EMPTY")
@@ -542,7 +540,7 @@ fn jhmcs(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam:
 
     // AIM-9 missile diamond: on the target the seeker tracks, else on the
     // cross, where the helmet slaves the seeker.
-    if c.mode == Mode::Srm && c.loadout.count(Store::Aim9) > 0 {
+    if c.heater().is_some() {
         let (x, y) = c.seeker.and_then(|w| c.track(w, a)).and_then(|(p, _)| project(cam, w, h, p)).unwrap_or((cx, cy));
         let k = 6.0 * s;
         cv.polyline(&[[x, y - k], [x + k, y], [x, y + k], [x - k, y]], 1.5, true, col);

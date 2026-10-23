@@ -1,12 +1,13 @@
-//! Stores of the F-16C Block 50 and their physics, simplified but with the
-//! published figures: the M61A1 gun and its 20 mm rounds, AIM-9M and AIM-120C
-//! missiles flying proportional navigation within their seeker, motor, g and
-//! fuze limits, and Mk-82 low-drag bombs. The sights that aim them live here
+//! Stores of the F-16C Block 50 and the MiG-29A 9.12 and their physics,
+//! simplified but with the published figures: the M61A1 and GSh-30-1 guns and
+//! their rounds, AIM-9M, AIM-120C, R-73 and R-27R missiles flying proportional
+//! navigation within their seeker, motor, g and fuze limits, and the Mk-82,
+//! FAB-250M-62 and FAB-500M-62 low-drag bombs. The sights that aim them live here
 //! too: the EEGS-style funnel of rounds already in the air, the LCOS pipper on
 //! that stream, the CCIP impact prediction and the missile launch-zone
 //! fly-out. Everything integrates at the fixed 120 Hz step, in world metres.
 use crate::math::*;
-use crate::sim::{atmosphere_at, Aircraft, FIXED_DT, G0};
+use crate::sim::{atmosphere_at, Aircraft, Type, FIXED_DT, G0};
 use std::collections::VecDeque;
 
 /// Anything that can shoot or be shot at.
@@ -17,25 +18,73 @@ pub enum Who {
     Ground(usize),
 }
 
-// ================================================================ M61A1 gun
-/// 511 linkless 20 mm rounds in the drum behind the cockpit.
-pub const GUN_ROUNDS: u32 = 511;
-/// 6,000 rounds per minute.
-pub const GUN_RATE: f64 = 100.0;
-/// PGU-28/B muzzle velocity, m/s.
-pub const MUZZLE_VELOCITY: f64 = 1036.0;
-/// Gun muzzle in body axes: the port in the left strake, abeam the seat.
-pub const GUN_PORT: V3 = v3(-0.72, 0.52, -3.40);
+// ================================================================ guns
+/// An internal gun and its ammunition.
+#[derive(Debug)]
+pub struct Gun {
+    pub name: &'static str,
+    /// Calibre, for the HUD.
+    pub calibre: &'static str,
+    pub rounds: u32,
+    /// Rounds per second.
+    pub rate: f64,
+    /// Muzzle velocity, m/s.
+    pub velocity: f64,
+    /// Drag factor k = rho Cd A / 2m of the projectile at sea level.
+    pub k: f64,
+    /// Damage to a 100-point airframe per hit.
+    pub damage: f64,
+    /// Mass the jet loses per round, kg.
+    pub expended: f64,
+    /// Muzzle in body axes.
+    pub port: V3,
+}
+
+/// M61A1 Vulcan: 511 linkless 20 mm rounds in the drum behind the cockpit,
+/// 6,000 rounds per minute, PGU-28/B at 1,036 m/s from the port in the left
+/// strake, abeam the seat. The 100 g projectile (Cd 0.28 supersonic) keeps
+/// about 600 m/s at 1,000 m, reached in 1.3 s. The jet loses the projectile
+/// and its propellant per round; the linkless feed carries the cases back.
+pub const M61A1: Gun = Gun {
+    name: "M61A1 VULCAN",
+    calibre: "20MM",
+    rounds: 511,
+    rate: 100.0,
+    velocity: 1036.0,
+    k: 0.5 * 1.225 * 0.28 * 3.14e-4 / 0.10,
+    damage: 6.0,
+    expended: 0.14,
+    port: v3(-0.72, 0.52, -3.40),
+};
+
+/// GSh-30-1 (9A-4071K): 150 rounds of 30 x 165 mm in the port LERX root,
+/// 1,500 to 1,800 rounds per minute, the 390 g OFZ high-explosive round at
+/// 860 m/s. Heavier and slower than the 20 mm round, it carries its speed
+/// further, and each hit does about two and a half times the damage.
+pub const GSH301: Gun = Gun {
+    name: "GSH-30-1",
+    calibre: "30MM",
+    rounds: 150,
+    rate: 27.5,
+    velocity: 860.0,
+    k: 0.5 * 1.225 * 0.28 * 7.07e-4 / 0.39,
+    damage: 15.0,
+    expended: 0.39 + 0.16,
+    port: v3(-0.63, 0.69, -3.40),
+};
+
+/// The gun of an airframe.
+pub fn gun_of(kind: Type) -> &'static Gun {
+    match kind {
+        Type::F16 => &M61A1,
+        Type::Mig29 => &GSH301,
+    }
+}
+
 /// The gun line points through the HUD gun cross, 55 mrad above the boresight.
 pub const GUN_ELEVATION: f64 = 55.0 / 650.0;
-/// Mass the jet loses per round: the 100 g projectile and its propellant; the
-/// linkless feed carries the empty cases back into the drum.
-pub const ROUND_EXPENDED: f64 = 0.14;
 /// One round in five is a tracer.
 pub const TRACER_EVERY: u32 = 5;
-/// Drag factor k = rho Cd A / 2m at sea level for the 100 g, 20 mm projectile
-/// (Cd 0.28 supersonic): about 600 m/s are left at 1,000 m, reached in 1.3 s.
-const ROUND_K: f64 = 0.5 * 1.225 * 0.28 * 3.14e-4 / 0.10;
 /// Rounds stop being tracked after this long, about 2.5 km down range.
 pub const ROUND_LIFE: f64 = 3.2;
 
@@ -44,9 +93,10 @@ pub fn gun_bore() -> V3 {
     v3(0.0, GUN_ELEVATION.sin(), -GUN_ELEVATION.cos())
 }
 
-/// Muzzle position and velocity of a round fired now from a jet.
+/// Muzzle position and velocity of a round fired now from a jet's gun.
 pub fn muzzle(a: &Aircraft) -> (V3, V3) {
-    (a.pos + a.q.rotate(GUN_PORT), a.vel + a.q.rotate(gun_bore()) * MUZZLE_VELOCITY)
+    let g = gun_of(a.kind);
+    (a.pos + a.q.rotate(g.port), a.vel + a.q.rotate(gun_bore()) * g.velocity)
 }
 
 /// Velocity-squared drag scaled by air density, and gravity: the motion of
@@ -69,16 +119,22 @@ pub struct Round {
     pub from: Who,
     /// Damage to an aircraft (hit points of 100) on a hit.
     pub damage: f64,
+    /// Drag factor of the projectile.
+    pub k: f64,
 }
 
 impl Round {
     pub fn new(pos: V3, vel: V3, tracer: bool, from: Who, damage: f64) -> Round {
-        Round { pos, vel, prev: pos, age: 0.0, tracer, from, damage }
+        Round { pos, vel, prev: pos, age: 0.0, tracer, from, damage, k: M61A1.k }
+    }
+    /// A round from a gun, with its damage and ballistics.
+    pub fn of(gun: &Gun, pos: V3, vel: V3, tracer: bool, from: Who) -> Round {
+        Round { damage: gun.damage, k: gun.k, ..Round::new(pos, vel, tracer, from, 0.0) }
     }
     pub fn step(&mut self, dt: f64) {
         self.prev = self.pos;
         self.age += dt;
-        ballistic(&mut self.pos, &mut self.vel, ROUND_K, dt);
+        ballistic(&mut self.pos, &mut self.vel, self.k, dt);
     }
 }
 
@@ -159,7 +215,7 @@ const SIGHT_SPAN: f64 = 1.6;
 impl GunSight {
     pub fn step(&mut self, dt: f64, a: &Aircraft) {
         for (p, v, age) in self.shots.iter_mut() {
-            ballistic(p, v, ROUND_K, dt);
+            ballistic(p, v, gun_of(a.kind).k, dt);
             *age += dt;
         }
         while self.shots.front().is_some_and(|s| s.2 > SIGHT_SPAN) {
@@ -232,6 +288,11 @@ pub struct Spec {
     pub active: bool,
     /// Infrared seeker, decoyed by flares; otherwise radar, decoyed by chaff.
     pub infrared: bool,
+    /// Semi-active radar homing: it guides only while the launcher's radar
+    /// keeps the target locked (R-27R, SA-6).
+    pub semi_active: bool,
+    /// Brevity call on launch.
+    pub call: &'static str,
 }
 
 /// AIM-9M Sidewinder: 85.5 kg, 2.87 m, 127 mm; Mk 36 Mod 11 reduced-smoke motor
@@ -261,6 +322,8 @@ pub const AIM9M: Spec = Spec {
     max_range: 14000.0,
     active: false,
     infrared: true,
+    semi_active: false,
+    call: "FOX 2",
 };
 
 /// AIM-120C AMRAAM: 161.5 kg, 3.66 m, 178 mm; boost-sustain motor to Mach 4;
@@ -290,6 +353,74 @@ pub const AIM120C: Spec = Spec {
     max_range: 35000.0,
     active: true,
     infrared: false,
+    semi_active: false,
+    call: "FOX 3",
+};
+
+/// R-73 (izdeliye 72, AA-11 Archer): 105 kg, 2.90 m, 170 mm; single-stage
+/// motor to Mach 2.5; 7.4 kg expanding-rod warhead on an active radio fuze;
+/// the cooled Mayak all-aspect infrared seeker looks 45 degrees off the nose
+/// and is cued by the helmet sight, and the gas vanes in the exhaust let it
+/// pull hard off the rail.
+pub const R73: Spec = Spec {
+    name: "R-73",
+    mass: 105.0,
+    length: 2.90,
+    diameter: 0.170,
+    propellant: 38.0,
+    motor: [(14000.0, 6.5), (0.0, 0.0)],
+    drop: 0.0,
+    cd0: 0.70,
+    cna: 32.0,
+    alpha_max: 25.0 * DEG,
+    g_limit: 40.0,
+    nav: 4.0,
+    gimbal: 45.0 * DEG,
+    acquire: 2.5 * DEG,
+    fuze: 8.0,
+    lethal: 3.5,
+    outer: 12.0,
+    arm: 0.4,
+    life: 40.0,
+    min_range: 300.0,
+    max_range: 20000.0,
+    active: false,
+    infrared: true,
+    semi_active: false,
+    call: "FOX 2",
+};
+
+/// R-27R (izdeliye 470R, AA-10 Alamo-A): 253 kg, 4.08 m, 230 mm; dual-thrust
+/// motor; 39 kg expanding-rod warhead on an active radar fuze; inertial
+/// midcourse, then semi-active radar homing on the jet's N019 radar, which
+/// has to keep the target locked to the end. Up to 73 km head on at height,
+/// much less low down.
+pub const R27R: Spec = Spec {
+    name: "R-27R",
+    mass: 253.0,
+    length: 4.08,
+    diameter: 0.230,
+    propellant: 80.0,
+    motor: [(42000.0, 2.5), (12500.0, 6.5)],
+    drop: 0.0,
+    cd0: 0.48,
+    cna: 30.0,
+    alpha_max: 20.0 * DEG,
+    g_limit: 30.0,
+    nav: 3.5,
+    gimbal: 50.0 * DEG,
+    acquire: 5.0 * DEG,
+    fuze: 13.0,
+    lethal: 7.0,
+    outer: 24.0,
+    arm: 1.0,
+    life: 80.0,
+    min_range: 800.0,
+    max_range: 32000.0,
+    active: false,
+    infrared: false,
+    semi_active: true,
+    call: "FOX 1",
 };
 
 impl Spec {
@@ -438,9 +569,19 @@ impl Missile {
 /// tables do; it is what makes the published ranges shrink low down.
 const MIN_MACH: f64 = 1.0;
 
-/// ALE-47 dispenser load: chaff and flare cartridges.
+/// Countermeasure load, chaff and flare cartridges: the F-16's ALE-47, and
+/// the MiG-29's two 30-round BVP-30-26M dispensers in the fin-root
+/// extensions with PPR-26 chaff and PPI-26 flares, the same count.
 pub const CHAFF: u32 = 30;
 pub const FLARES: u32 = 30;
+
+/// The dispenser's name.
+pub fn dispenser_of(kind: Type) -> &'static str {
+    match kind {
+        Type::F16 => "ALE-47",
+        Type::Mig29 => "BVP-30-26M",
+    }
+}
 
 /// Chance that one countermeasure program (a flare and a chaff bundle)
 /// pulls a missile's seeker off its target. Flares only fool an infrared
@@ -491,22 +632,76 @@ pub fn fly_out(spec: &'static Spec, pos: V3, vel: V3, tp: V3, tv: V3, floor: &dy
 }
 
 // ================================================================ bombs
+/// A free-fall bomb.
+#[derive(Debug)]
+pub struct BombSpec {
+    pub name: &'static str,
+    pub mass: f64,
+    pub length: f64,
+    pub diameter: f64,
+    /// Drag factor at sea level, k = rho Cd A / 2m.
+    pub k: f64,
+    /// Blast and fragments against vehicles and structures: damage inside
+    /// the lethal radius, falling to nothing at the outer one, m.
+    pub damage: f64,
+    pub lethal: f64,
+    pub outer: f64,
+}
+
 /// Mk-82 LDGP, the 500 lb general-purpose bomb: 241 kg with its fuze,
-/// 2.21 m, 273 mm, 87 kg of Tritonal.
-pub const MK82_MASS: f64 = 241.0;
-/// Drag factor at sea level, Cd 0.22 on the 0.0585 m^2 cross-section.
-const MK82_K: f64 = 0.5 * 1.225 * 0.22 * 0.0585 / MK82_MASS;
-/// MAU-12 rack ejection, m/s downward.
+/// 2.21 m, 273 mm, 87 kg of Tritonal; Cd 0.22 on the 0.0585 m^2 section.
+pub const MK82: BombSpec = BombSpec {
+    name: "MK-82",
+    mass: 241.0,
+    length: 2.21,
+    diameter: 0.273,
+    k: 0.5 * 1.225 * 0.22 * 0.0585 / 241.0,
+    damage: BOMB_DAMAGE,
+    lethal: BOMB_LETHAL,
+    outer: BOMB_OUTER,
+};
+#[cfg(test)]
+pub const MK82_MASS: f64 = MK82.mass;
+
+/// FAB-250M-62, the 1962 low-drag 250 kg high-explosive bomb for external
+/// carriage: 250 kg, 1.92 m, 300 mm, 100 kg of TNT, about the Mk-82's charge.
+pub const FAB250: BombSpec = BombSpec {
+    name: "FAB-250",
+    mass: 250.0,
+    length: 1.92,
+    diameter: 0.300,
+    k: 0.5 * 1.225 * 0.24 * 0.0707 / 250.0,
+    damage: 400.0,
+    lethal: 8.0,
+    outer: 45.0,
+};
+
+/// FAB-500M-62: 497 kg, 2.47 m, 400 mm, about 200 kg of TNT. Twice the
+/// charge of the FAB-250 reaches a quarter further (blast radius goes with
+/// the cube root of the charge).
+pub const FAB500: BombSpec = BombSpec {
+    name: "FAB-500",
+    mass: 497.0,
+    length: 2.47,
+    diameter: 0.400,
+    k: 0.5 * 1.225 * 0.24 * 0.1257 / 497.0,
+    damage: 500.0,
+    lethal: 10.0,
+    outer: 57.0,
+};
+
+/// Rack ejection, m/s downward.
 pub const BOMB_EJECT: f64 = 1.5;
 /// Fuze arming delay: a bomb that lands sooner is a dud.
 pub const BOMB_ARM: f64 = 2.0;
-/// Blast and fragments against vehicles and structures, m.
+/// The Mk-82's blast and fragments against vehicles and structures, m.
 pub const BOMB_LETHAL: f64 = 8.0;
 pub const BOMB_OUTER: f64 = 45.0;
 pub const BOMB_DAMAGE: f64 = 400.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Bomb {
+    pub spec: &'static BombSpec,
     pub pos: V3,
     pub vel: V3,
     pub age: f64,
@@ -515,16 +710,16 @@ pub struct Bomb {
 impl Bomb {
     /// Released from a station (body axes) of a jet: its velocity plus the
     /// ejector's push.
-    pub fn release(a: &Aircraft, station: V3) -> Bomb {
+    pub fn release(spec: &'static BombSpec, a: &Aircraft, station: V3) -> Bomb {
         let ax = a.q.axes();
-        Bomb { pos: a.pos + a.q.rotate(station), vel: a.vel - ax.up * BOMB_EJECT, age: 0.0 }
+        Bomb { spec, pos: a.pos + a.q.rotate(station), vel: a.vel - ax.up * BOMB_EJECT, age: 0.0 }
     }
 
     /// One fixed step; returns the impact point once it reaches the ground.
     pub fn step(&mut self, dt: f64, floor: &dyn Fn(f64, f64) -> f64) -> Option<V3> {
         let p0 = self.pos;
         self.age += dt;
-        ballistic(&mut self.pos, &mut self.vel, MK82_K, dt);
+        ballistic(&mut self.pos, &mut self.vel, self.spec.k, dt);
         ground_crossing(p0, self.pos, floor)
     }
 
@@ -536,8 +731,8 @@ impl Bomb {
 /// Continuously computed impact point: the bomb a release now would drop,
 /// flown with the same step and ballistics as a real one. Returns the impact
 /// point and the time of fall.
-pub fn ccip(a: &Aircraft, station: V3, floor: &dyn Fn(f64, f64) -> f64) -> Option<(V3, f64)> {
-    let mut b = Bomb::release(a, station);
+pub fn ccip(spec: &'static BombSpec, a: &Aircraft, station: V3, floor: &dyn Fn(f64, f64) -> f64) -> Option<(V3, f64)> {
+    let mut b = Bomb::release(spec, a, station);
     while b.age < 60.0 {
         if let Some(p) = b.step(FIXED_DT, floor) {
             return Some((p, b.age));
@@ -575,7 +770,7 @@ mod tests {
     /// 600 m/s left, and the round falls under gravity on the way.
     #[test]
     fn rounds_slow_down_and_drop() {
-        let mut r = Round::new(v3(0.0, 1000.0, 0.0), v3(0.0, 0.0, -MUZZLE_VELOCITY), false, Who::Player, 6.0);
+        let mut r = Round::new(v3(0.0, 1000.0, 0.0), v3(0.0, 0.0, -M61A1.velocity), false, Who::Player, 6.0);
         let mut t = 0.0;
         while -r.pos.z < 1000.0 {
             r.step(FIXED_DT);
@@ -587,7 +782,7 @@ mod tests {
         let drop = 1000.0 - r.pos.y;
         assert!(drop > 5.0 && drop < 0.5 * G0 * t * t + 0.5, "drop {drop:.1} m");
         // Thin air at 9 km lets the round keep more of its speed.
-        let mut high = Round::new(v3(0.0, 9000.0, 0.0), v3(0.0, 0.0, -MUZZLE_VELOCITY), false, Who::Player, 6.0);
+        let mut high = Round::new(v3(0.0, 9000.0, 0.0), v3(0.0, 0.0, -M61A1.velocity), false, Who::Player, 6.0);
         for _ in 0..(t / FIXED_DT) as usize {
             high.step(FIXED_DT);
         }
@@ -621,7 +816,7 @@ mod tests {
     /// and across, and the motor and drag give the published speeds.
     #[test]
     fn guidance_hits_a_non_manoeuvring_target() {
-        for spec in [&AIM9M, &AIM120C] {
+        for spec in [&AIM9M, &AIM120C, &R73, &R27R] {
             for (offset, tv, range) in [(v3(0.0, 0.0, -1.0), v3(0.0, 0.0, -230.0), 2500.0), (v3(0.6, 0.0, -0.8), v3(-240.0, 0.0, 0.0), 4000.0), (v3(-0.3, 0.1, -1.0), v3(150.0, 0.0, 180.0), 6000.0)] {
                 let tp0 = v3(0.0, 5000.0, 0.0) + offset.norm() * range;
                 let mut m = Missile::launch(spec, v3(0.0, 5000.0, 0.0), v3(0.0, 0.0, -250.0), Who::Player, Some(Who::Bandit(0)));
@@ -665,6 +860,13 @@ mod tests {
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -15000.0), toward, &flat).is_none());
         assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -20000.0), toward, &flat).is_some());
         assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -32000.0), toward, &flat).is_none());
+        // The R-73 outranges the Sidewinder head on; the R-27R reaches
+        // AMRAAM ranges low down, but not 30 km.
+        assert!(fly_out(&R73, pos, vel, pos + v3(0.0, 0.0, -12000.0), toward, &flat).is_some());
+        assert!(fly_out(&R73, pos, vel, pos + v3(0.0, 0.0, -20000.0), toward, &flat).is_none());
+        assert!(fly_out(&R73, pos, vel, pos + v3(0.0, 0.0, -3000.0), away, &flat).is_some());
+        assert!(fly_out(&R27R, pos, vel, pos + v3(0.0, 0.0, -20000.0), toward, &flat).is_some());
+        assert!(fly_out(&R27R, pos, vel, pos + v3(0.0, 0.0, -34000.0), toward, &flat).is_none());
         // Inside minimum range there is no shot.
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -150.0), away, &flat).is_none());
     }
@@ -694,8 +896,8 @@ mod tests {
             a.vel = v3(0.0, d.sin(), -d.cos()) * speed;
             a.q = Quat::axis_angle(V3::X, d + a.alpha);
             let station = v3(3.5, -0.2, 2.3);
-            let (p, tof) = ccip(&a, station, &ground).expect("no impact");
-            let mut b = Bomb::release(&a, station);
+            let (p, tof) = ccip(&MK82, &a, station, &ground).expect("no impact");
+            let mut b = Bomb::release(&MK82, &a, station);
             let hit = loop {
                 if let Some(h) = b.step(FIXED_DT, &ground) {
                     break h;
@@ -707,6 +909,23 @@ mod tests {
             let vac = (a.vel.y + (a.vel.y * a.vel.y + 2.0 * G0 * (alt - p.y)).sqrt()) / G0;
             assert!(-p.z < -a.vel.z * vac, "{alt} m: impact {:.0} m ahead", -p.z);
         }
+    }
+
+    /// The 30 mm round leaves slower than the 20 mm one but, heavier for
+    /// its size, keeps its speed better: the two meet near 1,500 m.
+    #[test]
+    fn the_30mm_round_carries_its_speed() {
+        let fly = |g: &Gun, t: f64| {
+            let mut r = Round::of(g, v3(0.0, 3000.0, 0.0), v3(0.0, 0.0, -g.velocity), false, Who::Player);
+            for _ in 0..(t / FIXED_DT) as usize {
+                r.step(FIXED_DT);
+            }
+            r
+        };
+        let (a, b) = (fly(&M61A1, 0.5), fly(&GSH301, 0.5));
+        assert!(a.vel.len() > b.vel.len(), "early on the 20 mm is faster");
+        let (a, b) = (fly(&M61A1, 2.5), fly(&GSH301, 2.5));
+        assert!(b.vel.len() > a.vel.len(), "later the 30 mm is: {:.0} vs {:.0} m/s", b.vel.len(), a.vel.len());
     }
 
     /// The LCOS pipper on the virtual stream: rounds fired at a target held on

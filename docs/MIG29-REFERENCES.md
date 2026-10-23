@@ -57,3 +57,29 @@ tapa la vista delantera salvo el morro y la bola IRST.
   del parabrisas, el arco sobre las rodillas con sus tres espejos y los
   rieles; mamparo detrás del asiento y la cubierta bajo la parte trasera de
   la cúpula.
+
+## Armamento del MiG-29A 9.12
+
+Cifras publicadas que usa el juego (`weapons.rs`, `combat.rs`):
+
+- Cañón GSh-30-1 (9A-4071K) en la raíz del LERX izquierdo: 150 proyectiles
+  de 30 x 165 mm, 1.500 a 1.800 disparos por minuto, el OFZ de 390 g a
+  860 m/s.
+- R-73 (izdeliye 72, AA-11 Archer): 105 kg, 2,90 m, 170 mm; cabeza infrarroja
+  refrigerada todo aspecto a 45 grados del eje, guiada por el visor de casco
+  Shchel-3UM; ojiva de varillas de 7,4 kg y espoleta radioeléctrica.
+- R-27R (izdeliye 470R, AA-10 Alamo-A): 253 kg, 4,08 m, 230 mm; guía inercial
+  y luego semiactiva sobre el radar N019, que debe mantener el blanco hasta el
+  impacto; ojiva de varillas de 39 kg; hasta 73 km de frente en altura.
+- FAB-250M-62: 250 kg, 1,92 m, 300 mm, 100 kg de TNT. FAB-500M-62: 497 kg,
+  2,47 m, 400 mm, unos 200 kg de TNT.
+- Dos dispensadores BVP-30-26M de 30 cartuchos de 26 mm (PPI-26 bengalas,
+  PPR-26 chaff).
+- Seis pilones subalares: R-73 en los exteriores, R-73 o FAB-250 en los
+  medios, R-27R o bombas pesadas en los interiores; carga típica aire-aire de
+  cuatro R-73 y dos R-27R.
+
+Fuentes: [R-27 (Wikipedia)](https://en.wikipedia.org/wiki/R-27_(air-to-air_missile)),
+[FAB-500](https://en.wikipedia.org/wiki/FAB-500),
+[FAB-250](https://en.wikipedia.org/wiki/FAB-250),
+[FAB-500M-62 (GlobalSecurity)](https://www.globalsecurity.org/military/world/russia/fab-500m-62.htm).

@@ -11,7 +11,7 @@ use crate::math::*;
 use crate::mesh::{Mesh, Rgb};
 use crate::sim::{Aircraft, Type};
 use crate::targets::{self, Kind, KINDS};
-use crate::weapons::{Who, AIM120C};
+use crate::weapons::{Who, AIM120C, AIM9M, FAB250, FAB500, MK82, R27R, R73};
 use crate::world::{self, Camera, Part, Props, World};
 use miniquad::*;
 
@@ -91,6 +91,31 @@ fn along(dir: V3, pos: V3, eye: V3) -> M4 {
     basis(ax.right, ax.up, ax.back, pos - eye)
 }
 
+/// Stretches a store's model across (its right and up columns) and along
+/// (its back column): the R-73, R-27R and FAB bombs drawn as the Sidewinder,
+/// AMRAAM and Mk-82 shapes at their own diameters and lengths.
+fn stretch(mut model: M4, across: f32, along: f32) -> M4 {
+    for (i, v) in model.iter_mut().take(11).enumerate() {
+        *v *= if i < 8 { across } else { along };
+    }
+    model
+}
+
+/// The shape a store is drawn with and how it is stretched onto it.
+fn store_shape<'m>(m: &'m Models, store: Store) -> (&'m Part, f32, f32) {
+    let k = |d: f64, d0: f64, l: f64, l0: f64| ((d / d0) as f32, (l / l0) as f32);
+    let (part, (across, along)) = match store {
+        Store::Aim9 => (&m.aim9, (1.0, 1.0)),
+        Store::Aim120 => (&m.aim120, (1.0, 1.0)),
+        Store::Mk82 => (&m.mk82, (1.0, 1.0)),
+        Store::R73 => (&m.aim9, k(R73.diameter, AIM9M.diameter, R73.length, AIM9M.length)),
+        Store::R27r => (&m.aim120, k(R27R.diameter, AIM120C.diameter, R27R.length, AIM120C.length)),
+        Store::Fab250 => (&m.mk82, k(FAB250.diameter, MK82.diameter, FAB250.length, MK82.length)),
+        Store::Fab500 => (&m.mk82, k(FAB500.diameter, MK82.diameter, FAB500.length, MK82.length)),
+    };
+    (part, across, along)
+}
+
 fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
     let ax = a.q.axes();
     basis(ax.right, ax.up, ax.back, a.pos + a.q.rotate(at) - eye)
@@ -111,12 +136,8 @@ impl Props for Scene<'_> {
                     w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st.at), eye), NONE);
                     continue;
                 }
-                let part = match st.store {
-                    Store::Aim9 => &m.aim9,
-                    Store::Aim120 => &m.aim120,
-                    Store::Mk82 => &m.mk82,
-                };
-                w.draw_prop(ctx, vp, part, jet_model(a, st.at + shift(a, st.at), eye), NONE);
+                let (part, across, along) = store_shape(m, st.store);
+                w.draw_prop(ctx, vp, part, stretch(jet_model(a, st.at + shift(a, st.at), eye), across, along), NONE);
             }
         }
         for b in c.bandits.iter().filter(|b| b.alive) {
@@ -133,19 +154,23 @@ impl Props for Scene<'_> {
         }
         for ms in &c.missiles {
             if (ms.pos - eye).len() < 9000.0 && ms.vel.len() > 1.0 {
-                let part = if ms.spec.name == AIM120C.name { &m.aim120 } else { &m.aim9 };
-                let mut model = along(ms.vel, ms.pos, eye);
-                // The SA-6 is drawn as the Sidewinder shape at twice the size.
-                let scale = if ms.spec.name == AIM120C.name { 1.0 } else { (ms.spec.length / 2.87) as f32 };
-                for v in model.iter_mut().take(11) {
-                    *v *= scale;
-                }
+                // Radar missiles are drawn as the AMRAAM shape, heat seekers
+                // as the Sidewinder's; the SA-6 as the Sidewinder at twice the size.
+                let model = along(ms.vel, ms.pos, eye);
+                let (part, base) = if ms.spec.name == AIM120C.name || ms.spec.name == R27R.name { (&m.aim120, &AIM120C) } else { (&m.aim9, &AIM9M) };
+                let model = if ms.spec.name == "3M9" {
+                    let s = (ms.spec.length / base.length) as f32;
+                    stretch(model, s, s)
+                } else {
+                    stretch(model, (ms.spec.diameter / base.diameter) as f32, (ms.spec.length / base.length) as f32)
+                };
                 w.draw_prop(ctx, vp, part, model, NONE);
             }
         }
         for b in &c.bombs {
             if (b.pos - eye).len() < 8000.0 {
-                w.draw_prop(ctx, vp, &m.mk82, along(b.vel, b.pos, eye), NONE);
+                let s = b.spec;
+                w.draw_prop(ctx, vp, &m.mk82, stretch(along(b.vel, b.pos, eye), (s.diameter / MK82.diameter) as f32, (s.length / MK82.length) as f32), NONE);
             }
         }
         for s in &c.sites {

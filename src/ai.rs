@@ -9,7 +9,7 @@
 use crate::math::*;
 use crate::sim::{stick_for_g, stick_for_roll, Aircraft, Input, G0};
 use crate::terrain;
-use crate::weapons::{fly_out, gun_bore, muzzle, Spec, MUZZLE_VELOCITY};
+use crate::weapons::{fly_out, gun_bore, gun_of, muzzle, Spec};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tactic {
@@ -242,7 +242,7 @@ pub fn gun_lead(me: &Aircraft, foe: &Aircraft) -> V3 {
     let (gun, _) = muzzle(me);
     let r = foe.pos - gun;
     // Average speed of a round over the first 900 m.
-    let tof = r.len() / (MUZZLE_VELOCITY * 0.78);
+    let tof = r.len() / (gun_of(me.kind).velocity * 0.78);
     (r + (foe.vel - me.vel) * tof + V3::Y * (0.5 * G0 * tof * tof)).norm()
 }
 

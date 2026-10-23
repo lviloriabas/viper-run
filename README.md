@@ -30,7 +30,7 @@ at start-up in about half a second.
 | `C` or right-click | Center the mouse stick and the head view (a left click only re-captures the mouse when it is free) |
 | `V` | Toggle cockpit / chase view |
 | `F` or left-click (mouse captured) | Fire the gun, launch a missile, release a bomb (pickle) |
-| `X` | Cycle the weapon and master mode: NAV, GUN, SRM (AIM-9), MRM (AIM-120), CCIP (Mk-82) |
+| `X` | Cycle the weapon and master mode: GUN, SRM (AIM-9 or R-73), MRM (AIM-120 or R-27R), CCIP (bombs); weapons only, never NAV or the chaff and flares |
 | `T` | Lock the target nearest the nose (or the helmet line of sight); again for the next |
 | `Z` | Countermeasures: one chaff bundle and one flare |
 | `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
@@ -128,6 +128,15 @@ pylon pairs, the internal fuel, and the gross weight, stores drag and
 thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
 30 chaff and 30 flares always come along.
 
+The MiG-29A 9.12 carries its own stores on its six underwing pylons: R-73s
+(AA-11 Archer, infrared, Fox 2) always on the outer pair; R-73s or
+FAB-250M-62 bombs on the middle pair; R-27Rs (AA-10 Alamo-A, semi-active
+radar, Fox 1), FAB-500M-62s or FAB-250s on the inner pair. Its GSh-30-1
+fires 150 rounds of 30 mm, and two BVP-30-26M dispensers hold 30 chaff and
+30 flares. The DOGFIGHT default is four R-73s and two R-27Rs, STRIKE two
+FAB-250s and two FAB-500s, FREE FLIGHT four R-73s and two FAB-500s; changing
+jets swaps each pylon's stores for the other airframe's equivalent.
+
 | Mission | Objective | Default stores | Clock |
 | --- | --- | --- | --- |
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
@@ -148,8 +157,10 @@ ground. The result screen shows the kills or targets, the time and a rating.
 
 ### Weapons and sensors
 
-- Master modes follow the weapon (`X`): NAV with the master arm safe, GUN,
-  SRM, MRM and CCIP. The HUD shows the master mode and arm state (for example
+- Master modes follow the weapon (`X`): GUN, SRM, MRM and CCIP, as the
+  stores on board allow. The jet starts in NAV with the master arm safe, but
+  `X` cycles only the weapons and never stops on NAV or the countermeasures,
+  which have their own button (`Z`). The HUD shows the master mode and arm state (for example
   SRM ARM), the selected weapon with what is left of it (2 AIM-9M, 511 20MM,
   or EMPTY), the lock's
   range and closure, a target designator box, or a locator line when the
@@ -159,7 +170,7 @@ ground. The result screen shows the kills or targets, the time and a rating.
   without a lock) with a range ring. One round in five is a tracer.
 - SRM: the AIM-9 seeker circle searches its 2.5-degree field along the
   boresight, or where the helmet looks, and slaves to a radar lock within its
-  40-degree gimbal; a high tone means it tracks. MRM: the AIM-120 steering
+  40-degree gimbal (45 degrees on the R-73); a high tone means it tracks. MRM: the AIM-120 steering
   circle and dot. Both show IN RNG and SHOOT from a launch-zone fly-out
   against the target's present track.
 - CCIP: the bomb's continuously computed impact point and the bomb fall line
@@ -180,8 +191,10 @@ ground. The result screen shows the kills or targets, the time and a rating.
   with a diamond on those locked on and a flashing M for missiles in flight.
   It pings for a new emitter, chirps on a lock and warbles while a missile
   guides; outside the cockpit a small scope repeats it.
-- Flares fool only infrared seekers (the AIM-9), chaff only radar ones (the
-  AIM-120 and the SA-6), best with the missile on the beam. The bandits use
+- The R-27R is semi-active: it is not fired without a radar lock and goes
+  blind the moment the lock drops, where the AIM-120 searches on its own.
+- Flares fool only infrared seekers (the AIM-9 and R-73), chaff only radar
+  ones (the AIM-120, R-27R and SA-6), best with the missile on the beam. The bandits use
   them too.
 
 ### Bandits and ground targets
@@ -194,8 +207,9 @@ overshoot, a max-g break when the player is at its six, beaming and then
 breaking into missiles, unloading to regain speed, extending past 2 km
 after a close pass so the fight keeps room to turn, and an Auto-GCAS-style
 recovery that predicts the pull-up and overrides everything near the terrain.
-They shoot the gun inside 900 m on a lead solution and fire AIM-9s from
-inside the launch zone. Hit points take 6 per 20 mm round; a warhead's damage
+They shoot the gun inside 900 m on a lead solution and fire AIM-9s (R-73s
+from a MiG) from inside the launch zone. Hit points take 6 per 20 mm round
+and 15 per 30 mm round; a warhead's damage
 falls off with the miss distance. A damaged jet trails smoke, and a kill
 leaves a burning wreck tumbling to the ground.
 
