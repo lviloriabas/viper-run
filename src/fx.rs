@@ -4,7 +4,7 @@
 use crate::airframe;
 use crate::gfx;
 use crate::math::*;
-use crate::sim::Aircraft;
+use crate::sim::{Aircraft, Type};
 use crate::terrain;
 use crate::vapor::Vapor;
 use crate::world::{sun_dir, Camera, FOG};
@@ -39,6 +39,16 @@ const MAX_VERTS: usize = 80000;
 const FLOATS: usize = 7;
 /// Nozzle exit in body axes (x right, y up, z aft), from the airframe.
 const NOZZLE: V3 = airframe::NOZZLE_EXIT;
+const MIG_NOZZLES: [V3; 2] = {
+    let n = crate::mig29::NOZZLE;
+    [v3(-n.x, n.y, n.z), v3(n.x, n.y, n.z)]
+};
+
+/// Nozzle exits of this aircraft's engines: the F-16's one on the centreline,
+/// the MiG-29's two out on the nacelles.
+fn nozzles(a: &Aircraft) -> &'static [V3] {
+    if a.kind == Type::Mig29 { &MIG_NOZZLES } else { std::slice::from_ref(&NOZZLE) }
+}
 /// Drift of smoke columns.
 const WIND: V3 = v3(3.2, 0.0, -1.6);
 
@@ -316,8 +326,10 @@ impl Fx {
     /// Torching puff at the nozzle as the afterburner lights.
     pub fn ab_light(&mut self, a: &Aircraft) {
         let ax = a.q.axes();
-        let nozzle = a.pos + ax.right * NOZZLE.x + ax.up * NOZZLE.y + ax.back * NOZZLE.z;
-        for _ in 0..8 {
+        let all = nozzles(a);
+        for i in 0..8 {
+            let n = all[i % all.len()];
+            let nozzle = a.pos + ax.right * n.x + ax.up * n.y + ax.back * n.z;
             let d = self.dir();
             let p = Particle {
                 kind: Kind::Fire,
@@ -726,23 +738,25 @@ fn plume_shape(a: &Aircraft, time: f64) -> Option<PlumeShape> {
 /// Faceted cone through rings of (distance aft of the nozzle, radius, colour, alpha).
 fn cone(data: &mut Vec<f32>, a: &Aircraft, eye: V3, rings: &[(f64, f64, [f64; 3], f64)], sides: usize, twist: f64) {
     let ax = a.q.axes();
-    let p = |z: f64, r: f64, t: f64| a.pos - eye + ax.right * (t.cos() * r) + ax.up * (NOZZLE.y + t.sin() * r) + ax.back * (NOZZLE.z + z);
-    for w in rings.windows(2) {
-        let (za, ra, ca, alpha_a) = w[0];
-        let (zb, rb, cb, alpha_b) = w[1];
-        for k in 0..sides {
-            let t0 = k as f64 * TAU / sides as f64 + twist;
-            let t1 = (k + 1) as f64 * TAU / sides as f64 + twist;
-            // Alternate facets a little darker so the cone reads as flat panels.
-            let shade = if k % 2 == 0 { 1.0 } else { 0.78 };
-            let (c0, c1) = (scale3(ca, shade), scale3(cb, shade));
-            let (a0, a1, b0, b1) = (p(za, ra, t0), p(za, ra, t1), p(zb, rb, t0), p(zb, rb, t1));
-            vert(data, a0, c0, alpha_a);
-            vert(data, a1, c0, alpha_a);
-            vert(data, b1, c1, alpha_b);
-            vert(data, a0, c0, alpha_a);
-            vert(data, b1, c1, alpha_b);
-            vert(data, b0, c1, alpha_b);
+    for n in nozzles(a) {
+        let p = |z: f64, r: f64, t: f64| a.pos - eye + ax.right * (n.x + t.cos() * r) + ax.up * (n.y + t.sin() * r) + ax.back * (n.z + z);
+        for w in rings.windows(2) {
+            let (za, ra, ca, alpha_a) = w[0];
+            let (zb, rb, cb, alpha_b) = w[1];
+            for k in 0..sides {
+                let t0 = k as f64 * TAU / sides as f64 + twist;
+                let t1 = (k + 1) as f64 * TAU / sides as f64 + twist;
+                // Alternate facets a little darker so the cone reads as flat panels.
+                let shade = if k % 2 == 0 { 1.0 } else { 0.78 };
+                let (c0, c1) = (scale3(ca, shade), scale3(cb, shade));
+                let (a0, a1, b0, b1) = (p(za, ra, t0), p(za, ra, t1), p(zb, rb, t0), p(zb, rb, t1));
+                vert(data, a0, c0, alpha_a);
+                vert(data, a1, c0, alpha_a);
+                vert(data, b1, c1, alpha_b);
+                vert(data, a0, c0, alpha_a);
+                vert(data, b1, c1, alpha_b);
+                vert(data, b0, c1, alpha_b);
+            }
         }
     }
 }
