@@ -480,7 +480,7 @@ fn mig_stick_grip(h: &Hands) -> Grip {
     Grip::new(MIG_STICK + g * 0.40, g, 1.0)
 }
 
-/// The 9.12's stick (RUS): a column out of a rubber boot to a black
+/// The MiG-29's stick (RUS): a column out of a rubber boot to a black
 /// chequered grip, a head swelling forward with the red weapon release, the
 /// trim hat and the autopilot buttons on top, and the wheel brake lever
 /// along the front.

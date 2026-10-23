@@ -285,7 +285,7 @@ impl Config {
 
     pub fn fleet_name(&self) -> &'static str {
         if self.threats.mixed {
-            "F-16C + MIG-29A"
+            "F-16C + MIG-29S"
         } else {
             self.aggressor.name()
         }

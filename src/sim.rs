@@ -77,14 +77,17 @@ const SUBSTEPS: usize = 4;
 
 pub use crate::air::{atmosphere_at, calibrated_airspeed};
 
-/// Which jet: the F-16C the tables describe, or a MiG-29A flown on the same
-/// aerodynamic tables scaled to its size, weight and engines. The MiG-29 is
-/// an approximation built from published figures, not wind-tunnel data:
-/// 38.06 m^2 of wing against 27.9, 10,900 kg empty, 3,630 kg of internal
-/// fuel, two RD-33s giving 22,200 lbf dry and 36,600 lbf in afterburner, and
-/// about 35 % more inertia. The flight manuals cited for the 9.12 limit the
-/// AoA to 24 degrees (Russian) or 26 (German), against 26 to 28 degrees
-/// critical, and allow 9 g only below 14,200 kg, 8 g above.
+/// Which jet: the F-16C the tables describe, or a MiG-29S (9.13S) flown on
+/// the same aerodynamic tables scaled to its size, weight and engines. The
+/// MiG-29 is an approximation built from published figures, not wind-tunnel
+/// data: 38.06 m^2 of wing against 27.9, 11,200 kg empty (the 9.13's manual
+/// figure, 300 kg over the 9.12 for the enlarged spine and its jammer),
+/// 3,820 kg of internal fuel (the 9.12's 3,630 and the 240 litres the
+/// enlarged No. 1 tank in the spine adds), two RD-33s giving 22,200 lbf dry
+/// and 36,600 lbf in afterburner, and about 35 % more inertia. The flight
+/// manuals cited for the 9.12 and 9.13 limit the AoA to 24 degrees (Russian)
+/// or 26 (German), against 26 to 28 degrees critical, and allow 9 g only
+/// below 14,200 kg, 8 g above.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Type {
     #[default]
@@ -96,20 +99,20 @@ impl Type {
     pub fn name(self) -> &'static str {
         match self {
             Type::F16 => "F-16C BLOCK 50",
-            Type::Mig29 => "MIG-29A 9.12",
+            Type::Mig29 => "MIG-29S 9.13S",
         }
     }
     /// The full name of the variant the model follows.
     pub fn full_name(self) -> &'static str {
         match self {
             Type::F16 => "F-16C BLOCK 50 FIGHTING FALCON",
-            Type::Mig29 => "MIG-29A FULCRUM-A, IZDELIYE 9.12",
+            Type::Mig29 => "MIG-29S FULCRUM-C, IZDELIYE 9.13S",
         }
     }
     pub fn empty_mass(self) -> f64 {
         match self {
             Type::F16 => EMPTY_MASS,
-            Type::Mig29 => 10900.0,
+            Type::Mig29 => 11200.0,
         }
     }
     /// Wing reference area, m^2.
@@ -130,7 +133,7 @@ impl Type {
     pub fn fuel_max(self) -> f64 {
         match self {
             Type::F16 => FUEL_MAX,
-            Type::Mig29 => 3630.0,
+            Type::Mig29 => 3820.0,
         }
     }
     /// Full afterburner thrust at sea level, lbf: one F110-GE-129, two RD-33s.

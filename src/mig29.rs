@@ -1,7 +1,7 @@
-//! MiG-29A (9.12) Fulcrum, low-poly, measured off a scale three-view: 17.32 m
+//! MiG-29S (9.13S) Fulcrum-C, low-poly, measured off a scale three-view: 17.32 m
 //! from the pitot tip to the stabilator tips, 11.36 m span, 4.73 m tall on
 //! its gear. A slim forward fuselage with a white radome, the IRST ball and
-//! a bubble canopy runs back into a narrow dorsal spine and the beaver tail
+//! a bubble canopy runs back into the 9.13's humped spine and the beaver tail
 //! between the nozzles. Broad, curved leading-edge root extensions flow into
 //! the flat lifting centre body, which sits on two engine nacelles splayed a
 //! little apart and fed by steeply raked intakes under the LERX. The 42
@@ -191,8 +191,10 @@ const FUSE_Z: (f64, f64) = (-7.50, 6.80);
 const RADOME_Z: f64 = -5.80;
 
 /// Dorsal spine behind the canopy: height over the fuselage and half width.
+/// The 9.13's "fatback": the spine swells from behind the canopy to past the
+/// wing root over the enlarged No. 1 fuel tank and the L-203 jammer.
 fn spine(z: f64) -> (f64, f64) {
-    let [_, h, w] = spline(&[[-2.40, 0.0, 0.36], [-1.90, 0.45, 0.36], [-1.00, 0.45, 0.35], [0.50, 0.31, 0.34], [2.00, 0.22, 0.32], [3.35, 0.15, 0.30], [5.00, 0.07, 0.26], [6.40, 0.0, 0.22], [6.80, 0.0, 0.22]], z);
+    let [_, h, w] = spline(&[[-2.40, 0.0, 0.36], [-1.90, 0.45, 0.38], [-1.00, 0.53, 0.42], [0.50, 0.47, 0.42], [2.00, 0.36, 0.38], [3.35, 0.22, 0.32], [5.00, 0.08, 0.26], [6.40, 0.0, 0.22], [6.80, 0.0, 0.22]], z);
     (h.max(0.0), w)
 }
 

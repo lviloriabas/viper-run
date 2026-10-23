@@ -213,7 +213,7 @@ ground. The result screen shows the kills or targets, the time and a rating.
 ### Bandits and ground targets
 
 Bandits fly the same six-degree-of-freedom model and FLCS as the player:
-MiG-29A Fulcrums by default, or F-16s in the 64th Aggressor Squadron's splinter schemes, taken in turn: Flanker blues, Desert, Ghost and Arctic, with Nellis's WA tail code (TYPE in the
+MiG-29S Fulcrums by default, or F-16s in the 64th Aggressor Squadron's splinter schemes, taken in turn: Flanker blues, Desert, Ghost and Arctic, with Nellis's WA tail code (TYPE in the
 threat setup); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
 pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
 overshoot, a max-g break when the player is at its six, beaming and then
@@ -248,21 +248,24 @@ drawn within 14 km.
 
 ### MiG-29
 
-AIRFRAME on the setup screen swaps the player's F-16C for a MiG-29A (9.12),
-and TYPE in the threat setup picks the aggressors. The Fulcrum is a low-poly model after the
-published three-view (17.3 m long, 11.4 m span, 4.7 m tall): radome and
+AIRFRAME on the setup screen swaps the player's F-16C for a MiG-29S
+(9.13S, Fulcrum-C), and TYPE in the threat setup picks the aggressors. The
+9.13S is the 9.13 "fatback", whose humped spine holds a larger No. 1 fuel
+tank and an L-203 jammer, with the N019M radar that adds the R-77. The
+Fulcrum is a low-poly model after the published three-view (17.3 m long, 11.4 m span, 4.7 m tall): radome and
 bubble canopy, leading-edge root extensions, the flat centre body between
 two widely spaced nacelles with wedge intakes, 42 degree wings, twin fins
 canted out 6 degrees, moving stabilators, two afterburner flames, in the
 two-tone grey of the type with red stars. It flies the F-16 aerodynamic
 tables scaled to its own size, weight and engines, an approximation from
-public figures rather than wind-tunnel data: 38.06 m² of wing, 10,900 kg
-empty, 3,630 kg of internal fuel, two RD-33s with 49.4 kN (11,111 lbf) dry
+public figures rather than wind-tunnel data: 38.06 m² of wing, 11,200 kg
+empty, 3,820 kg of internal fuel (the 9.12's 3,630 and the spine tank's
+extra 240 litres), two RD-33s with 49.4 kN (11,111 lbf) dry
 and 81.8 kN (18,387 lbf) in afterburner each, and about 35 % more inertia.
-The limits follow what the 9.12 flight manuals are cited as giving: the AoA
+The limits follow what the 9.12 and 9.13 flight manuals are cited as giving: the AoA
 held near 25 degrees (24 in the Russian manual, 26 in the German one, against
 26 to 28 critical) and 9 g only below 14,200 kg, 8 g above. The cockpit
-stays the F-16's.
+is the Fulcrum's own (docs/MIG29-REFERENCES.md).
 
 ### Airbase, take-off and landing
 

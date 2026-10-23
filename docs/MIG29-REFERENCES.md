@@ -1,12 +1,13 @@
 # Cabina del MiG-29
 
-Revisión del 22 de octubre de 2026. La cabina del MiG-29A (9.12) es propia,
+Revisión del 22 de octubre de 2026. La cabina del MiG-29S (9.13S) es propia,
 no una copia de la del F-16. Las fotografías se usan como referencia visual y
 no se incluyen como texturas ni se redistribuyen.
 
 ## Referencias visuales
 
-Fotografías de cabinas reales del 9.12 en Wikimedia Commons:
+Fotografías de cabinas reales del 9.12 en Wikimedia Commons (el 9.13 conserva
+casi sin cambios la misma cabina):
 
 - [MiG-29 cockpit 3](https://commons.wikimedia.org/wiki/File:MiG-29_cockpit_3.jpg):
   la cabina completa desde arriba. Fija la disposición general: panel y tubo

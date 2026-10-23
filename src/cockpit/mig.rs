@@ -1,5 +1,6 @@
-//! MiG-29A (9.12) cockpit, after photos of 9.12 cockpits on Wikimedia
-//! Commons (see docs/MIG29-REFERENCES.md): a narrow tub painted blue-grey,
+//! MiG-29S (9.13S) cockpit, after photos of 9.12 cockpits on Wikimedia
+//! Commons, which the 9.13 kept nearly unchanged (see
+//! docs/MIG29-REFERENCES.md): a narrow tub painted blue-grey,
 //! an analogue panel of black-faced round instruments with the attitude
 //! director (KPP) over the horizontal situation indicator (PNP) in the
 //! middle, airspeed and altimeter on the left, the variometer and engine

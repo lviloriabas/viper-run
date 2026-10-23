@@ -400,8 +400,8 @@ pub fn through_hud(los_body: V3) -> bool {
     hud || cockpit
 }
 
-/// Helmet-mounted display. The F-16C Block 50 wears JHMCS, the MiG-29A
-/// (9.12) the much simpler Shchel-3UM sight (see `shchel`). It is blanked
+/// Helmet-mounted display. The F-16C Block 50 wears JHMCS, the MiG-29S
+/// (9.13S) the much simpler Shchel-3UM sight (see `shchel`). It is blanked
 /// while the pilot looks through the HUD (`Combat::helmet` is None then).
 #[allow(clippy::too_many_arguments)]
 pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64) {
@@ -550,7 +550,7 @@ fn jhmcs(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam:
     }
 }
 
-/// Shchel-3UM, the MiG-29A's helmet sight: not a display but a collimated
+/// Shchel-3UM, the MiG-29S's helmet sight: not a display but a collimated
 /// reticle on a monocle before the right eye, which the head tracker turns
 /// into a line of sight for the IRST, the radar and the missile seekers.
 /// It shows the aiming ring and two lamps: target captured (ZAKHVAT) and
