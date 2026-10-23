@@ -305,6 +305,18 @@ impl Config {
         }
     }
 
+    /// The stores hung, counted by kind, for the briefing: "4 R-73 2 R-27R".
+    pub fn stores_summary(&self) -> String {
+        let mut kinds: Vec<(Store, u32)> = Vec::new();
+        for st in Loadout::configure(self).stations {
+            match kinds.iter_mut().find(|(s, _)| *s == st.store) {
+                Some(k) => k.1 += 1,
+                None => kinds.push((st.store, 1)),
+            }
+        }
+        kinds.iter().map(|(s, n)| format!("{n} {}", s.name())).collect::<Vec<_>>().join(" ")
+    }
+
     /// Next choice for a pylon pair.
     pub fn cycle(&mut self, inboard: bool) {
         let order = pylon_choices(self.jet, inboard);
@@ -1874,6 +1886,7 @@ mod tests {
             cfg.cycle(true);
             assert!(cfg.inboard.is_none_or(|s| matches!(s, Store::R27r | Store::Fab500 | Store::Fab250)));
         }
+        assert_eq!(Config::for_jet(MissionKind::Dogfight, Type::Mig29).stores_summary(), "4 R-73 2 R-27R");
         cfg.inboard = Some(Store::R27r);
         cfg.set_jet(Type::F16);
         assert_eq!((cfg.outboard, cfg.inboard), (Some(Store::Mk82), Some(Store::Aim120)));

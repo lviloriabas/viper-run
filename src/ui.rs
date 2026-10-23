@@ -231,7 +231,7 @@ impl<'a> Ui<'a> {
             MissionKind::Gates => ("Thread ten gates down the river gorge and make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
             MissionKind::Dogfight => ("Aggressor jets are inbound. Find them, shoot them down and come home.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
             MissionKind::Airfield => ("Take off from the valley airbase, fly out to the steerpoint and bring the jet back for a clean landing.", "THE RUNWAY IS LONG. THE APPROACH IS NOT FORGIVING."),
-            MissionKind::Strike => ("Drop the Cold River bridge and the SAM site that guards it. Expect fire from the ground.", "FOUR MK-82S. MAKE THEM COUNT."),
+            MissionKind::Strike => ("Drop the Cold River bridge and the SAM site that guards it. Expect fire from the ground.", "FOUR BOMBS. MAKE THEM COUNT."),
             MissionKind::Free => ("Fly the valley at your own pace. The gates, targets and bandits are there for practice, and nothing shoots back.", "NO CLOCK. NO SCORE. JUST THE VALLEY."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
@@ -280,12 +280,20 @@ impl<'a> Ui<'a> {
             crate::sim::Type::Mig29 => ("AIRFRAME", crate::sim::Type::Mig29.full_name(), "MIKOYAN, 2 X KLIMOV RD-33"),
         };
         let bandits = format!("{} BANDITS", cfg.threats.bandits);
-        let fleet = format!("{}, AIM-9, GUN", cfg.fleet_name());
+        let heaters = match (cfg.threats.mixed, cfg.aggressor) {
+            (true, _) => "AIM-9 + R-73",
+            (false, crate::sim::Type::Mig29) => "R-73",
+            (false, crate::sim::Type::F16) => "AIM-9",
+        };
+        let fleet = format!("{}, {heaters}, GUN", cfg.fleet_name());
+        let stores = cfg.stores_summary();
+        let gun = crate::weapons::gun_of(cfg.jet);
+        let gun = format!("{}, {} ROUNDS", gun.name, gun.rounds);
         let rows = match mission {
             MissionKind::Gates => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")],
-            MissionKind::Dogfight => [airframe, ("THREAT", &bandits, &fleet), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
+            MissionKind::Dogfight => [airframe, ("THREAT", &bandits, &fleet), ("STORES", &stores, &gun), ("CLOCK", "06:00", "SPLASH ALL THREE")],
             MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
-            MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
+            MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", &stores, &gun), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
             MissionKind::Free => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, ON A LOOP"), ("TARGETS", "2 BANDITS, SA-6", "HOLD FIRE, BACK IN 30 SEC"), ("CLOCK", "OFF", "STOP ON RWY A TO REARM")],
         };
         let rows = rows.map(|r| if !clock && r.0 == "CLOCK" { ("CLOCK", "OFF", "NO TIME LIMIT") } else { r });
