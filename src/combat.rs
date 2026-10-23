@@ -410,6 +410,8 @@ pub struct Config {
     pub jet: Type,
     pub aggressor: Type,
     pub threats: Threats,
+    /// Free flight: each kind of weapon reloads as soon as it runs out.
+    pub refill: bool,
 }
 
 impl Config {
@@ -422,7 +424,7 @@ impl Config {
             MissionKind::Strike => (None, Some(Store::Mk82), Some(Store::Mk82), 1.0),
             MissionKind::Free => (None, Some(Store::Aim120), Some(Store::Mk82), 1.0),
         };
-        Config { tip: Store::Aim9, outer, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
+        Config { tip: Store::Aim9, outer, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind), refill: false }
     }
 
     /// The mission's stores as the given airframe carries them: the MiG-29S's
@@ -1170,11 +1172,37 @@ impl Combat {
         }
     }
 
+    /// Free flight's auto refill: a kind of store all fired reloads on its
+    /// stations, an empty gun gets a full drum, and the chaff and flares
+    /// come back once both run out.
+    fn refill(&mut self) {
+        let l = &mut self.loadout;
+        let kinds: Vec<Store> = l.stations.iter().map(|s| s.store).collect();
+        for k in kinds {
+            if l.count(k) == 0 {
+                for s in l.stations.iter_mut().filter(|s| s.store == k) {
+                    s.loaded = true;
+                }
+                self.events.push(Event::Toast(format!("REFILL // {}", k.name())));
+            }
+        }
+        if l.rounds == 0 {
+            l.rounds = l.gun.rounds;
+            self.events.push(Event::Toast(format!("REFILL // {}", l.gun.name)));
+        }
+        if l.chaff == 0 && l.flares == 0 {
+            (l.chaff, l.flares) = (CHAFF, FLARES);
+        }
+    }
+
     /// Free flight goes on until the pilot quits: a new pair of bandits on
     /// their circuits half a minute after the last one falls, the targets rebuilt
     /// half a minute after the last one burns, and the jet rearmed, refuelled
     /// and repaired once it stops on the ground.
     fn practice(&mut self, a: &mut Aircraft) {
+        if self.cfg.refill {
+            self.refill();
+        }
         if self.bandits.iter().all(|b| !b.alive) {
             let at = *self.next_wave.get_or_insert(self.clock + 30.0);
             if self.clock >= at {
@@ -2338,6 +2366,29 @@ mod tests {
         cfg.set_jet(Type::F16);
         assert_eq!((cfg.tip, cfg.outboard, cfg.inboard), (Store::Aim9, Some(Store::Mk82), None), "no Sparrow on stations 4 and 6");
         assert_eq!(Loadout::configure(&cfg).gun.rounds, 511);
+    }
+
+    /// With auto refill on in free flight, a kind of weapon all fired comes
+    /// back on its own stations, and an empty gun gets its drum back;
+    /// kinds with some left are not touched.
+    #[test]
+    fn free_flight_refills_each_weapon_when_empty() {
+        terrain::init();
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Free, &mut m);
+        let mut cfg = Config::for_mission(MissionKind::Free);
+        cfg.refill = true;
+        c.equip(&cfg);
+        let mut a = spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0);
+        for s in c.loadout.stations.iter_mut().filter(|s| s.store == Store::Aim120) {
+            s.loaded = false;
+        }
+        let one = c.loadout.next(Store::Mk82).unwrap();
+        c.loadout.stations[one].loaded = false;
+        c.loadout.rounds = 0;
+        c.practice(&mut a);
+        assert_eq!((c.loadout.count(Store::Aim120), c.loadout.count(Store::Mk82)), (2, 1));
+        assert_eq!(c.loadout.rounds, M61A1.rounds);
     }
 
     /// Racks multiply the bombs on a pylon: TER-9/As on stations 3, 4, 6

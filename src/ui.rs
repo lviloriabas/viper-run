@@ -61,6 +61,8 @@ pub enum Action {
     Guns,
     /// Mission clocks on or off.
     Clock,
+    /// Free flight's auto refill on or off.
+    Refill,
     /// Wait for a key for an action (index into keymap::BINDS) and slot.
     Rebind(u8, u8),
     ResetKeys,
@@ -502,9 +504,11 @@ impl<'a> Ui<'a> {
             rows.push((gun.name, format!("{} ROUNDS {ammo}", gun.rounds), None));
             rows.push((crate::weapons::dispenser_of(cfg.jet), format!("{} CHAFF  {} FLARES", crate::weapons::CHAFF, crate::weapons::FLARES), None));
         }
-        // Free flight never has a clock.
+        // Free flight never has a clock; instead its weapons can refill.
         if mission != MissionKind::Free {
             rows.push(("MISSION CLOCK", if clock { format!("ON, {}", format_time(mission.time())) } else { "OFF".to_string() }, Some(Action::Clock)));
+        } else {
+            rows.push(("AUTO REFILL", if cfg.refill { "ON, EACH WEAPON WHEN EMPTY".to_string() } else { "OFF".to_string() }, Some(Action::Refill)));
         }
         // LAUNCH comes first in the keyboard order, so it is highlighted
         // first and Enter takes off.

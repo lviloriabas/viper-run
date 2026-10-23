@@ -715,8 +715,8 @@ impl App {
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Pick(k) => {
                 self.kind = k;
-                let (jet, aggressor, mixed) = (self.config.jet, self.config.aggressor, self.config.threats.mixed);
-                self.config = combat::Config { aggressor, ..combat::Config::for_jet(k, jet) };
+                let (jet, aggressor, mixed, refill) = (self.config.jet, self.config.aggressor, self.config.threats.mixed, self.config.refill);
+                self.config = combat::Config { aggressor, refill, ..combat::Config::for_jet(k, jet) };
                 self.config.threats.mixed = mixed;
             }
             Action::Jet => self.config.set_jet(self.config.jet.next()),
@@ -736,6 +736,7 @@ impl App {
             Action::Sams => self.config.threats.sams = (self.config.threats.sams + 1) % (scenario::MAX_SAMS + 1),
             Action::Guns => self.config.threats.guns = (self.config.threats.guns + 1) % (scenario::MAX_GUNS + 1),
             Action::Clock => self.settings.clock = !self.settings.clock,
+            Action::Refill => self.config.refill = !self.config.refill,
             Action::Reset => {
                 let fs = self.settings.fullscreen;
                 let muted = self.settings.muted;
