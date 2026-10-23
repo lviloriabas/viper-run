@@ -205,8 +205,9 @@ fn strip(data: &mut Vec<f32>, eye: V3, p0: V3, p1: V3, w0: f64, w1: f64, c: [f64
     }
 }
 
-/// Hands this frame's smoke trails, tracers and motor flames to the effects.
-pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera) {
+/// Hands this frame's smoke trails, tracers, motor flames and the flames
+/// of burning jets to the effects.
+pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera, player: Option<&Aircraft>) {
     let eye = cam.eye;
     fx.extra_blend.clear();
     fx.extra_glow.clear();
@@ -217,6 +218,7 @@ pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera) {
             Smoke::Motor => ([0.88, 0.88, 0.86], 0.55, 0.5, 5.0),
             Smoke::Damage => ([0.40, 0.40, 0.41], 0.6, 1.2, 7.0),
             Smoke::Fire => ([0.10, 0.09, 0.08], 0.75, 2.0, 10.0),
+            Smoke::Fuel => ([0.92, 0.93, 0.95], 0.35, 0.4, 3.0),
         };
         let life = t.kind.life();
         let pts: Vec<(V3, f64)> = t.points.iter().copied().collect();
@@ -245,6 +247,22 @@ pub fn fill_fx(c: &Combat, fx: &mut Fx, cam: &Camera) {
         let w = (d * 0.0015).max(0.12);
         strip(&mut fx.extra_blend, eye, tail, r.pos, w * 0.5, w, core, 0.5, 1.0);
         strip(&mut fx.extra_glow, eye, tail, r.pos, w * 0.3, w * 0.6, glow, 0.2, 0.9);
+    }
+    // A fire licks back from the burning system into the slipstream,
+    // flickering and growing as it burns.
+    let burning = player.filter(|_| !c.player_dead).map(|a| (a, &c.hull)).into_iter().chain(c.bandits.iter().filter(|b| b.alive).map(|b| (&b.jet, &b.hull)));
+    for (jet, hull) in burning {
+        let Some((i, t)) = hull.fire else { continue };
+        let m = &crate::damage::layout(hull.kind)[i];
+        let at = jet.pos + jet.q.rotate(m.at + V3::Z * m.half.z);
+        if (at - eye).len() > 6000.0 {
+            continue;
+        }
+        let flicker = 0.75 + 0.25 * (now * 23.0 + i as f64).sin() * (now * 7.3).cos();
+        let back = if jet.vel.len() > 1.0 { -jet.vel.norm() } else { V3::Y };
+        let len = (2.5 + t.min(20.0) * 0.25) * flicker;
+        strip(&mut fx.extra_glow, eye, at, at + back * len, 1.1, 0.3, [1.0, 0.55, 0.15], 1.0, 0.2);
+        strip(&mut fx.extra_glow, eye, at, at + back * (len * 0.5), 0.5, 0.15, [1.0, 0.9, 0.5], 1.0, 0.4);
     }
     for m in c.missiles.iter().filter(|m| m.burning()) {
         let back = m.vel.norm() * -1.0;

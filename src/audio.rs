@@ -17,8 +17,10 @@ pub struct Params {
     pub rumble_freq: f32,
     pub whine_gain: f32,
     pub whine_freq: f32,
-    /// M61A1 firing: 0 or the buzz level.
+    /// Gun firing: 0 or its level, and its rate of fire in rounds a second
+    /// (the M61A1's 100 tear, the GSh-30-1's 25 to 30 hammer).
     pub gun: f32,
+    pub gun_rate: f32,
     /// Sidewinder seeker tone: a low growl searching, a high tone locked.
     pub seeker_gain: f32,
     pub seeker_freq: f32,
@@ -161,13 +163,15 @@ impl Synth {
         glide(&mut c.whine_gain, t.whine_gain, k);
         glide(&mut c.whine_freq, t.whine_freq, k);
         glide(&mut c.gun, t.gun, km);
+        c.gun_rate = t.gun_rate;
         glide(&mut c.seeker_gain, t.seeker_gain, km);
         c.seeker_freq = t.seeker_freq;
         let p = self.cur;
         self.eng.set(true, p.eng_freq.max(40.0), 0.6);
         self.wind.set(false, p.wind_freq.max(60.0), 0.35);
         self.rumble_lp.set(true, 120.0, 0.7);
-        self.gun_lp.set(true, 1600.0, 0.9);
+        // The 30 mm's slower, heavier reports sit lower than the 20 mm's.
+        self.gun_lp.set(true, if p.gun_rate < 50.0 { 900.0 } else { 1600.0 }, 0.9);
         for s in out.iter_mut() {
             let w0 = self.white();
             let w1 = self.white();
@@ -179,15 +183,16 @@ impl Synth {
             v += self.rumble_lp.run(self.rumble_phase * 2.0 - 1.0) * p.rumble_gain;
             self.whine_phase = (self.whine_phase + p.whine_freq / RATE as f32).fract();
             v += (self.whine_phase * TAU).sin() * p.whine_gain;
-            // The gun: a crack of noise for each of its 100 rounds a second,
-            // which the ear hears as one tearing buzz.
+            // The gun: a crack of noise for each round, which at 100 a second
+            // the ear hears as one tearing buzz, and a thump of the breech
+            // under it.
             if p.gun > 0.001 {
-                self.gun_phase += 100.0 / RATE as f32;
+                self.gun_phase += p.gun_rate.max(1.0) / RATE as f32;
                 if self.gun_phase >= 1.0 {
                     self.gun_phase -= 1.0;
                     self.gun_env = 1.0;
                 }
-                let crack = self.white() * self.gun_env + (self.gun_env - 0.5) * 0.8;
+                let crack = self.white() * self.gun_env + (self.gun_env - 0.5) * 1.4;
                 self.gun_env *= 0.9975;
                 v += self.gun_lp.run(crack) * p.gun;
             }

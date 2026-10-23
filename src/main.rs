@@ -1331,7 +1331,8 @@ impl App {
             p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0 - buffet * 12.0;
             p.whine_gain = 0.0015 + thr * 0.003;
             p.whine_freq = 620.0 + thr * 560.0 + ab * 250.0;
-            p.gun = if self.combat.firing { 0.11 } else { 0.0 };
+            p.gun = if self.combat.firing { 0.34 } else { 0.0 };
+            p.gun_rate = self.combat.loadout.gun.rate as f32;
             // Sidewinder tone: a low growl while the seeker searches, a high
             // steady tone once it tracks.
             if self.combat.heater().is_some() {
@@ -1560,7 +1561,7 @@ impl EventHandler for App {
         // its own props and smoke.
         let mission = if flying_view { matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission) } else { Some(&self.preview) };
         if flying_view {
-            props::fill_fx(&self.combat, &mut self.world.fx, &cam);
+            props::fill_fx(&self.combat, &mut self.world.fx, &cam, self.aircraft.as_ref());
         } else {
             self.world.fx.extra_blend.clear();
             self.world.fx.extra_glow.clear();

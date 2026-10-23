@@ -609,6 +609,8 @@ pub enum Smoke {
     Motor,
     Damage,
     Fire,
+    /// White mist of fuel streaming from a holed tank.
+    Fuel,
 }
 
 impl Smoke {
@@ -618,6 +620,7 @@ impl Smoke {
             Smoke::Motor => 3.5,
             Smoke::Damage => 3.0,
             Smoke::Fire => 5.0,
+            Smoke::Fuel => 1.6,
         }
     }
     fn spacing(self) -> f64 {
@@ -625,6 +628,7 @@ impl Smoke {
             Smoke::Motor => 0.04,
             Smoke::Damage => 0.08,
             Smoke::Fire => 0.06,
+            Smoke::Fuel => 0.05,
         }
     }
 }
@@ -643,6 +647,26 @@ impl Trail {
     }
 }
 
+/// The smoke a damaged jet trails, as indices into `Combat::trails`: black
+/// from a fire, a white mist of fuel from a holed tank, grey from a damaged
+/// engine.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct JetSmoke {
+    slots: [Option<usize>; 3],
+}
+
+/// Where a jet's damage smokes from, world points for the fire, the fuel
+/// and the engine slots of `JetSmoke`.
+fn smoke_sources(hull: &Hull, jet: &Aircraft) -> [Option<(Smoke, V3)>; 3] {
+    let world = |p: V3| jet.pos + jet.q.rotate(p);
+    let layout = damage::layout(hull.kind);
+    let aft = |i: usize| layout[i].at + V3::Z * layout[i].half.z;
+    let fire = hull.fire.map(|(i, _)| (Smoke::Fire, world(aft(i))));
+    let fuel = (0..layout.len()).filter(|&i| layout[i].part == damage::Part::Fuel && hull.hp[i] < layout[i].hp).max_by(|&x, &y| (layout[x].hp - hull.hp[x]).partial_cmp(&(layout[y].hp - hull.hp[y])).unwrap_or(std::cmp::Ordering::Equal)).map(|i| (Smoke::Fuel, world(layout[i].at)));
+    let engine = (0..layout.len()).find(|&i| layout[i].part == damage::Part::Engine && hull.hp[i] < 0.6 * layout[i].hp && hull.fire.is_none_or(|(f, _)| f != i)).map(|i| (Smoke::Damage, world(aft(i))));
+    [fire, fuel, engine]
+}
+
 pub struct Bandit {
     pub jet: Aircraft,
     pub pilot: Pilot,
@@ -656,7 +680,7 @@ pub struct Bandit {
     pub alive: bool,
     gun_acc: f64,
     fired: u32,
-    trail: Option<usize>,
+    smoke: JetSmoke,
     /// Countermeasure programs left and seconds to the next.
     programs: u32,
     cm_clock: f64,
@@ -771,7 +795,7 @@ pub struct Combat {
     trigger_was: bool,
     gun_acc: f64,
     fired: u32,
-    player_trail: Option<usize>,
+    player_smoke: JetSmoke,
     /// The ground sites as deployed, for free flight to rebuild them.
     pristine: Vec<Site>,
     rnd: Lcg,
@@ -872,7 +896,7 @@ fn bandit_missile(kind: Type) -> &'static Spec {
 }
 
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
-    Bandit { rounds: gun_of(jet.kind).rounds, hull: Hull::new(jet.kind), jet, pilot: Pilot::new(skill), hp: 100.0, callsign, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0, patrol: None }
+    Bandit { rounds: gun_of(jet.kind).rounds, hull: Hull::new(jet.kind), jet, pilot: Pilot::new(skill), hp: 100.0, callsign, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, smoke: JetSmoke::default(), programs: CHAFF, cm_clock: 0.0, patrol: None }
 }
 
 /// Height `over` the terrain, and never under 2,600 m: above the ridges.
@@ -972,7 +996,7 @@ impl Combat {
             trigger_was: false,
             gun_acc: 0.0,
             fired: 0,
-            player_trail: None,
+            player_smoke: JetSmoke::default(),
             pristine: Vec::new(),
             rnd: Lcg(90210),
             leg: 0,
@@ -1648,7 +1672,7 @@ impl Combat {
             if b.jet.crashed {
                 let (p, name) = (b.jet.pos, b.callsign);
                 b.alive = false;
-                if let Some(t) = b.trail.take() {
+                for t in std::mem::take(&mut b.smoke).slots.into_iter().flatten() {
                     self.trails[t].open = false;
                 }
                 self.events.push(Event::Blast { pos: p, scale: 1.3, burn: 20.0 });
@@ -1710,7 +1734,7 @@ impl Combat {
         b.alive = false;
         let mut jet = b.jet.clone();
         let name = b.callsign;
-        if let Some(t) = b.trail.take() {
+        for t in std::mem::take(&mut b.smoke).slots.into_iter().flatten() {
             self.trails[t].open = false;
         }
         jet.vel = jet.vel * 0.8 + V3::Y * 15.0;
@@ -2060,32 +2084,42 @@ impl Combat {
 
     /// Damaged jets trail smoke: grey once hurt, black once badly hurt.
     fn damage_smoke(&mut self, a: &Aircraft) {
-        if self.hp < 60.0 && !a.crashed {
-            let t = match self.player_trail {
-                Some(t) => t,
-                None => {
-                    let t = self.open_trail(Smoke::Damage);
-                    self.player_trail = Some(t);
-                    t
-                }
-            };
-            self.lay(t, a.pos + a.q.axes().back * 6.0);
+        // The player (None) and each bandit: where their damage smokes from.
+        let mut jets: Vec<(Option<usize>, [Option<(Smoke, V3)>; 3])> = Vec::new();
+        let player = if a.crashed || self.player_dead { [None; 3] } else { smoke_sources(&self.hull, a) };
+        jets.push((None, player));
+        for (i, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
+            jets.push((Some(i), smoke_sources(&b.hull, &b.jet)));
         }
-        for i in 0..self.bandits.len() {
-            let b = &self.bandits[i];
-            if !b.alive || b.hp >= 60.0 {
-                continue;
-            }
-            let t = match b.trail {
-                Some(t) => t,
-                None => {
-                    let t = self.open_trail(if b.hp < 30.0 { Smoke::Fire } else { Smoke::Damage });
-                    self.bandits[i].trail = Some(t);
-                    t
-                }
+        for (who, sources) in jets {
+            let mut smoke = match who {
+                None => self.player_smoke,
+                Some(i) => self.bandits[i].smoke,
             };
-            let p = self.bandits[i].jet.pos + self.bandits[i].jet.q.axes().back * 6.0;
-            self.lay(t, p);
+            for (k, source) in sources.into_iter().enumerate() {
+                match source {
+                    Some((kind, p)) => {
+                        let t = match smoke.slots[k] {
+                            Some(t) => t,
+                            None => {
+                                let t = self.open_trail(kind);
+                                smoke.slots[k] = Some(t);
+                                t
+                            }
+                        };
+                        self.lay(t, p);
+                    }
+                    None => {
+                        if let Some(t) = smoke.slots[k].take() {
+                            self.trails[t].open = false;
+                        }
+                    }
+                }
+            }
+            match who {
+                None => self.player_smoke = smoke,
+                Some(i) => self.bandits[i].smoke = smoke,
+            }
         }
         let now = self.clock;
         for t in self.trails.iter_mut() {
@@ -2504,7 +2538,7 @@ mod tests {
         let mut m = Mission::new();
         let mut c = Combat::new(MissionKind::Dogfight, &mut m);
         let a = spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0);
-        for _ in 0..8 {
+        for _ in 0..5 {
             c.harm_jet(Who::Bandit(0), &a, |h, r| h.strike(v3(-4.6, 3.0, 1.2), v3(-4.6, -3.0, 1.2), 6.0, 0.3, r).unwrap_or_default());
         }
         let b = &c.bandits[0];

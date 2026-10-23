@@ -274,9 +274,16 @@ missile warhead throws a ring of fragments round its axis that hit
 whatever they meet out to its outer radius, weaker the further they fly,
 and its blast wrecks everything within its lethal radius but the pilot,
 whom only fragments reach. Rounds and fragments can set a tank or an
-engine on fire; a fire burns the system and the structure round it until
-it goes out, the MiG-29's extinguisher puts out its first engine fire,
-the F-16C has none, and a burning tank that burns through explodes.
+engine on fire. A fire burns the system and the structure round it, faster
+the longer it burns, until it goes out; the MiG-29's extinguisher puts out
+its first engine fire, the F-16C has none, and a burning tank that burns
+through explodes. A fire shows as flames licking back from the burning
+system and a trail of black smoke; a holed tank streams a white mist of
+fuel, and a damaged engine trails grey smoke. An engine below half its hit
+points loses its oil and seizes in a minute or so; a seized engine burns
+no fuel, spools down to windmilling and gives no thrust, so the F-16C
+glides, while the MiG-29 flies on its other engine and yaws toward the
+dead one.
 
 There are no hit points for the whole jet: what ends a flight is losing
 the pilot (a single 20 mm round through the cockpit can do it), a wing,
@@ -288,12 +295,14 @@ the jet toward its side, damaged hydraulics, stabilators or fin cut the
 surface travel, and a damaged structure takes less g. In the tests an
 AIM-9M bursting 4 m from an F-16 brings it down nine times in ten and
 almost never from 10 m, the 39 kg R-27R reaches further, and spread over
-the whole jet it takes about 15 hits of 20 mm or 4 of 30 mm. The HUD and
+the whole jet it takes about 10 hits of 20 mm or 3 of 30 mm to bring a
+fighter down outright, fewer on one spot, while an engine, a tank or the
+hydraulics can be lost to the first few. The HUD and
 the overlays name the damage (ENGINE FIRE, ENGINE DAMAGE, HYDRAULICS, WING
 DAMAGE, FUEL LEAK, STRUCT DAMAGE) and every hit is announced with the
 systems it struck; AIRFRAME % shows what is left of the systems overall;
-the F-16's caution panel lights FLCS, FUEL LOW and ENGINE, and the MiG's
-POZHAR lamp an engine fire. The result screen says what brought the jet
+the F-16's caution panel lights FLCS, FUEL LOW, ENGINE and ENG FIRE, and
+the MiG's POZHAR lamp a fire. The result screen says what brought the jet
 down; a pilot killed in the cockpit does not eject. Stopping on the
 ground in free flight repairs it all.
 

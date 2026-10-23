@@ -952,8 +952,13 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     }
     // Battle damage, worst first.
     let b = &a.battle;
-    if b.engine >= 0.95 {
-        w.push(Warn { text: "ENGINE FIRE", color: RED });
+    if b.fire {
+        w.push(Warn { text: "FIRE", color: RED });
+    }
+    if b.thrust() == 0.0 {
+        w.push(Warn { text: "ENGINE OUT", color: RED });
+    } else if b.engine >= 0.45 && a.kind == crate::sim::Type::Mig29 {
+        w.push(Warn { text: "ONE ENGINE OUT", color: AMBER });
     } else if b.engine > 0.0 {
         w.push(Warn { text: "ENGINE DAMAGE", color: AMBER });
     }

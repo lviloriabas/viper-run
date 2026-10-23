@@ -1159,7 +1159,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let gear_down = a.gear >= 0.999;
     let low_slow = a.agl < 3000.0 && a.airspeed_kt < 190.0 && !a.on_ground;
     let lamps = consoles::Lamps {
-        on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, false, a.fuel <= 0.0, a.oil_psi < 20.0, a.alpha_deg > 25.0, false, low_slow && !gear_down, false],
+        on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, a.battle.fire, a.fuel <= 0.0 || a.battle.thrust() == 0.0, a.oil_psi < 20.0, a.alpha_deg > 25.0, false, low_slow && !gear_down, false],
     };
     consoles::draw(cv, &lamps);
     if a.kind == crate::sim::Type::Mig29 {

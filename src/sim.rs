@@ -197,6 +197,11 @@ pub struct BattleDamage {
     pub side: f64,
     pub controls: f64,
     pub airframe: f64,
+    /// Thrust lost on the right engine less the left's, halved: a twin with
+    /// one engine down yaws toward the dead one.
+    pub asymmetry: f64,
+    /// Something is burning.
+    pub fire: bool,
 }
 
 impl BattleDamage {
@@ -1051,10 +1056,12 @@ impl Aircraft {
             self.flcs.rdr = clamp(self.flcs.rdr, -RUDDER_MAX * k, RUDDER_MAX * k);
         }
 
-        let fueled = self.fuel > 0.0;
+        // A dead engine burns nothing and gives nothing: it spools down.
+        let fueled = self.fuel > 0.0 && self.battle.thrust() > 0.0;
         let command = if !fueled { 0.0 } else if want_ab { 100.0 } else { 50.0 * self.throttle };
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
-        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) * self.battle.thrust() } else { 0.0 };
+        let full = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) } else { 0.0 };
+        self.thrust_n = full * self.battle.thrust();
 
         let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
         let mut c = aero::coefficients(&flow);
@@ -1084,6 +1091,8 @@ impl Aircraft {
         let qs = qbar * self.kind.area();
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
+        // The MiG's engines sit 1.1 m either side of the centreline.
+        let n = n + full * self.battle.asymmetry * 1.1;
         let (gf, gm) = self.wheel_forces(input, dt);
         let (fx, fy, fz) = (fx + gf.x, fy + gf.y, fz + gf.z);
         let (l, m, n) = (l + gm.x, m + gm.y, n + gm.z);
@@ -1142,7 +1151,7 @@ impl Aircraft {
         if self.gear > 0.0 && self.airspeed_kt > GEAR_LIMIT_KT + 40.0 {
             self.gear_overspeed = true;
         }
-        let fueled = self.fuel > 0.0;
+        let fueled = self.fuel > 0.0 && self.battle.thrust() > 0.0;
         // Full throttle is the afterburner; anything short of the stop is dry.
         let want_ab = self.throttle >= 1.0 && fueled;
         self.ab = want_ab;
@@ -1184,7 +1193,8 @@ impl Aircraft {
         let core = (self.power / 50.0).min(1.0);
         self.engine_spool = core;
         self.ab_level = ab;
-        self.rpm = if fueled { 65.0 + 35.0 * core.sqrt() } else { 99.0 * core };
+        // A dead engine runs down to windmilling in the airflow.
+        self.rpm = if fueled { 65.0 + 35.0 * core.sqrt() } else { (99.0 * core).max((self.airspeed_kt * 0.04).min(25.0)) };
         self.ftit = if fueled { 420.0 + 480.0 * core } else { 20.0 + 400.0 * core };
         self.nozzle = 15.0 + 80.0 * ab + 60.0 * (1.0 - core * 2.0).max(0.0);
         self.oil_psi = (self.rpm * 0.65).max(0.0);
@@ -1344,7 +1354,7 @@ mod tests {
     fn battle_damage_costs_performance() {
         let sound = aircraft(3000.0, 220.0);
         let mut hit = sound.clone();
-        hit.battle = BattleDamage { engine: 0.5, leak: 3.0, wing: 0.6, side: 1.0, controls: 0.5, airframe: 0.6 };
+        hit.battle = BattleDamage { engine: 0.5, leak: 3.0, wing: 0.6, side: 1.0, controls: 0.5, airframe: 0.6, ..Default::default() };
         let mil = Input { throttle_up: true, ..Default::default() };
         let (f0, f1) = (sound.fuel, hit.fuel);
         let sound = run(sound, 2.0, mil);

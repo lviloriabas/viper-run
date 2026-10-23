@@ -48,17 +48,17 @@ const fn m(part: Part, at: V3, half: V3, hp: f64, side: f64, name: &'static str)
 /// the wings, the stabilators and the fin, inside the fuselage structure.
 const F16: [Module; 12] = [
     m(Part::Pilot, v3(0.0, 1.05, -3.25), v3(0.28, 0.40, 0.42), 5.0, 0.0, "PILOT"),
-    m(Part::Fuel, v3(0.0, 0.55, -1.60), v3(0.45, 0.35, 0.75), 30.0, 0.0, "FWD FUEL TANK"),
-    m(Part::Fuel, v3(0.0, 0.55, 0.30), v3(0.45, 0.35, 0.75), 30.0, 0.0, "AFT FUEL TANK"),
-    m(Part::Fuel, v3(-2.0, 0.28, 0.90), v3(0.85, 0.09, 0.85), 25.0, -1.0, "LEFT WING TANK"),
-    m(Part::Fuel, v3(2.0, 0.28, 0.90), v3(0.85, 0.09, 0.85), 25.0, 1.0, "RIGHT WING TANK"),
-    m(Part::Engine, v3(0.0, 0.25, 3.40), v3(0.50, 0.50, 2.30), 45.0, 0.0, "ENGINE"),
-    m(Part::Hydraulics, v3(0.0, 0.0, 1.50), v3(0.25, 0.25, 3.00), 25.0, 0.0, "HYDRAULICS"),
-    m(Part::Wing, v3(-3.0, 0.28, 1.20), v3(1.90, 0.12, 1.50), 70.0, -1.0, "LEFT WING"),
-    m(Part::Wing, v3(3.0, 0.28, 1.20), v3(1.90, 0.12, 1.50), 70.0, 1.0, "RIGHT WING"),
-    m(Part::Stabilators, v3(0.0, 0.40, 5.60), v3(2.70, 0.15, 1.00), 50.0, 0.0, "STABILATORS"),
-    m(Part::Fin, v3(0.0, 2.10, 5.20), v3(0.12, 1.30, 1.20), 30.0, 0.0, "FIN"),
-    m(Part::Structure, v3(0.0, 0.45, -0.20), v3(0.65, 0.65, 6.70), 80.0, 0.0, "AIRFRAME"),
+    m(Part::Fuel, v3(0.0, 0.55, -1.60), v3(0.45, 0.35, 0.75), 22.0, 0.0, "FWD FUEL TANK"),
+    m(Part::Fuel, v3(0.0, 0.55, 0.30), v3(0.45, 0.35, 0.75), 22.0, 0.0, "AFT FUEL TANK"),
+    m(Part::Fuel, v3(-2.0, 0.28, 0.90), v3(0.85, 0.09, 0.85), 18.0, -1.0, "LEFT WING TANK"),
+    m(Part::Fuel, v3(2.0, 0.28, 0.90), v3(0.85, 0.09, 0.85), 18.0, 1.0, "RIGHT WING TANK"),
+    m(Part::Engine, v3(0.0, 0.25, 3.40), v3(0.50, 0.50, 2.30), 30.0, 0.0, "ENGINE"),
+    m(Part::Hydraulics, v3(0.0, 0.0, 1.50), v3(0.25, 0.25, 3.00), 18.0, 0.0, "HYDRAULICS"),
+    m(Part::Wing, v3(-3.0, 0.28, 1.20), v3(1.90, 0.12, 1.50), 45.0, -1.0, "LEFT WING"),
+    m(Part::Wing, v3(3.0, 0.28, 1.20), v3(1.90, 0.12, 1.50), 45.0, 1.0, "RIGHT WING"),
+    m(Part::Stabilators, v3(0.0, 0.40, 5.60), v3(2.70, 0.15, 1.00), 35.0, 0.0, "STABILATORS"),
+    m(Part::Fin, v3(0.0, 2.10, 5.20), v3(0.12, 1.30, 1.20), 20.0, 0.0, "FIN"),
+    m(Part::Structure, v3(0.0, 0.45, -0.20), v3(0.65, 0.65, 6.70), 45.0, 0.0, "AIRFRAME"),
 ];
 
 /// The MiG-29S: the cockpit, the enlarged No. 1 tank in the spine, the
@@ -66,19 +66,19 @@ const F16: [Module; 12] = [
 /// nacelles, the hydraulics, the wings, the stabilators and the twin fins.
 const MIG29: [Module; 14] = [
     m(Part::Pilot, v3(0.0, 1.15, -3.55), v3(0.28, 0.40, 0.42), 6.0, 0.0, "PILOT"),
-    m(Part::Fuel, v3(0.0, 0.95, -1.20), v3(0.40, 0.35, 0.90), 30.0, 0.0, "SPINE FUEL TANK"),
-    m(Part::Fuel, v3(0.0, 0.55, 0.90), v3(0.55, 0.30, 1.00), 30.0, 0.0, "CENTRE FUEL TANK"),
-    m(Part::Fuel, v3(-2.6, 0.45, 1.60), v3(1.00, 0.09, 0.90), 25.0, -1.0, "LEFT WING TANK"),
-    m(Part::Fuel, v3(2.6, 0.45, 1.60), v3(1.00, 0.09, 0.90), 25.0, 1.0, "RIGHT WING TANK"),
-    m(Part::Engine, v3(-1.1, 0.15, 3.60), v3(0.45, 0.45, 2.60), 35.0, -1.0, "LEFT ENGINE"),
-    m(Part::Engine, v3(1.1, 0.15, 3.60), v3(0.45, 0.45, 2.60), 35.0, 1.0, "RIGHT ENGINE"),
-    m(Part::Hydraulics, v3(0.0, 0.20, 1.50), v3(0.30, 0.25, 3.20), 30.0, 0.0, "HYDRAULICS"),
-    m(Part::Wing, v3(-3.6, 0.45, 2.00), v3(2.00, 0.12, 1.60), 80.0, -1.0, "LEFT WING"),
-    m(Part::Wing, v3(3.6, 0.45, 2.00), v3(2.00, 0.12, 1.60), 80.0, 1.0, "RIGHT WING"),
-    m(Part::Stabilators, v3(0.0, 0.36, 6.40), v3(2.60, 0.15, 0.90), 55.0, 0.0, "STABILATORS"),
-    m(Part::Fin, v3(-1.6, 1.60, 5.40), v3(0.12, 1.20, 1.30), 25.0, -1.0, "LEFT FIN"),
-    m(Part::Fin, v3(1.6, 1.60, 5.40), v3(0.12, 1.20, 1.30), 25.0, 1.0, "RIGHT FIN"),
-    m(Part::Structure, v3(0.0, 0.50, -0.30), v3(0.75, 0.60, 7.00), 95.0, 0.0, "AIRFRAME"),
+    m(Part::Fuel, v3(0.0, 0.95, -1.20), v3(0.40, 0.35, 0.90), 22.0, 0.0, "SPINE FUEL TANK"),
+    m(Part::Fuel, v3(0.0, 0.55, 0.90), v3(0.55, 0.30, 1.00), 22.0, 0.0, "CENTRE FUEL TANK"),
+    m(Part::Fuel, v3(-2.6, 0.45, 1.60), v3(1.00, 0.09, 0.90), 18.0, -1.0, "LEFT WING TANK"),
+    m(Part::Fuel, v3(2.6, 0.45, 1.60), v3(1.00, 0.09, 0.90), 18.0, 1.0, "RIGHT WING TANK"),
+    m(Part::Engine, v3(-1.1, 0.15, 3.60), v3(0.45, 0.45, 2.60), 24.0, -1.0, "LEFT ENGINE"),
+    m(Part::Engine, v3(1.1, 0.15, 3.60), v3(0.45, 0.45, 2.60), 24.0, 1.0, "RIGHT ENGINE"),
+    m(Part::Hydraulics, v3(0.0, 0.20, 1.50), v3(0.30, 0.25, 3.20), 20.0, 0.0, "HYDRAULICS"),
+    m(Part::Wing, v3(-3.6, 0.45, 2.00), v3(2.00, 0.12, 1.60), 50.0, -1.0, "LEFT WING"),
+    m(Part::Wing, v3(3.6, 0.45, 2.00), v3(2.00, 0.12, 1.60), 50.0, 1.0, "RIGHT WING"),
+    m(Part::Stabilators, v3(0.0, 0.36, 6.40), v3(2.60, 0.15, 0.90), 38.0, 0.0, "STABILATORS"),
+    m(Part::Fin, v3(-1.6, 1.60, 5.40), v3(0.12, 1.20, 1.30), 18.0, -1.0, "LEFT FIN"),
+    m(Part::Fin, v3(1.6, 1.60, 5.40), v3(0.12, 1.20, 1.30), 18.0, 1.0, "RIGHT FIN"),
+    m(Part::Structure, v3(0.0, 0.50, -0.30), v3(0.75, 0.60, 7.00), 55.0, 0.0, "AIRFRAME"),
 ];
 
 pub fn layout(kind: Type) -> &'static [Module] {
@@ -91,11 +91,14 @@ pub fn layout(kind: Type) -> &'static [Module] {
 /// Share of a round's damage each module along its path takes: it loses
 /// energy in everything it goes through.
 const PENETRATION: [f64; 4] = [1.0, 0.6, 0.35, 0.2];
-/// Burn rate of a fire, hit points a second, in the burning system and in
-/// the structure round it, and the chance a second that it goes out.
-const BURN: f64 = 2.5;
+/// Burn rate of a fire as it starts, hit points a second, in the burning
+/// system and in the structure round it (it grows as it burns), and the
+/// chance a second that it goes out. A badly damaged engine loses its oil
+/// and seizes: below half its hit points it loses `SEIZE` a second.
+const BURN: f64 = 2.0;
 const BURN_STRUCTURE: f64 = 1.0;
 const FIRE_OUT: f64 = 0.06;
+const SEIZE: f64 = 0.5;
 
 /// A jet's damage state: the hit points left in each module, a fire and
 /// what destroyed the jet, if anything has.
@@ -180,18 +183,18 @@ impl Hull {
             let az = roll + k as f64 * 2.399963 + (rnd.next() - 0.5) * 0.2;
             let d = axis * polar.cos() + (e1 * az.cos() + e2 * az.sin()) * polar.sin();
             if let Some(&(i, dist)) = self.crossed(at, at + d * outer).first() {
-                self.harm(i, 18.0 * (1.0 - dist / outer), 0.05, rnd);
+                self.harm(i, 11.0 * (1.0 - dist / outer), 0.05, rnd);
                 hit.push(i);
             }
         }
-        // Blast: 30 points per metre of lethal radius at the burst, falling
+        // Blast: 18 points per metre of lethal radius at the burst, falling
         // to nothing at one and a half times that radius. The cockpit keeps
         // it off the pilot, whom only fragments reach.
         let reach = lethal * 1.5;
         for (i, m) in layout(self.kind).iter().enumerate().filter(|(_, m)| m.part != Part::Pilot) {
             let d = box_distance(at - m.at, m.half);
             if d < reach {
-                self.harm(i, 30.0 * lethal * (1.0 - d / reach), 0.0, rnd);
+                self.harm(i, 18.0 * lethal * (1.0 - d / reach), 0.0, rnd);
                 hit.push(i);
             }
         }
@@ -227,6 +230,12 @@ impl Hull {
     /// an engine fire after two seconds. A burning tank that burns through
     /// explodes.
     pub fn step(&mut self, dt: f64, rnd: &mut Lcg) {
+        for i in 0..self.hp.len() {
+            let f = self.left(i);
+            if layout(self.kind)[i].part == Part::Engine && f > 0.0 && f < 0.5 {
+                self.hp[i] = (self.hp[i] - SEIZE * dt).max(0.0);
+            }
+        }
         let Some((i, t)) = self.fire else { return };
         let part = layout(self.kind)[i].part;
         if part == Part::Engine && self.extinguisher && t > 2.0 {
@@ -239,22 +248,26 @@ impl Hull {
             return;
         }
         self.fire = Some((i, t + dt));
-        self.harm(i, BURN * dt, 0.0, rnd);
+        let grow = 1.0 + t / 8.0;
+        self.harm(i, BURN * grow * dt, 0.0, rnd);
         if let Some(s) = layout(self.kind).iter().position(|m| m.part == Part::Structure) {
-            self.harm(s, BURN_STRUCTURE * dt, 0.0, rnd);
+            self.harm(s, BURN_STRUCTURE * grow * dt, 0.0, rnd);
         }
     }
 
     /// What the damage does to the jet's flight.
     pub fn effects(&self) -> BattleDamage {
         let mut b = BattleDamage::default();
-        let (mut wing_l, mut wing_r, mut engines) = (0.0f64, 0.0f64, 0.0);
+        let (mut wing_l, mut wing_r, mut engines, mut asymmetry) = (0.0f64, 0.0f64, 0.0, 0.0);
         for (i, m) in layout(self.kind).iter().enumerate() {
             let lost = 1.0 - self.left(i);
             match m.part {
                 Part::Engine => {
+                    // A damaged engine gives less; a seized one nothing.
                     let share = if self.kind == Type::Mig29 { 0.5 } else { 1.0 };
-                    engines += share * if lost >= 1.0 { 1.0 } else { lost * 0.7 };
+                    let loss = if lost >= 1.0 { 1.0 } else { lost * 0.7 };
+                    engines += share * loss;
+                    asymmetry += 0.5 * loss * m.side;
                 }
                 Part::Fuel => b.leak += lost * 3.0,
                 Part::Wing if m.side < 0.0 => wing_l = lost,
@@ -265,13 +278,9 @@ impl Hull {
                 Part::Pilot => {}
             }
         }
-        // A burning engine gives no thrust.
-        if let Some((i, _)) = self.fire {
-            if layout(self.kind)[i].part == Part::Engine {
-                engines += if self.kind == Type::Mig29 { 0.5 } else { 1.0 };
-            }
-        }
         b.engine = engines.min(1.0);
+        b.asymmetry = asymmetry;
+        b.fire = self.fire.is_some();
         b.wing = wing_l.max(wing_r);
         b.side = if wing_r > wing_l { 1.0 } else { -1.0 };
         b
