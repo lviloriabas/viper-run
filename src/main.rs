@@ -315,7 +315,7 @@ impl App {
         let frame = airframe::build();
         let world = World::new(&mut *ctx, &frame);
         let models = props::Models::new(&mut *ctx, &frame, &world);
-        let cockpit = Cockpit::new(&mut *ctx, &frame.canopy);
+        let cockpit = Cockpit::new(&mut *ctx, &frame.canopy, &mig29::build().canopy);
         let overlay = Canvas::new(&mut *ctx, font_tex, 240_000);
         let atlas_canvas = Canvas::new(&mut *ctx, font_tex, 400_000);
         let (w, h) = window::screen_size();
@@ -1484,7 +1484,7 @@ impl EventHandler for App {
             let cam_b = cockpit::body_camera(&cam, a);
             let sun_b = a.q.conj().rotate(world::sun_dir());
             self.ctx.begin_pass(Some(self.scene.pass), PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
-            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands);
+            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind == sim::Type::Mig29);
             self.ctx.end_render_pass();
         }
 
@@ -1497,8 +1497,9 @@ impl EventHandler for App {
         self.world.post(&mut *self.ctx, &self.scene, w, h, gloc as f32, (self.time * 60.0).floor() as f32 % 997.0);
         // Instrument faces carry information, so they skip the pixelation.
         if cockpit_view {
-            let cam_b = cockpit::body_camera(&cam, self.aircraft.as_ref().unwrap());
-            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32);
+            let a = self.aircraft.as_ref().unwrap();
+            let cam_b = cockpit::body_camera(&cam, a);
+            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32, a.kind == sim::Type::Mig29);
         }
 
         // 2D overlays at native resolution.

@@ -958,7 +958,8 @@ impl World {
             let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.air);
             if a.kind == Type::Mig29 {
-                self.draw_mig(ctx, a, &base, &model);
+                // The player's canopy is glass from outside (below) and gone from the seat.
+                self.draw_mig(ctx, a, &base, &model, false);
             } else {
             self.draw_part(ctx, &self.exterior, &base, &model);
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
@@ -982,8 +983,10 @@ impl World {
             }
             self.draw_gear(ctx, a, &base, &model);
             }
-            if !cockpit && a.kind == Type::F16 {
-                self.draw_part(ctx, &self.crew, &base, &model);
+            if !cockpit {
+                // The MiG's pilot sits under its own design eye.
+                let seat = if a.kind == Type::Mig29 { basis(V3::X, V3::Y, V3::Z, crate::mig29::EYE - airframe::EYE) } else { basis(V3::X, V3::Y, V3::Z, V3::ZERO) };
+                self.draw_part(ctx, &self.crew, &base, &mat_mul(&model, &seat));
             }
             // The flame sits between the plume's shock diamonds and its sheath.
             self.fx.draw(ctx, vp, Layer::PlumeCore);
@@ -1027,15 +1030,15 @@ impl World {
         self.fx.draw(ctx, vp, Layer::Particles);
 
         // Chase canopy: back faces first, then front faces, for correct layering.
-        // The MiG-29 draws its own canopy with the airframe.
-        if let (Some(a), false) = (aircraft.filter(|a| a.kind == Type::F16), cockpit) {
+        if let (Some(a), false) = (aircraft, cockpit) {
+            let canopy = if a.kind == Type::Mig29 { &self.mig_canopy } else { &self.canopy };
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
             let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint: [0.0; 4] };
             ctx.apply_pipeline(&self.glass_front);
-            self.draw_part(ctx, &self.canopy, &u, &model);
+            self.draw_part(ctx, canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);
-            self.draw_part(ctx, &self.canopy, &u, &model);
+            self.draw_part(ctx, canopy, &u, &model);
         }
     }
 
@@ -1055,7 +1058,7 @@ impl World {
         let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint };
         ctx.apply_pipeline(&self.air);
         if a.kind == Type::Mig29 {
-            self.draw_mig(ctx, a, &base, &model);
+            self.draw_mig(ctx, a, &base, &model, true);
             return;
         }
         self.draw_part(ctx, &self.exterior, &base, &model);
@@ -1078,10 +1081,11 @@ impl World {
 
     /// The MiG-29 with its stabilators at their deflection and its gear.
     /// The wing flex is shaped to the F-16's planform, so the MiG stays rigid.
-    fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
+    /// `canopy` draws the canopy opaque, as on the bandits.
+    fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, canopy: bool) {
         let base = &AirU { flex: [0.0; 2], ..*base };
         self.draw_part(ctx, &self.mig, base, model);
-        if base.cutout < 0.5 {
+        if canopy {
             self.draw_part(ctx, &self.mig_canopy, base, model);
         }
         let pitch = clamp(a.surf_pitch, -1.0, 1.0);

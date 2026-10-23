@@ -14,6 +14,7 @@ use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
 mod consoles;
+mod mig;
 mod pilot;
 
 /// Atlas height; the instrument pages fill the left 1024 square and the
@@ -325,6 +326,8 @@ pub struct Cockpit {
     dyn_face_bind: Bindings,
     dyn_face_count: usize,
     canopy: Part,
+    /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
+    mig: [Part; 3],
     hud_glass: Part,
     pub atlas: gfx::Target,
     atlas_pass: RenderPass,
@@ -332,7 +335,7 @@ pub struct Cockpit {
 }
 
 impl Cockpit {
-    pub fn new(ctx: &mut dyn RenderingBackend, canopy: &Mesh) -> Cockpit {
+    pub fn new(ctx: &mut dyn RenderingBackend, canopy: &Mesh, mig_canopy: &Mesh) -> Cockpit {
         use UniformType::*;
         let s = gfx::shader(ctx, VS, FS, &["u_atlas"], &[("u_vp", Mat4), ("u_eye", Float3), ("u_sun", Float3), ("u_sun_vis", Float1), ("u_alpha", Float1), ("u_tint", Float3)]);
         let pip = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
@@ -366,11 +369,23 @@ impl Cockpit {
         let dyn_face_bind = Bindings { vertex_buffers: vec![fvb], index_buffer: gfx::sequential_ib(ctx, DYN_FACE_CAP), images: vec![atlas_tex] };
         let mut canopy = world::part(ctx, canopy);
         canopy.bind.images = vec![atlas_tex];
+        let mut mm = Mesh::new();
+        mig::build_static(&mut mm);
+        let mut shifted = Mesh { v: mig_canopy.v.clone() };
+        for v in shifted.v.chunks_mut(crate::mesh::STRIDE) {
+            v[0] += mig::OFFSET.x as f32;
+            v[1] += mig::OFFSET.y as f32;
+            v[2] += mig::OFFSET.z as f32;
+        }
+        let mig = [world::part(ctx, &mm), world::part(ctx, &self::faces(&mm)), world::part(ctx, &shifted)].map(|mut p| {
+            p.bind.images = vec![atlas_tex];
+            p
+        });
         let mut glass = Mesh::new();
         glass.quad(HUD_GLASS[0], HUD_GLASS[1], HUD_GLASS[2], HUD_GLASS[3], Rgb(0.4, 0.6, 0.5));
         let mut hud_glass = world::part(ctx, &glass);
         hud_glass.bind.images = vec![atlas_tex];
-        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -382,20 +397,26 @@ impl Cockpit {
         ctx.texture_generate_mipmaps(self.atlas.color);
     }
 
-    /// Draws the cockpit into the current pass. `cam_b` is the camera in body axes.
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands) {
+    /// Draws the cockpit into the current pass, the MiG's when `mig`.
+    /// `cam_b` is the camera in cockpit space (see body_camera).
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, mig: bool) {
+        let (statics, canopy) = if mig { (&self.mig[0], &self.mig[2]) } else { (&self.statics, &self.canopy) };
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
         let vp = mat_mul(&proj, &cam_b.view());
         // The fuselage shades the tub when the sun is below the canopy rails.
         let sun_vis = smoothstep(-0.22, 0.08, sun_b.y) as f32;
         let u = CockpitU { vp, eye: cam_b.eye.f32(), sun: sun_b.norm().f32(), sun_vis, alpha: 1.0, tint: [0.0; 3] };
         ctx.apply_pipeline(&self.pip);
-        ctx.apply_bindings(&self.statics.bind);
+        ctx.apply_bindings(&statics.bind);
         ctx.apply_uniforms(UniformsSource::table(&u));
-        ctx.draw(0, self.statics.count, 1);
+        ctx.draw(0, statics.count, 1);
 
         self.dynamic.clear();
-        pilot::build_dynamic(&mut self.dynamic, hands);
+        if mig {
+            pilot::build_dynamic_mig(&mut self.dynamic, hands);
+        } else {
+            pilot::build_dynamic(&mut self.dynamic, hands);
+        }
         let n = self.dynamic.count().min(self.dyn_cap);
         ctx.buffer_update(self.dyn_bind.vertex_buffers[0], BufferSource::slice(&self.dynamic.v[..n * crate::mesh::STRIDE]));
         ctx.apply_bindings(&self.dyn_bind);
@@ -411,9 +432,9 @@ impl Cockpit {
         ctx.apply_bindings(&self.hud_glass.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.05, tint: [0.10, 0.16, 0.13], ..u }));
         ctx.draw(0, self.hud_glass.count, 1);
-        ctx.apply_bindings(&self.canopy.bind);
-        ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.035, tint: [0.16, 0.13, 0.05], ..u }));
-        ctx.draw(0, self.canopy.count, 1);
+        ctx.apply_bindings(&canopy.bind);
+        ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.035, tint: if mig { [0.08, 0.12, 0.12] } else { [0.16, 0.13, 0.05] }, ..u }));
+        ctx.draw(0, canopy.count, 1);
     }
 
     /// Redraws the displays, dials and placards at full resolution into the
@@ -421,20 +442,21 @@ impl Cockpit {
     /// their text stays sharp. The cockpit from the last `draw` first lays
     /// down depth only, so hands, arms and knees still cover them.
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
-    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32) {
+    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, mig: bool) {
+        let (statics, faces) = if mig { (&self.mig[0], &self.mig[1]) } else { (&self.statics, &self.faces) };
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
         let vp = mat_mul(&proj, &cam_b.view());
         let eye = cam_b.eye.f32();
         ctx.apply_pipeline(&self.depth_pip);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { vp, eye, sun: [0.0, 1.0, 0.0], sun_vis: 0.0, alpha: 1.0, tint: [0.0; 3] }));
-        ctx.apply_bindings(&self.statics.bind);
-        ctx.draw(0, self.statics.count, 1);
+        ctx.apply_bindings(&statics.bind);
+        ctx.draw(0, statics.count, 1);
         ctx.apply_bindings(&self.dyn_bind);
         ctx.draw(0, self.dyn_count as i32, 1);
         ctx.apply_pipeline(&self.face_pip);
-        ctx.apply_bindings(&self.faces.bind);
+        ctx.apply_bindings(&faces.bind);
         ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
-        ctx.draw(0, self.faces.count, 1);
+        ctx.draw(0, faces.count, 1);
         ctx.apply_bindings(&self.dyn_face_bind);
         ctx.draw(0, self.dyn_face_count as i32, 1);
     }
@@ -1124,6 +1146,9 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, false, a.fuel <= 0.0, a.oil_psi < 20.0, a.alpha_deg > 25.0, false, low_slow && !gear_down, false],
     };
     consoles::draw(cv, &lamps);
+    if a.kind == crate::sim::Type::Mig29 {
+        mig::draw(cv, a, &ad, m, c);
+    }
 }
 
 /// Standby attitude indicator: rotating sky/ground ball with a fixed aircraft symbol.
@@ -1369,11 +1394,21 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
 }
 
 /// Camera in body axes, for the cockpit pass and the combiner projection.
+/// The pilot's design eye in the jet's body axes.
+pub fn design_eye(a: &Aircraft) -> V3 {
+    match a.kind {
+        crate::sim::Type::Mig29 => crate::mig29::EYE,
+        crate::sim::Type::F16 => EYE,
+    }
+}
+
+/// The camera in cockpit space: body axes, shifted so the design eye sits
+/// at airframe::EYE, where both cockpits are built.
 pub fn body_camera(cam: &Camera, a: &Aircraft) -> Camera {
     let inv = a.q.conj();
-    Camera { eye: inv.rotate(cam.eye - a.pos), forward: inv.rotate(cam.forward), right: inv.rotate(cam.right), up: inv.rotate(cam.up), fov: cam.fov }
+    Camera { eye: inv.rotate(cam.eye - a.pos) - design_eye(a) + EYE, forward: inv.rotate(cam.forward), right: inv.rotate(cam.right), up: inv.rotate(cam.up), fov: cam.fov }
 }
 
 pub fn eye_world(a: &Aircraft) -> V3 {
-    a.pos + a.q.rotate(EYE)
+    a.pos + a.q.rotate(design_eye(a))
 }

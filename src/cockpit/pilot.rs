@@ -248,6 +248,13 @@ fn seat_axes() -> (V3, V3, V3) {
 /// Seat, torso, harness and the control mounts: everything that
 /// does not move. The caller facets the mesh.
 pub fn build_static(m: &mut Mesh) {
+    seat_and_torso(m);
+    sidestick_mount(m);
+}
+
+/// Seat, torso and harness, shared by both cockpits: the MiG's K-36DM sits
+/// close enough to the ACES II's place and recline under the same eye.
+fn seat_and_torso(m: &mut Mesh) {
     let (hip, up, fwd) = seat_axes();
     let seat = |o: V3| Frame { o, x: V3::X, y: up, z: -fwd };
     let at = |u: f64, f: f64| hip + up * u + fwd * f;
@@ -280,7 +287,9 @@ pub fn build_static(m: &mut Mesh) {
         strap(m, &[at(0.04, 0.02) + x(0.17), at(0.05, 0.095) + x(0.12), at(0.07, 0.10) + x(0.03)], 0.018, 0.004, up, WEBBING);
     }
     m.block(&chest(0.07, 0.106, 0.0), v3(0.036, 0.03, 0.009), METALC);
+}
 
+fn sidestick_mount(m: &mut Mesh) {
     // Sidestick mount standing on the right console, with its top plate, and
     // the arm rest under the neutral forearm on a post from the console.
     let (mount, top) = (Rgb(0.10, 0.11, 0.11), STICK.y - 0.004);
@@ -423,10 +432,116 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     m.facet();
 }
 
+// ================================================================ MiG-29
+// The MiG cockpit is built in the same space as the F-16's, with the design
+// eye in the same place, so the seat, torso and legs are shared.
+
+/// Seat, torso and harness under the MiG's eye.
+pub fn build_static_mig(m: &mut Mesh) {
+    seat_and_torso(m);
+}
+
+/// Centre stick pivot, on the floor between the legs. The grip stands
+/// about 0.5 m ahead of the eye and 0.55 m under it.
+const MIG_STICK: V3 = v3(0.0, 0.26, -3.80);
+
+/// Centre stick axes for the current deflection. Full deflection tilts it
+/// about 11 degrees, as the sidestick does.
+fn mig_stick_grip(h: &Hands) -> Grip {
+    let g = v3(h.roll * 0.20, 1.0, 0.13 + h.pitch * 0.20).norm();
+    Grip::new(MIG_STICK + g * 0.40, g, 1.0)
+}
+
+/// The 9.12's stick (RUS): a column out of a rubber boot to a black
+/// chequered grip, a head swelling forward with the red weapon release, the
+/// trim hat and the autopilot buttons on top, and the wheel brake lever
+/// along the front.
+fn mig_stick(m: &mut Mesh, k: &Grip) {
+    let c = |u: f64| MIG_STICK + k.g * u;
+    loft(m, &[St(MIG_STICK, 0.06, 0.06, RUBBER), St(c(0.06), 0.045, 0.045, RUBBER), St(c(0.10), 0.02, 0.02, GRIP), St(c(0.34), 0.017, 0.017, GRIP)], V3::X, &OCT);
+    let p = |f: f64, u: f64| k.p(f, u, 0.0);
+    loft(m, &[St(p(0.0, -0.065), 0.017, 0.019, GRIP), St(p(0.0, -0.03), 0.018, 0.023, GRIP), St(p(0.002, 0.035), 0.018, 0.024, GRIP), St(p(0.012, 0.058), 0.026, 0.032, GRIP), St(p(0.016, 0.082), 0.027, 0.034, GRIP), St(p(0.012, 0.098), 0.020, 0.026, GRIP), St(p(0.010, 0.104), 0.010, 0.014, GRIP)], V3::X, &OCT);
+    let top = |f: f64, s: f64| k.p(f, 0.092, s);
+    knob(m, top(0.030, -0.012), (k.g + k.fwd).norm(), 0.009, 0.010, Rgb(0.80, 0.78, 0.74));
+    knob(m, top(0.028, 0.012), (k.g + k.fwd).norm(), 0.007, 0.008, RED);
+    knob(m, top(0.004, 0.0), k.g, 0.008, 0.012, METALC.scale(0.6));
+    knob(m, top(-0.012, 0.014), (k.g - k.fwd).norm(), 0.006, 0.008, Rgb(0.20, 0.38, 0.40));
+    bar(m, k.p(0.045, 0.03, 0.0), k.p(0.05, -0.05, 0.004), 0.010, 0.003, k.fwd, Rgb(0.07, 0.07, 0.07));
+}
+
+/// Throttle (RUD): two levers side by side in a quadrant on the left
+/// console, with a combined grip. It travels 22 cm, from 0.16 m ahead of
+/// the eye at idle.
+fn mig_throttle_grip(h: &Hands) -> V3 {
+    v3(-0.315, 0.735, -3.40 - h.throttle * 0.22)
+}
+
+fn mig_throttle(m: &mut Mesh, h: &Hands) -> V3 {
+    let g = mig_throttle_grip(h);
+    // Levers lean forward from their pivots in the quadrant slot.
+    for x in [-0.330, -0.300] {
+        bar(m, v3(x, super::mig::QUADRANT_TOP, g.z + 0.09), v3(x, g.y - 0.02, g.z), 0.006, 0.01, V3::Z, Rgb(0.30, 0.32, 0.32));
+    }
+    let f = Frame { o: g, x: V3::X, y: V3::Y, z: V3::Z };
+    m.block(&f, v3(0.032, 0.024, 0.042), GRIP);
+    m.block(&f.at(0.0, 0.006, -0.046), v3(0.03, 0.02, 0.008), GRIP.scale(1.3));
+    knob(m, f.p(0.020, 0.024, -0.02), V3::Y, 0.007, 0.008, RED);
+    knob(m, f.p(0.034, 0.008, -0.01), V3::X, 0.009, 0.006, Rgb(0.55, 0.56, 0.55));
+    knob(m, f.p(-0.010, 0.024, 0.012), V3::Y, 0.006, 0.006, METALC.scale(0.6));
+    // The left hand on top, pointing forward, the thumb down the inboard side.
+    let hf = v3(0.06, 0.0, -1.0).norm();
+    let hs = V3::Y.cross(hf);
+    let c = g + V3::Y * 0.040 + V3::Z * 0.004;
+    let at = |s: f64, y: f64| c + hf * s + V3::Y * y;
+    let wrist = at(-0.080, -0.006);
+    loft(m, &[St(wrist, 0.034, 0.017, GLOVE), St(at(-0.040, 0.0), 0.044, 0.016, GLOVE), St(at(0.0, 0.002), 0.047, 0.015, GLOVE), St(at(0.034, -0.008), 0.046, 0.013, GLOVE), St(at(0.050, -0.030), 0.044, 0.012, GLOVE), St(at(0.054, -0.052), 0.040, 0.011, GLOVE)], hs, &OCT);
+    thumb(m, [g + v3(0.036, 0.022, 0.018), g + v3(0.046, 0.008, 0.004), g + v3(0.046, -0.004, -0.016), g + v3(0.042, -0.008, -0.032)], V3::Y);
+    wrist
+}
+
+/// Landing gear lever on the left wall ahead of the throttle: up with the
+/// gear up, down with it down, the warning light in its knob.
+fn mig_gear_lever(m: &mut Mesh, h: &Hands) {
+    let pivot = v3(-0.37, 0.80, -3.82);
+    let dir = v3(0.30, mix(0.75, -0.55, h.gear), 0.55).norm();
+    let tip = pivot + dir * 0.10;
+    m.block(&Frame { o: pivot, x: V3::X, y: V3::Y, z: V3::Z }, v3(0.012, 0.03, 0.02), Rgb(0.12, 0.13, 0.13));
+    loft(m, &[St(pivot, 0.006, 0.006, METALC), St(tip, 0.005, 0.005, METALC)], V3::X, &OCT);
+    let lamp = if h.gear_warn { Rgb(1.6, 0.22, 0.12) } else { Rgb(0.45, 0.10, 0.08) };
+    loft(m, &[St(tip, 0.016, 0.016, lamp), St(tip + dir * 0.022, 0.014, 0.014, lamp)], V3::X, &OCT);
+}
+
+/// MiG legs, stick, throttle and gear lever, with both arms.
+pub fn build_dynamic_mig(m: &mut Mesh, h: &Hands) {
+    mig_gear_lever(m, h);
+    for s in [-1.0, 1.0] {
+        leg(m, s, h.rudder);
+    }
+    let k = mig_stick_grip(h);
+    mig_stick(m, &k);
+    let (rx, rf) = (0.019, 0.025);
+    let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.012, 0.004, -rx * 0.1), k.p(-rf - 0.008, 0.030, -rx * 0.75), k.p(-0.028, 0.054, -rx - 0.003), k.p(-0.020, 0.074, -0.016)]);
+    arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
+    let wrist = mig_throttle(m, h);
+    arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.018));
+    m.facet();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::airframe::EYE;
+
+    #[test]
+    fn mig_controls_clear_the_seat_and_reach_the_hands() {
+        let h = Hands { throttle: 0.5, ..Default::default() };
+        let k = mig_stick_grip(&h);
+        // Grip between the knees, well ahead of the seat pan's front edge.
+        assert!(k.o.x.abs() < 0.01 && k.o.z < -3.70 && (EYE.y - k.o.y - 0.55).abs() < 0.05);
+        let t = mig_throttle_grip(&h);
+        assert!(t.y > super::super::mig::QUADRANT_TOP && (t - v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z)).len() < ARM.0 + ARM.1);
+        assert!((k.p(-0.072, -0.004, 0.028) - SHOULDER).len() < ARM.0 + ARM.1);
+    }
 
     #[test]
     fn controls_sit_where_they_do_in_the_jet() {
