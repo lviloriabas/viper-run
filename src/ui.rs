@@ -508,7 +508,7 @@ impl<'a> Ui<'a> {
         if mission != MissionKind::Free {
             rows.push(("MISSION CLOCK", if clock { format!("ON, {}", format_time(mission.time())) } else { "OFF".to_string() }, Some(Action::Clock)));
         } else {
-            rows.push(("AUTO REFILL", if cfg.refill { "ON, EACH WEAPON WHEN EMPTY".to_string() } else { "OFF".to_string() }, Some(Action::Refill)));
+            rows.push(("AUTO REFILL", if cfg.refill { "ON" } else { "OFF" }.to_string(), Some(Action::Refill)));
         }
         // LAUNCH comes first in the keyboard order, so it is highlighted
         // first and Enter takes off.
@@ -561,12 +561,15 @@ impl<'a> Ui<'a> {
             ("ZSU-23-4", if t.guns == 0 { "NONE".to_string() } else { t.guns.to_string() }, Action::Guns),
         ];
         let rows_top = yy;
+        // The map starts past the widest setting, the mixed fleet, so long
+        // names never run under it and the map holds still as they change.
+        let widest = rows.iter().map(|(_, v, _)| v.as_str()).chain(["F-16C + MIG-29S"]).map(|v| Canvas::text_width(v, s) + 16.0 * s).fold(90.0 * s, f32::max);
         for (label, value, act) in rows {
             self.cv.text(label, x, yy + 7.0 * s, sm, DIM, Align::Left);
             self.button(&value, "", col2, yy, false, act);
             yy += 17.0 * s;
         }
-        let brief_w = col2 - x + 90.0 * s;
+        let brief_w = col2 - x + widest;
         yy += 4.0 * s;
         self.cv.paragraph(t.layout.brief(), x, yy, brief_w, sm, 1.6, rgba(0xb3, 0xc3, 0xb7, 1.0));
         // The map takes the rest of the column, right of the setup rows.

@@ -676,6 +676,20 @@ impl App {
         settings::save(&self.settings, &self.best);
     }
 
+    /// The menu button nearest the highlighted one to its right (`dir` 1)
+    /// or left (-1), favouring the same row over the same column.
+    fn beside(&self, dir: f32) -> Option<usize> {
+        let cur = self.buttons.get(self.selected)?;
+        let (cx, cy) = (cur.x + cur.w * 0.5, cur.y + cur.h * 0.5);
+        self.buttons
+            .iter()
+            .enumerate()
+            .filter(|&(i, b)| i != self.selected && (if dir > 0.0 { b.x >= cur.x + cur.w } else { b.x + b.w <= cur.x }))
+            .map(|(i, b)| (i, ((b.x + b.w * 0.5 - cx) * dir).abs() + 3.0 * (b.y + b.h * 0.5 - cy).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
     fn act(&mut self, a: Action) {
         if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
@@ -1788,6 +1802,14 @@ impl EventHandler for App {
             return;
         }
         if in_menu && !self.buttons.is_empty() {
+            // Left and right jump to the nearest button that way, across
+            // columns; with none there they step through the order.
+            if matches!(key, KeyCode::Left | KeyCode::Right) && !self.controls_open {
+                if let Some(i) = self.beside(if key == KeyCode::Right { 1.0 } else { -1.0 }) {
+                    self.selected = i;
+                    return;
+                }
+            }
             match key {
                 KeyCode::Tab | KeyCode::Down | KeyCode::Right if !(self.controls_open && matches!(key, KeyCode::Right)) => {
                     self.selected = (self.selected + 1) % self.buttons.len();
