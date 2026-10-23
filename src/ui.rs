@@ -45,8 +45,8 @@ pub enum Action {
     Reset,
     /// Choose the mission on the start screen.
     Pick(MissionKind),
-    /// Loadout screen: next store for a station pair (0 tips, 1 outboard,
-    /// 2 inboard), next fuel load, and take off.
+    /// Loadout screen: next store for a station pair (0 tips, 1 stations 2
+    /// and 8, 2 outboard, 3 inboard), next fuel load, and take off.
     Station(u8),
     Fuel,
     Launch,
@@ -469,7 +469,7 @@ impl<'a> Ui<'a> {
         let armed = threats;
         let left = if threats { 240.0 * s } else { 300.0 * s };
         // Without the stores and the threat map the panel fits its few rows.
-        let tall = if armed { 266.0 } else { 172.0 };
+        let tall = if armed { 280.0 } else { 172.0 };
         let (pw, ph) = ((self.w - 24.0 * s).min(if threats { 800.0 * s } else { left }), (self.h - 26.0 * s).min(tall * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0 - 4.0 * s);
         self.frame(x, y, pw, ph);
@@ -482,7 +482,7 @@ impl<'a> Ui<'a> {
         let name = |st: Option<Store>| st.map_or("EMPTY", |s| s.pair());
         let mig = cfg.jet == crate::sim::Type::Mig29;
         let gun = crate::weapons::gun_of(cfg.jet);
-        let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7  OUTBOARD", "STA 4 / 6  INBOARD", "PGU-28") };
+        let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7", "STA 4 / 6", "PGU-28") };
         // The MiG's gauges read kilograms, the F-16's pounds.
         let (unit, per_kg) = if mig { ("KG", 1.0) } else { ("LB", 2.20462) };
         let fuel_kg = cfg.jet.fuel_max() * cfg.fuel;
@@ -490,8 +490,12 @@ impl<'a> Ui<'a> {
         let mut rows: Vec<(&str, String, Option<Action>)> = vec![("AIRFRAME", cfg.jet.name().to_string(), Some(Action::Jet))];
         if armed {
             rows.push((tip, cfg.tip.pair().to_string(), Some(Action::Station(0))));
-            rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(1))));
-            rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(2))));
+            // The MiG has no stations 2 and 8.
+            if crate::combat::has_pair(cfg.jet, 1) {
+                rows.push(("STA 2 / 8", name(cfg.outer).to_string(), Some(Action::Station(1))));
+            }
+            rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(2))));
+            rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(3))));
         }
         rows.push(("INTERNAL FUEL", fuel, Some(Action::Fuel)));
         if armed {

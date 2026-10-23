@@ -109,6 +109,10 @@ pub enum Store {
     R77,
     Fab250,
     Fab500,
+    /// Three Mk-82s on a TER-9/A triple ejector rack.
+    Mk82Ter,
+    /// Two FAB-250s one behind the other on an MBD3-U2T tandem rack.
+    Fab250Twin,
 }
 
 /// Weapon families, by what guides them. `arsenal` lists what each jet
@@ -129,7 +133,27 @@ pub enum Family {
 
 impl Store {
     #[cfg(test)]
-    pub const ALL: [Store; 13] = [Store::Aim9, Store::Aim9x, Store::Aim7, Store::Aim120, Store::Aim120d, Store::Mk82, Store::R60m, Store::R73, Store::R27r, Store::R27t, Store::R77, Store::Fab250, Store::Fab500];
+    pub const ALL: [Store; 15] = [Store::Aim9, Store::Aim9x, Store::Aim7, Store::Aim120, Store::Aim120d, Store::Mk82, Store::R60m, Store::R73, Store::R27r, Store::R27t, Store::R77, Store::Fab250, Store::Fab500, Store::Mk82Ter, Store::Fab250Twin];
+
+    /// The weapon a rack carries, or the store itself.
+    pub fn unit(self) -> Store {
+        match self {
+            Store::Mk82Ter => Store::Mk82,
+            Store::Fab250Twin => Store::Fab250,
+            s => s,
+        }
+    }
+
+    /// A rack's own mass (kg) and drag coefficient, which stay on the pylon
+    /// when the bombs go: the TER-9/A weighs about 45 kg, the MBD3-U2T
+    /// about 55.
+    fn rack(self) -> (f64, f64) {
+        match self {
+            Store::Mk82Ter => (45.0, 0.0008),
+            Store::Fab250Twin => (55.0, 0.0006),
+            _ => (0.0, 0.0),
+        }
+    }
 
     pub fn mass(self) -> f64 {
         match self.missile() {
@@ -140,7 +164,7 @@ impl Store {
     /// Zero-lift drag coefficient (on the 27.87 m^2 wing) of the store and
     /// its interference under a wing; a wingtip AIM-9 is in the clean data.
     fn drag(self) -> f64 {
-        match self {
+        match self.unit() {
             Store::Aim9 => 0.0005,
             Store::Aim9x => 0.0004,
             Store::Aim7 => 0.0011,
@@ -152,10 +176,11 @@ impl Store {
             Store::R77 => 0.0009,
             Store::Fab250 => 0.0013,
             Store::Fab500 => 0.0021,
+            Store::Mk82Ter | Store::Fab250Twin => 0.0,
         }
     }
     pub fn missile(self) -> Option<&'static Spec> {
-        match self {
+        match self.unit() {
             Store::Aim9 => Some(&AIM9M),
             Store::Aim9x => Some(&AIM9X),
             Store::Aim7 => Some(&AIM7M),
@@ -170,7 +195,7 @@ impl Store {
         }
     }
     pub fn bomb(self) -> Option<&'static BombSpec> {
-        match self {
+        match self.unit() {
             Store::Mk82 => Some(&MK82),
             Store::Fab250 => Some(&FAB250),
             Store::Fab500 => Some(&FAB500),
@@ -207,7 +232,7 @@ impl Store {
     /// Real name and, in brackets, what kind it is: the brevity code for a
     /// missile (Fox 1 semi-active, Fox 2 infrared, Fox 3 active radar).
     pub fn long_name(self) -> &'static str {
-        match self {
+        match self.unit() {
             Store::Aim9 => "AIM-9M SIDEWINDER (FOX 2)",
             Store::Aim9x => "AIM-9X SIDEWINDER (FOX 2)",
             Store::Aim7 => "AIM-7M SPARROW (FOX 1)",
@@ -221,6 +246,7 @@ impl Store {
             Store::R77 => "R-77 ADDER (FOX 3)",
             Store::Fab250 => "FAB-250M-62 (BOMB)",
             Store::Fab500 => "FAB-500M-62 (BOMB)",
+            Store::Mk82Ter | Store::Fab250Twin => "",
         }
     }
     /// A pair of them on the loadout screen.
@@ -239,6 +265,8 @@ impl Store {
             Store::R77 => "2 X R-77  RADAR",
             Store::Fab250 => "2 X FAB-250  250 KG",
             Store::Fab500 => "2 X FAB-500  500 KG",
+            Store::Mk82Ter => "6 X MK-82  2 TER-9/A",
+            Store::Fab250Twin => "4 X FAB-250  TANDEM",
         }
     }
     /// What the other airframe carries in its place: the same family, the
@@ -255,6 +283,8 @@ impl Store {
             Store::R27r | Store::R27t => Store::Aim7,
             Store::R77 => Store::Aim120,
             Store::Fab250 | Store::Fab500 => Store::Mk82,
+            Store::Mk82Ter => Store::Fab250Twin,
+            Store::Fab250Twin => Store::Mk82Ter,
         }
     }
 }
@@ -271,21 +301,34 @@ pub fn tip_store(jet: Type) -> Store {
 }
 
 /// Choices for a station pair: 0 the outermost (the F-16's wingtips, the
-/// MiG's outer pylons), 1 the next in (stations 3 and 7, the MiG's middle
-/// pylons), 2 the inboard ones (stations 4 and 6, the MiG's inner pylons).
-/// The F-16C Block 50: Sidewinders or AMRAAMs on the tips; missiles or bombs
-/// on 3 and 7; bombs, AMRAAMs or Sparrows on 4 and 6. The MiG-29S 9.13S:
-/// R-73s or R-60Ms outboard; dogfight missiles, R-77s or FAB-250s on the
-/// middle pylons; the R-27s, R-77s or bombs on the inner ones.
+/// MiG's outer pylons), 1 the F-16's stations 2 and 8 (the MiG has no
+/// such pair), 2 the next in (stations 3 and 7, the MiG's middle pylons),
+/// 3 the inboard ones (stations 4 and 6, the MiG's inner pylons).
+///
+/// The F-16C Block 50 carries air-to-air missiles on stations 1 to 3 and 7
+/// to 9 (LAU-129 rails for the AIM-9 and AIM-120), the Sparrow on 3 and 7,
+/// and bombs on 3, 4, 6 and 7, singly or three to a TER-9/A rack; 4 and 6
+/// are not air-to-air stations. The MiG-29S 9.13S has three pylons under
+/// each wing (and one under the belly for a tank): R-73s or R-60Ms
+/// outboard; dogfight missiles, R-77s, FAB-250s or FAB-500s on the middle
+/// pair; the R-27s, R-77s, FAB-500s or FAB-250s, singly or two on an
+/// MBD3-U2T tandem rack, on the inner pair, for up to 2,000 kg of bombs.
 fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
     match (jet, pair) {
         (Type::F16, 0) => &[Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
-        (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82)],
-        (Type::F16, _) => &[None, Some(Store::Mk82), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7)],
+        (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
+        (Type::F16, 2) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82), Some(Store::Mk82Ter)],
+        (Type::F16, _) => &[None, Some(Store::Mk82), Some(Store::Mk82Ter)],
         (Type::Mig29, 0) => &[Some(Store::R73), Some(Store::R60m)],
-        (Type::Mig29, 1) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250)],
-        (Type::Mig29, _) => &[None, Some(Store::R27r), Some(Store::R27t), Some(Store::R77), Some(Store::Fab500), Some(Store::Fab250)],
+        (Type::Mig29, 1) => &[None],
+        (Type::Mig29, 2) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250), Some(Store::Fab500)],
+        (Type::Mig29, _) => &[None, Some(Store::R27r), Some(Store::R27t), Some(Store::R77), Some(Store::Fab500), Some(Store::Fab250), Some(Store::Fab250Twin)],
     }
+}
+
+/// Whether a jet has a station pair at all (the MiG has no stations 2 and 8).
+pub fn has_pair(jet: Type, pair: u8) -> bool {
+    pylon_choices(jet, pair) != [None]
 }
 
 /// Every store a jet can carry in a family, from its pylon choices; the
@@ -293,10 +336,10 @@ fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
 #[cfg(test)]
 pub fn arsenal(jet: Type, family: Family) -> Vec<Store> {
     let mut v: Vec<Store> = Vec::new();
-    for pair in 0..3 {
-        for s in pylon_choices(jet, pair).iter().flatten() {
-            if s.family() == family && !v.contains(s) {
-                v.push(*s);
+    for pair in 0..4 {
+        for s in pylon_choices(jet, pair).iter().flatten().map(|s| s.unit()) {
+            if s.family() == family && !v.contains(&s) {
+                v.push(s);
             }
         }
     }
@@ -355,6 +398,8 @@ pub struct Station {
 pub struct Config {
     /// Stations 1 and 9, the wingtips (the MiG's outer pylons).
     pub tip: Store,
+    /// Stations 2 and 8, outboard under the F-16's wing.
+    pub outer: Option<Store>,
     /// Stations 3 and 7.
     pub outboard: Option<Store>,
     /// Stations 4 and 6, the heavy inboard pylons.
@@ -369,14 +414,15 @@ pub struct Config {
 
 impl Config {
     pub fn for_mission(kind: MissionKind) -> Config {
-        let (outboard, inboard, fuel) = match kind {
-            MissionKind::Gates => (None, None, 1.0),
-            MissionKind::Airfield => (None, None, 0.5),
-            MissionKind::Dogfight => (Some(Store::Aim120), None, 1.0),
-            MissionKind::Strike => (Some(Store::Mk82), Some(Store::Mk82), 1.0),
-            MissionKind::Free => (Some(Store::Aim120), Some(Store::Mk82), 1.0),
+        let (outer, outboard, inboard, fuel) = match kind {
+            MissionKind::Gates => (None, None, None, 1.0),
+            MissionKind::Airfield => (None, None, None, 0.5),
+            // Four heat seekers and two AMRAAMs, as the MiG's four R-73s and two R-77s.
+            MissionKind::Dogfight => (Some(Store::Aim9), Some(Store::Aim120), None, 1.0),
+            MissionKind::Strike => (None, Some(Store::Mk82), Some(Store::Mk82), 1.0),
+            MissionKind::Free => (None, Some(Store::Aim120), Some(Store::Mk82), 1.0),
         };
-        Config { tip: Store::Aim9, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
+        Config { tip: Store::Aim9, outer, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
     }
 
     /// The mission's stores as the given airframe carries them: the MiG-29S's
@@ -429,8 +475,9 @@ impl Config {
             choices.iter().flatten().find(|&&x| x == c).or_else(|| choices.iter().flatten().find(|x| x.family() == c.family())).or_else(|| choices.iter().flatten().find(|x| x.mode() == c.mode())).copied()
         };
         self.tip = swap(self.tip, 0).unwrap_or(tip_store(jet));
-        self.outboard = self.outboard.and_then(|s| swap(s, 1));
-        self.inboard = self.inboard.and_then(|s| swap(s, 2));
+        self.outer = self.outer.and_then(|s| swap(s, 1));
+        self.outboard = self.outboard.and_then(|s| swap(s, 2));
+        self.inboard = self.inboard.and_then(|s| swap(s, 3));
     }
 
     /// The stores hung, counted by kind, for the briefing: "4 R-73 2 R-27R".
@@ -445,19 +492,22 @@ impl Config {
         kinds.iter().map(|(s, n)| format!("{n} {}", s.name())).collect::<Vec<_>>().join(" ")
     }
 
-    /// Next choice for a station pair (0 tips, 1 outboard, 2 inboard).
+    /// Next choice for a station pair (0 tips, 1 stations 2 and 8, 2
+    /// outboard, 3 inboard).
     pub fn cycle(&mut self, pair: u8) {
         let order = pylon_choices(self.jet, pair);
         let current = match pair {
             0 => Some(self.tip),
-            1 => self.outboard,
+            1 => self.outer,
+            2 => self.outboard,
             _ => self.inboard,
         };
         let i = order.iter().position(|s| *s == current).unwrap_or(0);
         let next = order[(i + 1) % order.len()];
         match pair {
             0 => self.tip = next.unwrap_or(tip_store(self.jet)),
-            1 => self.outboard = next,
+            1 => self.outer = next,
+            2 => self.outboard = next,
             _ => self.inboard = next,
         }
     }
@@ -491,6 +541,8 @@ impl Config {
 pub struct Loadout {
     /// In release order, alternating sides.
     pub stations: Vec<Station>,
+    /// The racks' mass (kg) and drag, which stay on when the bombs go.
+    racks: (f64, f64),
     pub gun: &'static Gun,
     pub rounds: u32,
     pub chaff: u32,
@@ -511,11 +563,17 @@ impl Loadout {
     }
 
     /// Stores hung as the loadout screen chose: the wingtip pair always,
-    /// the outboard pair on stations 3 and 7, the inboard pair on 4 and 6.
+    /// then stations 2 and 8, 3 and 7, and 4 and 6. A rack's weapons hang
+    /// round its pylon: a TER-9/A's one below and two on the shoulders, a
+    /// tandem rack's one behind the other.
     pub fn configure(cfg: &Config) -> Loadout {
         let mut stations = tips(cfg.tip).to_vec();
-        for (pick, x) in [(cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
-            let Some(store) = pick else { continue };
+        let mut racks = (0.0, 0.0);
+        for (pick, x) in [(cfg.outer, 4.15), (cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
+            let Some(rack) = pick else { continue };
+            racks.0 += 2.0 * rack.rack().0;
+            racks.1 += 2.0 * rack.rack().1;
+            let store = rack.unit();
             // Missile noses forward of the pylon, bombs centred under it.
             let (y, z) = match store {
                 Store::Aim9 | Store::Aim9x | Store::R60m | Store::R73 => (-0.03, x * 0.5 - 0.83),
@@ -523,13 +581,21 @@ impl Loadout {
                 Store::Aim7 | Store::R27r | Store::R27t => (-0.08, x * 0.5 - 1.43),
                 Store::Mk82 | Store::Fab250 => (-0.08, x * 0.4 + 0.93),
                 Store::Fab500 => (-0.12, x * 0.4 + 0.93),
+                Store::Mk82Ter | Store::Fab250Twin => unreachable!(),
             };
-            for s in [-1.0, 1.0] {
-                stations.push(Station { store, at: v3(s * x, y, z), loaded: true, tip: false });
+            let places: &[(f64, f64, f64)] = match rack {
+                Store::Mk82Ter => &[(0.0, -0.30, 0.0), (-0.20, -0.06, 0.0), (0.20, -0.06, 0.0)],
+                Store::Fab250Twin => &[(0.0, 0.0, -1.0), (0.0, 0.0, 1.0)],
+                _ => &[(0.0, 0.0, 0.0)],
+            };
+            for &(dx, dy, dz) in places {
+                for s in [-1.0, 1.0] {
+                    stations.push(Station { store, at: v3(s * (x + dx), y + dy, z + dz), loaded: true, tip: false });
+                }
             }
         }
         let gun = gun_of(cfg.jet);
-        Loadout { stations, gun, rounds: gun.rounds, chaff: CHAFF, flares: FLARES }
+        Loadout { stations, racks, gun, rounds: gun.rounds, chaff: CHAFF, flares: FLARES }
     }
 
     pub fn count(&self, store: Store) -> u32 {
@@ -558,7 +624,7 @@ impl Loadout {
 
     /// Mass on the stations, with the spent ammunition taken off.
     pub fn mass(&self) -> f64 {
-        RAILS + self.stations.iter().filter(|s| s.loaded).map(|s| s.store.mass()).sum::<f64>() - (self.gun.rounds - self.rounds) as f64 * self.gun.expended
+        RAILS + self.racks.0 + self.stations.iter().filter(|s| s.loaded).map(|s| s.store.mass()).sum::<f64>() - (self.gun.rounds - self.rounds) as f64 * self.gun.expended
     }
 
     /// Mass hung on the underwing pylons, which lowers the flutter speed.
@@ -567,7 +633,7 @@ impl Loadout {
     }
 
     pub fn drag(&self) -> f64 {
-        self.stations.iter().filter(|s| s.loaded && !s.tip).map(|s| s.store.drag()).sum()
+        self.racks.1 + self.stations.iter().filter(|s| s.loaded && !s.tip).map(|s| s.store.drag()).sum::<f64>()
     }
 }
 
@@ -2244,7 +2310,7 @@ mod tests {
         strike.rounds -= 100;
         assert!((strike.mass() - (STORES_MASS + 3.0 * MK82_MASS - 100.0 * M61A1.expended)).abs() < 1e-9);
         let fight = Loadout::for_mission(MissionKind::Dogfight);
-        assert_eq!((fight.count(Store::Aim9), fight.count(Store::Aim120)), (2, 2));
+        assert_eq!((fight.count(Store::Aim9), fight.count(Store::Aim120)), (4, 2));
     }
 
     /// The MiG-29 hangs its own stores: R-73s on the outer pylons, the
@@ -2259,17 +2325,40 @@ mod tests {
         assert_eq!((l.gun.name, l.rounds), ("GSH-30-1", 150));
         let dog = Loadout::configure(&Config::for_jet(MissionKind::Dogfight, Type::Mig29));
         assert_eq!((dog.count(Store::R73), dog.count(Store::R77)), (4, 2));
-        for _ in 0..6 {
-            cfg.cycle(2);
-            assert!(cfg.inboard.is_none_or(|s| matches!(s, Store::R27r | Store::R27t | Store::R77 | Store::Fab500 | Store::Fab250)));
+        for _ in 0..7 {
+            cfg.cycle(3);
+            assert!(cfg.inboard.is_none_or(|s| matches!(s, Store::R27r | Store::R27t | Store::R77 | Store::Fab500 | Store::Fab250 | Store::Fab250Twin)));
         }
+        cfg.cycle(1);
+        assert_eq!(cfg.outer, None, "the MiG has no stations 2 and 8");
         cfg.cycle(0);
         assert_eq!(cfg.tip, Store::R60m);
         assert_eq!(Config::for_jet(MissionKind::Dogfight, Type::Mig29).stores_summary(), "4 R-73 2 R-77");
         cfg.inboard = Some(Store::R27r);
         cfg.set_jet(Type::F16);
-        assert_eq!((cfg.tip, cfg.outboard, cfg.inboard), (Store::Aim9, Some(Store::Mk82), Some(Store::Aim7)));
+        assert_eq!((cfg.tip, cfg.outboard, cfg.inboard), (Store::Aim9, Some(Store::Mk82), None), "no Sparrow on stations 4 and 6");
         assert_eq!(Loadout::configure(&cfg).gun.rounds, 511);
+    }
+
+    /// Racks multiply the bombs on a pylon: TER-9/As on stations 3, 4, 6
+    /// and 7 hang twelve Mk-82s, the MiG's tandem racks four FAB-250s on
+    /// its inner pylons, and a rack's own mass stays when the bombs go.
+    #[test]
+    fn racks_carry_more_bombs() {
+        let mut cfg = Config::for_mission(MissionKind::Strike);
+        (cfg.outboard, cfg.inboard) = (Some(Store::Mk82Ter), Some(Store::Mk82Ter));
+        let mut l = Loadout::configure(&cfg);
+        assert_eq!(l.count(Store::Mk82), 12);
+        assert!((l.mass() - (STORES_MASS + 12.0 * MK82_MASS + 4.0 * 45.0)).abs() < 1e-9);
+        let empty = l.drag();
+        for s in l.stations.iter_mut() {
+            s.loaded = false;
+        }
+        assert!(l.drag() > 0.0 && l.drag() < empty, "the racks keep their drag");
+        let mut mig = Config::for_jet(MissionKind::Strike, Type::Mig29);
+        mig.inboard = Some(Store::Fab250Twin);
+        assert_eq!(Loadout::configure(&mig).count(Store::Fab250), 6);
+        assert_eq!(mig.stores_summary(), "2 R-73 6 FAB-250");
     }
 
     /// The weapon families each jet fills, and the one it does not: the
@@ -2572,7 +2661,7 @@ mod tests {
         assert_eq!(c.seeker, Some(Who::Bandit(0)), "seeker on the bandit in the boresight");
         c.step(FIXED_DT_TEST, &mut a, true, &mut m2);
         assert_eq!(c.missiles.len(), 1);
-        assert_eq!(c.loadout.count(Store::Aim9), 1);
+        assert_eq!(c.loadout.count(Store::Aim9), 3);
         for _ in 0..(12.0 / FIXED_DT_TEST) as usize {
             a.update(FIXED_DT_TEST, &Input::default());
             c.step(FIXED_DT_TEST, &mut a, false, &mut m2);

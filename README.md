@@ -144,17 +144,26 @@ the F-16C, the Block 40+ minimum fuel, and an estimated 550 kg in the MiG,
 whose setup reads in kilograms like its gauges.
 
 Every station pair can be changed, the wingtips included. The F-16C Block
-50 takes AIM-9Ms, AIM-9Xs, AIM-120Cs or AIM-120Ds on the wingtips; any of
-those, AIM-7M Sparrows or Mk-82s on stations 3 and 7; and Mk-82s, AMRAAMs
-or Sparrows on 4 and 6. The MiG-29S 9.13S carries its own on six underwing
-pylons: R-73s (AA-11 Archer) or R-60Ms (AA-8 Aphid) on the outer pair; those,
-R-77s (AA-12 Adder, active radar) or FAB-250M-62 bombs on the middle pair;
-R-27Rs (AA-10 Alamo-A, semi-active), R-27Ts (Alamo-B, infrared), R-77s,
-FAB-500M-62s or FAB-250s on the inner pair. Its GSh-30-1 fires 150 rounds
-of 30 mm, and two BVP-30-26M dispensers hold 30 chaff and 30 flares. The
-DOGFIGHT default is four R-73s and two R-77s, STRIKE two FAB-250s and two
-FAB-500s, FREE FLIGHT four R-73s and two FAB-500s; changing jets swaps each
-pair's stores for the other airframe's equivalent in the same family.
+50 has nine stations: air-to-air missiles go on 1 to 3 and 7 to 9 (AIM-9Ms,
+AIM-9Xs, AIM-120Cs or AIM-120Ds on the wingtip rails 1 and 9 and on 2 and
+8, those or AIM-7M Sparrows on 3 and 7), and bombs on 3, 4, 6 and 7, one
+Mk-82 each or three on a TER-9/A triple ejector rack, for up to six
+missiles and twelve Mk-82s; 4 and 6 are not air-to-air stations, and the
+centreline (5) takes a tank, which the game leaves off. The MiG-29S 9.13S
+has three pylons under each wing and one under the belly for a tank:
+R-73s (AA-11 Archer) or R-60Ms (AA-8 Aphid) on the outer pair; those,
+R-77s (AA-12 Adder, active radar), FAB-250M-62s or FAB-500M-62s on the
+middle pair; R-27Rs (AA-10 Alamo-A, semi-active), R-27Ts (Alamo-B,
+infrared), R-77s, FAB-500s, FAB-250s or two FAB-250s on an MBD3-U2T tandem
+rack on the inner pair, for up to six missiles or 2,000 kg of bombs. A
+rack's own weight and drag stay on the pylon after its bombs have gone.
+Its GSh-30-1 fires 150 rounds of 30 mm, and two BVP-30-26M dispensers hold
+30 chaff and 30 flares. The DOGFIGHT defaults match each other: four heat
+seekers and two active radar missiles each (AIM-9Ms on 1, 2, 8 and 9 and
+AIM-120Cs on 3 and 7, or four R-73s and two R-77s); STRIKE is four Mk-82s
+or two FAB-250s and two FAB-500s, FREE FLIGHT two AIM-120Cs and two Mk-82s
+or four R-73s and two FAB-500s. Changing jets swaps each pair's stores for
+the other airframe's equivalent in the same family.
 
 The missiles come in families by what guides them (`weapons.rs`,
 `combat::arsenal`):
@@ -170,7 +179,7 @@ The missiles come in families by what guides them (`weapons.rs`,
 | Mission | Objective | Default stores | Clock |
 | --- | --- | --- | --- |
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
-| DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
+| DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 4 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
 | AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 50 % fuel | 10:00 |
 | FREE FLIGHT | Practice with no end: the gate rings on a loop, the strike targets and a pair of bandits flying circuits round the gorge (the lead clockwise 14 km out, the wing the other way 9 km out), none of which chase or shoot at you; a new pair comes 30 s after the last one falls, the targets are rebuilt 30 s after the last one burns, and stopping on the ground rearms, refuels and repairs the jet. Only a crash ends it | 2 AIM-9M, 2 AIM-120C, 2 Mk-82 | none |
