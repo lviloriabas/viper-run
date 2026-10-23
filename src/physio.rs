@@ -16,7 +16,11 @@
 //! pilot goes out near 6.9 G; held on a rapid-onset plateau, before the
 //! reflex has acted, light loss comes 0.7 G sooner. The suit adds about
 //! 1.4 G, COMBAT EDGE pressure breathing about 1.1 G and a good AGSM about
-//! 3 G, which a trained pilot tires of within a minute at 9 G. How long a
+//! 3 G. The straining tires the pilot, slowly at first and then faster:
+//! the centrifuge standard is 15 s at 9 G, which about one attempt in five
+//! fails, so here the view starts to close after about 10 s at 9 G, narrows
+//! to a tunnel over the next several, blacks out near 20 s and the pilot
+//! goes out a few seconds later. How long a
 //! G-LOC lasts follows the exposure: the longer and deeper the brain went
 //! without blood, the longer the pilot stays out, and nobody wakes while the
 //! g is still on. Centrifuge episodes average 12 s of absolute and 12 s of
@@ -34,7 +38,7 @@ const MMHG_PER_G: f64 = 1060.0 * G0 * 0.28 / 133.322;
 /// Eye-level pressures (mmHg) between which the retina, and then the brain,
 /// go from fully perfused to not perfused at all.
 const RETINA: (f64, f64) = (0.0, 30.0);
-const BRAIN: (f64, f64) = (-25.0, -5.0);
+const BRAIN: (f64, f64) = (-18.0, -2.0);
 /// Seconds of oxygen each holds with no flow, and the time constant of its
 /// recovery once the flow is back.
 const RETINA_RESERVE: f64 = 3.0;
@@ -49,7 +53,7 @@ const PBG: f64 = 25.0;
 const AGSM: f64 = 65.0;
 /// Seconds of full straining that exhaust the pilot, the share of the AGSM
 /// lost when exhausted, and the seconds of rest that bring it back.
-const ENDURANCE: f64 = 50.0;
+const ENDURANCE: f64 = 22.0;
 const FATIGUE_LOSS: f64 = 1.0;
 const REST: f64 = 60.0;
 /// Baroreflex range (mmHg), and its time constants: sympathetic (raising the
@@ -170,7 +174,7 @@ impl Pilot {
         let column = MMHG_PER_G * nz;
         // The mask pressure rises with the suit's from 4 G.
         let breathing = PBG * self.suit * smoothstep(4.0, 9.0, nz);
-        let protection = SUIT * self.suit + breathing + AGSM * self.strain * (1.0 - FATIGUE_LOSS * self.fatigue);
+        let protection = SUIT * self.suit + breathing + AGSM * self.strain * (1.0 - FATIGUE_LOSS * self.fatigue * self.fatigue);
         let raw = MAP_HEART + protection - column;
         // The carotid sinus reads the head-level pressure and drives it back
         // towards its 1 g value.
@@ -251,7 +255,7 @@ impl Pilot {
     /// What the pilot sees now.
     pub fn vision(&self) -> Vision {
         let o = self.retina;
-        let mut v = Vision { tunnel: 1.0 - smoothstep(0.15, 0.85, o), grey: 1.0 - smoothstep(0.4, 0.92, o), black: 1.0 - smoothstep(0.0, 0.25, o), red: self.red };
+        let mut v = Vision { tunnel: 1.0 - smoothstep(0.12, 0.96, o), grey: 1.0 - smoothstep(0.35, 0.97, o), black: 1.0 - smoothstep(0.0, 0.3, o), red: self.red };
         if self.gloc > 0.0 {
             // Out cold, then the view comes back through a grey haze.
             let back = smoothstep(self.relative, 0.5 * self.relative, self.gloc);
@@ -374,6 +378,30 @@ mod tests {
         // Held long enough, the straining tires and the pilot goes out.
         ride(&mut p, &mut a, 60.0, |_| 9.0, false);
         assert!(p.glocs >= 1, "a minute more at 9 G");
+    }
+
+    #[test]
+    fn a_held_nine_g_closes_the_view_gradually_before_the_g_loc() {
+        let mut p = Pilot::default();
+        let mut a = jet();
+        let (mut t, mut narrowing, mut blind) = (0.0, 0.0, None);
+        while p.glocs == 0 && t < 60.0 {
+            ride(&mut p, &mut a, DT, |_| 1.0 + 8.0 * (t / 1.5_f64).min(1.0), false);
+            t += DT;
+            let v = p.vision();
+            if t < 10.0 {
+                assert!(v.tunnel < 0.01, "light loss after {t:.1} s");
+            }
+            if v.tunnel > 0.05 && v.black < 0.5 {
+                narrowing += DT;
+            }
+            if v.black > 0.99 && blind.is_none() {
+                blind = Some(t);
+            }
+        }
+        println!("9 G held: view closing for {narrowing:.1} s, black at {blind:?} s, G-LOC at {t:.1} s");
+        assert!(narrowing > 3.0, "the tunnel closed in {narrowing:.1} s");
+        assert!(t > 18.0 && t < 30.0, "G-LOC after {t:.1} s at 9 G");
     }
 
     #[test]
