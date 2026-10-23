@@ -247,7 +247,7 @@ impl Config {
     pub fn for_mission(kind: MissionKind) -> Config {
         let (outboard, inboard, fuel) = match kind {
             MissionKind::Gates => (None, None, 1.0),
-            MissionKind::Airfield => (None, None, 0.6),
+            MissionKind::Airfield => (None, None, 0.5),
             MissionKind::Dogfight => (Some(Store::Aim120), None, 1.0),
             MissionKind::Strike => (Some(Store::Mk82), Some(Store::Mk82), 1.0),
             MissionKind::Free => (Some(Store::Aim120), Some(Store::Mk82), 1.0),
@@ -294,7 +294,11 @@ impl Config {
     /// Changes the airframe, swapping each pylon's stores for what the new
     /// one carries in their place, of the same kind where that pylon has it.
     pub fn set_jet(&mut self, jet: Type) {
+        let min = self.fuel_is_min();
         self.jet = jet;
+        if min {
+            self.fuel = Config::fuel_choices(jet)[4];
+        }
         for inboard in [false, true] {
             let choices = pylon_choices(jet, inboard);
             let slot = if inboard { &mut self.inboard } else { &mut self.outboard };
@@ -325,8 +329,22 @@ impl Config {
         *slot = order[(i + 1) % order.len()];
     }
 
+    /// Fuel loads on offer, fractions of the internal fuel, from full down
+    /// to the jet's minimum (`Type::fuel_min`).
+    pub fn fuel_choices(jet: Type) -> [f64; 5] {
+        [1.0, 0.75, 0.5, 0.25, jet.fuel_min() / jet.fuel_max()]
+    }
+
+    /// Next fuel load down, back to full after the minimum.
     pub fn cycle_fuel(&mut self) {
-        self.fuel = if self.fuel >= 0.99 { 0.5 } else if self.fuel < 0.6 { 0.75 } else { 1.0 };
+        let choices = Config::fuel_choices(self.jet);
+        let i = choices.iter().position(|&f| (f - self.fuel).abs() < 0.005).unwrap_or(0);
+        self.fuel = choices[(i + 1) % choices.len()];
+    }
+
+    /// The fuel load is the minimum.
+    pub fn fuel_is_min(&self) -> bool {
+        (self.fuel - Config::fuel_choices(self.jet)[4]).abs() < 0.005
     }
 
     /// Gross weight (kg) and total drag coefficient of the stores.

@@ -133,6 +133,22 @@ impl Type {
             Type::Mig29 => 3630.0,
         }
     }
+    /// Full afterburner thrust at sea level, lbf: one F110-GE-129, two RD-33s.
+    pub fn max_thrust_lbf(self) -> f64 {
+        match self {
+            Type::F16 => 29000.0,
+            Type::Mig29 => 36600.0,
+        }
+    }
+    /// Least fuel a sortie can start with, kg: the F-16 Block 40+ minimum
+    /// fuel, 1,000 lb, and for the MiG-29 an estimate of the same reserve at
+    /// the RD-33 pair's higher idle flow (no published figure was found).
+    pub fn fuel_min(self) -> f64 {
+        match self {
+            Type::F16 => 1000.0 / 2.20462,
+            Type::Mig29 => 550.0,
+        }
+    }
     /// AoA where the limiter starts trading g for AoA, and the hard stop of
     /// the AoA protection, degrees: the F-16 caps near 25.5, the MiG-29 at
     /// the 25 degrees between its two manuals' figures.

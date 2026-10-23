@@ -264,7 +264,7 @@ struct App {
     pad_active: bool,
     /// Smoothed right-stick position driving the head or chase camera.
     pad_look: (f64, f64),
-    /// Zoom held on the right mouse button or toggled with R3, and the eased
+    /// Zoom held on the right mouse button or the right stick click, and the eased
     /// 0..1 amount that narrows the field of view.
     zoom_mouse: bool,
     zoom_pad: bool,
@@ -544,14 +544,12 @@ impl App {
         // Only the airfield sortie starts on the ground, gear down.
         self.gear_lever = a.on_ground;
         self.flaps_switch = false;
-        if self.kind != MissionKind::Gates {
-            a.fuel = a.kind.fuel_max() * self.config.fuel;
-        }
+        a.fuel = a.kind.fuel_max() * self.config.fuel;
         if !a.on_ground {
             combat::load(&mut a, &self.combat.loadout);
         } else {
             a.stores_mass = self.combat.loadout.mass();
-            a.mass = sim::spec::EMPTY_MASS + a.stores_mass + a.fuel;
+            a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
         }
         self.mission.start_throttle = a.throttle;
         self.aircraft = Some(a);
@@ -676,8 +674,8 @@ impl App {
         }
         match a {
             Action::Controls => self.toggle_controls(None),
-            // Combat sorties go through the loadout screen first.
-            Action::Start if self.state == State::Attract && !matches!(self.kind, MissionKind::Gates | MissionKind::Airfield) => {
+            // Every sortie goes through its setup screen first.
+            Action::Start if self.state == State::Attract => {
                 self.state = State::Loadout;
                 self.selected = 0;
             }
@@ -947,6 +945,8 @@ impl App {
             }
             v
         };
+        // Zoom lasts only while the right stick is held in.
+        self.zoom_pad = !menu && self.pad.held(RS);
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
         keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
@@ -962,9 +962,6 @@ impl App {
                 PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
                 PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
             };
-            if self.pad.pressed(RS) {
-                self.zoom_pad = !self.zoom_pad;
-            }
             for (button, b) in actions.iter().copied().chain(airbrake) {
                 if self.pad.pressed(button) {
                     self.bind_pressed(b);
@@ -1615,7 +1612,7 @@ impl EventHandler for App {
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
-                    State::Loadout => u.loadout_screen(self.kind, &self.config),
+                    State::Loadout => u.loadout_screen(self.kind, &self.config, self.settings.clock),
                     State::Paused => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));
                         u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted, obj.as_ref());
@@ -1766,6 +1763,12 @@ impl EventHandler for App {
             return;
         }
         let in_menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
+        // Space engages from the mission board and launches from the setup
+        // screen, whichever button is highlighted.
+        if key == KeyCode::Space && !repeat && !self.controls_open && matches!(self.state, State::Attract | State::Loadout) {
+            self.act(if self.state == State::Loadout { Action::Launch } else { Action::Start });
+            return;
+        }
         if in_menu && !self.buttons.is_empty() {
             match key {
                 KeyCode::Tab | KeyCode::Down | KeyCode::Right if !(self.controls_open && matches!(key, KeyCode::Right)) => {

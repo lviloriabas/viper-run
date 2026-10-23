@@ -26,3 +26,17 @@
 - [x] Hacer el modelo del MIG-29 seleccionable para el jugador, seleccionar quienes son los agressors
 - [x] Agregar estructuras en tierra para que no se vea tan vacío.
 - [x] El filtro de pixelado debe ser un poquito más sutil, solo para mejorar la visibilidad, pero no lo bajes tanto.
+- [x] En la pantalla de free flight permite cambiar de avión, mueve la configuración a las pantallas de configuración de cada misión.
+- [ ] Agregar un sistema de daños, que afecte el desempeño de la aeronave.
+- [x] Agregar minimun fuel setting.
+- [x] Agregar misiles radar al MIG-29.
+- [ ] Agregar IRST funcional al MIG-29.
+- [x] Mejorar el sistema de íconos de teclas o botones a presionar por opción, por ej a veces dice (A) para ciertas opciones, pero al presionar A cambia la opción seleccionada, haz que sea consistente e inspírate en otros juegos.
+- [x] El zoom es hold, no toggle.
+- [ ] Para los bandits camuflaje de aggressor si son F-16.
+- [ ] Los espejos del MIG-29 tienen que tener la forma de los reales, son más grandes y más redondeados, no tan planos.
+- [ ] Investiga que misiles se pueden lanzar sin lock y cuales no, cuales pueden lockear después, etc.
+- [ ] Agregar más tipos de misiles, como los AIM-9X, AIM-120D, R-77, R-73, etc. Otros tipos de lock como el sparrow, y siempre reales e implementar el análogo ruso para el MIG-29, ordena las armas en categorías claras en el código para que sea más fácil saber qué tipos de armas le faltan a cuales aviones.
+
+Más adelante
+- [ ] Tutoriales de controles, armas, vuelo, despegues y aterrizajes.

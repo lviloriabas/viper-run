@@ -46,7 +46,8 @@ at start-up in about half a second.
 | `R` | Restart from the pause menu or a result screen |
 | `M` | Audio on / off |
 | `F11` | Fullscreen |
-| `Enter`, `Tab`, arrows, mouse | Menu navigation; `Ctrl+Q` quits from a menu |
+| Right-click (held) | Zoom the view in to 40 % of its field of view, for as long as it is held |
+| `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; `Space` engages from the mission board and launches from the setup screen; `Ctrl+Q` quits from a menu |
 
 Every flight key above, from the stick to the MFD pages, can be rebound: the
 K drawer opens a KEY BINDINGS panel with a primary and an alternate key per
@@ -81,7 +82,14 @@ fire with `RT`.
 | `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
 | `B` while frozen | Open the pause menu |
 | `Back` / `View` | Open / close the controls drawer |
-| D-pad or left stick, `A`, `B` | Menu navigation, select, back |
+| Right-stick click (held) | Zoom, for as long as it is held |
+| D-pad or left stick, `A`, `B` | Menu navigation: `A` acts on the highlighted button, `B` goes back; `Start` engages and launches |
+
+Menus show their prompts the same way everywhere: a button carries a key or
+pad button only when that one works from anywhere on the screen (`Start` or
+`Space` to launch, `B` or `Esc` back, `Back` or `K` for the controls), and the
+legend along the foot of the screen names the rest: move, select (`A` or
+`Enter`, always on the highlighted button) and the screen's shortcuts.
 
 CLASSIC is the earlier layout: `RT` / `LT` throttle (`RT` to the stop for
 afterburner), `LB` / `RB` rudder, `A` fire, d-pad up / down cycle weapon and
@@ -122,11 +130,16 @@ energy and alpha. Roll into the turn first, then pull through the valley.
 
 ## Missions
 
-Pick the mission on the start screen. DOGFIGHT, STRIKE and FREE FLIGHT then open a loadout
-screen: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
+Pick the mission on the start screen; ENGAGE then opens its setup screen.
+Every mission sets the airframe (AIRFRAME: F-16C or MiG-29), the internal
+fuel and, except free flight, the mission clock there. DOGFIGHT, STRIKE and
+FREE FLIGHT add the loadout and the opposition: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
 pylon pairs, the internal fuel, and the gross weight, stores drag and
 thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
-30 chaff and 30 flares always come along.
+30 chaff and 30 flares always come along. The fuel steps down from full
+through 75, 50 and 25 % to the minimum a jet may start with: 1,000 lb in
+the F-16C, the Block 40+ minimum fuel, and an estimated 550 kg in the MiG,
+whose setup reads in kilograms like its gauges.
 
 The MiG-29A 9.12 carries its own stores on its six underwing pylons: R-73s
 (AA-11 Archer, infrared, Fox 2) always on the outer pair; R-73s or
@@ -142,10 +155,10 @@ jets swaps each pylon's stores for the other airframe's equivalent.
 | GATE RUN | The 10-gate time trial below, unchanged | 2 AIM-9M (unused) | 02:30 |
 | DOGFIGHT | Shoot down three aggressors (MiG-29s, or F-16s); two come head-on from 20 km, spread 3 km apart, a third joins after the first kill | 2 AIM-9M, 2 AIM-120C | 06:00 |
 | STRIKE | Destroy the Cold River bridge and the SA-6 launcher and radar | 2 AIM-9M, 4 Mk-82 | 07:00 |
-| AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 60 % fuel | 10:00 |
+| AIRFIELD | Take off from runway A of the valley airbase, fly out to a steerpoint 9 km past the far end, come back and land to a full stop on the runway | 2 AIM-9M, 50 % fuel | 10:00 |
 | FREE FLIGHT | Practice with no end: the gate rings on a loop, the strike targets and a pair of bandits flying circuits round the gorge (the lead clockwise 14 km out, the wing the other way 9 km out), none of which chase or shoot at you; a new pair comes 30 s after the last one falls, the targets are rebuilt 30 s after the last one burns, and stopping on the ground rearms, refuels and repairs the jet. Only a crash ends it | 2 AIM-9M, 2 AIM-120C, 2 Mk-82 | none |
 
-`CLOCK: ON / OFF` on the start screen (saved with the settings) switches the
+MISSION CLOCK on the setup screen (saved with the settings) switches the
 clock off for every mission: nothing times out, the HUD counts the time flown
 instead, no seconds-left bonus is scored, and a gate run without a clock does
 not set a best score.
@@ -200,8 +213,8 @@ ground. The result screen shows the kills or targets, the time and a rating.
 ### Bandits and ground targets
 
 Bandits fly the same six-degree-of-freedom model and FLCS as the player:
-MiG-29A Fulcrums by default, or F-16s in desert splinter paint (BANDITS on
-the start screen while DOGFIGHT is picked); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
+MiG-29A Fulcrums by default, or F-16s in desert splinter paint (TYPE in the
+threat setup); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
 pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
 overshoot, a max-g break when the player is at its six, beaming and then
 breaking into missiles, unloading to regain speed, extending past 2 km
@@ -235,8 +248,8 @@ drawn within 14 km.
 
 ### MiG-29
 
-JET on the start screen swaps the player's F-16C for a MiG-29A (9.12), and
-BANDITS picks the aggressors. The Fulcrum is a low-poly model after the
+AIRFRAME on the setup screen swaps the player's F-16C for a MiG-29A (9.12),
+and TYPE in the threat setup picks the aggressors. The Fulcrum is a low-poly model after the
 published three-view (17.3 m long, 11.4 m span, 4.7 m tall): radome and
 bubble canopy, leading-edge root extensions, the flat centre body between
 two widely spaced nacelles with wedge intakes, 42 degree wings, twin fins

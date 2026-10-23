@@ -135,18 +135,39 @@ pub fn ui_scale(w: f32, h: f32) -> f32 {
 }
 
 impl<'a> Ui<'a> {
-    /// A key hint as the active input shows it: the keyboard key, or the
-    /// controller button that does the same in menus (none if there is none).
+    /// A shortcut as the active input shows it: the keyboard key, or the
+    /// controller button that does the same from anywhere on the screen
+    /// (none if there is none). Enter and {A} only ever act on the
+    /// highlighted button, so they are never a button's shortcut: the
+    /// legend at the foot of the screen names them once.
     fn hint<'b>(&self, key: &'b str) -> &'b str {
         if !self.pad {
             return key;
         }
         match key {
-            "ENTER" => "{A}",
+            "SPACE" | "P" | "R" => "{START}",
             "ESC" => "{B}",
             "K" => "{BACK}",
-            "P" | "R" => "{START}",
             _ => "",
+        }
+    }
+
+    /// The prompt legend along the foot of a menu: move and select, which
+    /// act on the highlighted button, then the screen's own shortcuts.
+    fn legend(&mut self, shortcuts: &[(&str, &str)]) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let mut items: Vec<(&str, &str)> = if self.pad { vec![("{DPAD}", "MOVE"), ("{A}", "SELECT")] } else { vec![("ARROWS", "MOVE"), ("ENTER", "SELECT")] };
+        items.extend(shortcuts.iter().map(|&(k, v)| (self.hint(k), v)).filter(|(k, _)| !k.is_empty()));
+        let gap = 10.0 * s;
+        let widths: Vec<f32> = items.iter().map(|(k, v)| Canvas::text_width(k, sm) + 4.0 * sm + Canvas::text_width(v, sm)).collect();
+        let total = widths.iter().sum::<f32>() + gap * (items.len() as f32 - 1.0);
+        let (mut x, y) = ((self.w - total) / 2.0, self.h - 6.0 * s);
+        self.cv.rect(x - 6.0 * s, y - 6.0 * s, total + 12.0 * s, 12.0 * s, rgba(0x05, 0x08, 0x07, 0.7));
+        for ((k, v), w) in items.iter().zip(widths) {
+            self.cv.text(k, x, y, sm, ACID, Align::Left);
+            self.cv.text(v, x + Canvas::text_width(k, sm) + 4.0 * sm, y, sm, with_alpha(CREAM, 0.75), Align::Left);
+            x += w + gap;
         }
     }
 
@@ -240,14 +261,12 @@ impl<'a> Ui<'a> {
         yy += 8.0 * s;
         let bx = x + m;
         // The mission row sits above ENGAGE but comes after it in the
-        // keyboard order, so Enter still starts the flight.
+        // keyboard order, so ENGAGE is highlighted first. The jet, the
+        // bandits and the clock are set on each mission's setup screen.
         let picks_y = yy;
         yy += 19.0 * s;
-        let jets_y = yy;
-        yy += 19.0 * s;
-        let w1 = self.button("ENGAGE", "ENTER", bx, yy, true, Action::Start);
-        let w2 = self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
-        let _ = w2;
+        let w1 = self.button("ENGAGE", "SPACE", bx, yy, true, Action::Start);
+        self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
         yy += 19.0 * s;
         let w3 = self.button("CONTROLS / CONFIG", "K", bx, yy, false, Action::Controls);
         self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
@@ -258,15 +277,7 @@ impl<'a> Ui<'a> {
             let label = if k == MissionKind::Free { "FREE FLT" } else { k.name() };
             mx += self.button(label, "", mx, picks_y, k == mission, Action::Pick(k)) + 4.0 * s;
         }
-        let mut jx = bx;
-        jx += self.button(&format!("JET: {}", cfg.jet.name()), "", jx, jets_y, false, Action::Jet) + 4.0 * s;
-        if matches!(mission, MissionKind::Dogfight | MissionKind::Free) {
-            jx += self.button(&format!("BANDITS: {}", cfg.aggressor.name()), "", jx, jets_y, false, Action::Aggressor) + 4.0 * s;
-        }
-        // Free flight never has a clock.
-        if mission != MissionKind::Free {
-            self.button(if clock { "CLOCK: ON" } else { "CLOCK: OFF" }, "", jx, jets_y, false, Action::Clock);
-        }
+        self.legend(&[("SPACE", "ENGAGE"), ("K", "CONTROLS")]);
 
         // Briefing card.
         let (bxx, byy, bw) = (x + left_w + 6.0 * s, y + 30.0 * s, pw - left_w - m - 6.0 * s);
@@ -317,7 +328,7 @@ impl<'a> Ui<'a> {
             (true, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "FIRE"), ("{RB}", "LOCK TARGET"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{A}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (true, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{A}", "FIRE"), ("{DD}", "LOCK TARGET"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{DU}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (false, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{DD}", "LANDING GEAR"), ("{DU}", "FLAPS"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
-            (false, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{X}", "LANDING GEAR"), ("{R3}", "ZOOM"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
+            (false, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{X}", "LANDING GEAR"), ("{R3} HOLD", "ZOOM"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
             (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE, MENU")],
             (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE, MENU")],
         };
@@ -375,9 +386,9 @@ impl<'a> Ui<'a> {
             let used = self.button(label, hint, bx, yy, i == 0, *act);
             bx += used + 6.0 * s;
         }
-        let small = if self.pad { small.replace("ESC RESUME, R RESTART", "{B} RESUME, {A} SELECT").replace("R RESTART", "{START} RESTART").replace("ESC MENU", "{B} MENU") } else { small.to_string() };
-        let small = if self.pad { small.split(", M AUDIO").next().unwrap_or("").to_string() } else { small };
-        self.cv.text(&small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        let keys: Vec<(&str, &str)> = actions.iter().map(|&(label, hint, _)| (hint, label)).collect();
+        self.legend(&keys);
     }
 
     pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool, obj: Option<&Objective>) {
@@ -398,7 +409,7 @@ impl<'a> Ui<'a> {
                 ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
             ],
             &[("RESUME", "P", Action::Resume), ("RESTART", if self.pad { "" } else { "R" }, Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
-            &format!("ESC RESUME, R RESTART, M AUDIO {}", if muted { "OFF" } else { "ON" }),
+            if self.pad { "" } else if muted { "ESC RESUME, M AUDIO OFF" } else { "ESC RESUME, M AUDIO ON" },
         );
     }
 
@@ -418,8 +429,8 @@ impl<'a> Ui<'a> {
                     ACID,
                     &format!("All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as {rank}."),
                     [("RUN TIME", format_time(r.time), GREEN), ("GATES", format!("{} / 10", r.gates), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)],
-                    &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
-                    &format!("{}, R RESTART, ESC MENU", best_line(best)),
+                    &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                    &best_line(best),
                 );
             }
             Outcome::Crash | Outcome::ShotDown => self.status_panel(
@@ -429,7 +440,7 @@ impl<'a> Ui<'a> {
                 RED,
                 &format!("The gorge is unforgiving. The flight recorder shows {} gates cleared before impact.", pad(r.gates as f64, 2)),
                 [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), RED), ("ELAPSED", format_time(r.time), CREAM), ("IMPACT", format!("{} KT", pad(r.impact * 1.94384, 3)), RED), ("BEST", best_str, CREAM)],
-                &[("REARM & RETRY", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
+                &[("REARM & RETRY", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
                 "TIP: EASE OFF THE PULL AT HIGH SPEED. LET THE GORGE OPEN BEFORE YOU ROLL IN.",
             ),
             Outcome::Timeout => self.status_panel(
@@ -439,46 +450,62 @@ impl<'a> Ui<'a> {
                 AMBER,
                 &format!("The coast is still out there. You cleared {} gates before the clock ran dry.", pad(r.gates as f64, 2)),
                 [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), AMBER), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("BEST", best_str, CREAM)],
-                &[("TRY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
+                &[("TRY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
                 "THE CLOCK IS A HARD CEILING. GATES ADD 8 SECONDS EACH.",
             ),
         }
     }
 
-    /// Loadout before a DOGFIGHT or STRIKE sortie: the pylon pairs, the fuel,
-    /// and what that does to the weight, drag and thrust-to-weight.
-    pub fn loadout_screen(&mut self, mission: MissionKind, cfg: &Config) {
+    /// Setup before every sortie: the airframe, the stores on the pylon
+    /// pairs (missions with something to shoot), the fuel and the clock, and
+    /// what that does to the weight, drag and thrust-to-weight.
+    pub fn loadout_screen(&mut self, mission: MissionKind, cfg: &Config, clock: bool) {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         // The fighting missions add the threat setup and its map on the right.
         let threats = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
-        let left = if threats { 240.0 * s } else { 420.0 * s };
-        let (pw, ph) = ((self.w - 24.0 * s).min(if threats { 800.0 * s } else { left }), (self.h - 20.0 * s).min(250.0 * s));
-        let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
+        let armed = threats;
+        let left = if threats { 240.0 * s } else { 300.0 * s };
+        // Without the stores and the threat map the panel fits its few rows.
+        let tall = if armed { 266.0 } else { 172.0 };
+        let (pw, ph) = ((self.w - 24.0 * s).min(if threats { 800.0 * s } else { left }), (self.h - 26.0 * s).min(tall * s));
+        let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0 - 4.0 * s);
         self.frame(x, y, pw, ph);
         let m = 14.0 * s;
         let mut yy = y + m;
         self.cv.text(&format!("// {}, {}", cfg.jet.full_name(), mission.name()), x + m, yy, sm, DIM, Align::Left);
         yy += 20.0 * s;
-        self.cv.text("LOADOUT", x + m, yy, s * 3.0, GREEN, Align::Left);
+        self.cv.text(if armed { "LOADOUT" } else { "SETUP" }, x + m, yy, s * 3.0, GREEN, Align::Left);
         yy += 18.0 * s;
         let name = |st: Option<Store>| st.map_or("EMPTY", |s| s.pair());
         let mig = cfg.jet == crate::sim::Type::Mig29;
         let gun = crate::weapons::gun_of(cfg.jet);
         let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7  OUTBOARD", "STA 4 / 6  INBOARD", "PGU-28") };
-        let rows: [(&str, String, Option<Action>); 6] = [
-            (tip, crate::combat::tip_store(cfg.jet).pair().to_string(), None),
-            (out, name(cfg.outboard).to_string(), Some(Action::Station(0))),
-            (inb, name(cfg.inboard).to_string(), Some(Action::Station(1))),
-            ("INTERNAL FUEL", format!("{} LB  {}%", (cfg.jet.fuel_max() * cfg.fuel * 2.20462).round() as i64, (cfg.fuel * 100.0).round() as i64), Some(Action::Fuel)),
-            (gun.name, format!("{} ROUNDS {ammo}", gun.rounds), None),
-            (crate::weapons::dispenser_of(cfg.jet), format!("{} CHAFF  {} FLARES", crate::weapons::CHAFF, crate::weapons::FLARES), None),
-        ];
-        // LAUNCH comes first in the keyboard order, so Enter takes off.
-        let launch_y = yy + 6.0 * 17.0 * s + 14.0 * s;
-        let w1 = self.button("LAUNCH", "ENTER", x + m, launch_y, true, Action::Launch);
+        // The MiG's gauges read kilograms, the F-16's pounds.
+        let (unit, per_kg) = if mig { ("KG", 1.0) } else { ("LB", 2.20462) };
+        let fuel_kg = cfg.jet.fuel_max() * cfg.fuel;
+        let fuel = if cfg.fuel_is_min() { format!("{} {unit}  MINIMUM", (fuel_kg * per_kg).round() as i64) } else { format!("{} {unit}  {}%", (fuel_kg * per_kg).round() as i64, (cfg.fuel * 100.0).round() as i64) };
+        let mut rows: Vec<(&str, String, Option<Action>)> = vec![("AIRFRAME", cfg.jet.name().to_string(), Some(Action::Jet))];
+        if armed {
+            rows.push((tip, crate::combat::tip_store(cfg.jet).pair().to_string(), None));
+            rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(0))));
+            rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(1))));
+        }
+        rows.push(("INTERNAL FUEL", fuel, Some(Action::Fuel)));
+        if armed {
+            rows.push((gun.name, format!("{} ROUNDS {ammo}", gun.rounds), None));
+            rows.push((crate::weapons::dispenser_of(cfg.jet), format!("{} CHAFF  {} FLARES", crate::weapons::CHAFF, crate::weapons::FLARES), None));
+        }
+        // Free flight never has a clock.
+        if mission != MissionKind::Free {
+            rows.push(("MISSION CLOCK", if clock { format!("ON, {}", format_time(mission.time())) } else { "OFF".to_string() }, Some(Action::Clock)));
+        }
+        // LAUNCH comes first in the keyboard order, so it is highlighted
+        // first and Enter takes off.
+        let launch_y = yy + rows.len() as f32 * 17.0 * s + 14.0 * s;
+        let w1 = self.button("LAUNCH", "SPACE", x + m, launch_y, true, Action::Launch);
         self.button("MISSION BOARD", "ESC", x + m + w1 + 6.0 * s, launch_y, false, Action::Menu);
-        let col2 = x + m + 112.0 * sm;
+        let col2 = x + m + 120.0 * sm;
         for (label, value, act) in rows {
             self.cv.text(label, x + m, yy + 7.0 * s, sm, DIM, Align::Left);
             match act {
@@ -490,16 +517,17 @@ impl<'a> Ui<'a> {
             yy += 17.0 * s;
         }
         let (mass, drag) = cfg.weight();
-        let lb = mass * 2.20462;
-        // Full afterburner, 29,000 lbf, against the take-off weight.
-        let tw = 29000.0 / lb;
-        let stats = format!("GROSS {} LB   DRAG +{} COUNTS   T/W {:.2}", (lb / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
+        // Full afterburner against the take-off weight.
+        let tw = cfg.jet.max_thrust_lbf() / (mass * 2.20462);
+        let stats = format!("GROSS {} {unit}   DRAG +{} COUNTS   T/W {:.2}", (mass * per_kg / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
         self.cv.text(&stats, x + m, yy + 4.0 * s, sm, AMBER, Align::Left);
-        self.cv.text(if self.pad { "{DPAD} TO A STORE, {A} TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." } else { "CLICK A STORE TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." }, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        let note = if armed { "HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." } else { "LESS FUEL IS LIGHTER AND QUICKER, AND SOONER EMPTY." };
+        self.cv.text(note, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
         // After LAUNCH and the stores in the keyboard order.
         if threats && pw > left + 200.0 * s {
             self.threat_setup(x + left, y + m, pw - left - m, ph - 2.0 * m, mission, cfg);
         }
+        self.legend(&[("SPACE", "LAUNCH"), ("ESC", "MISSION BOARD")]);
     }
 
     /// Threat setup beside the loadout: the prepared layout, the number and
@@ -640,7 +668,7 @@ impl<'a> Ui<'a> {
     /// Result of a DOGFIGHT or STRIKE sortie.
     fn combat_result(&mut self, r: &RunResult) {
         if r.mission == MissionKind::Airfield && r.kind == Outcome::Win {
-            let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)];
+            let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)];
             self.status_panel(
                 "// FULL STOP, RUNWAY A",
                 DIM,
@@ -649,7 +677,7 @@ impl<'a> Ui<'a> {
                 "Wheels up, out to the steerpoint and back down on the same runway. The tower has logged your landing.",
                 [("TIME", format_time(r.time), GREEN), ("LEGS", format!("{} / {}", r.done, r.total), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", if r.score > 4200.0 { "ACE" } else if r.score > 3500.0 { "VIPER" } else { "QUALIFIED" }.to_string(), CREAM)],
                 again,
-                "R RESTART, ESC MENU",
+                "",
             );
             return;
         }
@@ -662,15 +690,15 @@ impl<'a> Ui<'a> {
                 RED,
                 &format!("The gorge is unforgiving. You flew {} and took down {} bandits and {} ground targets.", format_time(r.time), r.done, r.total),
                 [("FLOWN", format_time(r.time), CREAM), ("KILLS", r.done.to_string(), GREEN), ("TARGETS", r.total.to_string(), GREEN), ("SCORE", pad(r.score, 5), AMBER)],
-                &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)],
-                "R RESTART, ESC MENU",
+                &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                "",
             );
             return;
         }
         let fight = r.mission == MissionKind::Dogfight;
         let (what, unit) = if fight { ("KILLS", "bandits") } else { ("TARGETS", "primary targets") };
         let tally = format!("{} / {}", r.done, r.total);
-        let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "", Action::Menu)];
+        let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)];
         match r.kind {
             Outcome::Win => {
                 let rank = match (fight, r.time) {
@@ -685,7 +713,7 @@ impl<'a> Ui<'a> {
                 } else {
                     ("// TARGETS DESTROYED, COLD RIVER", "STRIKE COMPLETE", format!("The bridge is in the river and the SA-6 battery is burning. The evaluator has logged the strike as {rank}."))
                 };
-                self.status_panel(kicker, DIM, title, ACID, &text, [("TIME", format_time(r.time), GREEN), (what, tally, CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)], again, "R RESTART, ESC MENU");
+                self.status_panel(kicker, DIM, title, ACID, &text, [("TIME", format_time(r.time), GREEN), (what, tally, CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)], again, "");
             }
             Outcome::ShotDown => self.status_panel(
                 "// AIRFRAME LOST, PILOT EJECTED",
@@ -753,7 +781,7 @@ impl<'a> Ui<'a> {
                 ("{RT}", "Fire, hold for gun"),
                 ("{RB}", "Lock target, again for next"),
                 ("{RB} HOLD", "Drop lock"),
-                ("{R3}", "Zoom on / off"),
+                ("{R3} HOLD", "Zoom"),
                 ("{LB}", "Throttle up, afterburner at the stop"),
                 ("{LT}", "Throttle down"),
                 ("{LT} GROUND", "Wheel brakes"),
@@ -781,7 +809,7 @@ impl<'a> Ui<'a> {
                 ("{DU}", "Next weapon"),
                 ("{B}", "Airbrake"),
                 ("{X}", "Landing gear"),
-                ("{R3}", "Zoom on / off"),
+                ("{R3} HOLD", "Zoom"),
                 ("{Y}", "Cockpit / chase camera"),
                 ("{DLR}", "Left / right MFD page"),
                 ("{START}", "Freeze flight"),
