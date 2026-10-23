@@ -11,7 +11,7 @@ use crate::math::*;
 use crate::mesh::{Mesh, Rgb};
 use crate::sim::{Aircraft, Type};
 use crate::targets::{self, Kind, KINDS};
-use crate::weapons::{Who, AIM120C, AIM9M, FAB250, FAB500, MK82, R27R, R73};
+use crate::weapons::{Spec, Who, AIM120C, AIM9M, MK82};
 use crate::world::{self, Camera, Part, Props, World};
 use miniquad::*;
 
@@ -99,19 +99,22 @@ fn stretch(mut model: M4, across: f32, along: f32) -> M4 {
     model
 }
 
+/// The shape a missile is drawn with and how it is stretched onto it: the
+/// Sidewinder's for the slim dogfight missiles, the AMRAAM's for the long
+/// medium-range ones, scaled to the real missile's size.
+fn missile_shape<'m>(m: &'m Models, spec: &Spec) -> (&'m Part, f32, f32) {
+    let base = if spec.length > 3.3 { &AIM120C } else { &AIM9M };
+    let part = if spec.length > 3.3 { &m.aim120 } else { &m.aim9 };
+    (part, (spec.diameter / base.diameter) as f32, (spec.length / base.length) as f32)
+}
+
 /// The shape a store is drawn with and how it is stretched onto it.
 fn store_shape<'m>(m: &'m Models, store: Store) -> (&'m Part, f32, f32) {
-    let k = |d: f64, d0: f64, l: f64, l0: f64| ((d / d0) as f32, (l / l0) as f32);
-    let (part, (across, along)) = match store {
-        Store::Aim9 => (&m.aim9, (1.0, 1.0)),
-        Store::Aim120 => (&m.aim120, (1.0, 1.0)),
-        Store::Mk82 => (&m.mk82, (1.0, 1.0)),
-        Store::R73 => (&m.aim9, k(R73.diameter, AIM9M.diameter, R73.length, AIM9M.length)),
-        Store::R27r => (&m.aim120, k(R27R.diameter, AIM120C.diameter, R27R.length, AIM120C.length)),
-        Store::Fab250 => (&m.mk82, k(FAB250.diameter, MK82.diameter, FAB250.length, MK82.length)),
-        Store::Fab500 => (&m.mk82, k(FAB500.diameter, MK82.diameter, FAB500.length, MK82.length)),
-    };
-    (part, across, along)
+    match (store.missile(), store.bomb()) {
+        (Some(spec), _) => missile_shape(m, spec),
+        (None, Some(b)) => (&m.mk82, (b.diameter / MK82.diameter) as f32, (b.length / MK82.length) as f32),
+        _ => (&m.mk82, 1.0, 1.0),
+    }
 }
 
 fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
@@ -153,16 +156,11 @@ impl Props for Scene<'_> {
         }
         for ms in &c.missiles {
             if (ms.pos - eye).len() < 9000.0 && ms.vel.len() > 1.0 {
-                // Radar missiles are drawn as the AMRAAM shape, heat seekers
-                // as the Sidewinder's; the SA-6 as the Sidewinder at twice the size.
+                // Each missile in its own size; the SA-6 as the AMRAAM shape
+                // scaled up evenly.
                 let model = along(ms.vel, ms.pos, eye);
-                let (part, base) = if ms.spec.name == AIM120C.name || ms.spec.name == R27R.name { (&m.aim120, &AIM120C) } else { (&m.aim9, &AIM9M) };
-                let model = if ms.spec.name == "3M9" {
-                    let s = (ms.spec.length / base.length) as f32;
-                    stretch(model, s, s)
-                } else {
-                    stretch(model, (ms.spec.diameter / base.diameter) as f32, (ms.spec.length / base.length) as f32)
-                };
+                let (part, across, length) = missile_shape(m, ms.spec);
+                let model = if ms.spec.name == "3M9" { stretch(model, length, length) } else { stretch(model, across, length) };
                 w.draw_prop(ctx, vp, part, model, NONE);
             }
         }

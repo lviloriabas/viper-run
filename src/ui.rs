@@ -45,8 +45,8 @@ pub enum Action {
     Reset,
     /// Choose the mission on the start screen.
     Pick(MissionKind),
-    /// Loadout screen: next store for a pylon pair (0 outboard, 1 inboard),
-    /// next fuel load, and take off.
+    /// Loadout screen: next store for a station pair (0 tips, 1 outboard,
+    /// 2 inboard), next fuel load, and take off.
     Station(u8),
     Fuel,
     Launch,
@@ -487,9 +487,9 @@ impl<'a> Ui<'a> {
         let fuel = if cfg.fuel_is_min() { format!("{} {unit}  MINIMUM", (fuel_kg * per_kg).round() as i64) } else { format!("{} {unit}  {}%", (fuel_kg * per_kg).round() as i64, (cfg.fuel * 100.0).round() as i64) };
         let mut rows: Vec<(&str, String, Option<Action>)> = vec![("AIRFRAME", cfg.jet.name().to_string(), Some(Action::Jet))];
         if armed {
-            rows.push((tip, crate::combat::tip_store(cfg.jet).pair().to_string(), None));
-            rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(0))));
-            rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(1))));
+            rows.push((tip, cfg.tip.pair().to_string(), Some(Action::Station(0))));
+            rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(1))));
+            rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(2))));
         }
         rows.push(("INTERNAL FUEL", fuel, Some(Action::Fuel)));
         if armed {

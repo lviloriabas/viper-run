@@ -1,11 +1,12 @@
-//! Stores of the F-16C Block 50 and the MiG-29A 9.12 and their physics,
+//! Stores of the F-16C Block 50 and the MiG-29S 9.13S and their physics,
 //! simplified but with the published figures: the M61A1 and GSh-30-1 guns and
-//! their rounds, AIM-9M, AIM-120C, R-73 and R-27R missiles flying proportional
-//! navigation within their seeker, motor, g and fuze limits, and the Mk-82,
-//! FAB-250M-62 and FAB-500M-62 low-drag bombs. The sights that aim them live here
-//! too: the EEGS-style funnel of rounds already in the air, the LCOS pipper on
-//! that stream, the CCIP impact prediction and the missile launch-zone
-//! fly-out. Everything integrates at the fixed 120 Hz step, in world metres.
+//! their rounds, the air-to-air missiles of both jets by family (infrared,
+//! semi-active and active radar) flying proportional navigation within
+//! their seeker, motor, g and fuze limits, and the Mk-82, FAB-250M-62 and
+//! FAB-500M-62 low-drag bombs. The sights that aim them live here too: the
+//! EEGS-style funnel of rounds already in the air, the LCOS pipper on that
+//! stream, the CCIP impact prediction and the missile launch-zone fly-out.
+//! Everything integrates at the fixed 120 Hz step, in world metres.
 use crate::math::*;
 use crate::sim::{atmosphere_at, Aircraft, Type, FIXED_DT, G0};
 use std::collections::VecDeque;
@@ -246,6 +247,29 @@ impl GunSight {
 }
 
 // ================================================================ missiles
+// The air-to-air missiles by what guides them, each family with the F-16's
+// and the MiG-29's:
+//
+//   infrared, short range (Fox 2)   AIM-9M, AIM-9X        R-60M, R-73
+//   infrared, medium range (Fox 2)  none                  R-27T
+//   semi-active radar (Fox 1)       AIM-7M                R-27R
+//   active radar (Fox 3)            AIM-120C, AIM-120D    R-77
+//
+// Which airframe carries what on which pylon is in combat.rs
+// (`pylon_choices`, `arsenal`); docs/WEAPONS.md has the launch rules.
+
+/// What a missile homes on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Seeker {
+    /// The target's heat; decoyed by flares.
+    Infrared,
+    /// The launcher's radar energy reflected off the target, so the launcher
+    /// has to keep the target locked to the end; decoyed by chaff.
+    SemiActive,
+    /// Its own radar, after midcourse on the launcher's data; decoyed by chaff.
+    Active,
+}
+
 /// Missile data. Masses, sizes, warheads and limits are the published
 /// figures; motor impulse and drag are fitted to the published speeds.
 #[derive(Debug)]
@@ -283,18 +307,21 @@ pub struct Spec {
     /// Minimum launch range, m, and the range the HUD and AI screen shots to.
     pub min_range: f64,
     pub max_range: f64,
-    /// Active radar seeker that searches by itself (AIM-120); otherwise it
-    /// needs a lock at launch (AIM-9).
-    pub active: bool,
-    /// Infrared seeker, decoyed by flares; otherwise radar, decoyed by chaff.
-    pub infrared: bool,
-    /// Semi-active radar homing: it guides only while the launcher's radar
-    /// keeps the target locked (R-27R, SA-6).
-    pub semi_active: bool,
+    pub seeker: Seeker,
+    /// Lock-on after launch: fired with no seeker lock it can still find
+    /// its target in flight (the AIM-9X Block II on the radar's cue, the
+    /// AIM-120 and R-77 with their own radar). Without it, lock-on before
+    /// launch only: no lock, no guidance.
+    pub loal: bool,
+    /// Midcourse updates from the launcher's lock over a datalink, so the
+    /// missile flies to where the target is, not where it was at launch,
+    /// until its seeker takes over.
+    pub datalink: bool,
     /// Brevity call on launch.
     pub call: &'static str,
 }
 
+// ------------------------------------------- infrared, short range (Fox 2)
 /// AIM-9M Sidewinder: 85.5 kg, 2.87 m, 127 mm; Mk 36 Mod 11 reduced-smoke motor
 /// (about 5 s), Mach 2.5; WDU-17/B 9.4 kg annular blast-fragmentation warhead
 /// on a DSU-15 active optical fuze; all-aspect seeker gimballed to 40 degrees.
@@ -320,48 +347,82 @@ pub const AIM9M: Spec = Spec {
     life: 40.0,
     min_range: 300.0,
     max_range: 14000.0,
-    active: false,
-    infrared: true,
-    semi_active: false,
+    seeker: Seeker::Infrared,
+    loal: false,
+    datalink: false,
     call: "FOX 2",
 };
 
-/// AIM-120C AMRAAM: 161.5 kg, 3.66 m, 178 mm; boost-sustain motor to Mach 4;
-/// WDU-41/B 18 kg blast-fragmentation warhead; inertial midcourse on the jet's
-/// track, then its own active radar seeker.
-pub const AIM120C: Spec = Spec {
-    name: "AIM-120C",
-    mass: 161.5,
-    length: 3.66,
-    diameter: 0.178,
-    propellant: 52.0,
-    motor: [(24000.0, 2.6), (9800.0, 6.0)],
-    drop: 0.35,
-    cd0: 0.5,
+/// AIM-9X Block II Sidewinder: 85.3 kg, 3.02 m, 127 mm; the AIM-9M's motor
+/// and WDU-17/B warhead in a low-drag airframe with small fins and jet-vane
+/// thrust vectoring; a staring imaging-infrared seeker that looks 90 degrees
+/// off the nose, cued by the JHMCS. Block II adds a datalink and lock-on
+/// after launch: fired on the radar's cue with no tone, it acquires in flight.
+pub const AIM9X: Spec = Spec {
+    name: "AIM-9X",
+    mass: 85.3,
+    length: 3.02,
+    diameter: 0.127,
+    propellant: 25.0,
+    motor: [(10100.0, 5.0), (0.0, 0.0)],
+    drop: 0.0,
+    cd0: 0.80,
     cna: 30.0,
-    alpha_max: 20.0 * DEG,
-    g_limit: 40.0,
+    alpha_max: 35.0 * DEG,
+    g_limit: 50.0,
     nav: 4.0,
-    gimbal: 60.0 * DEG,
-    acquire: 20.0 * DEG,
-    fuze: 12.0,
-    lethal: 6.0,
-    outer: 20.0,
-    arm: 1.0,
-    life: 90.0,
-    min_range: 1000.0,
-    max_range: 35000.0,
-    active: true,
-    infrared: false,
-    semi_active: false,
-    call: "FOX 3",
+    gimbal: 90.0 * DEG,
+    acquire: 2.5 * DEG,
+    fuze: 9.0,
+    lethal: 4.0,
+    outer: 14.0,
+    arm: 0.5,
+    life: 40.0,
+    min_range: 250.0,
+    max_range: 16000.0,
+    seeker: Seeker::Infrared,
+    loal: true,
+    datalink: true,
+    call: "FOX 2",
+};
+
+/// R-60M (izdeliye 62M, AA-8 Aphid): 44 kg, 2.09 m, 120 mm; a small single-
+/// stage motor to Mach 2.7; 3.5 kg expanding-rod warhead on an optical fuze;
+/// a cooled infrared seeker that looks 20 degrees off the nose. A dogfight
+/// missile for close in, lock-on before launch only.
+pub const R60M: Spec = Spec {
+    name: "R-60M",
+    mass: 44.0,
+    length: 2.09,
+    diameter: 0.120,
+    propellant: 10.0,
+    motor: [(7500.0, 3.0), (0.0, 0.0)],
+    drop: 0.0,
+    cd0: 0.80,
+    cna: 28.0,
+    alpha_max: 25.0 * DEG,
+    g_limit: 42.0,
+    nav: 4.0,
+    gimbal: 20.0 * DEG,
+    acquire: 2.0 * DEG,
+    fuze: 5.0,
+    lethal: 2.5,
+    outer: 8.0,
+    arm: 0.4,
+    life: 25.0,
+    min_range: 200.0,
+    max_range: 8000.0,
+    seeker: Seeker::Infrared,
+    loal: false,
+    datalink: false,
+    call: "FOX 2",
 };
 
 /// R-73 (izdeliye 72, AA-11 Archer): 105 kg, 2.90 m, 170 mm; single-stage
 /// motor to Mach 2.5; 7.4 kg expanding-rod warhead on an active radio fuze;
 /// the cooled Mayak all-aspect infrared seeker looks 45 degrees off the nose
 /// and is cued by the helmet sight, and the gas vanes in the exhaust let it
-/// pull hard off the rail.
+/// pull hard off the rail. Lock-on before launch only.
 pub const R73: Spec = Spec {
     name: "R-73",
     mass: 105.0,
@@ -384,15 +445,84 @@ pub const R73: Spec = Spec {
     life: 40.0,
     min_range: 300.0,
     max_range: 20000.0,
-    active: false,
-    infrared: true,
-    semi_active: false,
+    seeker: Seeker::Infrared,
+    loal: false,
+    datalink: false,
     call: "FOX 2",
+};
+
+// ------------------------------------------ infrared, medium range (Fox 2)
+/// R-27T (izdeliye 470T, AA-10 Alamo-B): the R-27R's 254 kg, 4.08 m, 230 mm
+/// airframe, dual-thrust motor and 39 kg rod warhead with the passive
+/// infrared seeker of the R-73's generation. It has to see the target
+/// before it leaves the rail, cued by the radar or the IRST; the jet need
+/// not keep a lock afterwards, and it gives no radar warning.
+pub const R27T: Spec = Spec {
+    name: "R-27T",
+    mass: 254.0,
+    length: 4.08,
+    diameter: 0.230,
+    propellant: 80.0,
+    motor: [(42000.0, 2.5), (12500.0, 6.5)],
+    drop: 0.0,
+    cd0: 0.48,
+    cna: 30.0,
+    alpha_max: 20.0 * DEG,
+    g_limit: 30.0,
+    nav: 3.5,
+    gimbal: 50.0 * DEG,
+    acquire: 3.0 * DEG,
+    fuze: 13.0,
+    lethal: 7.0,
+    outer: 24.0,
+    arm: 1.0,
+    life: 80.0,
+    min_range: 800.0,
+    max_range: 25000.0,
+    seeker: Seeker::Infrared,
+    loal: false,
+    datalink: false,
+    call: "FOX 2",
+};
+
+// ----------------------------------------------- semi-active radar (Fox 1)
+/// AIM-7M Sparrow: 231 kg, 3.66 m, 203 mm; Mk 58 boost-sustain motor to
+/// Mach 4; 40 kg WAU-17/B annular blast-fragmentation warhead; inertial
+/// midcourse, then semi-active homing on the jet's radar, which has to keep
+/// the target locked to the end. Ejected from its pylon. The USAF's
+/// F-16Cs never adopted it; Sparrow trials on the Block 30 and the export
+/// jets that carry it put it on the same stations.
+pub const AIM7M: Spec = Spec {
+    name: "AIM-7M",
+    mass: 231.0,
+    length: 3.66,
+    diameter: 0.203,
+    propellant: 55.0,
+    motor: [(30000.0, 2.8), (6000.0, 5.0)],
+    drop: 0.3,
+    cd0: 0.55,
+    cna: 30.0,
+    alpha_max: 20.0 * DEG,
+    g_limit: 25.0,
+    nav: 3.5,
+    gimbal: 50.0 * DEG,
+    acquire: 5.0 * DEG,
+    fuze: 12.0,
+    lethal: 7.0,
+    outer: 22.0,
+    arm: 1.0,
+    life: 75.0,
+    min_range: 1000.0,
+    max_range: 30000.0,
+    seeker: Seeker::SemiActive,
+    loal: false,
+    datalink: false,
+    call: "FOX 1",
 };
 
 /// R-27R (izdeliye 470R, AA-10 Alamo-A): 253 kg, 4.08 m, 230 mm; dual-thrust
 /// motor; 39 kg expanding-rod warhead on an active radar fuze; inertial
-/// midcourse, then semi-active radar homing on the jet's N019 radar, which
+/// midcourse, then semi-active radar homing on the jet's radar, which
 /// has to keep the target locked to the end. Up to 73 km head on at height,
 /// much less low down.
 pub const R27R: Spec = Spec {
@@ -417,13 +547,120 @@ pub const R27R: Spec = Spec {
     life: 80.0,
     min_range: 800.0,
     max_range: 32000.0,
-    active: false,
-    infrared: false,
-    semi_active: true,
+    seeker: Seeker::SemiActive,
+    loal: false,
+    datalink: false,
     call: "FOX 1",
 };
 
+// ---------------------------------------------------- active radar (Fox 3)
+/// AIM-120C AMRAAM: 161.5 kg, 3.66 m, 178 mm; boost-sustain motor to Mach 4;
+/// WDU-41/B 18 kg blast-fragmentation warhead; inertial midcourse on the jet's
+/// datalink, then its own active radar seeker. Fired without a lock it goes
+/// active off the rail and takes the first target its radar finds.
+pub const AIM120C: Spec = Spec {
+    name: "AIM-120C",
+    mass: 161.5,
+    length: 3.66,
+    diameter: 0.178,
+    propellant: 52.0,
+    motor: [(24000.0, 2.6), (9800.0, 6.0)],
+    drop: 0.35,
+    cd0: 0.5,
+    cna: 30.0,
+    alpha_max: 20.0 * DEG,
+    g_limit: 40.0,
+    nav: 4.0,
+    gimbal: 60.0 * DEG,
+    acquire: 20.0 * DEG,
+    fuze: 12.0,
+    lethal: 6.0,
+    outer: 20.0,
+    arm: 1.0,
+    life: 90.0,
+    min_range: 1000.0,
+    max_range: 35000.0,
+    seeker: Seeker::Active,
+    loal: true,
+    datalink: true,
+    call: "FOX 3",
+};
+
+/// AIM-120D AMRAAM: the AIM-120C's airframe and warhead with a longer-
+/// burning motor, GPS-aided inertial navigation and a two-way datalink,
+/// for about half as much range again.
+pub const AIM120D: Spec = Spec {
+    name: "AIM-120D",
+    mass: 161.5,
+    length: 3.66,
+    diameter: 0.178,
+    propellant: 70.0,
+    motor: [(24000.0, 2.6), (9800.0, 13.0)],
+    drop: 0.35,
+    cd0: 0.5,
+    cna: 30.0,
+    alpha_max: 20.0 * DEG,
+    g_limit: 40.0,
+    nav: 4.0,
+    gimbal: 60.0 * DEG,
+    acquire: 20.0 * DEG,
+    fuze: 12.0,
+    lethal: 6.0,
+    outer: 20.0,
+    arm: 1.0,
+    life: 120.0,
+    min_range: 1000.0,
+    max_range: 48000.0,
+    seeker: Seeker::Active,
+    loal: true,
+    datalink: true,
+    call: "FOX 3",
+};
+
+/// R-77 (RVV-AE, izdeliye 170, AA-12 Adder): 175 kg, 3.60 m, 200 mm; a
+/// single-stage motor; 22.5 kg rod warhead on a laser fuze; the lattice
+/// tail fins hold it at high angles of attack. Inertial midcourse with
+/// datalink corrections from the N019M radar, then its own active seeker;
+/// close in it is fired active off the rail.
+pub const R77: Spec = Spec {
+    name: "R-77",
+    mass: 175.0,
+    length: 3.60,
+    diameter: 0.200,
+    propellant: 55.0,
+    motor: [(26000.0, 3.0), (8000.0, 6.0)],
+    drop: 0.3,
+    cd0: 0.60,
+    cna: 34.0,
+    alpha_max: 30.0 * DEG,
+    g_limit: 40.0,
+    nav: 4.0,
+    gimbal: 60.0 * DEG,
+    acquire: 20.0 * DEG,
+    fuze: 12.0,
+    lethal: 6.0,
+    outer: 21.0,
+    arm: 1.0,
+    life: 90.0,
+    min_range: 600.0,
+    max_range: 33000.0,
+    seeker: Seeker::Active,
+    loal: true,
+    datalink: true,
+    call: "FOX 3",
+};
+
 impl Spec {
+    pub fn infrared(&self) -> bool {
+        self.seeker == Seeker::Infrared
+    }
+    pub fn semi_active(&self) -> bool {
+        self.seeker == Seeker::SemiActive
+    }
+    pub fn active(&self) -> bool {
+        self.seeker == Seeker::Active
+    }
+
     fn area(&self) -> f64 {
         PI * 0.25 * self.diameter * self.diameter
     }
@@ -516,7 +753,11 @@ impl Missile {
         if let (Some((tp, tv)), true) = (seen, guided) {
             let r = tp - self.pos;
             let range = r.len().max(1.0);
-            if r.dot(dir) / range < s.gimbal.cos() {
+            // Past the seeker's look limit a missile loses its target, unless
+            // a datalink still steers it there early in its flight (a shot
+            // over the shoulder, or at a target off the nose).
+            let midcourse = s.datalink && self.age < 8.0;
+            if r.dot(dir) / range < s.gimbal.cos() && !midcourse {
                 self.tracking = false;
             } else {
                 let vr = tv - self.vel;
@@ -596,7 +837,7 @@ pub fn decoy_chance(spec: &Spec, missile: V3, target: V3, target_vel: V3) -> f64
         return 0.0;
     }
     let near = 1.0 - smoothstep(2500.0, 6000.0, range);
-    if spec.infrared {
+    if spec.infrared() {
         0.35 * near
     } else {
         let speed = target_vel.len().max(1.0);
@@ -816,8 +1057,12 @@ mod tests {
     /// and across, and the motor and drag give the published speeds.
     #[test]
     fn guidance_hits_a_non_manoeuvring_target() {
-        for spec in [&AIM9M, &AIM120C, &R73, &R27R] {
+        for spec in [&AIM9M, &AIM9X, &R60M, &R73, &R27T, &AIM7M, &R27R, &AIM120C, &AIM120D, &R77] {
             for (offset, tv, range) in [(v3(0.0, 0.0, -1.0), v3(0.0, 0.0, -230.0), 2500.0), (v3(0.6, 0.0, -0.8), v3(-240.0, 0.0, 0.0), 4000.0), (v3(-0.3, 0.1, -1.0), v3(150.0, 0.0, 180.0), 6000.0)] {
+                // The R-60M's seeker looks only 20 degrees off the nose.
+                if (-offset.norm().z).acos() > spec.gimbal {
+                    continue;
+                }
                 let tp0 = v3(0.0, 5000.0, 0.0) + offset.norm() * range;
                 let mut m = Missile::launch(spec, v3(0.0, 5000.0, 0.0), v3(0.0, 0.0, -250.0), Who::Player, Some(Who::Bandit(0)));
                 let mut t = 0.0;
@@ -869,6 +1114,24 @@ mod tests {
         assert!(fly_out(&R27R, pos, vel, pos + v3(0.0, 0.0, -34000.0), toward, &flat).is_none());
         // Inside minimum range there is no shot.
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -150.0), away, &flat).is_none());
+    }
+
+    /// Head on and low down, each missile reaches about as far against its
+    /// rivals as the published ranges say: the AIM-9X past the AIM-9M, the
+    /// R-60M short of both, the AIM-120D half again as far as the C, the
+    /// R-77 and the Sparrow short of the AMRAAM.
+    #[test]
+    fn ranges_rank_as_published() {
+        let pos = v3(0.0, 1000.0, 0.0);
+        let vel = v3(0.0, 0.0, -230.0);
+        let reach = |spec: &'static Spec| {
+            (1..120).map(|k| k as f64 * 500.0).filter(|&r| fly_out(spec, pos, vel, pos + v3(0.0, 0.0, -r), v3(0.0, 0.0, 260.0), &flat).is_some()).fold(0.0, f64::max)
+        };
+        let (m9, x9, r60) = (reach(&AIM9M), reach(&AIM9X), reach(&R60M));
+        assert!(x9 > m9 && r60 < m9, "AIM-9X {x9}, AIM-9M {m9}, R-60M {r60}");
+        let (c, d, r77, sparrow) = (reach(&AIM120C), reach(&AIM120D), reach(&R77), reach(&AIM7M));
+        assert!(d > c * 1.25 && r77 < c && sparrow < c, "AIM-120C {c}, D {d}, R-77 {r77}, AIM-7M {sparrow}");
+        assert!((reach(&R27T) - reach(&R27R)).abs() <= 500.0, "the R-27s share a motor");
     }
 
     /// Flares only fool heat seekers and chaff only radar ones; chaff works

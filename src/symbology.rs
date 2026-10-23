@@ -141,7 +141,30 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
                 }
             }
         }
-        Mode::Srm => {
+        // A radar missile: the steering circle; a heat seeker shows its
+        // seeker circle below, the R-27T in MRM too.
+        Mode::Mrm if c.heater().is_none() => {
+            // Allowable steering error circle with the steering dot on the target.
+            if let Some(cen) = (pen.at)(0.0, 0.0) {
+                let edge = (pen.at)(0.0, 30.0).map(|e| e[1] - cen[1]).unwrap_or(40.0);
+                cv.circle(cen[0], cen[1], edge, lw, HUD);
+                if let Some((tp, _)) = lock {
+                    let d = a.q.conj().rotate((tp - a.pos).norm());
+                    let (x, y) = (d.x.atan2(-d.z) * 650.0, -d.y.atan2(-d.z) * 650.0);
+                    let k = (30.0 / (x * x + y * y).sqrt().max(1e-6)).min(1.0);
+                    if let Some(p) = (pen.at)(x * k, y * k) {
+                        cv.disc(p[0], p[1], 2.2 * big, HUD);
+                    }
+                }
+            }
+            if c.shoot {
+                pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
+                if flash {
+                    pen.text(cv, "SHOOT", 0.0, -36.0, big, Align::Center);
+                }
+            }
+        }
+        Mode::Srm | Mode::Mrm => {
             // Seeker circle: on its target when tracking (solid), on the
             // boresight while searching (dashed).
             let look = c.seeker.and_then(|w| c.track(w, a)).map(|(p, _)| (p - pen.eye).norm()).unwrap_or(ax.forward);
@@ -153,27 +176,6 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
                     for k in 0..8 {
                         let a0 = k as f32 * std::f32::consts::TAU / 8.0;
                         cv.arc(p[0], p[1], r, a0, a0 + 0.45, lw, HUD);
-                    }
-                }
-            }
-            if c.shoot {
-                pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
-                if flash {
-                    pen.text(cv, "SHOOT", 0.0, -36.0, big, Align::Center);
-                }
-            }
-        }
-        Mode::Mrm => {
-            // Allowable steering error circle with the steering dot on the target.
-            if let Some(cen) = (pen.at)(0.0, 0.0) {
-                let edge = (pen.at)(0.0, 30.0).map(|e| e[1] - cen[1]).unwrap_or(40.0);
-                cv.circle(cen[0], cen[1], edge, lw, HUD);
-                if let Some((tp, _)) = lock {
-                    let d = a.q.conj().rotate((tp - a.pos).norm());
-                    let (x, y) = (d.x.atan2(-d.z) * 650.0, -d.y.atan2(-d.z) * 650.0);
-                    let k = (30.0 / (x * x + y * y).sqrt().max(1e-6)).min(1.0);
-                    if let Some(p) = (pen.at)(x * k, y * k) {
-                        cv.disc(p[0], p[1], 2.2 * big, HUD);
                     }
                 }
             }

@@ -93,16 +93,43 @@ impl Mode {
 /// The F-16's stores and the MiG-29's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Store {
+    /// AIM-9M.
     Aim9,
+    Aim9x,
+    Aim7,
+    /// AIM-120C.
     Aim120,
+    Aim120d,
     Mk82,
+    R60m,
     R73,
     R27r,
+    R27t,
+    R77,
     Fab250,
     Fab500,
 }
 
+/// Weapon families, by what guides them. `arsenal` lists what each jet
+/// carries in each, so a missing type shows as an empty family.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Family {
+    /// Infrared dogfight missiles (Fox 2).
+    ShortIr,
+    /// Infrared missiles with medium-range motors (Fox 2).
+    MediumIr,
+    /// Semi-active radar missiles (Fox 1).
+    SemiActive,
+    /// Active radar missiles (Fox 3).
+    ActiveRadar,
+    /// Free-fall bombs.
+    Bomb,
+}
+
 impl Store {
+    #[cfg(test)]
+    pub const ALL: [Store; 13] = [Store::Aim9, Store::Aim9x, Store::Aim7, Store::Aim120, Store::Aim120d, Store::Mk82, Store::R60m, Store::R73, Store::R27r, Store::R27t, Store::R77, Store::Fab250, Store::Fab500];
+
     pub fn mass(self) -> f64 {
         match self.missile() {
             Some(s) => s.mass,
@@ -114,10 +141,14 @@ impl Store {
     fn drag(self) -> f64 {
         match self {
             Store::Aim9 => 0.0005,
-            Store::Aim120 => 0.0008,
+            Store::Aim9x => 0.0004,
+            Store::Aim7 => 0.0011,
+            Store::Aim120 | Store::Aim120d => 0.0008,
             Store::Mk82 => 0.0013,
+            Store::R60m => 0.0003,
             Store::R73 => 0.0006,
-            Store::R27r => 0.0011,
+            Store::R27r | Store::R27t => 0.0011,
+            Store::R77 => 0.0009,
             Store::Fab250 => 0.0013,
             Store::Fab500 => 0.0021,
         }
@@ -125,9 +156,15 @@ impl Store {
     pub fn missile(self) -> Option<&'static Spec> {
         match self {
             Store::Aim9 => Some(&AIM9M),
+            Store::Aim9x => Some(&AIM9X),
+            Store::Aim7 => Some(&AIM7M),
             Store::Aim120 => Some(&AIM120C),
+            Store::Aim120d => Some(&AIM120D),
+            Store::R60m => Some(&R60M),
             Store::R73 => Some(&R73),
             Store::R27r => Some(&R27R),
+            Store::R27t => Some(&R27T),
+            Store::R77 => Some(&R77),
             _ => None,
         }
     }
@@ -139,12 +176,24 @@ impl Store {
             _ => None,
         }
     }
-    /// The master mode that releases it.
+    pub fn family(self) -> Family {
+        match self.missile() {
+            None => Family::Bomb,
+            Some(s) => match s.seeker {
+                Seeker::Infrared if s.max_range > 20000.0 => Family::MediumIr,
+                Seeker::Infrared => Family::ShortIr,
+                Seeker::SemiActive => Family::SemiActive,
+                Seeker::Active => Family::ActiveRadar,
+            },
+        }
+    }
+    /// The master mode that releases it: SRM for the dogfight missiles, MRM
+    /// for everything with a medium-range motor, CCIP for bombs.
     pub fn mode(self) -> Mode {
-        match self {
-            Store::Aim9 | Store::R73 => Mode::Srm,
-            Store::Aim120 | Store::R27r => Mode::Mrm,
-            Store::Mk82 | Store::Fab250 | Store::Fab500 => Mode::Ccip,
+        match self.family() {
+            Family::ShortIr => Mode::Srm,
+            Family::MediumIr | Family::SemiActive | Family::ActiveRadar => Mode::Mrm,
+            Family::Bomb => Mode::Ccip,
         }
     }
     /// Short name, for the HUD.
@@ -159,10 +208,16 @@ impl Store {
     pub fn long_name(self) -> &'static str {
         match self {
             Store::Aim9 => "AIM-9M SIDEWINDER (FOX 2)",
+            Store::Aim9x => "AIM-9X SIDEWINDER (FOX 2)",
+            Store::Aim7 => "AIM-7M SPARROW (FOX 1)",
             Store::Aim120 => "AIM-120C AMRAAM (FOX 3)",
+            Store::Aim120d => "AIM-120D AMRAAM (FOX 3)",
             Store::Mk82 => "MK 82 (BOMB)",
+            Store::R60m => "R-60M APHID (FOX 2)",
             Store::R73 => "R-73 ARCHER (FOX 2)",
-            Store::R27r => "R-27R ALAMO (FOX 1)",
+            Store::R27r => "R-27R ALAMO-A (FOX 1)",
+            Store::R27t => "R-27T ALAMO-B (FOX 2)",
+            Store::R77 => "R-77 ADDER (FOX 3)",
             Store::Fab250 => "FAB-250M-62 (BOMB)",
             Store::Fab500 => "FAB-500M-62 (BOMB)",
         }
@@ -171,29 +226,41 @@ impl Store {
     pub fn pair(self) -> &'static str {
         match self {
             Store::Aim9 => "2 X AIM-9M  IR",
+            Store::Aim9x => "2 X AIM-9X  IR",
+            Store::Aim7 => "2 X AIM-7M  SARH",
             Store::Aim120 => "2 X AIM-120C  RADAR",
+            Store::Aim120d => "2 X AIM-120D  RADAR",
             Store::Mk82 => "2 X MK-82  500 LB",
+            Store::R60m => "2 X R-60M  IR",
             Store::R73 => "2 X R-73  IR",
             Store::R27r => "2 X R-27R  SARH",
+            Store::R27t => "2 X R-27T  IR",
+            Store::R77 => "2 X R-77  RADAR",
             Store::Fab250 => "2 X FAB-250  250 KG",
             Store::Fab500 => "2 X FAB-500  500 KG",
         }
     }
-    /// What the other airframe carries in its place.
+    /// What the other airframe carries in its place: the same family, the
+    /// nearest in kind (the F-16 has no infrared medium-range missile, so
+    /// the R-27T's place takes the Sparrow).
     fn counterpart(self) -> Store {
         match self {
             Store::Aim9 => Store::R73,
-            Store::Aim120 => Store::R27r,
+            Store::Aim9x => Store::R73,
+            Store::Aim7 => Store::R27r,
+            Store::Aim120 | Store::Aim120d => Store::R77,
             Store::Mk82 => Store::Fab250,
-            Store::R73 => Store::Aim9,
-            Store::R27r => Store::Aim120,
+            Store::R60m | Store::R73 => Store::Aim9,
+            Store::R27r | Store::R27t => Store::Aim7,
+            Store::R77 => Store::Aim120,
             Store::Fab250 | Store::Fab500 => Store::Mk82,
         }
     }
 }
 
-/// The missiles always on the outermost stations: the F-16's wingtip
-/// AIM-9s, the MiG-29's R-73s on the outer pylons.
+/// The missiles the outermost stations carry unless the loadout says
+/// otherwise: the F-16's wingtip AIM-9Ms, the MiG-29's R-73s on the outer
+/// pylons. The bandits always fly with these.
 pub fn tip_store(jet: Type) -> Store {
     if jet == Type::Mig29 {
         Store::R73
@@ -202,17 +269,42 @@ pub fn tip_store(jet: Type) -> Store {
     }
 }
 
-/// Choices for a pylon pair. The F-16: missiles and bombs outboard, bombs
-/// or AMRAAMs inboard. The MiG-29A 9.12: R-73s or FAB-250s on the middle
-/// pylons, the R-27Rs or the heavy bombs on the inner ones.
-fn pylon_choices(jet: Type, inboard: bool) -> &'static [Option<Store>] {
-    match (jet, inboard) {
-        (Type::F16, false) => &[None, Some(Store::Aim9), Some(Store::Aim120), Some(Store::Mk82)],
-        (Type::F16, true) => &[None, Some(Store::Mk82), Some(Store::Aim120)],
-        (Type::Mig29, false) => &[None, Some(Store::R73), Some(Store::Fab250)],
-        (Type::Mig29, true) => &[None, Some(Store::R27r), Some(Store::Fab500), Some(Store::Fab250)],
+/// Choices for a station pair: 0 the outermost (the F-16's wingtips, the
+/// MiG's outer pylons), 1 the next in (stations 3 and 7, the MiG's middle
+/// pylons), 2 the inboard ones (stations 4 and 6, the MiG's inner pylons).
+/// The F-16C Block 50: Sidewinders or AMRAAMs on the tips; missiles or bombs
+/// on 3 and 7; bombs, AMRAAMs or Sparrows on 4 and 6. The MiG-29S 9.13S:
+/// R-73s or R-60Ms outboard; dogfight missiles, R-77s or FAB-250s on the
+/// middle pylons; the R-27s, R-77s or bombs on the inner ones.
+fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
+    match (jet, pair) {
+        (Type::F16, 0) => &[Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
+        (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82)],
+        (Type::F16, _) => &[None, Some(Store::Mk82), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7)],
+        (Type::Mig29, 0) => &[Some(Store::R73), Some(Store::R60m)],
+        (Type::Mig29, 1) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250)],
+        (Type::Mig29, _) => &[None, Some(Store::R27r), Some(Store::R27t), Some(Store::R77), Some(Store::Fab500), Some(Store::Fab250)],
     }
 }
+
+/// Every store a jet can carry in a family, from its pylon choices; the
+/// test `arsenal_by_family` spells the table out.
+#[cfg(test)]
+pub fn arsenal(jet: Type, family: Family) -> Vec<Store> {
+    let mut v: Vec<Store> = Vec::new();
+    for pair in 0..3 {
+        for s in pylon_choices(jet, pair).iter().flatten() {
+            if s.family() == family && !v.contains(s) {
+                v.push(*s);
+            }
+        }
+    }
+    v
+}
+
+/// Range at which an active missile's own radar finds a fighter, m: past
+/// it an AMRAAM or R-77 needs the datalink to know where to fly.
+const ACTIVE_RANGE: f64 = 15000.0;
 
 /// Launch rails, pylons and racks, kg: STORES_MASS less its two AIM-9s.
 const RAILS: f64 = STORES_MASS - 2.0 * 85.5;
@@ -227,10 +319,12 @@ pub struct Station {
     pub tip: bool,
 }
 
-/// What the loadout screen sets before a sortie: the stores on the two
-/// pylon pairs, the internal fuel and the opposition.
+/// What the loadout screen sets before a sortie: the stores on the three
+/// station pairs, the internal fuel and the opposition.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Config {
+    /// Stations 1 and 9, the wingtips (the MiG's outer pylons).
+    pub tip: Store,
     /// Stations 3 and 7.
     pub outboard: Option<Store>,
     /// Stations 4 and 6, the heavy inboard pylons.
@@ -252,17 +346,17 @@ impl Config {
             MissionKind::Strike => (Some(Store::Mk82), Some(Store::Mk82), 1.0),
             MissionKind::Free => (Some(Store::Aim120), Some(Store::Mk82), 1.0),
         };
-        Config { outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
+        Config { tip: Store::Aim9, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
     }
 
-    /// The mission's stores as the given airframe carries them: the MiG's
-    /// usual air-to-air load is four R-73s and two R-27Rs on the inner pylons.
+    /// The mission's stores as the given airframe carries them: the MiG-29S's
+    /// air-to-air load is four R-73s and two R-77s on the inner pylons.
     pub fn for_jet(kind: MissionKind, jet: Type) -> Config {
         let mut c = Config::for_mission(kind);
         c.set_jet(jet);
         if jet == Type::Mig29 {
             (c.outboard, c.inboard) = match kind {
-                MissionKind::Dogfight => (Some(Store::R73), Some(Store::R27r)),
+                MissionKind::Dogfight => (Some(Store::R73), Some(Store::R77)),
                 MissionKind::Strike => (Some(Store::Fab250), Some(Store::Fab500)),
                 MissionKind::Free => (Some(Store::R73), Some(Store::Fab500)),
                 _ => (c.outboard, c.inboard),
@@ -299,14 +393,14 @@ impl Config {
         if min {
             self.fuel = Config::fuel_choices(jet)[4];
         }
-        for inboard in [false, true] {
-            let choices = pylon_choices(jet, inboard);
-            let slot = if inboard { &mut self.inboard } else { &mut self.outboard };
-            *slot = slot.and_then(|s| {
-                let c = s.counterpart();
-                choices.iter().flatten().find(|&&x| x == c).or_else(|| choices.iter().flatten().find(|x| x.mode() == c.mode())).copied()
-            });
-        }
+        let swap = |s: Store, pair: u8| -> Option<Store> {
+            let choices = pylon_choices(jet, pair);
+            let c = s.counterpart();
+            choices.iter().flatten().find(|&&x| x == c).or_else(|| choices.iter().flatten().find(|x| x.family() == c.family())).or_else(|| choices.iter().flatten().find(|x| x.mode() == c.mode())).copied()
+        };
+        self.tip = swap(self.tip, 0).unwrap_or(tip_store(jet));
+        self.outboard = self.outboard.and_then(|s| swap(s, 1));
+        self.inboard = self.inboard.and_then(|s| swap(s, 2));
     }
 
     /// The stores hung, counted by kind, for the briefing: "4 R-73 2 R-27R".
@@ -321,12 +415,21 @@ impl Config {
         kinds.iter().map(|(s, n)| format!("{n} {}", s.name())).collect::<Vec<_>>().join(" ")
     }
 
-    /// Next choice for a pylon pair.
-    pub fn cycle(&mut self, inboard: bool) {
-        let order = pylon_choices(self.jet, inboard);
-        let slot = if inboard { &mut self.inboard } else { &mut self.outboard };
-        let i = order.iter().position(|s| s == slot).unwrap_or(0);
-        *slot = order[(i + 1) % order.len()];
+    /// Next choice for a station pair (0 tips, 1 outboard, 2 inboard).
+    pub fn cycle(&mut self, pair: u8) {
+        let order = pylon_choices(self.jet, pair);
+        let current = match pair {
+            0 => Some(self.tip),
+            1 => self.outboard,
+            _ => self.inboard,
+        };
+        let i = order.iter().position(|s| *s == current).unwrap_or(0);
+        let next = order[(i + 1) % order.len()];
+        match pair {
+            0 => self.tip = next.unwrap_or(tip_store(self.jet)),
+            1 => self.outboard = next,
+            _ => self.inboard = next,
+        }
     }
 
     /// Fuel loads on offer, fractions of the internal fuel, from full down
@@ -364,11 +467,12 @@ pub struct Loadout {
     pub flares: u32,
 }
 
-/// Wingtip AIM-9 noses (stations 1 and 9), which the MiG's outer pylons
-/// take as R-73s.
-fn tips(jet: Type) -> [Station; 2] {
+/// Wingtip missile noses (stations 1 and 9; the MiG's outer pylons), on a
+/// rail placed for the AIM-9M: a longer missile's nose sits further forward.
+fn tips(store: Store) -> [Station; 2] {
     let t = crate::airframe::AIM9_TIP;
-    [-1.0, 1.0].map(|s| Station { store: tip_store(jet), at: v3(s * t.x, t.y, t.z), loaded: true, tip: true })
+    let ahead = store.missile().map_or(0.0, |m| (m.length - AIM9M.length) * 0.5);
+    [-1.0, 1.0].map(|s| Station { store, at: v3(s * t.x, t.y, t.z - ahead), loaded: true, tip: true })
 }
 
 impl Loadout {
@@ -376,17 +480,17 @@ impl Loadout {
         Loadout::configure(&Config::for_mission(kind))
     }
 
-    /// Stores hung as the loadout screen chose: the wingtip AIM-9s always,
+    /// Stores hung as the loadout screen chose: the wingtip pair always,
     /// the outboard pair on stations 3 and 7, the inboard pair on 4 and 6.
     pub fn configure(cfg: &Config) -> Loadout {
-        let mut stations = tips(cfg.jet).to_vec();
+        let mut stations = tips(cfg.tip).to_vec();
         for (pick, x) in [(cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
             let Some(store) = pick else { continue };
             // Missile noses forward of the pylon, bombs centred under it.
             let (y, z) = match store {
-                Store::Aim9 | Store::R73 => (-0.03, x * 0.5 - 0.83),
-                Store::Aim120 => (-0.06, x * 0.5 - 1.23),
-                Store::R27r => (-0.08, x * 0.5 - 1.43),
+                Store::Aim9 | Store::Aim9x | Store::R60m | Store::R73 => (-0.03, x * 0.5 - 0.83),
+                Store::Aim120 | Store::Aim120d | Store::R77 => (-0.06, x * 0.5 - 1.23),
+                Store::Aim7 | Store::R27r | Store::R27t => (-0.08, x * 0.5 - 1.43),
                 Store::Mk82 | Store::Fab250 => (-0.08, x * 0.4 + 0.93),
                 Store::Fab500 => (-0.12, x * 0.4 + 0.93),
             };
@@ -462,9 +566,9 @@ pub const SA6: Spec = Spec {
     life: 35.0,
     min_range: 3000.0,
     max_range: 22000.0,
-    active: false,
-    infrared: false,
-    semi_active: true,
+    seeker: Seeker::SemiActive,
+    loal: false,
+    datalink: false,
     call: "SAM LAUNCH",
 };
 
@@ -1033,7 +1137,7 @@ impl Combat {
 
     /// The infrared missile selected with one left: its seeker is uncaged.
     pub fn heater(&self) -> Option<&'static Spec> {
-        (self.mode == Mode::Srm).then(|| self.loadout.next_for(Mode::Srm)).flatten().and_then(|i| self.loadout.stations[i].store.missile())
+        matches!(self.mode, Mode::Srm | Mode::Mrm).then(|| self.loadout.next_for(self.mode)).flatten().and_then(|i| self.loadout.stations[i].store.missile()).filter(|s| s.infrared())
     }
 
     /// Selects a master mode by name, for the test switches.
@@ -1287,10 +1391,18 @@ impl Combat {
         let Some(i) = self.loadout.next_for(mode) else { return };
         let st = self.loadout.stations[i];
         let Some(spec) = st.store.missile() else { return };
-        // A heat seeker goes for what its seeker tracks; a radar missile for
-        // the lock. The R-27R guides only on a lock, and is not fired without.
-        let target = if spec.infrared { self.seeker } else { self.lock.filter(|w| matches!(w, Who::Bandit(_))) };
-        if spec.semi_active && target.is_none() {
+        // Launch rules (docs/WEAPONS.md). A heat seeker goes for what its
+        // seeker tracks; with no tone a lock-on-before-launch one leaves
+        // unguided, while the AIM-9X takes the radar's lock as its cue and
+        // acquires in flight. A radar missile goes for the lock: a
+        // semi-active one is not fired without it, an active one fired
+        // without it searches with its own radar.
+        let lock = self.lock.filter(|w| matches!(w, Who::Bandit(_)));
+        let target = match spec.seeker {
+            Seeker::Infrared => self.seeker.or(if spec.loal { lock } else { None }),
+            Seeker::SemiActive | Seeker::Active => lock,
+        };
+        if spec.semi_active() && target.is_none() {
             self.events.push(Event::Lock { text: "NO LOCK".to_string() });
             return;
         }
@@ -1325,7 +1437,10 @@ impl Combat {
             // AIM-9M, 45 on the R-73), or keeps what it has, or searches its
             // 2.5-degree field where the helmet looks (or along the boresight).
             let gimbal = spec.gimbal;
-            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < 18000.0 && matches!(w, Who::Bandit(_)));
+            // An infrared seeker sees a fighter a little past the missile's
+            // own reach: some 17 km for the AIM-9M, 30 for the R-27T.
+            let reach = spec.max_range * 1.2;
+            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < reach && matches!(w, Who::Bandit(_)));
             let look = self.helmet.unwrap_or(fwd);
             let near_look = |p: V3| look.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
             let seeker = if let Some(l) = self.lock.filter(|&l| usable(l, gimbal)) {
@@ -1344,7 +1459,7 @@ impl Combat {
             self.zone_clock = 0.25;
             let spec = self.loadout.next_for(self.mode).and_then(|i| self.loadout.stations[i].store.missile());
             let shot = match (self.mode, spec) {
-                (Mode::Srm, Some(spec)) => self.seeker.map(|s| (spec, s)),
+                (Mode::Srm | Mode::Mrm, Some(spec)) if spec.infrared() => self.seeker.map(|s| (spec, s)),
                 (Mode::Mrm, Some(spec)) => self.lock.filter(|w| matches!(w, Who::Bandit(_))).map(|l| (spec, l)),
                 _ => None,
             };
@@ -1606,17 +1721,32 @@ impl Combat {
     fn step_missiles(&mut self, dt: f64, a: &Aircraft) {
         let mut i = 0;
         while i < self.missiles.len() {
-            // An AMRAAM fired without a lock searches with its own radar.
-            if self.missiles[i].spec.active && self.missiles[i].target.is_none() && self.missiles[i].age > 1.5 {
+            let spec = self.missiles[i].spec;
+            // A player's AMRAAM or R-77 rides the datalink while the radar
+            // holds its target; if the lock goes before it is close enough to
+            // see the target with its own radar, it flies on blind and
+            // searches when it gets there.
+            if spec.active() && spec.datalink && self.missiles[i].from == Who::Player && self.missiles[i].target.is_some() && self.lock != self.missiles[i].target {
+                let far = self.missiles[i].target.and_then(|w| self.track(w, a)).is_none_or(|(p, _)| (p - self.missiles[i].pos).len() > ACTIVE_RANGE);
+                if far {
+                    self.missiles[i].target = None;
+                    self.missiles[i].tracking = false;
+                }
+            }
+            // An active missile with no target searches with its own radar;
+            // an AIM-9X fired with nothing to cue it, with its seeker.
+            let searching = (spec.active() || spec.infrared() && spec.loal) && self.missiles[i].from == Who::Player;
+            if searching && self.missiles[i].target.is_none() && self.missiles[i].age > 1.5 {
                 let (mp, mv) = (self.missiles[i].pos, self.missiles[i].vel.norm());
-                let found = self.bandits.iter().enumerate().filter(|(_, b)| b.alive).map(|(k, b)| (k, b.jet.pos - mp)).filter(|(_, r)| r.len() < 15000.0 && mv.dot(r.norm()) > (20.0f64 * DEG).cos()).min_by(|x, y| x.1.len().partial_cmp(&y.1.len()).unwrap_or(std::cmp::Ordering::Equal));
+                let (reach, cone) = if spec.active() { (ACTIVE_RANGE, spec.acquire) } else { (8000.0, 20.0 * DEG) };
+                let found = self.bandits.iter().enumerate().filter(|(_, b)| b.alive).map(|(k, b)| (k, b.jet.pos - mp)).filter(|(_, r)| r.len() < reach && mv.dot(r.norm()) > cone.cos()).min_by(|x, y| x.1.len().partial_cmp(&y.1.len()).unwrap_or(std::cmp::Ordering::Equal));
                 if let Some((k, _)) = found {
                     self.missiles[i].target = Some(Who::Bandit(k));
                     self.missiles[i].tracking = true;
                 }
             }
-            // An R-27R goes blind once the player's radar drops its target.
-            if self.missiles[i].spec.semi_active && self.missiles[i].from == Who::Player && self.lock != self.missiles[i].target {
+            // An R-27R or Sparrow goes blind once the player's radar drops its target.
+            if spec.semi_active() && self.missiles[i].from == Who::Player && self.lock != self.missiles[i].target {
                 self.missiles[i].tracking = false;
             }
             // A semi-active SAM goes blind when its radar dies.
@@ -1899,16 +2029,43 @@ mod tests {
         assert_eq!((l.count(Store::R73), l.count(Store::Aim9), l.count_for(Mode::Ccip)), (2, 0, 4));
         assert_eq!((l.gun.name, l.rounds), ("GSH-30-1", 150));
         let dog = Loadout::configure(&Config::for_jet(MissionKind::Dogfight, Type::Mig29));
-        assert_eq!((dog.count(Store::R73), dog.count(Store::R27r)), (4, 2));
-        for _ in 0..4 {
-            cfg.cycle(true);
-            assert!(cfg.inboard.is_none_or(|s| matches!(s, Store::R27r | Store::Fab500 | Store::Fab250)));
+        assert_eq!((dog.count(Store::R73), dog.count(Store::R77)), (4, 2));
+        for _ in 0..6 {
+            cfg.cycle(2);
+            assert!(cfg.inboard.is_none_or(|s| matches!(s, Store::R27r | Store::R27t | Store::R77 | Store::Fab500 | Store::Fab250)));
         }
-        assert_eq!(Config::for_jet(MissionKind::Dogfight, Type::Mig29).stores_summary(), "4 R-73 2 R-27R");
+        cfg.cycle(0);
+        assert_eq!(cfg.tip, Store::R60m);
+        assert_eq!(Config::for_jet(MissionKind::Dogfight, Type::Mig29).stores_summary(), "4 R-73 2 R-77");
         cfg.inboard = Some(Store::R27r);
         cfg.set_jet(Type::F16);
-        assert_eq!((cfg.outboard, cfg.inboard), (Some(Store::Mk82), Some(Store::Aim120)));
+        assert_eq!((cfg.tip, cfg.outboard, cfg.inboard), (Store::Aim9, Some(Store::Mk82), Some(Store::Aim7)));
         assert_eq!(Loadout::configure(&cfg).gun.rounds, 511);
+    }
+
+    /// The weapon families each jet fills, and the one it does not: the
+    /// F-16C has no medium-range heat seeker to answer the R-27T.
+    #[test]
+    fn arsenal_by_family() {
+        let names = |jet, f| arsenal(jet, f).iter().map(|s| s.name()).collect::<Vec<_>>().join(" ");
+        assert_eq!(names(Type::F16, Family::ShortIr), "AIM-9M AIM-9X");
+        assert_eq!(names(Type::F16, Family::MediumIr), "");
+        assert_eq!(names(Type::F16, Family::SemiActive), "AIM-7M");
+        assert_eq!(names(Type::F16, Family::ActiveRadar), "AIM-120C AIM-120D");
+        assert_eq!(names(Type::F16, Family::Bomb), "MK-82");
+        assert_eq!(names(Type::Mig29, Family::ShortIr), "R-73 R-60M");
+        assert_eq!(names(Type::Mig29, Family::MediumIr), "R-27T");
+        assert_eq!(names(Type::Mig29, Family::SemiActive), "R-27R");
+        assert_eq!(names(Type::Mig29, Family::ActiveRadar), "R-77");
+        assert_eq!(names(Type::Mig29, Family::Bomb), "FAB-250 FAB-500");
+        // Every store belongs to exactly one family and has a counterpart
+        // on the other jet in the same family where that jet has one.
+        for s in Store::ALL {
+            let c = s.counterpart();
+            if s.family() != Family::MediumIr {
+                assert_eq!(c.family(), s.family(), "{s:?} and {c:?}");
+            }
+        }
     }
 
     /// The R-27R needs a lock to be fired and guides only while it lasts.
@@ -1917,7 +2074,9 @@ mod tests {
         terrain::init();
         let mut m = Mission::new();
         let mut c = Combat::new(MissionKind::Dogfight, &mut m);
-        c.equip(&Config::for_jet(MissionKind::Dogfight, Type::Mig29));
+        let mut cfg = Config::for_jet(MissionKind::Dogfight, Type::Mig29);
+        cfg.inboard = Some(Store::R27r);
+        c.equip(&cfg);
         c.select(Mode::Mrm);
         let mut a = spawn_type(Type::Mig29, v3(0.0, 4000.0, 0.0), 0.0, 230.0);
         a.update(0.0, &Input::default());
@@ -1930,6 +2089,51 @@ mod tests {
         c.lock = None;
         c.step_missiles(crate::sim::FIXED_DT, &a);
         assert!(!c.missiles[0].tracking, "blind once the lock is gone");
+    }
+
+    /// Launch rules by seeker: a Sparrow is not fired without a lock; an
+    /// AMRAAM fired without one goes active and finds the bandit ahead; one
+    /// fired on a lock that is then dropped far out loses the datalink and
+    /// flies on blind; an AIM-9X with no tone takes the lock as its cue.
+    #[test]
+    fn launch_rules_follow_the_seeker() {
+        terrain::init();
+        let fire = |store: Store, lock: Option<Who>| {
+            let mut m = Mission::new();
+            let mut c = Combat::new(MissionKind::Dogfight, &mut m);
+            let mut cfg = Config::for_mission(MissionKind::Dogfight);
+            cfg.outboard = Some(store);
+            if store.mode() == Mode::Srm {
+                cfg.tip = store;
+            }
+            c.equip(&cfg);
+            let mut a = spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0);
+            a.update(0.0, &Input::default());
+            // One bandit straight ahead, 12 km out and flying away.
+            c.bandits.truncate(1);
+            c.bandits[0].jet = spawn(a.pos + a.q.axes().forward * 12000.0, 0.0, 200.0);
+            c.lock = lock;
+            c.seeker = None;
+            c.launch(&a, store.mode());
+            (c, a)
+        };
+        let (c, _) = fire(Store::Aim7, None);
+        assert!(c.missiles.is_empty(), "no Sparrow without a lock");
+        let (mut c, a) = fire(Store::Aim120, None);
+        assert_eq!(c.missiles[0].target, None);
+        for _ in 0..240 {
+            c.step_missiles(crate::sim::FIXED_DT, &a);
+        }
+        assert_eq!(c.missiles[0].target, Some(Who::Bandit(0)), "a maddog AMRAAM finds the bandit");
+        let (mut c, a) = fire(Store::Aim120d, Some(Who::Bandit(0)));
+        c.bandits[0].jet.pos = a.pos + a.q.axes().forward * 40000.0;
+        c.lock = None;
+        c.step_missiles(crate::sim::FIXED_DT, &a);
+        assert!(c.missiles[0].target.is_none() && !c.missiles[0].tracking, "no datalink without the lock");
+        let (c, _) = fire(Store::Aim9x, Some(Who::Bandit(0)));
+        assert_eq!(c.missiles[0].target, Some(Who::Bandit(0)), "the AIM-9X locks on after launch");
+        let (c, _) = fire(Store::Aim9, Some(Who::Bandit(0)));
+        assert_eq!(c.missiles[0].target, None, "an AIM-9M with no tone leaves unguided");
     }
 
     /// The MiG-29 spawns trimmed: hands off it holds its height and speed,
@@ -2025,7 +2229,7 @@ mod tests {
         }
         assert!(names.iter().any(|n| n.starts_with("GSH-30-1 (GUN) x150")), "{names:?}");
         assert!(names.iter().any(|n| n.starts_with("R-73 ARCHER (FOX 2) x2")), "{names:?}");
-        assert!(names.iter().any(|n| n.starts_with("R-27R ALAMO (FOX 1) x2")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("R-27R ALAMO-A (FOX 1) x2")), "{names:?}");
         assert!(names.iter().any(|n| n.starts_with("FAB-")), "{names:?}");
         assert_eq!(m.time_left, crate::sim::MISSION_TIME);
         assert_eq!(m.gates.len(), 10, "the gate run keeps its gates");

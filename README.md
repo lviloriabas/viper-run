@@ -141,14 +141,29 @@ through 75, 50 and 25 % to the minimum a jet may start with: 1,000 lb in
 the F-16C, the Block 40+ minimum fuel, and an estimated 550 kg in the MiG,
 whose setup reads in kilograms like its gauges.
 
-The MiG-29A 9.12 carries its own stores on its six underwing pylons: R-73s
-(AA-11 Archer, infrared, Fox 2) always on the outer pair; R-73s or
-FAB-250M-62 bombs on the middle pair; R-27Rs (AA-10 Alamo-A, semi-active
-radar, Fox 1), FAB-500M-62s or FAB-250s on the inner pair. Its GSh-30-1
-fires 150 rounds of 30 mm, and two BVP-30-26M dispensers hold 30 chaff and
-30 flares. The DOGFIGHT default is four R-73s and two R-27Rs, STRIKE two
-FAB-250s and two FAB-500s, FREE FLIGHT four R-73s and two FAB-500s; changing
-jets swaps each pylon's stores for the other airframe's equivalent.
+Every station pair can be changed, the wingtips included. The F-16C Block
+50 takes AIM-9Ms, AIM-9Xs, AIM-120Cs or AIM-120Ds on the wingtips; any of
+those, AIM-7M Sparrows or Mk-82s on stations 3 and 7; and Mk-82s, AMRAAMs
+or Sparrows on 4 and 6. The MiG-29S 9.13S carries its own on six underwing
+pylons: R-73s (AA-11 Archer) or R-60Ms (AA-8 Aphid) on the outer pair; those,
+R-77s (AA-12 Adder, active radar) or FAB-250M-62 bombs on the middle pair;
+R-27Rs (AA-10 Alamo-A, semi-active), R-27Ts (Alamo-B, infrared), R-77s,
+FAB-500M-62s or FAB-250s on the inner pair. Its GSh-30-1 fires 150 rounds
+of 30 mm, and two BVP-30-26M dispensers hold 30 chaff and 30 flares. The
+DOGFIGHT default is four R-73s and two R-77s, STRIKE two FAB-250s and two
+FAB-500s, FREE FLIGHT four R-73s and two FAB-500s; changing jets swaps each
+pair's stores for the other airframe's equivalent in the same family.
+
+The missiles come in families by what guides them (`weapons.rs`,
+`combat::arsenal`):
+
+| Family | F-16C Block 50 | MiG-29S 9.13S |
+| --- | --- | --- |
+| Infrared, short range (Fox 2) | AIM-9M, AIM-9X | R-60M, R-73 |
+| Infrared, medium range (Fox 2) | none | R-27T |
+| Semi-active radar (Fox 1) | AIM-7M | R-27R |
+| Active radar (Fox 3) | AIM-120C, AIM-120D | R-77 |
+| Bombs | Mk-82 | FAB-250M-62, FAB-500M-62 |
 
 | Mission | Objective | Default stores | Clock |
 | --- | --- | --- | --- |
@@ -183,7 +198,7 @@ ground. The result screen shows the kills or targets, the time and a rating.
   without a lock) with a range ring. One round in five is a tracer.
 - SRM: the AIM-9 seeker circle searches its 2.5-degree field along the
   boresight, or where the helmet looks, and slaves to a radar lock within its
-  40-degree gimbal (45 degrees on the R-73); a high tone means it tracks. MRM: the AIM-120 steering
+  gimbal (40 degrees on the AIM-9M, 90 on the AIM-9X, 20 on the R-60M, 45 on the R-73); a high tone means it tracks. MRM: the AIM-120 steering
   circle and dot. Both show IN RNG and SHOOT from a launch-zone fly-out
   against the target's present track.
 - CCIP: the bomb's continuously computed impact point and the bomb fall line
@@ -204,10 +219,18 @@ ground. The result screen shows the kills or targets, the time and a rating.
   with a diamond on those locked on and a flashing M for missiles in flight.
   It pings for a new emitter, chirps on a lock and warbles while a missile
   guides; outside the cockpit a small scope repeats it.
-- The R-27R is semi-active: it is not fired without a radar lock and goes
-  blind the moment the lock drops, where the AIM-120 searches on its own.
-- Flares fool only infrared seekers (the AIM-9 and R-73), chaff only radar
-  ones (the AIM-120, R-27R and SA-6), best with the missile on the beam. The bandits use
+- Launch rules follow the seeker (docs/WEAPONS.md). Heat seekers lock on
+  before launch: with no tone the AIM-9M, R-60M, R-73 and R-27T leave
+  unguided, while the AIM-9X Block II takes the radar lock as its cue and
+  locks on after launch (or searches ahead with nothing to cue it). The
+  semi-active AIM-7M and R-27R are not fired without a radar lock and go
+  blind the moment it drops. The AIM-120C/D and R-77 ride the datalink
+  while the radar holds the lock and turn their own radar on near the
+  target; fired without a lock they go active off the rail, and if the lock
+  drops with the target still beyond 15 km they fly on blind and search
+  when they get there. The R-27T flies in MRM but shows the seeker circle.
+- Flares fool only infrared seekers (the AIM-9s, R-60M, R-73 and R-27T),
+  chaff only radar ones (the AMRAAMs, Sparrow, R-27R, R-77 and SA-6), best with the missile on the beam. The bandits use
   them too.
 
 ### Bandits and ground targets

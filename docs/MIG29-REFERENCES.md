@@ -1,86 +1,91 @@
-# Cabina del MiG-29
+# MiG-29 cockpit
 
-Revisión del 22 de octubre de 2026. La cabina del MiG-29S (9.13S) es propia,
-no una copia de la del F-16. Las fotografías se usan como referencia visual y
-no se incluyen como texturas ni se redistribuyen.
+Revised 23 October 2026. The MiG-29S (9.13S) cockpit is its own, not a copy
+of the F-16's. The photos are used as visual reference and are neither
+included as textures nor redistributed.
 
-## Referencias visuales
+## Visual references
 
-Fotografías de cabinas reales del 9.12 en Wikimedia Commons (el 9.13 conserva
-casi sin cambios la misma cabina):
+Photos of real 9.12 cockpits on Wikimedia Commons (the 9.13 kept the same
+cockpit almost unchanged):
 
 - [MiG-29 cockpit 3](https://commons.wikimedia.org/wiki/File:MiG-29_cockpit_3.jpg):
-  la cabina completa desde arriba. Fija la disposición general: panel y tubo
-  en gris azulado, palanca central entre las piernas, consolas laterales a la
-  altura de los muslos, el HUD ILS-31 con su marco grueso sobre la visera
-  negra, la pantalla IT-23 a su derecha y la columna de luces de aviso junto
-  al riel derecho de la cúpula.
+  the whole cockpit from above. It sets the general layout: blue-grey panel
+  and tub, centre stick between the legs, side consoles at thigh height, the
+  ILS-31 HUD with its heavy frame on the black coaming, the IT-23 display to
+  its right and the column of warning lights by the right canopy rail.
 - [Polski MiG-29 kokpit](https://commons.wikimedia.org/wiki/File:Polski_mig_29_kokpit.JPG):
-  panel de un MiG-29 polaco modernizado; instrumentos redondos de fondo negro,
-  el KPP (director de actitud) sobre el PNP (situación horizontal) en el
-  centro, anemómetro y altímetro a la izquierda.
+  the panel of an upgraded Polish MiG-29; black-faced round instruments, the
+  KPP (attitude director) over the PNP (horizontal situation) in the middle,
+  airspeed and altimeter on the left.
 - [MiG-29 cockpit 1](https://commons.wikimedia.org/wiki/File:MiG-29_cockpit_1.jpg):
-  la empuñadura de la palanca: negra y cuadriculada, con la cabeza
-  ensanchada hacia delante, el botón rojo de armas, el compensador y la
-  palanca del freno de ruedas por delante.
+  the stick grip: black and chequered, its head swelling forward, the red
+  weapon button, the trim hat and the wheel brake lever in front.
 - [MiG-29 cockpit 2](https://commons.wikimedia.org/wiki/File:MiG-29_cockpit_2.jpg):
-  detalle del panel derecho: temperatura de gases doble en x100 °C,
-  indicadores de hidráulica y oxígeno y la posición de la rampa de admisión.
+  the right panel in detail: twin exhaust gas temperature in x100 °C,
+  hydraulic and oxygen gauges and the intake ramp position.
 - [MiG-29 cocpit 1](https://commons.wikimedia.org/wiki/File:MiG-29_cocpit_1.jpg)
-  y [cockpit 114th brta](https://commons.wikimedia.org/wiki/File:-29_cockpit_114th_brta.jpg):
-  el arco grueso de la cúpula con sus tres espejos retrovisores y la bola
-  IRST delante del parabrisas, a la derecha.
+  and [cockpit 114th brta](https://commons.wikimedia.org/wiki/File:-29_cockpit_114th_brta.jpg):
+  the heavy canopy arch with its three rear-view mirrors (big, rounded and
+  convex) and the IRST ball ahead of the windscreen, to the right.
 
-## Disposición en el juego
+## Layout in the game
 
-La cabina se construye en el mismo espacio que la del F-16, con el ojo de
-diseño en el mismo punto, y `cockpit::body_camera` lleva la cámara desde el
-ojo del MiG (`mig29::EYE`) hasta allí; así el asiento, el cuerpo del piloto,
-las piernas y el HUD se comparten. El exterior recorta la piel en
-`mig29::CUTOUT` desde el asiento y no dibuja la cúpula, de modo que nada
-tapa la vista delantera salvo el morro y la bola IRST.
+The cockpit is built in the same space as the F-16's, with the design eye at
+the same point, and `cockpit::body_camera` carries the camera from the MiG's
+eye (`mig29::EYE`) to it; so the seat, the pilot's body, the legs and the HUD
+are shared. From the seat the exterior cuts the skin away in
+`mig29::CUTOUT` and leaves the canopy out, so nothing blocks the view ahead
+but the nose and the IRST ball.
 
-- Panel inclinado 12 grados, con alas plegadas 22 grados hacia el piloto.
-  Centro: KPP sobre PNP; a la izquierda anemómetro en km/h con ventana de
-  Mach, altímetro en metros (aguja larga por kilómetro, corta por diez y
-  contador) y el UUAP (ángulo de ataque arriba, factor de carga abajo); a la
-  derecha variómetro en m/s, tacómetro doble y temperatura de gases doble.
-  Ala derecha: combustible en kg, hidráulica y reloj. Ala izquierda: luces del
-  tren y flaps y el panel de piloto automático y navegación (SAU, RSBN, ARK).
-- Visera negra con el HUD ILS-31 (cuerpo grande y marco grueso alrededor del
-  cristal combinador) y la pantalla IT-23 con una imagen tipo B del radar.
-- Columna de diez luces de aviso junto al riel derecho; las leyendas van
-  transliteradas porque la fuente del juego solo tiene caracteres latinos.
-- Palanca central sobre el suelo, con fuelle, y acelerador de dos palancas en
-  un cuadrante sobre la consola izquierda; palanca del tren en la pared
-  izquierda, delante del acelerador.
-- Marcos de la cúpula sobre la forma exterior (`mig29::canopy_point`): postes
-  del parabrisas, el arco sobre las rodillas con sus tres espejos y los
-  rieles; mamparo detrás del asiento y la cubierta bajo la parte trasera de
-  la cúpula.
+- Panel tilted 12 degrees, with wings folded 22 degrees toward the pilot.
+  Centre: KPP over PNP; on the left the airspeed indicator in km/h with a
+  Mach window, the altimeter in metres (long needle per kilometre, short per
+  ten, and a counter) and the UUAP (angle of attack above, load factor
+  below); on the right the variometer in m/s, the twin tachometer and the
+  twin exhaust gas temperature. Right wing: fuel in kg, hydraulics and the
+  clock. Left wing: gear and flap lights and the autopilot and navigation
+  panel (SAU, RSBN, ARK).
+- Black coaming with the ILS-31 HUD (a big body and a heavy frame round the
+  combiner glass) and the IT-23 display with a B-scope radar picture.
+- A column of ten warning lights by the right rail; the legends are
+  transliterated because the game font only has Latin characters.
+- Centre stick on the floor, with a boot, and a two-lever throttle in a
+  quadrant on the left console; gear handle on the left wall, ahead of the
+  throttle.
+- Canopy frames on the exterior shape (`mig29::canopy_point`): windscreen
+  posts, the arch over the knees with its three mirrors and the rails; a
+  bulkhead behind the seat and the decking under the rear of the canopy.
 
-## Armamento del MiG-29A 9.12
+## MiG-29S 9.13S stores
 
-Cifras publicadas que usa el juego (`weapons.rs`, `combat.rs`):
+Published figures the game uses (`weapons.rs`, `combat.rs`):
 
-- Cañón GSh-30-1 (9A-4071K) en la raíz del LERX izquierdo: 150 proyectiles
-  de 30 x 165 mm, 1.500 a 1.800 disparos por minuto, el OFZ de 390 g a
-  860 m/s.
-- R-73 (izdeliye 72, AA-11 Archer): 105 kg, 2,90 m, 170 mm; cabeza infrarroja
-  refrigerada todo aspecto a 45 grados del eje, guiada por el visor de casco
-  Shchel-3UM; ojiva de varillas de 7,4 kg y espoleta radioeléctrica.
-- R-27R (izdeliye 470R, AA-10 Alamo-A): 253 kg, 4,08 m, 230 mm; guía inercial
-  y luego semiactiva sobre el radar N019, que debe mantener el blanco hasta el
-  impacto; ojiva de varillas de 39 kg; hasta 73 km de frente en altura.
-- FAB-250M-62: 250 kg, 1,92 m, 300 mm, 100 kg de TNT. FAB-500M-62: 497 kg,
-  2,47 m, 400 mm, unos 200 kg de TNT.
-- Dos dispensadores BVP-30-26M de 30 cartuchos de 26 mm (PPI-26 bengalas,
-  PPR-26 chaff).
-- Seis pilones subalares: R-73 en los exteriores, R-73 o FAB-250 en los
-  medios, R-27R o bombas pesadas en los interiores; carga típica aire-aire de
-  cuatro R-73 y dos R-27R.
+- GSh-30-1 (9A-4071K) gun in the left LERX root: 150 rounds of 30 x 165 mm,
+  1,500 to 1,800 rounds a minute, the 390 g OFZ at 860 m/s.
+- R-73 (izdeliye 72, AA-11 Archer): 105 kg, 2.90 m, 170 mm; cooled
+  all-aspect infrared seeker 45 degrees off the nose, cued by the Shchel-3UM
+  helmet sight; 7.4 kg rod warhead and a radio fuze.
+- R-60M (izdeliye 62M, AA-8 Aphid): 44 kg, 2.09 m, 120 mm; a 20 degree
+  infrared seeker; 3.5 kg rod warhead. For close combat only.
+- R-27R (izdeliye 470R, AA-10 Alamo-A): 253 kg, 4.08 m, 230 mm; inertial,
+  then semi-active on the N019M radar, which must hold the target to
+  impact; 39 kg rod warhead; up to 73 km head on at height.
+- R-27T (izdeliye 470T, AA-10 Alamo-B): the R-27R with a passive infrared
+  seeker; it must acquire the target before launch.
+- R-77 (RVV-AE, AA-12 Adder): 175 kg, 3.60 m, 200 mm; inertial with the
+  N019M's datalink and active radar at the end; lattice fins; 22.5 kg
+  warhead. The 9.13S's N019M radar is what lets it carry the missile.
+- FAB-250M-62: 250 kg, 1.92 m, 300 mm, 100 kg of TNT. FAB-500M-62: 497 kg,
+  2.47 m, 400 mm, about 200 kg of TNT.
+- Two BVP-30-26M dispensers of 30 26 mm cartridges (PPI-26 flares, PPR-26
+  chaff).
+- Six underwing pylons: R-73s or R-60Ms outboard; those, R-77s or FAB-250s
+  on the middle pair; R-27Rs, R-27Ts, R-77s or bombs on the inner pair; the
+  default air-to-air load is four R-73s and two R-77s. Each missile's lock
+  rules are in docs/WEAPONS.md.
 
-Fuentes: [R-27 (Wikipedia)](https://en.wikipedia.org/wiki/R-27_(air-to-air_missile)),
+Sources: [R-27 (Wikipedia)](https://en.wikipedia.org/wiki/R-27_(air-to-air_missile)),
 [FAB-500](https://en.wikipedia.org/wiki/FAB-500),
 [FAB-250](https://en.wikipedia.org/wiki/FAB-250),
 [FAB-500M-62 (GlobalSecurity)](https://www.globalsecurity.org/military/world/russia/fab-500m-62.htm).

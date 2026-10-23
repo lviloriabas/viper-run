@@ -680,7 +680,7 @@ impl App {
                 self.selected = 0;
             }
             Action::Start | Action::Restart | Action::Launch => self.start_mission(),
-            Action::Station(i) => self.config.cycle(i == 1),
+            Action::Station(i) => self.config.cycle(i),
             Action::Fuel => self.config.cycle_fuel(),
             Action::Resume => self.resume(),
             Action::Menu => self.go_menu(),
