@@ -30,7 +30,7 @@
 - [ ] Agregar un sistema de daños, que afecte el desempeño de la aeronave.
 - [x] Agregar minimun fuel setting.
 - [x] Agregar misiles radar al MIG-29.
-- [ ] Agregar IRST funcional al MIG-29.
+- [x] Agregar IRST funcional al MIG-29.
 - [x] Mejorar el sistema de íconos de teclas o botones a presionar por opción, por ej a veces dice (A) para ciertas opciones, pero al presionar A cambia la opción seleccionada, haz que sea consistente e inspírate en otros juegos.
 - [x] El zoom es hold, no toggle.
 - [x] Para los bandits camuflaje de aggressor si son F-16.

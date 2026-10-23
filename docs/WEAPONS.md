@@ -86,6 +86,10 @@ The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
 - With a datalink a missile can turn toward a target outside its seeker's
   field during its first 8 s (an off-boresight or over-the-shoulder shot);
   without one, a target outside the field is lost.
+- The MiG-29S's IRST track cues its heat seekers but guides no radar
+  missile; its laser ranges inside 6.5 km. The IRST is passive, and neither
+  jet has a missile approach warner, so a bandit sees an infrared missile
+  only by its smoke (inside 6 km while the motor burns) or close in (3 km).
 - Flares fool only infrared seekers and chaff only radar ones.
 
 ## Sources

@@ -471,6 +471,7 @@ impl PadButton {
             "DPAD" => PadButton::Dpad(0b1111),
             "DU" => PadButton::Dpad(0b0001),
             "DD" => PadButton::Dpad(0b0010),
+            "DL" => PadButton::Dpad(0b0100),
             "DLR" => PadButton::Dpad(0b1100),
             "START" => PadButton::Menu,
             "BACK" => PadButton::View,

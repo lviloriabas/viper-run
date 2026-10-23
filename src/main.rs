@@ -101,6 +101,8 @@ struct Opts {
     /// Hold the trigger, and lock the nearest target, through a scripted run.
     fire: bool,
     lock: bool,
+    /// Track with the MiG's IRST instead of the radar.
+    irst: bool,
     /// Fly the scripted run with the AI pilot toward the steerpoint.
     auto: bool,
     weapon: Option<Mode>,
@@ -151,6 +153,7 @@ fn parse_opts() -> Opts {
                         "wheelbrake" => o.input.wheel_brake = true,
                         "fire" => o.fire = true,
                         "lock" => o.lock = true,
+                        "irst" => o.irst = true,
                         "auto" => o.auto = true,
                         _ => {}
                     }
@@ -192,7 +195,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -440,6 +443,9 @@ impl App {
         if let (Some(mach), Some(a)) = (self.opts.mach, self.aircraft.as_mut()) {
             a.vel = a.vel.norm() * mach * sim::atmosphere_at(a.pos.y).sound;
             a.update(0.0, &Input::default());
+        }
+        if let (true, Some(a)) = (self.opts.irst, self.aircraft.as_ref()) {
+            self.combat.toggle_irst(a);
         }
         if self.opts.sim_seconds > 0.0 && self.state == State::Flying {
             let steps = (self.opts.sim_seconds / FIXED_DT).round() as usize;
@@ -962,7 +968,10 @@ impl App {
                 PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
                 PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
             };
+            // The MiG has no MFDs: its left d-pad works the radar / IRST switch.
+            let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
             for (button, b) in actions.iter().copied().chain(airbrake) {
+                let b = if mig && b == Bind::LeftMfd { Bind::Sensor } else { b };
                 if self.pad.pressed(button) {
                     self.bind_pressed(b);
                 }
@@ -1366,6 +1375,11 @@ impl App {
             Bind::Lock if flying => {
                 if let Some(a) = &self.aircraft {
                     self.combat.designate(a);
+                }
+            }
+            Bind::Sensor if flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.toggle_irst(a);
                 }
             }
             Bind::Countermeasures if flying => {

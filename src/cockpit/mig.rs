@@ -539,18 +539,36 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
         let x = x0 + w * k as f32 / 4.0;
         cv.line(x, y0, x, y0 + hh, 1.0, dim);
     }
-    let range = 40000.0;
-    for b in c.bandits.iter().filter(|b| b.alive) {
-        let rel = b.jet.pos - a.pos;
-        let az = (bearing(rel) - a.heading + 540.0).rem_euclid(360.0) - 180.0;
-        let d = v3(rel.x, 0.0, rel.z).len();
-        if az.abs() < 60.0 && d < range {
-            let (x, y) = (x0 + w * ((az + 60.0) / 120.0) as f32, y0 + hh * (1.0 - (d / range) as f32));
-            cv.rect(x - 6.0, y - 2.0, 12.0, 4.0, green);
+    if c.irst {
+        // IRST (TP) picture: azimuth across its 60 degrees, elevation up from
+        // -15 to +30, the heat sources it sees, the track boxed, and the
+        // laser range once inside 6.5 km.
+        for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive && crate::combat::irst_sees(a, &b.jet, 1.0)) {
+            let d = a.q.conj().rotate((b.jet.pos - a.pos).norm());
+            let (az, el) = (d.x.atan2(-d.z) / DEG, d.y.asin() / DEG);
+            let (x, y) = (x0 + w * ((az + 30.0) / 60.0) as f32, y0 + hh * (1.0 - ((el + 15.0) / 45.0) as f32));
+            cv.disc(x, y, 3.0, green);
+            if c.lock == Some(crate::weapons::Who::Bandit(i)) {
+                cv.stroke_rect(x - 8.0, y - 8.0, 16.0, 16.0, 2.0, green);
+            }
         }
+        cv.text("TP", r.x + 3.0, y0 + 4.0, 1.0, green, Align::Left);
+        let laser = c.laser_range(a).map_or("D ---".to_string(), |d| format!("D {:.1}", d / 1000.0));
+        cv.text(&laser, r.x + r.w - 3.0, y0 + 4.0, 1.0, green, Align::Right);
+    } else {
+        let range = 40000.0;
+        for b in c.bandits.iter().filter(|b| b.alive) {
+            let rel = b.jet.pos - a.pos;
+            let az = (bearing(rel) - a.heading + 540.0).rem_euclid(360.0) - 180.0;
+            let d = v3(rel.x, 0.0, rel.z).len();
+            if az.abs() < 60.0 && d < range {
+                let (x, y) = (x0 + w * ((az + 60.0) / 120.0) as f32, y0 + hh * (1.0 - (d / range) as f32));
+                cv.rect(x - 6.0, y - 2.0, 12.0, 4.0, green);
+            }
+        }
+        cv.text("40", r.x + 3.0, y0 + 4.0, 1.0, green, Align::Left);
+        cv.text("0", r.x + 3.0, y0 + hh - 4.0, 1.0, green, Align::Left);
     }
-    cv.text("40", r.x + 3.0, y0 + 4.0, 1.0, green, Align::Left);
-    cv.text("0", r.x + 3.0, y0 + hh - 4.0, 1.0, green, Align::Left);
     cv.polyline(&[[x0 + w / 2.0 - 6.0, y0 + hh + 10.0], [x0 + w / 2.0, y0 + hh + 4.0], [x0 + w / 2.0 + 6.0, y0 + hh + 10.0]], 2.0, false, green);
 
     // Left switch panel: autopilot (SAU), navigation (RSBN, ARK) and the

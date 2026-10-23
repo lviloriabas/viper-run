@@ -302,6 +302,32 @@ pub fn arsenal(jet: Type, family: Family) -> Vec<Store> {
     v
 }
 
+/// The OEPS-29 IRST's field (azimuth either side, and elevation below and
+/// above the boresight) and its detection range against a fighter at
+/// military power: some 15 km from behind, where the exhaust shows, down to
+/// 8 km head on; an afterburner makes a target half as visible again.
+const IRST_AZ: f64 = 30.0 * DEG;
+const IRST_EL: (f64, f64) = (-15.0 * DEG, 30.0 * DEG);
+const IRST_TAIL: f64 = 15000.0;
+const IRST_HEAD: f64 = 8000.0;
+/// Reach of the OEPS-29's laser rangefinder, m.
+pub const LASER_RANGE: f64 = 6500.0;
+
+/// The IRST sees a jet: inside its field, within its heat-detection range
+/// (stretched by `margin` to keep a track) and with clear sky between.
+pub fn irst_sees(a: &Aircraft, t: &Aircraft, margin: f64) -> bool {
+    let r = t.pos - a.pos;
+    let d = a.q.conj().rotate(r.norm());
+    let (az, el) = (d.x.atan2(-d.z), d.y.asin());
+    if az.abs() > IRST_AZ || el < IRST_EL.0 || el > IRST_EL.1 {
+        return false;
+    }
+    // Aspect: 1 with the target's nose on us, 0 from behind.
+    let nose_on = (t.q.axes().forward.dot(-r.norm()) + 1.0) * 0.5;
+    let burner = if t.power > 50.0 { 1.5 } else { 1.0 };
+    r.len() < mix(IRST_TAIL, IRST_HEAD, nose_on) * burner * margin && line_of_sight(a.pos, t.pos)
+}
+
 /// Range at which an active missile's own radar finds a fighter, m: past
 /// it an AMRAAM or R-77 needs the datalink to know where to fly.
 const ACTIVE_RANGE: f64 = 15000.0;
@@ -705,8 +731,12 @@ pub struct Combat {
     pub bombs: Vec<Bomb>,
     pub trails: Vec<Trail>,
     pub sight: GunSight,
-    /// Radar (or ground designation) lock.
+    /// Radar (or ground designation) lock, or the IRST's track.
     pub lock: Option<Who>,
+    /// The MiG-29's OEPS-29 optronic sight tracks in place of the radar:
+    /// the IRST finds and tracks passively, so the target's RWR stays
+    /// quiet, and the laser rangefinder measures range inside 6.5 km.
+    pub irst: bool,
     /// What the Sidewinder's seeker is tracking before launch.
     pub seeker: Option<Who>,
     /// CCIP impact point and time of fall.
@@ -912,6 +942,7 @@ impl Combat {
             trails: Vec::new(),
             sight: GunSight::default(),
             lock: None,
+            irst: false,
             seeker: None,
             ccip: None,
             shoot: false,
@@ -1157,8 +1188,18 @@ impl Combat {
     }
 
     /// Lock candidates the radar can see: within 60 degrees of the nose, in
-    /// range and not behind terrain, nearest the boresight first.
+    /// range and not behind terrain, nearest the boresight first; with the
+    /// IRST, the fighters inside its field and heat-detection range.
     fn candidates(&self, a: &Aircraft, ground: bool) -> Vec<(Who, f64)> {
+        if self.irst && !ground {
+            let look = self.helmet.unwrap_or(a.q.axes().forward);
+            let mut v: Vec<(Who, f64)> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive && irst_sees(a, &b.jet, 1.0)).map(|(i, b)| {
+                let r = b.jet.pos - a.pos;
+                (Who::Bandit(i), look.dot(r.norm()).clamp(-1.0, 1.0).acos() + r.len() / 400000.0)
+            }).collect();
+            v.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+            return v;
+        }
         let fwd = a.q.axes().forward;
         // The helmet picks among what the radar can see: nearest its line of sight.
         let look = self.helmet.unwrap_or(fwd);
@@ -1201,6 +1242,31 @@ impl Combat {
             _ => "NO TARGET".to_string(),
         };
         self.events.push(Event::Lock { text });
+    }
+
+    /// The lock if the radar holds it: what the semi-active and active
+    /// missiles need, which an IRST track cannot give them.
+    pub fn radar_lock(&self) -> Option<Who> {
+        self.lock.filter(|_| !self.irst)
+    }
+
+    /// The MiG's sensor switch, radar or IRST; the F-16C has no IRST. The
+    /// track is dropped as the sensors change over.
+    pub fn toggle_irst(&mut self, a: &Aircraft) {
+        let text = if a.kind != Type::Mig29 {
+            "NO IRST ON THE F-16C"
+        } else {
+            self.irst = !self.irst;
+            self.lock = None;
+            if self.irst { "IRST // OEPS-29 SEARCH" } else { "RADAR // N019M SEARCH" }
+        };
+        self.events.push(Event::Lock { text: text.to_string() });
+    }
+
+    /// Laser range to the IRST's target, inside the rangefinder's 6.5 km;
+    /// beyond it an IRST track gives the angle only.
+    pub fn laser_range(&self, a: &Aircraft) -> Option<f64> {
+        self.lock.filter(|_| self.irst).and_then(|w| self.track(w, a)).map(|(p, _)| (p - a.pos).len()).filter(|&r| r <= LASER_RANGE)
     }
 
     /// Drops the lock or designation, if there is one.
@@ -1397,10 +1463,11 @@ impl Combat {
         // acquires in flight. A radar missile goes for the lock: a
         // semi-active one is not fired without it, an active one fired
         // without it searches with its own radar.
+        // The IRST's track cues a heat seeker but guides no radar missile.
         let lock = self.lock.filter(|w| matches!(w, Who::Bandit(_)));
         let target = match spec.seeker {
             Seeker::Infrared => self.seeker.or(if spec.loal { lock } else { None }),
-            Seeker::SemiActive | Seeker::Active => lock,
+            Seeker::SemiActive | Seeker::Active => self.radar_lock().filter(|w| matches!(w, Who::Bandit(_))),
         };
         if spec.semi_active() && target.is_none() {
             self.events.push(Event::Lock { text: "NO LOCK".to_string() });
@@ -1426,7 +1493,10 @@ impl Combat {
         let fwd = a.q.axes().forward;
         let off = |p: V3| fwd.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
         if let Some(l) = self.lock {
-            let keep = self.track(l, a).is_some_and(|(p, _)| off(p) < 70.0 * DEG && (p - a.pos).len() < 80000.0);
+            let keep = match (self.irst, l) {
+                (true, Who::Bandit(i)) => self.bandits.get(i).is_some_and(|b| b.alive && irst_sees(a, &b.jet, 1.15)),
+                _ => self.track(l, a).is_some_and(|(p, _)| off(p) < 70.0 * DEG && (p - a.pos).len() < 80000.0),
+            };
             if !keep {
                 self.lock = None;
                 self.events.push(Event::Lock { text: "LOCK LOST".to_string() });
@@ -1460,7 +1530,7 @@ impl Combat {
             let spec = self.loadout.next_for(self.mode).and_then(|i| self.loadout.stations[i].store.missile());
             let shot = match (self.mode, spec) {
                 (Mode::Srm | Mode::Mrm, Some(spec)) if spec.infrared() => self.seeker.map(|s| (spec, s)),
-                (Mode::Mrm, Some(spec)) => self.lock.filter(|w| matches!(w, Who::Bandit(_))).map(|l| (spec, l)),
+                (Mode::Mrm, Some(spec)) => self.radar_lock().filter(|w| matches!(w, Who::Bandit(_))).map(|l| (spec, l)),
                 _ => None,
             };
             self.shoot = shot.and_then(|(spec, w)| self.track(w, a).map(|t| (spec, t))).is_some_and(|(spec, (p, v))| fly_out(spec, a.pos, a.vel, p, v, &terrain::floor).is_some());
@@ -1487,6 +1557,13 @@ impl Combat {
                 .missiles
                 .iter()
                 .filter(|m| m.target == Some(Who::Bandit(i)) && m.tracking)
+                // Neither jet has a missile approach warner: the RWR gives a
+                // radar missile away, but a heat seeker is only seen, by its
+                // smoke while the motor burns or close in.
+                .filter(|m| {
+                    let d = (m.pos - self.bandits[i].jet.pos).len();
+                    !m.spec.infrared() || d < 3000.0 || m.burning() && d < 6000.0
+                })
                 .map(|m| (m.pos, m.vel))
                 .min_by(|x, y| (x.0 - self.bandits[i].jet.pos).len().partial_cmp(&(y.0 - self.bandits[i].jet.pos).len()).unwrap_or(std::cmp::Ordering::Equal));
             // A missile closing inside 4 km gets a program every second or so.
@@ -1726,7 +1803,7 @@ impl Combat {
             // holds its target; if the lock goes before it is close enough to
             // see the target with its own radar, it flies on blind and
             // searches when it gets there.
-            if spec.active() && spec.datalink && self.missiles[i].from == Who::Player && self.missiles[i].target.is_some() && self.lock != self.missiles[i].target {
+            if spec.active() && spec.datalink && self.missiles[i].from == Who::Player && self.missiles[i].target.is_some() && self.radar_lock() != self.missiles[i].target {
                 let far = self.missiles[i].target.and_then(|w| self.track(w, a)).is_none_or(|(p, _)| (p - self.missiles[i].pos).len() > ACTIVE_RANGE);
                 if far {
                     self.missiles[i].target = None;
@@ -1746,7 +1823,7 @@ impl Combat {
                 }
             }
             // An R-27R or Sparrow goes blind once the player's radar drops its target.
-            if spec.semi_active() && self.missiles[i].from == Who::Player && self.lock != self.missiles[i].target {
+            if spec.semi_active() && self.missiles[i].from == Who::Player && self.radar_lock() != self.missiles[i].target {
                 self.missiles[i].tracking = false;
             }
             // A semi-active SAM goes blind when its radar dies.
@@ -2089,6 +2166,46 @@ mod tests {
         c.lock = None;
         c.step_missiles(crate::sim::FIXED_DT, &a);
         assert!(!c.missiles[0].tracking, "blind once the lock is gone");
+    }
+
+    /// The MiG's IRST sees a fighter from behind further than head on, and
+    /// only inside its field; its track cues the R-73 but no radar missile,
+    /// and the laser gives a range only inside 6.5 km. The F-16 has none.
+    #[test]
+    fn the_irst_tracks_passively() {
+        terrain::init();
+        let mut a = spawn_type(Type::Mig29, v3(0.0, 4000.0, 0.0), 0.0, 230.0);
+        a.update(0.0, &Input::default());
+        let ahead = |d: f64, heading: f64| spawn(a.pos + a.q.axes().forward * d, heading, 200.0);
+        let toward = heading_of(-a.q.axes().forward);
+        let away = heading_of(a.q.axes().forward);
+        assert!(irst_sees(&a, &ahead(6000.0, toward), 1.0));
+        assert!(!irst_sees(&a, &ahead(12000.0, toward), 1.0), "head on, past 8 km");
+        assert!(irst_sees(&a, &ahead(12000.0, away), 1.0), "from behind, 12 km");
+        let off = spawn(a.pos + Quat::axis_angle(V3::Y, 40.0 * DEG).rotate(a.q.axes().forward) * 5000.0, away, 200.0);
+        assert!(!irst_sees(&a, &off, 1.0), "outside its 30 degrees");
+
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Dogfight, &mut m);
+        let mut cfg = Config::for_jet(MissionKind::Dogfight, Type::Mig29);
+        cfg.inboard = Some(Store::R27r);
+        c.equip(&cfg);
+        c.bandits.truncate(1);
+        c.bandits[0].jet = ahead(9000.0, away);
+        c.toggle_irst(&a);
+        assert!(c.irst);
+        c.designate(&a);
+        assert_eq!(c.lock, Some(Who::Bandit(0)));
+        assert_eq!((c.radar_lock(), c.laser_range(&a)), (None, None), "angle only past the laser");
+        c.select(Mode::Mrm);
+        c.launch(&a, Mode::Mrm);
+        assert!(c.missiles.is_empty(), "no R-27R on an IRST track");
+        c.bandits[0].jet = ahead(5000.0, away);
+        assert!(c.laser_range(&a).is_some_and(|r| (r - 5000.0).abs() < 1.0));
+
+        let mut f = Combat::new(MissionKind::Dogfight, &mut Mission::new());
+        f.toggle_irst(&spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0));
+        assert!(!f.irst);
     }
 
     /// Launch rules by seeker: a Sparrow is not fired without a lock; an

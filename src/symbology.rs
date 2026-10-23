@@ -96,11 +96,22 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
             None => locator(cv, pen, a, tp),
         }
         let closure = -(tv - a.vel).dot((tp - a.pos).norm()) * 1.94384;
-        let text = if range < 3700.0 { format!("{:.1} KFT", range * 3.28084 / 1000.0) } else { format!("{:.1} NM", range / 1852.0) };
+        // An IRST track has a range only inside the laser's reach.
+        let ranged = !c.irst || c.laser_range(a).is_some();
+        let text = if !ranged {
+            "LASER ---".to_string()
+        } else if range < 3700.0 {
+            format!("{:.1} KFT", range * 3.28084 / 1000.0)
+        } else {
+            format!("{:.1} NM", range / 1852.0)
+        };
         pen.text(cv, &text, half, 94.0, pen.small, Align::Right);
-        if matches!(c.lock, Some(Who::Bandit(_))) {
+        if matches!(c.lock, Some(Who::Bandit(_))) && ranged {
             pen.text(cv, &format!("VC {}", closure.round() as i64), half, 106.0, pen.small, Align::Right);
         }
+    }
+    if c.irst {
+        pen.text(cv, "IRST", -half, 106.0, pen.small, Align::Left);
     }
     match c.mode {
         Mode::Nav => {}

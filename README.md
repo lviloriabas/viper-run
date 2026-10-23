@@ -32,6 +32,7 @@ at start-up in about half a second.
 | `F` or left-click (mouse captured) | Fire the gun, launch a missile, release a bomb (pickle) |
 | `X` | Cycle the weapon and master mode: GUN, SRM (AIM-9 or R-73), MRM (AIM-120 or R-27R), CCIP (bombs); weapons only, never NAV or the chaff and flares |
 | `T` | Lock the target nearest the nose (or the helmet line of sight); again for the next |
+| `I` | MiG-29: switch the radar and the IRST (OEPS-29) for locking |
 | `Z` | Countermeasures: one chaff bundle and one flare |
 | `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
 | `K` | Open / close the controls and configuration drawer |
@@ -79,6 +80,7 @@ fire with `RT`.
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
 | D-pad down / up | Landing gear / ALT FLAPS |
+| D-pad left in the MiG-29 | Radar / IRST switch (the MiG has no MFDs) |
 | `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
 | `B` while frozen | Open the pause menu |
 | `Back` / `View` | Open / close the controls drawer |
@@ -229,6 +231,17 @@ ground. The result screen shows the kills or targets, the time and a rating.
   target; fired without a lock they go active off the rail, and if the lock
   drops with the target still beyond 15 km they fly on blind and search
   when they get there. The R-27T flies in MRM but shows the seeker circle.
+- The MiG-29S's OEPS-29 sight puts an IRST and a laser rangefinder in the
+  ball ahead of the windscreen. `I` (d-pad left on a pad) switches the lock
+  between the N019M radar and the IRST. The IRST searches 30 degrees either
+  side, 15 down and 30 up, and sees a fighter some 15 km from behind but only
+  8 km head on, half as far again if it is in afterburner; it is passive, so
+  nothing warns the target. Its track cues the R-73, R-60M and R-27T seekers,
+  but the R-27R and R-77 need the radar. The laser gives a range inside
+  6.5 km; beyond that the HUD reads LASER --- and the IT-23 shows the IRST's
+  azimuth and elevation picture (TP) with the range as D. Neither jet has a
+  missile approach warner: bandits know a radar missile by its guidance, but
+  see a heat seeker only by its smoke within 6 km or close in.
 - Flares fool only infrared seekers (the AIM-9s, R-60M, R-73 and R-27T),
   chaff only radar ones (the AMRAAMs, Sparrow, R-27R, R-77 and SA-6), best with the missile on the beam. The bandits use
   them too.

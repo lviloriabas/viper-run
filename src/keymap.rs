@@ -17,6 +17,8 @@ pub enum Bind {
     Trigger,
     Weapon,
     Lock,
+    /// The MiG-29's sensor switch: radar or IRST.
+    Sensor,
     Countermeasures,
     Airbrake,
     Gear,
@@ -28,7 +30,7 @@ pub enum Bind {
     RightMfd,
 }
 
-pub const BINDS: [Bind; 21] = [
+pub const BINDS: [Bind; 22] = [
     Bind::PitchUp,
     Bind::PitchDown,
     Bind::RollLeft,
@@ -41,6 +43,7 @@ pub const BINDS: [Bind; 21] = [
     Bind::Trigger,
     Bind::Weapon,
     Bind::Lock,
+    Bind::Sensor,
     Bind::Countermeasures,
     Bind::Airbrake,
     Bind::Gear,
@@ -72,6 +75,7 @@ impl Bind {
             Bind::Trigger => "FIRE / PICKLE",
             Bind::Weapon => "CYCLE WEAPON",
             Bind::Lock => "LOCK TARGET",
+            Bind::Sensor => "RADAR / IRST (MIG)",
             Bind::Countermeasures => "CHAFF / FLARE",
             Bind::Airbrake => "AIRBRAKE",
             Bind::Gear => "LANDING GEAR",
@@ -99,6 +103,7 @@ impl Bind {
             Bind::Trigger => "trigger",
             Bind::Weapon => "weapon",
             Bind::Lock => "lock",
+            Bind::Sensor => "sensor",
             Bind::Countermeasures => "countermeasures",
             Bind::Airbrake => "airbrake",
             Bind::Gear => "gear",
@@ -126,6 +131,7 @@ impl Bind {
             Bind::Trigger => (F, None),
             Bind::Weapon => (X, None),
             Bind::Lock => (T, None),
+            Bind::Sensor => (I, None),
             Bind::Countermeasures => (Z, None),
             Bind::Airbrake => (H, None),
             Bind::Gear => (G, None),
