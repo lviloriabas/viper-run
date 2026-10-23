@@ -264,6 +264,11 @@ struct App {
     pad_active: bool,
     /// Smoothed right-stick position driving the head or chase camera.
     pad_look: (f64, f64),
+    /// Zoom held on the right mouse button or toggled with R3, and the eased
+    /// 0..1 amount that narrows the field of view.
+    zoom_mouse: bool,
+    zoom_pad: bool,
+    zoom: f64,
     mouse: (f64, f64),
     /// Keyboard pitch, ramped so a tap gives a partial pull and a hold a full one.
     key_pitch: f64,
@@ -387,6 +392,9 @@ impl App {
             pad: Gamepad::new(),
             pad_active: false,
             pad_look: (0.0, 0.0),
+            zoom_mouse: false,
+            zoom_pad: false,
+            zoom: 0.0,
             mouse: (0.0, 0.0),
             key_pitch: 0.0,
             airbrake: false,
@@ -562,6 +570,7 @@ impl App {
         self.key_pitch = 0.0;
         self.keys.clear();
         self.center_stick();
+        (self.zoom_pad, self.zoom) = (false, 0.0);
         self.grab(true);
         let dogfight = format!("DOGFIGHT // {} BANDITS // T LOCK, X WEAPON", self.config.threats.bandits);
         self.flash_toast(
@@ -946,14 +955,17 @@ impl App {
         }
         if !menu {
             let airbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Airbrake)) };
-            let actions = match self.settings.pad_layout {
+            let actions: &[(u16, Bind)] = match self.settings.pad_layout {
                 // Fire (RT), lock (RB) and countermeasures (L3) never take a
                 // thumb off a stick; the d-pad and face buttons are for what
                 // can wait.
-                PadLayout::Combat => [(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
-                PadLayout::Classic => [(Y, Bind::View), (X, Bind::Center), (RS, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
+                PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
+                PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
             };
-            for (button, b) in actions.into_iter().chain(airbrake) {
+            if self.pad.pressed(RS) {
+                self.zoom_pad = !self.zoom_pad;
+            }
+            for (button, b) in actions.iter().copied().chain(airbrake) {
                 if self.pad.pressed(button) {
                     self.bind_pressed(b);
                 }
@@ -1223,7 +1235,7 @@ impl App {
         q = q.mul(Quat::axis_angle(V3::X, self.look.1));
         let ax = q.axes();
         let eye = cockpit::eye_world(a);
-        Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG }
+        Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() }
     }
 
     fn chase_camera(&self, a: &Aircraft) -> Camera {
@@ -1260,7 +1272,12 @@ impl App {
             eye.y = floor;
         }
         let (f, r, u) = basis(eye);
-        Camera { eye, forward: f, right: r, up: u, fov: (48.0 + speed_factor * 3.0) * DEG }
+        Camera { eye, forward: f, right: r, up: u, fov: (48.0 + speed_factor * 3.0) * DEG * self.zoom_scale() }
+    }
+
+    /// Field-of-view factor for the zoom, down to 0.4 when fully in.
+    fn zoom_scale(&self) -> f64 {
+        1.0 - 0.6 * self.zoom
     }
 
     /// Renders the world behind the jet, seen from over the pilot's head,
@@ -1427,6 +1444,8 @@ impl EventHandler for App {
             self.pad_active = false;
         }
         self.toast_timer = (self.toast_timer - dt).max(0.0);
+        let zoomed = (self.zoom_mouse || self.zoom_pad) && matches!(self.state, State::Flying | State::Frozen);
+        self.zoom += (zoomed as i32 as f64 - self.zoom) * (1.0 - (-dt * 9.0).exp());
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
             State::Attract | State::Loadout => self.attract_time += dt,
@@ -1689,7 +1708,8 @@ impl EventHandler for App {
         self.mouse_pos = (x, y);
         if matches!(self.state, State::Flying | State::Frozen) && !self.controls_open {
             match button {
-                MouseButton::Right | MouseButton::Middle => {
+                MouseButton::Right => self.zoom_mouse = true,
+                MouseButton::Middle => {
                     self.center_stick();
                     self.flash_toast("MOUSE STICK CENTERED", 1.1);
                 }
@@ -1819,8 +1839,10 @@ impl EventHandler for App {
     }
 
     fn mouse_button_up_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
-        if button == MouseButton::Left {
-            self.trigger_mouse = false;
+        match button {
+            MouseButton::Left => self.trigger_mouse = false,
+            MouseButton::Right => self.zoom_mouse = false,
+            _ => {}
         }
     }
 
