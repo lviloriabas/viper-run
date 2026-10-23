@@ -130,7 +130,9 @@ pub struct Site {
 
 impl Site {
     fn new(kind: Kind, pos: V3, heading: f64, group: usize, primary: bool) -> Site {
-        Site { kind, pos, heading, hp: kind.hp(), dead: false, primary, group, clock: 0.0, aim: V3::Y, ammo: if kind == Kind::Launcher { 3 } else { 0 } }
+        // A launcher's clock is its reload: the first round is 25 s away.
+        let launcher = kind == Kind::Launcher;
+        Site { kind, pos, heading, hp: kind.hp(), dead: false, primary, group, clock: if launcher { 25.0 } else { 0.0 }, aim: V3::Y, ammo: if launcher { 3 } else { 0 } }
     }
 
     /// Rotation from the target's axes to the world.
@@ -174,33 +176,54 @@ fn bank(z: f64, off: f64) -> V3 {
 
 /// Steerpoint names, in the order the route meets them.
 pub const GROUPS: [&str; 4] = ["CONVOY", "SAM SITE", "BRIDGE", "DEPOT"];
+/// Group of the defences that have no steerpoint of their own.
+pub const NO_GROUP: usize = 9;
 
-/// The STRIKE target set along the gorge, between gates 3 and 9 of the run.
+/// The STRIKE target set along the gorge, between gates 3 and 9 of the run,
+/// with its classic defences (scenario::Layout::HeadOn).
 pub fn place() -> Vec<Site> {
+    let mut s = objectives();
+    gun(&mut s, 3440.0, 75.0, 0);
+    battery(&mut s, 1250.0, -165.0, 1, true);
+    gun(&mut s, 1170.0, -120.0, 1);
+    gun(&mut s, -770.0, 110.0, 2);
+    s
+}
+
+/// The strike's targets without their defences: the convoy on the east bank
+/// heading south, the road bridge and the supply depot.
+pub fn objectives() -> Vec<Site> {
     let mut s = Vec::new();
-    // Convoy on the east bank heading south, with its gun escort behind.
     for k in 0..4 {
         let z = 3380.0 - k as f64 * 42.0;
         s.push(Site::new(Kind::Truck, bank(z, 70.0), along(z), 0, false));
     }
-    s.push(Site::new(Kind::Zsu, bank(3440.0, 75.0), along(3440.0), 0, false));
-    // SA-6 battery on the west bank: launcher, radar, a resupply truck, guns.
-    s.push(Site::new(Kind::Launcher, bank(1250.0, -165.0), along(1250.0) + 2.6, 1, true));
-    s.push(Site::new(Kind::Radar, bank(1300.0, -205.0), along(1300.0) + 2.2, 1, true));
-    s.push(Site::new(Kind::Truck, bank(1205.0, -180.0), along(1205.0) + 1.4, 1, false));
-    s.push(Site::new(Kind::Zsu, bank(1170.0, -120.0), along(1170.0), 1, false));
     // The road bridge across the river, its deck square to the stream.
     let z = -700.0;
     let mut bridge = Site::new(Kind::Bridge, bank(z, 0.0), along(z) + PI / 2.0, 2, true);
     bridge.pos.y = terrain::floor(river_x(z), z);
     s.push(bridge);
-    s.push(Site::new(Kind::Zsu, bank(-770.0, 110.0), along(-770.0), 2, false));
     // Supply depot on the east bank: two warehouses and two fuel tanks.
     s.push(Site::new(Kind::Warehouse, bank(-2650.0, 215.0), along(-2650.0), 3, false));
     s.push(Site::new(Kind::Warehouse, bank(-2715.0, 255.0), along(-2715.0), 3, false));
     s.push(Site::new(Kind::FuelTank, bank(-2770.0, 175.0), 0.0, 3, false));
     s.push(Site::new(Kind::FuelTank, bank(-2800.0, 200.0), 0.0, 3, false));
     s
+}
+
+/// An SA-6 battery beside the river at station `z`, `off` metres east of
+/// its centre line (west when negative): the launcher, its radar further
+/// out and a resupply truck.
+pub fn battery(s: &mut Vec<Site>, z: f64, off: f64, group: usize, primary: bool) {
+    let out = off.signum();
+    s.push(Site::new(Kind::Launcher, bank(z, off), along(z) + 2.6, group, primary));
+    s.push(Site::new(Kind::Radar, bank(z + 50.0, off + out * 40.0), along(z + 50.0) + 2.2, group, primary));
+    s.push(Site::new(Kind::Truck, bank(z - 45.0, off + out * 15.0), along(z - 45.0) + 1.4, group, false));
+}
+
+/// A ZSU-23-4 beside the river at station `z`, `off` metres east of it.
+pub fn gun(s: &mut Vec<Site>, z: f64, off: f64, group: usize) {
+    s.push(Site::new(Kind::Zsu, bank(z, off), along(z), group, false));
 }
 
 /// Centre of a steerpoint group, a little above the ground.

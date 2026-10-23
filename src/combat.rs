@@ -7,6 +7,7 @@
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
 use crate::sim::{spec::STORES_MASS, trim, Aircraft, Flcs, Gate, Input, Mission, Type, G0};
+use crate::scenario::{self, Threats};
 use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
 use crate::weapons::*;
@@ -140,7 +141,7 @@ pub struct Station {
 }
 
 /// What the loadout screen sets before a sortie: the stores on the two
-/// pylon pairs and the internal fuel.
+/// pylon pairs, the internal fuel and the opposition.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Config {
     /// Stations 3 and 7.
@@ -152,16 +153,38 @@ pub struct Config {
     /// The player's airframe and the bandits'.
     pub jet: Type,
     pub aggressor: Type,
+    pub threats: Threats,
 }
 
 impl Config {
     pub fn for_mission(kind: MissionKind) -> Config {
-        match kind {
-            MissionKind::Gates => Config { outboard: None, inboard: None, fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
-            MissionKind::Airfield => Config { outboard: None, inboard: None, fuel: 0.6, jet: Type::F16, aggressor: Type::Mig29 },
-            MissionKind::Dogfight => Config { outboard: Some(Store::Aim120), inboard: None, fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
-            MissionKind::Strike => Config { outboard: Some(Store::Mk82), inboard: Some(Store::Mk82), fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
-            MissionKind::Free => Config { outboard: Some(Store::Aim120), inboard: Some(Store::Mk82), fuel: 1.0, jet: Type::F16, aggressor: Type::Mig29 },
+        let (outboard, inboard, fuel) = match kind {
+            MissionKind::Gates => (None, None, 1.0),
+            MissionKind::Airfield => (None, None, 0.6),
+            MissionKind::Dogfight => (Some(Store::Aim120), None, 1.0),
+            MissionKind::Strike => (Some(Store::Mk82), Some(Store::Mk82), 1.0),
+            MissionKind::Free => (Some(Store::Aim120), Some(Store::Mk82), 1.0),
+        };
+        Config { outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind) }
+    }
+
+    /// Next bandit fleet: F-16 aggressors, MiG-29s, then the two mixed.
+    pub fn next_fleet(&mut self) {
+        if self.threats.mixed {
+            self.threats.mixed = false;
+            self.aggressor = Type::F16;
+        } else if self.aggressor == Type::Mig29 {
+            self.threats.mixed = true;
+        } else {
+            self.aggressor = Type::Mig29;
+        }
+    }
+
+    pub fn fleet_name(&self) -> &'static str {
+        if self.threats.mixed {
+            "F-16 + MIG-29"
+        } else {
+            self.aggressor.name()
         }
     }
 
@@ -359,8 +382,7 @@ impl Patrol {
 }
 
 const PATROL_POINTS: usize = 8;
-/// Halfway down the gate route, so the circuits ring the gorge.
-const PATROL_CENTRE_Z: f64 = -600.0;
+const PATROL_CENTRE_Z: f64 = scenario::PATROL_CENTRE_Z;
 /// A bandit turns for the next point once within this of it, m.
 const PATROL_REACHED: f64 = 3000.0;
 
@@ -436,7 +458,8 @@ pub struct Combat {
     gun_acc: f64,
     fired: u32,
     player_trail: Option<usize>,
-    sam_clock: f64,
+    /// The ground sites as deployed, for free flight to rebuild them.
+    pristine: Vec<Site>,
     rnd: Lcg,
     /// Airfield sortie: legs done (takeoff, steerpoint, landing), whether the
     /// wheels are on the runway, and the vertical speed a step ago.
@@ -525,6 +548,9 @@ pub fn load(a: &mut Aircraft, l: &Loadout) {
     a.throttle = t.throttle;
     a.update(0.0, &Input::default());
 }
+
+/// Callsigns in the order the bandits are put up.
+const CALLSIGNS: [&str; scenario::MAX_BANDITS as usize] = ["BANDIT 1", "BANDIT 2", "BANDIT 3", "BANDIT 4", "BANDIT 5", "BANDIT 6"];
 
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
     Bandit { jet, pilot: Pilot::new(skill), hp: 100.0, callsign, rounds: GUN_ROUNDS, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0, patrol: None }
@@ -625,7 +651,7 @@ impl Combat {
             gun_acc: 0.0,
             fired: 0,
             player_trail: None,
-            sam_clock: 25.0,
+            pristine: Vec::new(),
             rnd: Lcg(90210),
             leg: 0,
             touched: false,
@@ -692,6 +718,46 @@ impl Combat {
         c
     }
 
+    /// Puts up the opposition the loadout screen chose (scenario::deploy):
+    /// the bandits and the ground sites, and for the fight the steerpoint at
+    /// the bandits, for the strike one at each target group.
+    pub fn deploy(&mut self, cfg: &Config, m: &mut Mission) {
+        if !matches!(self.kind, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free) {
+            return;
+        }
+        let d = scenario::deploy(self.kind, cfg.aggressor, &cfg.threats, m);
+        self.reserve.clear();
+        self.bandits = d.bandits.iter().enumerate().map(|(i, s)| {
+            let callsign = CALLSIGNS[i.min(CALLSIGNS.len() - 1)];
+            match s.patrol {
+                Some((radius, turn, over, at)) => {
+                    let mut p = Patrol { radius, turn, over, next: 0 };
+                    p.next = p.after(at);
+                    let from = p.point(at);
+                    let mut b = bandit(spawn_type(s.kind, from, heading_of(p.point(p.next) - from), s.speed), s.skill, callsign);
+                    b.patrol = Some(p);
+                    b
+                }
+                None => bandit(spawn_type(s.kind, s.pos, s.heading, s.speed), s.skill, callsign),
+            }
+        }).collect();
+        self.sites = d.sites;
+        self.pristine = self.sites.clone();
+        let fwd = m.start_vel.norm();
+        match self.kind {
+            MissionKind::Dogfight if !self.bandits.is_empty() => {
+                let centre = self.bandits.iter().fold(V3::ZERO, |a, b| a + b.jet.pos) / self.bandits.len() as f64;
+                m.gates = vec![Gate { pos: centre, radius: 0.0, axis: fwd, passed: false }];
+                m.gate_index = 0;
+            }
+            MissionKind::Strike => {
+                m.gates = (0..targets::GROUPS.len()).filter_map(|g| targets::group_point(&self.sites, g)).map(|pos| Gate { pos, radius: 0.0, axis: fwd, passed: false }).collect();
+                m.gate_index = 0;
+            }
+            _ => {}
+        }
+    }
+
     /// Free flight goes on until the pilot quits: a new pair of bandits on
     /// their circuits half a minute after the last one falls, the targets rebuilt
     /// half a minute after the last one burns, and the jet rearmed, refuelled
@@ -709,7 +775,7 @@ impl Combat {
             let at = *self.rebuild_at.get_or_insert(self.clock + 30.0);
             if self.clock >= at {
                 self.rebuild_at = None;
-                self.sites = targets::place();
+                self.sites = if self.pristine.is_empty() { targets::place() } else { self.pristine.clone() };
                 if matches!(self.lock, Some(Who::Ground(_))) {
                     self.lock = None;
                 }
@@ -736,7 +802,7 @@ impl Combat {
     pub fn equip(&mut self, cfg: &Config) {
         // Bandits of the chosen type, where and as fast as the briefing put them.
         for b in self.bandits.iter_mut().chain(self.reserve.iter_mut()) {
-            if b.jet.kind != cfg.aggressor {
+            if b.jet.kind != cfg.aggressor && !cfg.threats.mixed {
                 let j = &b.jet;
                 b.jet = spawn_type(cfg.aggressor, j.pos, heading_of(j.vel), j.speed);
             }
@@ -1338,8 +1404,9 @@ impl Combat {
                 }
             }
             // A semi-active SAM goes blind when its radar dies.
-            if let Who::Ground(_) = self.missiles[i].from {
-                if !self.sites.iter().any(|s| s.kind == Kind::Radar && !s.dead) {
+            if let Who::Ground(g) = self.missiles[i].from {
+                let launcher = self.sites[g].pos;
+                if !self.sites.iter().any(|s| s.kind == Kind::Radar && !s.dead && (s.pos - launcher).len() < 300.0) {
                     self.missiles[i].tracking = false;
                 }
             }
@@ -1399,14 +1466,13 @@ impl Combat {
     }
 
     /// The ZSU-23-4s shoot at the player when he is in reach and in sight,
-    /// in bursts, leading him from a lagging track; the SA-6 battery fires
-    /// while its radar sees him above the valley clutter.
+    /// in bursts, leading him from a lagging track; each SA-6 launcher fires
+    /// while its own battery's radar sees him above the valley clutter, one
+    /// round every 25 s.
     fn step_sites(&mut self, dt: f64, a: &Aircraft) {
         if !self.hostile {
             return;
         }
-        self.sam_clock -= dt;
-        let radar = self.sites.iter().position(|s| s.kind == Kind::Radar && !s.dead);
         for k in 0..self.sites.len() {
             if self.sites[k].dead {
                 continue;
@@ -1414,12 +1480,14 @@ impl Combat {
             match self.sites[k].kind {
                 Kind::Zsu => self.flak(k, dt, a),
                 Kind::Launcher => {
-                    let Some(r) = radar else { continue };
+                    self.sites[k].clock -= dt;
                     let s = &self.sites[k];
-                    let eye = self.sites[r].eye();
+                    let own = |r: &&Site| r.kind == Kind::Radar && !r.dead && (r.pos - s.pos).len() < 300.0;
+                    let Some(radar) = self.sites.iter().find(own) else { continue };
+                    let eye = radar.eye();
                     let range = (a.pos - eye).len();
-                    if self.sam_clock <= 0.0 && s.ammo > 0 && a.agl > 300.0 && range > SA6.min_range && range < 14000.0 && line_of_sight(eye, a.pos) {
-                        self.sam_clock = 25.0;
+                    if s.clock <= 0.0 && s.ammo > 0 && a.agl > 300.0 && range > SA6.min_range && range < scenario::SAM_RANGE && line_of_sight(eye, a.pos) {
+                        self.sites[k].clock = 25.0;
                         let s = &mut self.sites[k];
                         s.ammo -= 1;
                         let pos = s.eye();

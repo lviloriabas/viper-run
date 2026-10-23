@@ -22,6 +22,7 @@ mod mig29;
 mod physio;
 mod png;
 mod props;
+mod scenario;
 mod scenery;
 mod settings;
 mod sim;
@@ -522,6 +523,7 @@ impl App {
         self.mission = Mission::new();
         self.mission.timed = self.settings.clock;
         self.combat = Combat::new(self.kind, &mut self.mission);
+        self.combat.deploy(&self.config, &mut self.mission);
         if self.kind != MissionKind::Gates {
             self.combat.equip(&self.config);
         }
@@ -561,10 +563,11 @@ impl App {
         self.keys.clear();
         self.center_stick();
         self.grab(true);
+        let dogfight = format!("DOGFIGHT // {} BANDITS // T LOCK, X WEAPON", self.config.threats.bandits);
         self.flash_toast(
             match self.kind {
                 MissionKind::Gates => "COLD RIVER // 10 GATES // MOUSE CAPTURED",
-                MissionKind::Dogfight => "DOGFIGHT // 3 BANDITS // T LOCK, X WEAPON",
+                MissionKind::Dogfight => &dogfight,
                 MissionKind::Strike => "STRIKE // BRIDGE AND SA-6 // X WEAPON, T DESIGNATE",
                 MissionKind::Airfield => "RUNWAY A // THROTTLE UP, ROTATE AT 150 KT, G GEAR UP",
                 MissionKind::Free => "FREE FLIGHT // NOBODY SHOOTS BACK // STOP ON RWY A TO REARM",
@@ -698,11 +701,26 @@ impl App {
             Action::Fullscreen => self.toggle_fullscreen(),
             Action::Pick(k) => {
                 self.kind = k;
-                let (jet, aggressor) = (self.config.jet, self.config.aggressor);
+                let (jet, aggressor, mixed) = (self.config.jet, self.config.aggressor, self.config.threats.mixed);
                 self.config = combat::Config { jet, aggressor, ..combat::Config::for_mission(k) };
+                self.config.threats.mixed = mixed;
             }
             Action::Jet => self.config.jet = self.config.jet.next(),
-            Action::Aggressor => self.config.aggressor = self.config.aggressor.next(),
+            Action::Aggressor => self.config.next_fleet(),
+            Action::Layout => {
+                let t = &self.config.threats;
+                self.config.threats = scenario::Threats::with_layout(t.layout.next(), self.kind, t.mixed);
+            }
+            // The counts wrap round; a dogfight always has someone to fight.
+            Action::Bandits => {
+                let t = &mut self.config.threats;
+                t.bandits = (t.bandits + 1) % (scenario::MAX_BANDITS + 1);
+                if self.kind == MissionKind::Dogfight {
+                    t.bandits = t.bandits.max(1);
+                }
+            }
+            Action::Sams => self.config.threats.sams = (self.config.threats.sams + 1) % (scenario::MAX_SAMS + 1),
+            Action::Guns => self.config.threats.guns = (self.config.threats.guns + 1) % (scenario::MAX_GUNS + 1),
             Action::Clock => self.settings.clock = !self.settings.clock,
             Action::Reset => {
                 let fs = self.settings.fullscreen;

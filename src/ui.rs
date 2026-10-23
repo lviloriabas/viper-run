@@ -7,7 +7,10 @@ use crate::combat::{Config, MissionKind, Store};
 use crate::keymap::{key_name, Keymap, BINDS};
 use crate::math::*;
 use crate::settings::{Best, PadLayout, PitchSource, Settings, FOV_MAX, FOV_MIN};
+use crate::scenario;
 use crate::sim::{Aircraft, Mission};
+use crate::targets;
+use crate::terrain;
 use crate::world::Camera;
 
 pub const INK: Col = rgba(0x05, 0x08, 0x07, 1.0);
@@ -50,6 +53,12 @@ pub enum Action {
     /// Next airframe for the player, and for the bandits.
     Jet,
     Aggressor,
+    /// Threat setup: next prepared layout, and one more bandit, SA-6
+    /// battery or ZSU-23-4 (wrapping to none).
+    Layout,
+    Bandits,
+    Sams,
+    Guns,
     /// Mission clocks on or off.
     Clock,
     /// Wait for a key for an action (index into keymap::BINDS) and slot.
@@ -220,7 +229,7 @@ impl<'a> Ui<'a> {
         yy += 18.0 * s;
         let (copy, tag) = match mission {
             MissionKind::Gates => ("You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
-            MissionKind::Dogfight => ("Two aggressor jets are coming up the gorge high and fast, and a third is somewhere off the flank. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
+            MissionKind::Dogfight => ("Aggressor jets are coming for you, as many and from where the threat setup on the loadout screen puts them. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
             MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", match (self.pad, self.layout) {
                     (false, _) => "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B.",
                     (true, PadLayout::Combat) => "GEAR AND FLAPS ARE ON THE D-PAD, WHEEL BRAKES ON LT.",
@@ -275,9 +284,11 @@ impl<'a> Ui<'a> {
             crate::sim::Type::F16 => ("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM"),
             crate::sim::Type::Mig29 => ("AIRFRAME", "MIG-29A 9.12", "2 X RD-33 / FBW TRAINER FLCS"),
         };
+        let bandits = format!("{} BANDITS", cfg.threats.bandits);
+        let fleet = format!("{}, AIM-9, GUN", cfg.fleet_name());
         let rows = match mission {
             MissionKind::Gates => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, COAST EGRESS"), ("CLOCK", "02:30", "+ 8 SEC PER GATE"), ("HAZARD", "TERRAIN", "STALL, G-LIMIT")],
-            MissionKind::Dogfight => [airframe, ("THREAT", "3 BANDITS", if cfg.aggressor == crate::sim::Type::Mig29 { "MIG-29A FULCRUM, AIM-9, GUN" } else { "AGGRESSOR F-16, AIM-9, GUN" }), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
+            MissionKind::Dogfight => [airframe, ("THREAT", &bandits, &fleet), ("STORES", "2 AIM-9M 2 AIM-120C", "M61A1, 511 ROUNDS"), ("CLOCK", "06:00", "SPLASH ALL THREE")],
             MissionKind::Airfield => [airframe, ("ROUTE", "RWY A, STPT 1, RWY A", "9 KM PAST THE FAR END, 3,000 FT"), ("CLOCK", "10:00", "FULL-STOP LANDING"), ("SCORING", "TOUCHDOWN", "SINK RATE AND AIM POINT")],
             MissionKind::Strike => [airframe, ("TARGETS", "BRIDGE, SA-6 SITE", "CONVOY, DEPOT, ZSU-23-4"), ("STORES", "4 MK-82 2 AIM-9M", "M61A1, 511 ROUNDS"), ("CLOCK", "07:00", "DROP BRIDGE, KILL THE SAM")],
             MissionKind::Free => [airframe, ("ROUTE", "10 GATES", "RIVER GORGE, ON A LOOP"), ("TARGETS", "2 BANDITS, SA-6", "HOLD FIRE, BACK IN 30 SEC"), ("CLOCK", "OFF", "STOP ON RWY A TO REARM")],
@@ -436,7 +447,10 @@ impl<'a> Ui<'a> {
     pub fn loadout_screen(&mut self, mission: MissionKind, cfg: &Config) {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
-        let (pw, ph) = ((self.w - 24.0 * s).min(420.0 * s), (self.h - 20.0 * s).min(250.0 * s));
+        // The fighting missions add the threat setup and its map on the right.
+        let threats = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
+        let left = if threats { 240.0 * s } else { 420.0 * s };
+        let (pw, ph) = ((self.w - 24.0 * s).min(if threats { 800.0 * s } else { left }), (self.h - 20.0 * s).min(250.0 * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
         self.frame(x, y, pw, ph);
         let m = 14.0 * s;
@@ -481,6 +495,145 @@ impl<'a> Ui<'a> {
         let stats = format!("GROSS {} LB   DRAG +{} COUNTS   T/W {:.2}", (lb / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
         self.cv.text(&stats, x + m, yy + 4.0 * s, sm, AMBER, Align::Left);
         self.cv.text(if self.pad { "D-PAD TO A STORE, A TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." } else { "CLICK A STORE TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." }, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        // After LAUNCH and the stores in the keyboard order.
+        if threats && pw > left + 200.0 * s {
+            self.threat_setup(x + left, y + m, pw - left - m, ph - 2.0 * m, mission, cfg);
+        }
+    }
+
+    /// Threat setup beside the loadout: the prepared layout, the number and
+    /// type of bandits, the SA-6 batteries and ZSU-23-4s, and a tactical map
+    /// of what that puts in the valley.
+    fn threat_setup(&mut self, x: f32, y: f32, w: f32, h: f32, mission: MissionKind, cfg: &Config) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let t = &cfg.threats;
+        let mut yy = y;
+        self.cv.text("// OPPOSITION", x, yy, sm, DIM, Align::Left);
+        yy += 20.0 * s;
+        self.cv.text("THREATS", x, yy, s * 3.0, RED, Align::Left);
+        yy += 14.0 * s;
+        let col2 = x + 64.0 * sm;
+        let rows: [(&str, String, Action); 5] = [
+            ("LAYOUT", t.layout.name().to_string(), Action::Layout),
+            ("BANDITS", if t.bandits == 0 { "NONE".to_string() } else { t.bandits.to_string() }, Action::Bandits),
+            ("TYPE", cfg.fleet_name().to_string(), Action::Aggressor),
+            ("SA-6 SITES", if t.sams == 0 { "NONE".to_string() } else { t.sams.to_string() }, Action::Sams),
+            ("ZSU-23-4", if t.guns == 0 { "NONE".to_string() } else { t.guns.to_string() }, Action::Guns),
+        ];
+        let rows_top = yy;
+        for (label, value, act) in rows {
+            self.cv.text(label, x, yy + 7.0 * s, sm, DIM, Align::Left);
+            self.button(&value, "", col2, yy, false, act);
+            yy += 17.0 * s;
+        }
+        let brief_w = col2 - x + 90.0 * s;
+        yy += 4.0 * s;
+        self.cv.paragraph(t.layout.brief(), x, yy, brief_w, sm, 1.6, rgba(0xb3, 0xc3, 0xb7, 1.0));
+        // The map takes the rest of the column, right of the setup rows.
+        let mx = x + brief_w + 8.0 * s;
+        let mw = (x + w - mx).max(40.0 * s);
+        self.tactical_map(mx, rows_top - 34.0 * s, mw, h - (rows_top - 34.0 * s - y), mission, cfg);
+    }
+
+    /// Tactical map of the Cold River valley, north up: the ground shaded by
+    /// height, the river, the gate route and the runway, the jet's start,
+    /// and the opposition the setup deploys, with the SA-6 and ZSU-23-4
+    /// engagement rings and the patrol circuits.
+    fn tactical_map(&mut self, x: f32, y: f32, w: f32, h: f32, mission: MissionKind, cfg: &Config) {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let m = Mission::new();
+        let d = scenario::deploy(mission, cfg.aggressor, &cfg.threats, &m);
+        // A window from past the farthest bandits (north, -z, at the top) to
+        // just behind the start.
+        let (z0, z1) = (m.start_pos.z - 40000.0, m.start_pos.z + 3000.0);
+        let span_z = z1 - z0;
+        let span_x = span_z * (w / h) as f64;
+        let cx = terrain::river_x((z0 + z1) * 0.5);
+        let to = |p: V3| -> [f32; 2] { [x + (((p.x - cx) / span_x + 0.5) as f32) * w, y + (((p.z - z0) / span_z) as f32) * h] };
+        let px = |metres: f64| (metres / span_z) as f32 * h;
+        self.cv.set_clip(Some(vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]]));
+        // Ground: cells shaded by height, lit from the north-west.
+        let (nx, nz) = (((w / h) * 72.0).round().max(8.0) as usize, 72usize);
+        let (cw, ch) = (w / nx as f32, h / nz as f32);
+        for j in 0..nz {
+            for i in 0..nx {
+                let wx = cx + ((i as f64 + 0.5) / nx as f64 - 0.5) * span_x;
+                let wz = z0 + (j as f64 + 0.5) / nz as f64 * span_z;
+                let e = terrain::floor(wx, wz);
+                let slope = e - terrain::floor(wx - 250.0, wz - 250.0);
+                let t = clamp((e - 500.0) / 2000.0, 0.0, 1.0) as f32;
+                let lit = clamp(1.0 + slope / 900.0, 0.85, 1.15) as f32;
+                let (r, g, b) = if t < 0.5 { (0.16 + 0.5 * t, 0.24 + 0.24 * t, 0.14 + 0.22 * t) } else { (0.41 + 0.5 * (t - 0.5), 0.36 + 0.56 * (t - 0.5), 0.25 + 0.7 * (t - 0.5)) };
+                let c = |v: f32| ((v * lit).min(1.0) * 255.0) as u8;
+                self.cv.rect(x + i as f32 * cw, y + j as f32 * ch, cw + 0.5, ch + 0.5, rgba(c(r), c(g), c(b), 1.0));
+            }
+        }
+        // River, route and runway.
+        let river: Vec<[f32; 2]> = (0..=60).map(|k| to(scenario::river(z0 + k as f64 / 60.0 * span_z))).collect();
+        self.cv.polyline(&river, 2.0, false, rgba(0x5a, 0x9c, 0xd8, 0.9));
+        let route: Vec<[f32; 2]> = m.gates.iter().map(|g| to(g.pos)).collect();
+        self.cv.polyline(&route, 1.0, false, with_alpha(GREEN, 0.35));
+        let (ax, az) = terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH, 0.0);
+        let (bx, bz) = terrain::runway_point(terrain::RUNWAY_HALF_LENGTH, 0.0);
+        let (ra, rb) = (to(v3(ax, 0.0, az)), to(v3(bx, 0.0, bz)));
+        self.cv.line(ra[0], ra[1], rb[0], rb[1], 3.0, rgba(0x2a, 0x2c, 0x2e, 1.0));
+        // Engagement rings first, under the markers.
+        for site in &d.sites {
+            let p = to(site.pos);
+            match site.kind {
+                targets::Kind::Launcher => self.cv.circle(p[0], p[1], px(scenario::SAM_RANGE), 1.0, with_alpha(RED, 0.55)),
+                targets::Kind::Zsu => self.cv.circle(p[0], p[1], px(scenario::GUN_RANGE).max(3.0), 1.0, with_alpha(AMBER, 0.6)),
+                _ => {}
+            }
+        }
+        for site in &d.sites {
+            let p = to(site.pos);
+            match site.kind {
+                targets::Kind::Launcher => {
+                    self.cv.tri([p[0], p[1] - 4.0 * s], [p[0] - 3.5 * s, p[1] + 3.0 * s], [p[0] + 3.5 * s, p[1] + 3.0 * s], RED);
+                    self.cv.text("SA-6", p[0] + 5.0 * s, p[1], sm, RED, Align::Left);
+                }
+                targets::Kind::Zsu => self.cv.disc(p[0], p[1], 2.0 * s, AMBER),
+                targets::Kind::Radar => {}
+                _ => self.cv.rect(p[0] - 1.5 * s, p[1] - 1.5 * s, 3.0 * s, 3.0 * s, CREAM),
+            }
+        }
+        // Bandits: on patrol, their circuit; otherwise where they start and
+        // the way they head.
+        for b in &d.bandits {
+            let letter = if b.kind == crate::sim::Type::Mig29 { "M" } else { "F" };
+            let p = match b.patrol {
+                Some((radius, _, _, at)) => {
+                    let c = to(scenario::river(scenario::PATROL_CENTRE_Z));
+                    self.cv.circle(c[0], c[1], px(radius), 1.0, with_alpha(RED, 0.4));
+                    let ang = at as f64 * TAU / 8.0;
+                    to(scenario::river(scenario::PATROL_CENTRE_Z) + v3(ang.sin() * radius, 0.0, -ang.cos() * radius))
+                }
+                None => {
+                    let p = to(b.pos);
+                    let (dx, dz) = (b.heading.sin(), -b.heading.cos());
+                    self.cv.line(p[0], p[1], p[0] + (dx * 9.0) as f32 * s, p[1] + (dz * 9.0) as f32 * s, 1.0, RED);
+                    p
+                }
+            };
+            let r = 3.5 * s;
+            self.cv.quad([[p[0], p[1] - r], [p[0] + r, p[1]], [p[0], p[1] + r], [p[0] - r, p[1]]], RED);
+            self.cv.text(letter, p[0], p[1] - r - 5.0 * s, sm, RED, Align::Center);
+        }
+        // The jet's start, pointing down the route.
+        let p = to(m.start_pos);
+        let f = v3(m.start_vel.x, 0.0, m.start_vel.z).norm();
+        let (fx, fz) = (f.x as f32, f.z as f32);
+        let r = 5.0 * s;
+        self.cv.tri([p[0] + fx * r, p[1] + fz * r], [p[0] - fx * r * 0.6 - fz * r * 0.6, p[1] - fz * r * 0.6 + fx * r * 0.6], [p[0] - fx * r * 0.6 + fz * r * 0.6, p[1] - fz * r * 0.6 - fx * r * 0.6], GREEN);
+        self.cv.set_clip(None);
+        self.cv.stroke_rect(x, y, w, h, 1.0, LINE_HOT);
+        self.cv.text("N", x + w - 6.0 * s, y + 7.0 * s, sm, CREAM, Align::Center);
+        let scale = px(10000.0);
+        self.cv.line(x + 6.0 * s, y + h - 6.0 * s, x + 6.0 * s + scale, y + h - 6.0 * s, 1.0, CREAM);
+        self.cv.text("10 KM", x + 6.0 * s, y + h - 12.0 * s, sm, CREAM, Align::Left);
     }
 
     /// Result of a DOGFIGHT or STRIKE sortie.
@@ -527,7 +680,7 @@ impl<'a> Ui<'a> {
                     _ => "QUALIFIED",
                 };
                 let (kicker, title, text) = if fight {
-                    ("// SPLASH ALL BANDITS, COLD RIVER", "SKY CLEARED", format!("All three aggressors are down and you are still flying. The evaluator has logged the fight as {rank}."))
+                    ("// SPLASH ALL BANDITS, COLD RIVER", "SKY CLEARED", format!("Every aggressor is down and you are still flying. The evaluator has logged the fight as {rank}."))
                 } else {
                     ("// TARGETS DESTROYED, COLD RIVER", "STRIKE COMPLETE", format!("The bridge is in the river and the SA-6 battery is burning. The evaluator has logged the strike as {rank}."))
                 };
