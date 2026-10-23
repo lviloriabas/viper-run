@@ -213,7 +213,7 @@ ground. The result screen shows the kills or targets, the time and a rating.
 ### Bandits and ground targets
 
 Bandits fly the same six-degree-of-freedom model and FLCS as the player:
-MiG-29A Fulcrums by default, or F-16s in desert splinter paint (TYPE in the
+MiG-29A Fulcrums by default, or F-16s in the 64th Aggressor Squadron's splinter schemes, taken in turn: Flanker blues, Desert, Ghost and Arctic, with Nellis's WA tail code (TYPE in the
 threat setup); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
 pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
 overshoot, a max-g break when the player is at its six, beaming and then

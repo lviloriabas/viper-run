@@ -425,13 +425,9 @@ void main() {
         vec3 paint = dark > 0.75 ? vec3(0.34, 0.40, 0.47) : (mid > 0.15 ? vec3(0.52, 0.60, 0.67) : vec3(0.72, 0.77, 0.80));
         base = paint * (v_color.g / 0.72);
     }
-    // Repaint: 1 lays two-tone splinter camouflage of the paint colour over
-    // the grey skin (aggressors); 2 tints everything (burnt wrecks).
+    // Repaint 2 tints everything (burnt wrecks); aggressors wear their own
+    // skin texture instead (World::draw_jet).
     if (u_paint.w > 1.5) base *= u_paint.rgb;
-    else if (u_paint.w > 0.5 && v_uv.x >= 0.0) {
-        float splinter = step(0.0, sin(v_local.x * 1.9 + v_local.z * 0.8) + sin(v_local.z * 1.3 - v_local.x * 0.5 + v_local.y * 2.0 + 1.0));
-        base *= u_paint.rgb * mix(1.15, 0.62, splinter);
-    }
     vec3 col = base * v_light;
     float a = u_alpha;
     if (u_alpha < 0.9 && u_glow < 0.5) {
@@ -649,6 +645,8 @@ pub struct World {
     mig_stab: [Part; 2],
     mig_gear: [Part; 3],
     mig_canopy: Part,
+    /// Skins of the aggressor F-16s, one per airframe::SCHEMES entry.
+    aggressor: Vec<TextureId>,
     /// Buildings, trees and pylons (scenery.rs), each at its cluster origin.
     scenery: Vec<(V3, Part)>,
     post: Pipeline,
@@ -791,6 +789,14 @@ impl World {
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
         ctx.texture_generate_mipmaps(skin);
+        let aggressor = airframe::SCHEMES
+            .iter()
+            .map(|k| {
+                let t = ctx.new_texture_from_data_and_format(&airframe::aggressor_skin(k), skin_params);
+                ctx.texture_generate_mipmaps(t);
+                t
+            })
+            .collect();
         let air = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, depth);
         let glass = |cull| PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::alpha_blend()), cull_face: cull, ..Default::default() };
         let glass_back = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, glass(CullFace::Back));
@@ -855,6 +861,7 @@ impl World {
             mig_stab,
             mig_gear,
             mig_canopy,
+            aggressor,
             scenery,
             post,
             vision,
@@ -1067,7 +1074,20 @@ impl World {
         ctx.draw(0, p.count, 1);
     }
 
+    /// A skinned part wearing another skin texture, if one is given.
+    fn draw_part_in(&self, ctx: &mut dyn RenderingBackend, p: &Part, skin: Option<TextureId>, u: &AirU, model: &M4) {
+        match skin {
+            Some(t) => {
+                let bind = Bindings { images: vec![t], ..p.bind.clone() };
+                self.draw_part(ctx, &Part { bind, count: p.count }, u, model);
+            }
+            None => self.draw_part(ctx, p, u, model),
+        }
+    }
+
     /// Another F-16 in the scene (a bandit or a tumbling wreck), repainted.
+    /// Paint mode 1 puts an F-16 in the aggressor scheme numbered by the
+    /// paint's first value.
     /// Moving surfaces and the canopy are only drawn within 2.5 km; beyond
     /// that the jet is a few pixels and the skin alone will do.
     pub fn draw_jet(&self, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera, a: &Aircraft, paint: [f32; 4]) {
@@ -1080,7 +1100,9 @@ impl World {
             self.draw_mig(ctx, a, &base, &model, true);
             return;
         }
-        self.draw_part(ctx, &self.exterior, &base, &model);
+        let camo = (paint[3] == 1.0).then(|| self.aggressor[paint[0] as usize % self.aggressor.len()]);
+        let base = AirU { paint: if camo.is_some() { [0.0; 4] } else { paint }, ..base };
+        self.draw_part_in(ctx, &self.exterior, camo, &base, &model);
         if rel.len() > 2500.0 {
             return;
         }
@@ -1088,11 +1110,11 @@ impl World {
             let angle = clamp(-a.surf_pitch * 25.0 * DEG + side * -a.surf_roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
             let pivot = v3(side * airframe::STAB_PIVOT.x, airframe::STAB_PIVOT.y, airframe::STAB_PIVOT.z);
             let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
-            self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
+            self.draw_part_in(ctx, &self.stab[i], camo, &base, &mat_mul(&model, &local));
         }
         let (hinge, axis) = airframe::rudder_axis();
         let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
-        self.draw_part(ctx, &self.rudder, &base, &mat_mul(&model, &local));
+        self.draw_part_in(ctx, &self.rudder, camo, &base, &mat_mul(&model, &local));
         self.draw_gear(ctx, a, &base, &model);
         // Opaque canopy: the gold tint reads at a distance without the glass passes.
         self.draw_part(ctx, &self.canopy, &base, &model);

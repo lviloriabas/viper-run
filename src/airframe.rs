@@ -387,6 +387,53 @@ const GREY_LOW: [f32; 3] = [160.0, 166.0, 171.0]; // FS 36375 light ghost grey
 const INSIGNIA: [f32; 3] = [84.0, 88.0, 94.0];
 const RADOME: [f32; 3] = [112.0, 116.0, 120.0];
 
+/// An aggressor camouflage: the three colours of a hard-edged splinter
+/// pattern, the fin serial and the colour of the stencils.
+pub struct Scheme {
+    colours: [[f32; 3]; 3],
+    serial: &'static str,
+    ink: [f32; 3],
+}
+
+/// The paint schemes the 64th Aggressor Squadron's F-16s wear at Nellis,
+/// each copying a threat jet's: "Flanker", the Su-27's three blues;
+/// "Desert", tan, brown and drab; "Ghost", two blue-greys over light grey;
+/// and "Arctic", white and greys. Bandits take them in turn.
+pub const SCHEMES: [Scheme; 4] = [
+    // Flanker
+    Scheme { colours: [[176.0, 196.0, 214.0], [118.0, 146.0, 180.0], [64.0, 88.0, 124.0]], serial: "AF 86-0280", ink: [38.0, 44.0, 58.0] },
+    // Desert
+    Scheme { colours: [[198.0, 172.0, 126.0], [150.0, 110.0, 70.0], [104.0, 106.0, 74.0]], serial: "AF 86-0299", ink: [52.0, 44.0, 34.0] },
+    // Ghost
+    Scheme { colours: [[168.0, 176.0, 184.0], [118.0, 128.0, 140.0], [84.0, 94.0, 108.0]], serial: "AF 86-0320", ink: [40.0, 44.0, 50.0] },
+    // Arctic
+    Scheme { colours: [[226.0, 228.0, 230.0], [162.0, 168.0, 174.0], [74.0, 78.0, 84.0]], serial: "AF 86-0291", ink: [40.0, 42.0, 46.0] },
+];
+
+impl Scheme {
+    /// Colour at a point of one painted view (0 top, 1 bottom, 2 and 3 the
+    /// sides). Three families of straight lines, each at its own angle and
+    /// spacing, cut the skin into angular patches, and each patch takes a
+    /// colour from a hash of the three strips it lies in, so neighbours that
+    /// draw the same colour merge into the long splinters of the real paint.
+    fn at(&self, a: f64, b: f64, view: u32) -> [f32; 3] {
+        const FAMILIES: [(f64, f64, f64); 3] = [(0.45, 2.9, 0.3), (1.75, 3.5, 0.7), (2.7, 4.4, 0.15)];
+        let mut h = 0x9e37_79b9u32.wrapping_mul(view + 1) ^ self.serial.len() as u32;
+        for (angle, spacing, offset) in FAMILIES {
+            let d = a * f64::cos(angle) + b * f64::sin(angle);
+            let k = (d / spacing + offset).floor() as i32 as u32;
+            h = (h ^ k).wrapping_mul(0x85eb_ca6b);
+            h ^= h >> 13;
+        }
+        self.colours[(h % 3) as usize]
+    }
+}
+
+/// An aggressor's skin texture, painted like `Airframe::skin`.
+pub fn aggressor_skin(scheme: &Scheme) -> Vec<u8> {
+    paint_skin(Some(scheme))
+}
+
 fn in_star(dx: f64, dy: f64, r: f64) -> bool {
     // Five-pointed star, point up: even-odd test against its ten corners.
     let pts: Vec<(f64, f64)> = (0..10)
@@ -447,18 +494,23 @@ fn glyph_atlas() -> &'static [u8] {
     ATLAS.get_or_init(font::atlas)
 }
 
-/// Colour of the paint at a body point seen in one view.
-fn paint(view: View, z: f64, a: f64) -> [f32; 3] {
+/// Colour of the paint at a body point seen in one view, in the Block 50's
+/// two greys or, for an aggressor, in its camouflage.
+fn paint(view: View, z: f64, a: f64, camo: Option<&Scheme>) -> [f32; 3] {
     let s = section(z);
     match view {
         View::Top | View::Bottom => {
             let x = a;
             let top = view == View::Top;
-            let mut c = if top { GREY_TOP } else { GREY_LOW };
+            let mut c = match camo {
+                Some(k) => k.at(x, z, if top { 0 } else { 1 }),
+                None if top => GREY_TOP,
+                None => GREY_LOW,
+            };
             if top {
                 // Anti-glare panel ahead of the windscreen.
                 if z > -6.2 && z < CANOPY_FRONT + 0.1 && x.abs() < s.w * 0.55 {
-                    c = GREY_DARK;
+                    c = camo.map_or(GREY_DARK, |k| k.colours[2].map(|v| v * 0.8));
                 }
                 // Star points forward, bars run spanwise: top of the left wing.
                 if insignia(x, -z, -3.05, -2.35, 0.42).is_some_and(|d| d) {
@@ -487,26 +539,39 @@ fn paint(view: View, z: f64, a: f64) -> [f32; 3] {
             let dir = if view == View::Right { -1.0 } else { 1.0 };
             // Medium grey above the chine, light grey below, blended over a band.
             let split = s.yc + 0.05;
-            let mut c = if y > split + 0.06 { GREY_TOP } else if y < split - 0.06 { GREY_LOW } else { [143.0, 149.0, 154.0] };
+            let mut c = match camo {
+                Some(k) => k.at(z, y, 2 + (view == View::Left) as u32),
+                None if y > split + 0.06 => GREY_TOP,
+                None if y < split - 0.06 => GREY_LOW,
+                None => [143.0, 149.0, 154.0],
+            };
             if z < -5.95 {
                 c = RADOME;
             }
             if y > FIN_ROOT_Y + 0.1 && z > 3.6 {
-                // Fin: green tip band, AV tail code and serial.
-                c = GREY_TOP;
-                if y > 3.20 {
-                    c = [60.0, 112.0, 72.0];
-                }
-                if y > 3.52 {
-                    c = [40.0, 42.0, 46.0];
-                }
+                // Fin: the Aviano jet's green tip band, AV tail code and
+                // serial; an aggressor's camouflage runs up the fin to Nellis's
+                // WA code and its own serial.
+                let (code, serial, ink) = match camo {
+                    Some(k) => ("WA", k.serial, k.ink),
+                    None => {
+                        c = GREY_TOP;
+                        if y > 3.20 {
+                            c = [60.0, 112.0, 72.0];
+                        }
+                        if y > 3.52 {
+                            c = [40.0, 42.0, 46.0];
+                        }
+                        ("AV", "AF 89-2001", INSIGNIA)
+                    }
+                };
                 let code_start = if dir > 0.0 { 5.40 } else { 6.19 };
-                if text_pixel("AV", z, y, code_start, 2.70, 0.50, dir) {
-                    c = INSIGNIA;
+                if text_pixel(code, z, y, code_start, 2.70, 0.50, dir) {
+                    c = ink;
                 }
                 let serial_start = if dir > 0.0 { 4.75 } else { 6.10 };
-                if text_pixel("AF 89-2001", z, y, serial_start, 1.88, 0.16, dir) {
-                    c = INSIGNIA;
+                if text_pixel(serial, z, y, serial_start, 1.88, 0.16, dir) {
+                    c = ink;
                 }
             }
             if let Some(dark) = insignia(z * dir, y, -0.55 * dir, -0.08, 0.27) {
@@ -531,7 +596,7 @@ fn paint(view: View, z: f64, a: f64) -> [f32; 3] {
 }
 
 /// Paints the four views into the skin texture, with a little grain.
-fn paint_skin() -> Vec<u8> {
+fn paint_skin(camo: Option<&Scheme>) -> Vec<u8> {
     let mut out = vec![0u8; SKIN_W * SKIN_H * 4];
     for py in 0..SKIN_H {
         for px in 0..SKIN_W {
@@ -547,7 +612,7 @@ fn paint_skin() -> Vec<u8> {
             let z = PAINT_Z.0 + (u * 2.0).fract() * (PAINT_Z.1 - PAINT_Z.0);
             let f = (v * 2.0).fract();
             let a = if side { SIDE_Y.0 - f * (SIDE_Y.0 - SIDE_Y.1) } else { f * 2.0 * PLAN_X - PLAN_X };
-            let c = paint(view, z, a);
+            let c = paint(view, z, a, camo);
             let grain = ((px * 7 + py * 13) % 5) as f32 - 2.0;
             let o = (py * SKIN_W + px) * 4;
             for k in 0..3 {
@@ -719,7 +784,7 @@ pub fn build() -> Airframe {
         mend_normals(m);
     }
     let (gear, gear_doors) = landing_gear();
-    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear, gear_doors, skin: paint_skin() }
+    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear, gear_doors, skin: paint_skin(None) }
 }
 
 /// Retraction pivots of the nose and main gear legs, the axis each swings

@@ -15,8 +15,6 @@ use crate::weapons::{Who, AIM120C, AIM9M, FAB250, FAB500, MK82, R27R, R73};
 use crate::world::{self, Camera, Part, Props, World};
 use miniquad::*;
 
-/// Aggressor paint: desert sand with a brown splinter.
-const AGGRESSOR: [f32; 4] = [0.86, 0.70, 0.48, 1.0];
 /// Burnt and blackened.
 const BURNT: [f32; 4] = [0.20, 0.18, 0.16, 2.0];
 const NONE: [f32; 4] = [0.0; 4];
@@ -140,11 +138,12 @@ impl Props for Scene<'_> {
                 w.draw_prop(ctx, vp, part, stretch(jet_model(a, st.at + shift(a, st.at), eye), across, along), NONE);
             }
         }
-        for b in c.bandits.iter().filter(|b| b.alive) {
+        for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
             if (b.jet.pos - eye).len() > 30000.0 {
                 continue;
             }
-            w.draw_jet(ctx, vp, cam, &b.jet, AGGRESSOR);
+            // Aggressor paint: the F-16s take the 64th's schemes in turn.
+            w.draw_jet(ctx, vp, cam, &b.jet, [i as f32, 0.0, 0.0, 1.0]);
             for (i, tip) in m.tips.iter().enumerate().take(b.missiles as usize) {
                 w.draw_prop(ctx, vp, tip, jet_model(&b.jet, shift(&b.jet, tip_at(i)), eye), NONE);
             }
