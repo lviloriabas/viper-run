@@ -7,15 +7,15 @@
 //! little apart and fed by steeply raked intakes under the LERX. The 42
 //! degree wings droop 3 degrees from the tail booms, which carry the
 //! all-moving stabilators and the twin fins, canted out 6 degrees over their
-//! root extensions. Smooth (Gouraud) surfaces in vertex colours: grey-green
-//! camouflage over light grey, a pale belly, bare-metal engine bays and red
+//! root extensions. Smooth (Gouraud) surfaces in vertex colours: a modern
+//! three-tone grey-blue digital (pixel) camouflage laid on by the aircraft
+//! shader over the upper skin, a pale belly, bare-metal engine bays and red
 //! stars on the fins and under the wings. Body axes as for the F-16 model:
 //! x right, y up, z aft, the centre of gravity at the origin.
 use crate::math::*;
 use crate::mesh::{Frame, Mesh, Rgb};
 
 const LIGHT: Rgb = Rgb(0.69, 0.72, 0.73);
-const CAMO: Rgb = Rgb(0.48, 0.56, 0.53);
 const BELLY: Rgb = Rgb(0.76, 0.80, 0.82);
 const RADOME: Rgb = Rgb(0.86, 0.87, 0.83);
 const GLASS: Rgb = Rgb(0.13, 0.19, 0.23);
@@ -31,9 +31,9 @@ const WHITE: Rgb = Rgb(0.90, 0.90, 0.88);
 pub const STAB_PIVOT: V3 = v3(1.95, 0.36, 6.55);
 /// Right nozzle exit (the left mirrors it).
 pub const NOZZLE: V3 = v3(1.11, 0.05, 7.25);
-/// Gear leg pivots and their retraction swings about x: the nose leg folds
+/// Gear leg pivots, the axis each swings about and its retraction swing: the nose leg folds
 /// aft between the intake ducts, the main legs forward into the wing roots.
-pub const GEAR_PIVOTS: [(V3, f64); 3] = [(v3(0.0, 0.14, -1.72), -95.0 * DEG), (v3(-1.50, 0.30, 1.95), 88.0 * DEG), (v3(1.50, 0.30, 1.95), 88.0 * DEG)];
+pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [(v3(0.0, 0.14, -1.72), V3::X, -95.0 * DEG), (v3(-1.50, 0.30, 1.95), V3::X, 88.0 * DEG), (v3(1.50, 0.30, 1.95), V3::X, 88.0 * DEG)];
 
 /// Pilot design eye, about 0.2 m under the canopy over the helmet.
 pub const EYE: V3 = v3(0.0, 1.38, -3.55);
@@ -111,21 +111,28 @@ fn naca(c: f64) -> f64 {
     5.0 * (0.2969 * c.sqrt() - 0.1260 * c - 0.3516 * c * c + 0.2843 * c.powi(3) - 0.1036 * c.powi(4))
 }
 
-/// Grey-green blotches over the light grey, in body coordinates, so the
-/// pattern runs on across the joins between parts.
-fn camo(p: V3) -> bool {
-    let a = (0.62 * p.z + 1.1 * (0.5 * p.x + 0.3 * p.y).sin()).sin();
-    let b = (0.9 * p.x - 0.45 * p.z + 0.8 * p.y + 1.3).sin();
-    a + 0.75 * b > 0.45
-}
-
-fn skin(p: V3, n: V3) -> Rgb {
+/// Upper skin is LIGHT, which `flag_camo` hands to the shader's digital
+/// camouflage; the belly stays pale.
+fn skin(_p: V3, n: V3) -> Rgb {
     if n.y < -0.4 {
         BELLY
-    } else if camo(p) {
-        CAMO
     } else {
         LIGHT
+    }
+}
+
+/// Marks the vertices painted LIGHT (plain, or darkened on the moving
+/// surfaces) with uv (-2, -2): the aircraft shader lays the three-tone
+/// digital camouflage over them, in body coordinates, so the pattern runs on
+/// across the joins between parts.
+fn flag_camo(m: &mut Mesh) {
+    for c in m.v.chunks_mut(crate::mesh::STRIDE) {
+        let k = c[7] as f64 / LIGHT.1;
+        let grey = (c[6] as f64 - LIGHT.0 * k).abs() < 0.01 && (c[8] as f64 - LIGHT.2 * k).abs() < 0.01;
+        if grey && k > 0.85 && k < 1.01 {
+            c[9] = -2.0;
+            c[10] = -2.0;
+        }
     }
 }
 
@@ -404,8 +411,8 @@ pub fn build() -> Fulcrum {
     // Fuselage, nose to beaver tail, and the brake-chute fairing closing it.
     let axis = |p: V3| v3(0.0, spline(&FUSE, p.z)[2], p.z);
     let fuse_z = |u: f64| mix(FUSE_Z.0, FUSE_Z.1, 0.5 * u + 0.5 * u * u);
-    m.surface(34, 14, |u, v| fuselage_point(fuse_z(u), v * TAU), |p, n| if p.z < RADOME_Z { RADOME } else { skin(p, n) }, Some(&axis));
-    let tail: Vec<V3> = (0..14).map(|k| fuselage_point(FUSE_Z.1, k as f64 * TAU / 14.0)).collect();
+    m.surface(34, 28, |u, v| fuselage_point(fuse_z(u), v * TAU), |p, n| if p.z < RADOME_Z { RADOME } else { skin(p, n) }, Some(&axis));
+    let tail: Vec<V3> = (0..28).map(|k| fuselage_point(FUSE_Z.1, k as f64 * TAU / 28.0)).collect();
     face(&mut m, &tail, V3::Z, SOOT);
     // Pitot boom on the radome tip, with its vane collar.
     m.capsule(v3(0.0, 0.27, -7.42), v3(0.0, 0.27, -8.65), 0.04, 0.018, METAL, 5);
@@ -418,9 +425,16 @@ pub fn build() -> Fulcrum {
     let irst = v3(0.17, fuselage_top_at(-4.98, 0.17) - 0.02, -4.98);
     m.ellipsoid(irst, v3(0.13, 0.12, 0.15), Rgb(0.25, 0.33, 0.36), 4, 8);
     m.ellipsoid(irst + v3(0.0, -0.03, 0.10), v3(0.15, 0.08, 0.20), LIGHT, 3, 8);
-    let top = fuselage_point(0.1, PI / 2.0).y - 0.02;
+    // The blade's foot follows the spine down, sunk a little into it.
+    let top = |z: f64| fuselage_point(z, PI / 2.0).y - 0.03;
+    let blade = [v3(0.0, top(0.0), 0.0), v3(0.0, top(0.36), 0.36), v3(0.0, top(0.36) + 0.30, 0.48), v3(0.0, top(0.0) + 0.30, 0.38)];
     for s in [-1.0, 1.0] {
-        face(&mut m, &[v3(s * 0.01, top, 0.0), v3(s * 0.01, top, 0.36), v3(s * 0.01, top + 0.30, 0.48), v3(s * 0.01, top + 0.30, 0.38)], v3(s, 0.0, 0.0), METAL);
+        let p: Vec<V3> = blade.iter().map(|&p| p + V3::X * (s * 0.012)).collect();
+        face(&mut m, &p, v3(s, 0.0, 0.0), METAL);
+    }
+    for k in 0..4 {
+        let (a, b) = (blade[k], blade[(k + 1) % 4]);
+        face(&mut m, &[a - V3::X * 0.012, a + V3::X * 0.012, b + V3::X * 0.012, b - V3::X * 0.012], (a + b) * 0.5 - (blade[0] + blade[2]) * 0.5, METAL);
     }
 
     for side in [-1.0, 1.0] {
@@ -510,7 +524,11 @@ pub fn build() -> Fulcrum {
         tip_cap(&mut st, &edge(true), &edge(false), V3::X * side, LIGHT);
         st
     };
-    Fulcrum { body: m, canopy, stabs: [stab(1.0), stab(-1.0)], gear: landing_gear() }
+    let mut stabs = [stab(1.0), stab(-1.0)];
+    for mesh in std::iter::once(&mut m).chain(stabs.iter_mut()) {
+        flag_camo(mesh);
+    }
+    Fulcrum { body: m, canopy, stabs, gear: landing_gear() }
 }
 
 /// Landing gear legs fully down: the nose leg with its twin wheels and mud
@@ -532,7 +550,7 @@ fn landing_gear() -> [Mesh; 3] {
     let plate = |m: &mut Mesh, o: V3, half: V3, col: Rgb| m.block(&Frame { o, x: V3::X, y: V3::Y, z: V3::Z }, half, col);
 
     let mut nose = Mesh::new();
-    let (p, _) = GEAR_PIVOTS[0];
+    let (p, _, _) = GEAR_PIVOTS[0];
     // Ten-sided tyres rest on a flat, r cos 18 degrees under the axle.
     let axle = v3(0.0, -1.55 + 0.285 * (PI / 10.0).cos(), -1.50);
     leg(&mut nose, p, axle, 0.06);
@@ -546,7 +564,7 @@ fn landing_gear() -> [Mesh; 3] {
 
     let main = |side: f64| {
         let mut m = Mesh::new();
-        let (p, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
+        let (p, _, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
         let axle = v3(side * 1.55, -1.55 + 0.42 * (PI / 10.0).cos(), 2.16);
         let foot = axle - V3::X * (side * 0.20);
         leg(&mut m, p, foot, 0.08);

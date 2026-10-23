@@ -269,7 +269,7 @@ pub fn rudder_axis() -> (V3, V3) {
 }
 
 pub const BRAKE_HINGE_Z: f64 = 5.95;
-const BOOM_Y: f64 = 0.42;
+pub const BOOM_Y: f64 = 0.42;
 
 pub struct Airframe {
     pub exterior: Mesh,
@@ -284,6 +284,8 @@ pub struct Airframe {
     pub tips: [Mesh; 2],
     /// Nose, left main and right main landing gear legs, extended.
     pub gear: [Mesh; 3],
+    /// Gear well doors that hinge on the airframe (see `GEAR_DOORS`).
+    pub gear_doors: [Mesh; 1],
     /// Paint texture, `SKIN_W` x `SKIN_H` RGBA.
     pub skin: Vec<u8>,
 }
@@ -716,18 +718,29 @@ pub fn build() -> Airframe {
     for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()).chain(tips.iter_mut()) {
         mend_normals(m);
     }
-    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear: landing_gear(), skin: paint_skin() }
+    let (gear, gear_doors) = landing_gear();
+    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear, gear_doors, skin: paint_skin() }
 }
 
-/// Retraction pivots of the nose and main gear legs, and the angle each
-/// swings through about the body x axis (negative: the wheel goes aft).
-pub const GEAR_PIVOTS: [(V3, f64); 3] = [(v3(0.0, -0.50, -3.45), -100.0 * DEG), (v3(-0.95, -0.38, 0.55), 95.0 * DEG), (v3(0.95, -0.38, 0.55), 95.0 * DEG)];
+/// Retraction pivots of the nose and main gear legs, the axis each swings
+/// about and the angle it swings through (negative: the wheel goes aft).
+/// The nose leg hangs from the forebody just ahead of the intake and folds
+/// aft; the mains hang from the sides of the intake trunk and fold forward
+/// and inward, tucking the wheels in under the body.
+pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
+    (v3(0.0, 0.08, -3.38), V3::X, -105.0 * DEG),
+    (v3(-0.72, 0.0, 0.55), v3(0.912, 0.0, 0.410), 95.0 * DEG),
+    (v3(0.72, 0.0, 0.55), v3(0.912, 0.0, -0.410), 95.0 * DEG),
+];
+/// Nose-well door: hinged on the right edge of the well, flush with the
+/// skin when shut, and swung down beside the leg when open.
+pub const GEAR_DOORS: [(V3, V3, f64); 1] = [(v3(0.17, 0.095, -3.20), V3::Z, 88.0 * DEG)];
 
-/// Landing gear legs fully down: nose leg with its single wheel under the
-/// intake, main legs with the larger wheels under the wing roots. The tyres
-/// meet the ground at the sim's wheel points (sim::WHEELS), 1.55 m under the
-/// datum.
-fn landing_gear() -> [Mesh; 3] {
+/// Landing gear legs fully down: nose leg with its single wheel in a fork,
+/// main legs with the larger wheels outboard of their struts and the strut
+/// doors along them. The tyres meet the ground at the sim's wheel points
+/// (sim::WHEELS), 1.55 m under the datum. Returns the legs and the doors.
+fn landing_gear() -> ([Mesh; 3], [Mesh; 1]) {
     let strut = Rgb(0.78, 0.78, 0.76);
     let tyre = Rgb(0.07, 0.07, 0.075);
     let hub = Rgb(0.55, 0.56, 0.55);
@@ -736,25 +749,46 @@ fn landing_gear() -> [Mesh; 3] {
         m.lathe(c - V3::X * (w * 0.5), V3::X, &[(0.0, 0.0), (0.0, r * 0.82), (0.02, r), (w - 0.02, r), (w, r * 0.82), (w, 0.0)], 10, tyre);
         m.lathe(c - V3::X * (w * 0.5 + 0.005), V3::X, &[(0.0, 0.0), (0.0, r * 0.5), (w + 0.01, r * 0.5), (w + 0.01, 0.0)], 8, hub);
     };
+    let block = |m: &mut Mesh, o: V3, half: V3, col: Rgb| m.block(&Frame { o, x: V3::X, y: V3::Y, z: V3::Z }, half, col);
+
     let mut nose = Mesh::new();
-    let (p, _) = GEAR_PIVOTS[0];
-    nose.lathe(p, -V3::Y, &[(0.0, 0.0), (0.0, 0.055), (0.55, 0.055), (0.56, 0.045), (0.83, 0.045), (0.84, 0.0)], 6, strut);
-    nose.block(&Frame { o: p + v3(0.0, -0.68, 0.10), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.03, 0.10, 0.07), strut.scale(0.85));
-    wheel(&mut nose, v3(0.0, -1.33, -3.45), 0.22, 0.16);
-    nose.block(&Frame { o: p + v3(0.18, -0.30, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.28, 0.32), door);
+    let (p, _, _) = GEAR_PIVOTS[0];
+    let axle = v3(0.0, -1.33, -3.45);
+    // Oleo from the forebody down to the fork crown just above the tyre.
+    let crown = axle + V3::Y * 0.27;
+    let l = (crown - p).len();
+    nose.lathe(p, (crown - p).norm(), &[(0.0, 0.0), (0.0, 0.065), (0.62 * l, 0.065), (0.63 * l, 0.05), (l, 0.05), (l + 0.01, 0.0)], 6, strut);
+    block(&mut nose, crown, v3(0.13, 0.025, 0.05), strut.scale(0.85));
+    for s in [-1.0, 1.0] {
+        block(&mut nose, axle + v3(s * 0.11, 0.13, 0.0), v3(0.012, 0.14, 0.04), strut.scale(0.85));
+    }
+    // Torque link behind the oleo.
+    block(&mut nose, p.lerp(crown, 0.75) + V3::Z * 0.08, v3(0.02, 0.10, 0.03), strut.scale(0.8));
+    wheel(&mut nose, axle, 0.22, 0.16);
+    let mut nose_door = Mesh::new();
+    let (h, _, _) = GEAR_DOORS[0];
+    block(&mut nose_door, h - V3::X * 0.17, v3(0.17, 0.008, 0.26), door);
+
     let main = |side: f64| {
         let mut m = Mesh::new();
-        let (p, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
+        let (p, _, _) = GEAR_PIVOTS[if side < 0.0 { 1 } else { 2 }];
         let foot = v3(side * 1.06, -1.20, 0.55);
-        m.lathe(p, (foot - p).norm(), &[(0.0, 0.0), (0.0, 0.07), (0.50, 0.07), (0.51, 0.055), ((foot - p).len(), 0.055), ((foot - p).len() + 0.01, 0.0)], 6, strut);
-        // Drag brace from the axle forward and up into the wheel well.
-        let brace = v3(side * 0.85, -0.40, 0.05);
-        m.lathe(brace, (foot - brace).norm(), &[(0.0, 0.0), (0.0, 0.03), ((foot - brace).len(), 0.03), ((foot - brace).len(), 0.0)], 5, strut.scale(0.85));
+        let dir = (foot - p).norm();
+        let l = (foot - p).len();
+        m.lathe(p, dir, &[(0.0, 0.0), (0.0, 0.075), (0.55 * l, 0.075), (0.56 * l, 0.06), (l, 0.06), (l + 0.01, 0.0)], 6, strut);
+        // Axle stub out to the wheel.
+        m.lathe(foot, V3::X * side, &[(0.0, 0.0), (0.0, 0.045), (0.14, 0.045), (0.14, 0.0)], 5, strut);
+        // Drag brace from the leg forward into the well.
+        let (brace, mid) = (v3(side * 0.70, -0.05, -0.15), p.lerp(foot, 0.55));
+        let bl = (mid - brace).len();
+        m.lathe(brace, (mid - brace).norm(), &[(0.0, 0.0), (0.0, 0.03), (bl, 0.03), (bl, 0.0)], 5, strut.scale(0.85));
         wheel(&mut m, v3(side * 1.18, -1.20, 0.55), 0.35, 0.21);
-        m.block(&Frame { o: p + v3(side * 0.10, -0.36, 0.0), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.008, 0.34, 0.42), door);
+        // Strut door on the outboard face of the leg, closing the well.
+        let out = v3(-dir.y * side, dir.x * side, 0.0).norm();
+        m.block(&Frame { o: p + dir * 0.40 + out * 0.09, x: out, y: dir, z: V3::Z }, v3(0.008, 0.38, 0.34), door);
         m
     };
-    [nose, main(-1.0), main(1.0)]
+    ([nose, main(-1.0), main(1.0)], [nose_door])
 }
 
 /// Nose of the right wingtip AIM-9 (the left one mirrors it).
@@ -856,6 +890,27 @@ mod tests {
         }
     }
 
+
+    /// The gear legs hang from the skin, not from thin air, and fold their
+    /// wheels into the body: the mains in beside the intake trunk, the nose
+    /// wheel up behind the forebody.
+    #[test]
+    fn gear_legs_hang_from_the_skin_and_fold_into_the_body() {
+        let below = |p: V3| {
+            let s = section(p.z);
+            let i = catmull(&INTAKE, p.z);
+            let fuse = s.yc - s.hl;
+            let duct = if p.z > INTAKE_Z.0 && p.x.abs() < i.w { i.yc - i.hl } else { fuse };
+            p.y - fuse.min(duct)
+        };
+        for (i, &(p, axis, swing)) in GEAR_PIVOTS.iter().enumerate() {
+            assert!(p.x.abs() < section(p.z).w && below(p) > -0.05 && p.y < 0.2, "leg {i} pivot {p:?} off the skin");
+            let wheel = [v3(0.0, -1.33, -3.45), v3(-1.18, -1.20, 0.55), v3(1.18, -1.20, 0.55)][i];
+            let up = p + Quat::axis_angle(axis, swing).rotate(wheel - p);
+            println!("leg {i}: wheel folds to {up:?}");
+            assert!(up.x.abs() < 0.8 && up.y > -0.55 && up.y < 0.5, "leg {i} wheel folds to {up:?}");
+        }
+    }
     #[test]
     fn eye_is_inside_the_canopy() {
         let (w, base, top) = canopy_profile(EYE.z);

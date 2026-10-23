@@ -92,6 +92,8 @@ struct Opts {
     mach: Option<f64>,
     controls: bool,
     fov: Option<f64>,
+    /// Chase camera distance scale, for close-ups of the airframe.
+    zoom: Option<f64>,
     bench: Option<f64>,
     size: Option<(i32, i32)>,
     mission: Option<MissionKind>,
@@ -180,6 +182,7 @@ fn parse_opts() -> Opts {
             }
             "--controls" => o.controls = true,
             "--fov" => o.fov = next(&mut i).parse().ok(),
+            "--zoom" => o.zoom = next(&mut i).parse().ok(),
             "--bench" => o.bench = next(&mut i).parse().ok(),
             "--size" => {
                 let v = next(&mut i);
@@ -188,7 +191,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -205,6 +208,8 @@ struct App {
     overlay: Canvas,
     atlas_canvas: Canvas,
     scene: gfx::Target,
+    /// The rear-view mirrors' picture, copied into the cockpit atlas.
+    mirror: gfx::Target,
     output: Option<gfx::Target>,
     audio: Audio,
     settings: Settings,
@@ -324,6 +329,7 @@ impl App {
         let (w, h) = window::screen_size();
         let (rw, rh) = render_size(w, h);
         let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Nearest);
+        let mirror = gfx::Target::new(&mut *ctx, cockpit::MIRROR_SIZE.0, cockpit::MIRROR_SIZE.1, FilterMode::Nearest);
         let (settings, best) = settings::load();
         let audio = Audio::start();
         let preview = Mission::new();
@@ -340,6 +346,7 @@ impl App {
             overlay,
             atlas_canvas,
             scene,
+            mirror,
             output: None,
             audio,
             settings,
@@ -1210,6 +1217,7 @@ impl App {
         let mut offset = ax.back * (14.5 + speed_factor * 3.0) + ax.up * 4.2;
         offset = Quat::axis_angle(ax.up, self.chase_look.0).rotate(offset);
         offset = Quat::axis_angle(ax.right, self.chase_look.1).rotate(offset);
+        offset = offset * self.opts.zoom.unwrap_or(1.0);
         let mut eye = a.pos + offset;
         let orbiting = self.chase_look.0.abs() + self.chase_look.1.abs() > 0.001;
         let look = if orbiting { a.pos + ax.up * 0.35 } else { a.pos + view_dir * 10.0 + ax.up * 0.7 };
@@ -1235,6 +1243,20 @@ impl App {
         }
         let (f, r, u) = basis(eye);
         Camera { eye, forward: f, right: r, up: u, fov: (48.0 + speed_factor * 3.0) * DEG }
+    }
+
+    /// Renders the world behind the jet, seen from over the pilot's head,
+    /// into the rear-view mirrors' picture and hands it to the cockpit atlas.
+    fn draw_mirrors(&mut self) {
+        let Some(a) = self.aircraft.as_ref() else { return };
+        let rear = cockpit::mirror_camera(a);
+        let m = &self.mirror;
+        self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
+        let mission = matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission);
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a) };
+        self.world.draw(&mut *self.ctx, &rear, m.w as f64 / m.h as f64, self.time, mission, Some(a), true, Some(&scene as &dyn world::Props));
+        self.ctx.end_render_pass();
+        self.cockpit.blit_mirror(&mut *self.ctx, &self.world, m);
     }
 
     fn current_camera(&self) -> Camera {
@@ -1478,6 +1500,7 @@ impl EventHandler for App {
             let a = self.aircraft.as_ref().unwrap();
             self.cockpit.update_atlas(&mut *self.ctx, &mut self.atlas_canvas, a, &self.mission, self.pages, self.time, &self.combat);
             self.cockpit.atlas_clock = self.time;
+            self.draw_mirrors();
         }
 
         // World and cockpit into the low-resolution scene target.

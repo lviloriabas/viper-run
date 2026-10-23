@@ -55,6 +55,11 @@ const R_DIALS: [R; 7] = [
     r(768.0, 320.0, 128.0, 128.0),
 ];
 const R_GMETER: R = r(896.0, 320.0, 128.0, 128.0);
+/// The rear-view picture (see `mirror_camera`), shared by both cockpits.
+const R_MIRROR: R = r(1024.0, 1280.0, 512.0, 160.0);
+/// Vertical field of view of the rear-view camera; its picture is 512 by 160.
+pub const MIRROR_SIZE: (u32, u32) = (512, 160);
+const MIRROR_FOV: f64 = 40.0 * DEG;
 const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
 const R_ARM: R = r(256.0, 448.0, 256.0, 128.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
@@ -397,6 +402,17 @@ impl Cockpit {
         ctx.texture_generate_mipmaps(self.atlas.color);
     }
 
+    /// Copies the rear-view picture into the atlas, where the mirror glass
+    /// shows it, after `update_atlas` has redrawn the instruments.
+    pub fn blit_mirror(&self, ctx: &mut dyn RenderingBackend, world: &world::World, mirror: &gfx::Target) {
+        ctx.begin_pass(Some(self.atlas_pass), PassAction::Nothing);
+        let r = R_MIRROR;
+        ctx.apply_viewport(r.x as i32, (A - (r.y + r.h) as f64) as i32, r.w as i32, r.h as i32);
+        world.post(ctx, mirror, r.w, r.h, 0.0, 0.0);
+        ctx.end_render_pass();
+        ctx.texture_generate_mipmaps(self.atlas.color);
+    }
+
     /// Draws the cockpit into the current pass, the MiG's when `mig`.
     /// `cam_b` is the camera in cockpit space (see body_camera).
     pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, mig: bool) {
@@ -657,9 +673,24 @@ fn build_static(m: &mut Mesh) {
     // Canopy aft bow and bulkhead behind the seat, on the canopy's facet lines.
     let nv = airframe::CANOPY_NV;
     let bow: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.985, k as f64 / nv as f64)).collect();
-    pilot::strap(m, &bow, 0.03, 0.026, V3::Z, Rgb(0.13, 0.15, 0.16));
+    pilot::band(m, &bow, 0.03, 0.026, V3::Z, Rgb(0.13, 0.15, 0.16));
     let bulk: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.995, k as f64 / nv as f64)).collect();
     m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));
+
+    // Rear-view mirrors on arms off the canopy frame ahead of the pilot,
+    // left and right, turned to the eye.
+    for (v, side) in [(0.17, 1.0), (0.83, -1.0)] {
+        let p = airframe::canopy_point(0.26, v);
+        let c = p + (v3(0.0, EYE.y, p.z) - p).norm() * 0.05;
+        let n = (EYE - c).norm();
+        let x = V3::Y.cross(n).norm();
+        let f = Frame { o: c, x, y: n.cross(x), z: n };
+        m.block(&f, v3(0.042, 0.016, 0.006), Rgb(0.13, 0.15, 0.16));
+        mirror_glass(m, &f.at(0.0, 0.0, 0.0066), 0.076, 0.026, side);
+        // Arm down to the canopy frame on the sill.
+        let rail = airframe::canopy_point(0.26, if side > 0.0 { 0.01 } else { 0.99 });
+        pilot::bar(m, f.p(0.0, -0.012, -0.006), rail, 0.007, 0.007, V3::Z, Rgb(0.13, 0.15, 0.16));
+    }
     m.facet();
 }
 
@@ -1411,4 +1442,26 @@ pub fn body_camera(cam: &Camera, a: &Aircraft) -> Camera {
 
 pub fn eye_world(a: &Aircraft) -> V3 {
     a.pos + a.q.rotate(design_eye(a))
+}
+
+/// The rear-view mirrors' camera: from just over the design eye, back along
+/// the body and a little up, over the spine and the tail. Its right is the
+/// body's left; the mirror glass flips the picture back.
+pub fn mirror_camera(a: &Aircraft) -> Camera {
+    let ax = a.q.axes();
+    let f = (ax.back * (8.0 * DEG).cos() + ax.up * (8.0 * DEG).sin()).norm();
+    let r = f.cross(ax.up).norm();
+    Camera { eye: eye_world(a) + ax.up * 0.12, forward: f, right: r, up: r.cross(f).norm(), fov: MIRROR_FOV }
+}
+
+/// Rear-view mirror glass `w` by `h` on frame `f`, showing the slice of the
+/// rear picture its place looks at, left for right as a mirror does: `side`
+/// -1 looks back down the left, 1 down the right, 0 straight back.
+fn mirror_glass(m: &mut Mesh, f: &Frame, w: f64, h: f64, side: f64) {
+    let rm = R_MIRROR;
+    let sw = 0.42 * rm.w;
+    let sh = (sw * (h / w) as f32).min(rm.h);
+    let c = 0.5 - 0.29 * side as f32;
+    let x = rm.x + c * rm.w + sw / 2.0;
+    screen(m, f, w, h, r(x, rm.y + (rm.h - sh) / 2.0, -sw, sh));
 }

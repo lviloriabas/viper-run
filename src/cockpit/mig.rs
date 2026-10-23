@@ -57,6 +57,7 @@ const R_WARN: R = r(736.0, 1472.0, 96.0, 320.0);
 const R_GEAR: R = r(832.0, 1472.0, 192.0, 128.0);
 const R_TV: R = r(0.0, 1664.0, 256.0, 208.0);
 const R_LEFT: R = r(256.0, 1664.0, 224.0, 240.0);
+const R_COMPASS: R = r(480.0, 1664.0, 128.0, 128.0);
 
 // ================================================================ panel
 /// Main panel: tilted back 12 degrees, its foot 0.66 m above the datum just
@@ -248,14 +249,16 @@ pub fn build_static(m: &mut Mesh) {
     let (zw, za) = (crate::mig29::CANOPY_Z[0] + OFFSET.z, (crate::mig29::CANOPY_Z[2] + crate::mig29::CANOPY_Z[3]) * 0.5 + OFFSET.z);
     let post = (crate::mig29::CANOPY_POST.0 + crate::mig29::CANOPY_POST.1) * 0.5;
     for phi in [post, PI - post] {
-        let pts: Vec<V3> = (0..=4).map(|k| cp(mix(zw, za, k as f64 / 4.0), phi) - inward(cp(mix(zw, za, k as f64 / 4.0), phi), 0.015)).collect();
-        crate::cockpit::pilot::strap(m, &pts, 0.008, 0.016, (crate::airframe::EYE - pts[2]).norm(), FRAME);
+        // Set in as deep as the arch and stopped inside it, so no end shows.
+        let z_of = |k: usize| mix(zw, za - 0.012, k as f64 / 4.0);
+        let pts: Vec<V3> = (0..=4).map(|k| cp(z_of(k), phi) - inward(cp(z_of(k), phi), 0.025)).collect();
+        crate::cockpit::pilot::band(m, &pts, 0.008, 0.016, (crate::airframe::EYE - pts[2]).norm(), FRAME);
     }
     let arch: Vec<V3> = (0..=nphi).map(|k| {
         let p = cp(za, k as f64 / nphi as f64 * PI);
         p - inward(p, 0.025)
     }).collect();
-    crate::cockpit::pilot::strap(m, &arch, 0.012, 0.022, V3::Z, FRAME);
+    crate::cockpit::pilot::band(m, &arch, 0.012, 0.022, V3::Z, FRAME);
     for d in [-0.42, 0.0, 0.42] {
         let p = cp(za, PI / 2.0 + d);
         let c = p - inward(p, 0.05) + V3::Z * 0.03;
@@ -263,9 +266,22 @@ pub fn build_static(m: &mut Mesh) {
         let x = V3::Y.cross(n).norm();
         let f = Frame { o: c, x, y: n.cross(x), z: n };
         m.block(&f, v3(0.036, 0.016, 0.005), FRAME.scale(0.8));
-        m.block(&f.at(0.0, 0.0, 0.0055), v3(0.031, 0.012, 0.0005), Rgb(0.62, 0.72, 0.78));
-        crate::cockpit::pilot::bar(m, f.p(0.0, 0.0, -0.006), p, 0.005, 0.005, V3::Z, FRAME.scale(0.8));
+        super::mirror_glass(m, &f.at(0.0, 0.0, 0.0056), 0.062, 0.024, -d / 0.42);
+        crate::cockpit::pilot::bar(m, f.p(0.0, 0.0, -0.006), p - inward(p, 0.03), 0.005, 0.005, V3::Z, FRAME.scale(0.8));
     }
+
+    // KI-13 standby compass on its bracket at the top of the right
+    // windscreen post, the bowl's window turned to the pilot.
+    let (q, p) = (mix(zw, za, 0.9), post + 0.30);
+    let mount = cp(q, p) - inward(cp(q, p), 0.03);
+    let c = mount - inward(mount, 0.06) + V3::Z * 0.035;
+    let n = (crate::airframe::EYE - c).norm();
+    let x = V3::Y.cross(n).norm();
+    let f = Frame { o: c, x, y: n.cross(x), z: n };
+    crate::cockpit::pilot::bar(m, mount, f.p(0.0, 0.0, -0.03), 0.008, 0.008, V3::Z, FRAME);
+    m.lathe(f.p(0.0, 0.0, -0.04), n, &[(0.0, 0.0), (0.0, 0.03), (0.01, 0.034), (0.04, 0.036), (0.04, 0.0)], 10, KNOB.scale(1.6));
+    m.ring(&f.at(0.0, 0.0, 0.003), 0.028, 0.036, 0.006, KNOB.scale(2.2), 12);
+    m.disc_uv(&f.at(0.0, 0.0, 0.002), 0.028, super::uv(R_COMPASS), 16);
 
     crate::cockpit::pilot::build_static_mig(m);
     m.facet();
@@ -443,6 +459,34 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
     spoke(cv, x, y, ((t / 43200.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.5, 3.0, POINTER);
     spoke(cv, x, y, ((t / 3600.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.8, 2.0, POINTER);
     spoke(cv, x, y, ((t / 60.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.85, 1.0, RED);
+
+    // KI-13: the card turns under the lubber line, read through the bowl's
+    // window: 60 degrees of it across, ticks every 5, a figure every 30.
+    let (x, y, rad) = gauge_face(cv, R_COMPASS);
+    cv.rect(x - rad * 0.9, y - rad * 0.36, rad * 1.8, rad * 0.72, rgba(0x1c, 0x1b, 0x16, 1.0));
+    let per_deg = rad * 1.8 / 60.0;
+    let base = (a.heading / 5.0).round() * 5.0;
+    for k in -7..=7 {
+        let h = base + k as f64 * 5.0;
+        let dx = ((h - a.heading) * per_deg as f64) as f32;
+        if dx.abs() > rad * 0.86 {
+            continue;
+        }
+        let hh = (h.rem_euclid(360.0)).round() as i64;
+        let len = if hh % 10 == 0 { rad * 0.16 } else { rad * 0.09 };
+        cv.line(x + dx, y + rad * 0.34, x + dx, y + rad * 0.34 - len, 2.0, INK);
+        if hh % 30 == 0 {
+            let label = match hh {
+                0 => "N".to_string(),
+                90 => "E".to_string(),
+                180 => "S".to_string(),
+                270 => "W".to_string(),
+                _ => format!("{}", hh / 10),
+            };
+            cv.text(&label, x + dx, y - rad * 0.06, 1.0, INK, Align::Center);
+        }
+    }
+    cv.line(x, y - rad * 0.40, x, y + rad * 0.40, 2.0, rgba(0xf0, 0x90, 0x30, 1.0));
 
     // Warning lamp column, its legends transliterated.
     let lamps = [

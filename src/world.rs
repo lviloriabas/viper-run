@@ -410,6 +410,21 @@ void main() {
         if (abs(v_local.x) < 0.44 && v_local.y > 0.55 && v_local.z > -4.78 && v_local.z < -2.0) discard;
     } else if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
     vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
+    if (v_uv.x < -1.5) {
+        // Digital camouflage (mig29::flag_camo): 22 cm square cells in body
+        // space, each taking one of three grey-blues from two blob fields
+        // sampled at the cell centre, so the blobs keep stepped pixel edges,
+        // with a scatter of stray cells along them. The vertex colour's
+        // brightness (darker on the moving surfaces) carries over.
+        vec3 cell = floor(v_local * 4.5);
+        vec3 c = (cell + 0.5) / 4.5;
+        float r1 = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
+        float r2 = fract(sin(dot(cell, vec3(39.346, 11.135, 83.155))) * 24634.6345) - 0.5;
+        float dark = sin(c.z * 0.85 + 1.3 * sin(c.x * 0.7)) + sin(c.x * 1.35 - c.z * 0.55 + c.y * 1.7) + 0.9 * r1;
+        float mid = sin(c.z * 1.6 - 0.6 * c.x + 2.0) + sin(c.x * 2.1 + c.z * 1.05 + c.y) + 0.9 * r2;
+        vec3 paint = dark > 0.75 ? vec3(0.34, 0.40, 0.47) : (mid > 0.15 ? vec3(0.52, 0.60, 0.67) : vec3(0.72, 0.77, 0.80));
+        base = paint * (v_color.g / 0.72);
+    }
     // Repaint: 1 lays two-tone splinter camouflage of the paint colour over
     // the grey skin (aggressors); 2 tints everything (burnt wrecks).
     if (u_paint.w > 1.5) base *= u_paint.rgb;
@@ -628,6 +643,7 @@ pub struct World {
     rudder: Part,
     brakes: [Part; 4],
     gear: [Part; 3],
+    gear_doors: [Part; 1],
     /// MiG-29: airframe, the right and left stabilators and its own gear legs.
     mig: Part,
     mig_stab: [Part; 2],
@@ -796,6 +812,7 @@ impl World {
         let rudder = skinned(&airframe.rudder);
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
+        let gear_doors = [skinned(&airframe.gear_doors[0])];
         let fulcrum = crate::mig29::build();
         let (mig, mig_stab) = (skinned(&fulcrum.body), [skinned(&fulcrum.stabs[0]), skinned(&fulcrum.stabs[1])]);
         let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
@@ -833,6 +850,7 @@ impl World {
             rudder,
             brakes,
             gear,
+            gear_doors,
             mig,
             mig_stab,
             mig_gear,
@@ -976,7 +994,8 @@ impl World {
             self.draw_part(ctx, &self.rudder, &base, &mat_mul(&model, &local));
             for (i, b) in self.brakes.iter().enumerate() {
                 let up = i % 2 == 0;
-                let hinge = v3(0.0, 0.06, airframe::BRAKE_HINGE_Z);
+                // Each petal hinges on its own leading edge, flush with the boom.
+                let hinge = v3(0.0, airframe::BOOM_Y + if up { 0.034 } else { -0.034 }, airframe::BRAKE_HINGE_Z);
                 let angle = a.brake * 58.0 * DEG * if up { -1.0 } else { 1.0 };
                 let local = rotate_about(hinge, Quat::axis_angle(V3::X, angle));
                 self.draw_part(ctx, b, &base, &mat_mul(&model, &local));
@@ -1101,19 +1120,32 @@ impl World {
 
     fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
         self.draw_legs(ctx, a, base, model, &self.gear, &airframe::GEAR_PIVOTS);
+        self.draw_doors(ctx, a, base, model, &self.gear_doors, &airframe::GEAR_DOORS);
     }
 
     /// Landing gear legs, swung up toward their wells as the gear retracts,
-    /// and gone once it is up and locked.
-    fn draw_legs(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, legs: &[Part; 3], pivots: &[(V3, f64); 3]) {
+    /// and gone once it is up and locked. The doors open first, then the
+    /// legs travel with an eased start and stop, the nose leg leading.
+    fn draw_legs(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, legs: &[Part; 3], pivots: &[(V3, V3, f64); 3]) {
         if a.gear < 0.01 {
             return;
         }
         for (i, part) in legs.iter().enumerate() {
-            let (pivot, swing) = pivots[i];
-            // The nose leg leads, the mains follow, as the sequence runs.
-            let t = smoothstep(if i == 0 { 0.0 } else { 0.15 }, if i == 0 { 0.85 } else { 1.0 }, a.gear);
-            let local = rotate_about(pivot, Quat::axis_angle(V3::X, (1.0 - t) * swing));
+            let (pivot, axis, swing) = pivots[i];
+            let t = smoothstep(if i == 0 { 0.15 } else { 0.25 }, if i == 0 { 0.9 } else { 1.0 }, a.gear);
+            let local = rotate_about(pivot, Quat::axis_angle(axis, (1.0 - t) * swing));
+            self.draw_part(ctx, part, base, &mat_mul(model, &local));
+        }
+    }
+
+    /// Gear well doors hinged on the airframe: shut and flush when the gear
+    /// is up, swung open over the first part of the cycle.
+    fn draw_doors(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, doors: &[Part], hinges: &[(V3, V3, f64)]) {
+        if a.gear < 0.01 {
+            return;
+        }
+        for (part, &(hinge, axis, open)) in doors.iter().zip(hinges) {
+            let local = rotate_about(hinge, Quat::axis_angle(axis, smoothstep(0.0, 0.2, a.gear) * open));
             self.draw_part(ctx, part, base, &mat_mul(model, &local));
         }
     }

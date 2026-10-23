@@ -83,6 +83,34 @@ pub(super) fn strap(m: &mut Mesh, pts: &[V3], w: f64, h: f64, up: V3, col: Rgb) 
     }
 }
 
+/// One continuous rectangular section swept through a polyline, half width
+/// `w` across and half height `h` along `up`. Neighbouring segments share
+/// mitred corners, so a curved frame has no corners poking out at its bends.
+pub(super) fn band(m: &mut Mesh, pts: &[V3], w: f64, h: f64, up: V3, col: Rgb) {
+    let n = pts.len();
+    let ring = |i: usize| {
+        let t = (pts[(i + 1).min(n - 1)] - pts[i.saturating_sub(1)]).norm();
+        let seg = (pts[(i + 1).min(n - 1)] - pts[i]).len().max(1e-9);
+        let d = if i + 1 < n { (pts[i + 1] - pts[i]) / seg } else { t };
+        let miter = 1.0 / t.dot(d).max(0.5);
+        let x = up.cross(t).norm();
+        let y = t.cross(x);
+        let p = pts[i];
+        [p + x * (w * miter) + y * h, p - x * (w * miter) + y * h, p - x * (w * miter) - y * h, p + x * (w * miter) - y * h]
+    };
+    let rings: Vec<[V3; 4]> = (0..n).map(ring).collect();
+    for i in 0..n - 1 {
+        let (a, b) = (rings[i], rings[i + 1]);
+        for j in 0..4 {
+            let k = (j + 1) % 4;
+            m.quad(a[j], a[k], b[k], b[j], col);
+        }
+    }
+    let (s, e) = (rings[0], rings[n - 1]);
+    m.quad(s[3], s[2], s[1], s[0], col);
+    m.quad(e[0], e[1], e[2], e[3], col);
+}
+
 /// Grip axes: `g` up the grip, `fwd` where the fingers wrap, `out` toward
 /// the back of the hand (outboard).
 #[derive(Clone, Copy)]
