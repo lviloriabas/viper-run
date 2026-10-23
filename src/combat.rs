@@ -84,6 +84,17 @@ impl Mode {
             Mode::Ccip => "CCIP",
         }
     }
+    /// The selected weapon's real name and, in brackets, what kind it is:
+    /// the brevity code for a missile (Fox 2 infrared, Fox 3 active radar).
+    pub fn weapon(self) -> &'static str {
+        match self {
+            Mode::Nav => "NAV",
+            Mode::Gun => "M61A1 VULCAN (GUN)",
+            Mode::Srm => "AIM-9M SIDEWINDER (FOX 2)",
+            Mode::Mrm => "AIM-120C AMRAAM (FOX 3)",
+            Mode::Ccip => "MK 82 (BOMB)",
+        }
+    }
     pub fn air_to_ground(self) -> bool {
         self == Mode::Ccip
     }

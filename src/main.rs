@@ -1306,7 +1306,7 @@ impl App {
             }
             Bind::Weapon if flying => {
                 self.combat.cycle_weapon();
-                self.flash_toast(&format!("{} // {}", self.combat.mode.label(), symbology::stores_line(&self.combat)), 1.6);
+                self.flash_toast(&symbology::stores_line(&self.combat), 1.6);
             }
             Bind::Lock if flying => {
                 if let Some(a) = &self.aircraft {
@@ -1316,6 +1316,8 @@ impl App {
             Bind::Countermeasures if flying => {
                 if let Some(a) = &self.aircraft {
                     self.combat.countermeasures(a);
+                    let l = &self.combat.loadout;
+                    self.flash_toast(&format!("CHAFF + FLARES  //  CHAFF {}  FLARES {}", l.chaff, l.flares), 1.2);
                 }
             }
             Bind::Airbrake if flying => {

@@ -245,7 +245,7 @@ pub const AIM9M: Spec = Spec {
     propellant: 25.0,
     motor: [(10100.0, 5.0), (0.0, 0.0)],
     drop: 0.0,
-    cd0: 0.42,
+    cd0: 0.95,
     cna: 32.0,
     alpha_max: 22.0 * DEG,
     g_limit: 35.0,
@@ -274,7 +274,7 @@ pub const AIM120C: Spec = Spec {
     propellant: 52.0,
     motor: [(24000.0, 2.6), (9800.0, 6.0)],
     drop: 0.35,
-    cd0: 0.38,
+    cd0: 0.5,
     cna: 30.0,
     alpha_max: 20.0 * DEG,
     g_limit: 40.0,
@@ -285,7 +285,7 @@ pub const AIM120C: Spec = Spec {
     lethal: 6.0,
     outer: 20.0,
     arm: 1.0,
-    life: 70.0,
+    life: 90.0,
     min_range: 1000.0,
     max_range: 35000.0,
     active: true,
@@ -426,12 +426,17 @@ impl Missile {
         if let Some(p) = ground_crossing(p0, self.pos, floor) {
             return Fate::Ground(p);
         }
-        if self.age > s.life || (burn > 2.0 && thrust == 0.0 && self.vel.len() < 160.0) {
+        if self.age > s.life || (burn > 2.0 && thrust == 0.0 && self.vel.len() < MIN_MACH * atm.sound) {
             return Fate::Spent(self.pos);
         }
         Fate::Flying
     }
 }
+
+/// Below this Mach number after burnout a missile can no longer pull the
+/// g to stay on a manoeuvring target and is written off, as launch-zone
+/// tables do; it is what makes the published ranges shrink low down.
+const MIN_MACH: f64 = 1.0;
 
 /// ALE-47 dispenser load: chaff and flare cartridges.
 pub const CHAFF: u32 = 30;
@@ -642,7 +647,7 @@ mod tests {
 
     /// A Sidewinder fired at a target far beyond its kinematic range runs out
     /// of energy, and one fired with the target behind the seeker loses it.
-    /// Low down, a tail chase of 10 km is AMRAAM range, not Sidewinder range.
+    /// Low down, a tail chase of 7 km is AMRAAM range, not Sidewinder range.
     #[test]
     fn missiles_have_finite_envelopes() {
         let pos = v3(0.0, 1000.0, 0.0);
@@ -651,8 +656,15 @@ mod tests {
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -3000.0), away, &flat).is_some());
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -16000.0), away, &flat).is_none());
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, 3000.0), v3(0.0, 0.0, 230.0), &flat).is_none());
-        assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -10000.0), away, &flat).is_none());
-        assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -10000.0), away, &flat).is_some());
+        assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -7000.0), away, &flat).is_none());
+        assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -7000.0), away, &flat).is_some());
+        // Head on, low down, the Sidewinder reaches about 12 km and the
+        // AMRAAM about 25 km (published launch envelopes).
+        let toward = v3(0.0, 0.0, 260.0);
+        assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -10000.0), toward, &flat).is_some());
+        assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -15000.0), toward, &flat).is_none());
+        assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -20000.0), toward, &flat).is_some());
+        assert!(fly_out(&AIM120C, pos, vel, pos + v3(0.0, 0.0, -32000.0), toward, &flat).is_none());
         // Inside minimum range there is no shot.
         assert!(fly_out(&AIM9M, pos, vel, pos + v3(0.0, 0.0, -150.0), away, &flat).is_none());
     }

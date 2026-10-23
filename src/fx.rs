@@ -390,24 +390,38 @@ impl Fx {
         }
     }
 
-    /// A countermeasure program: a white-hot flare thrown down and aft,
-    /// burning out as it falls, and a small grey puff of chaff.
+    /// A countermeasure program, chaff and flares together, out of the
+    /// dispensers on each side of the tail: a white-hot flare thrown down
+    /// and outboard on each side, burning out as it falls, and a bundle of
+    /// chaff blooming into a glittering grey cloud beside it.
     pub fn decoy(&mut self, pos: V3, vel: V3) {
-        let d = self.dir();
-        let p = Particle {
-            kind: Kind::Fire,
-            pos,
-            vel: vel * 0.55 + V3::Y * -12.0 + d * 6.0,
-            life: self.r(2.2, 3.0),
-            size: (0.9, 0.5),
-            color: ([1.0, 1.0, 0.92], [1.0, 0.55, 0.2]),
-            drag: 0.8,
-            gravity: 9.8,
-            ..BASE
+        let side = {
+            let s = vel.cross(V3::Y);
+            if s.len() > 1e-3 { s.norm() } else { V3::X }
         };
-        self.push(p);
-        let life = self.r(1.5, 2.2);
-        self.smoke(pos, vel * 0.3 + d * 3.0, (0.6, 3.5), life, (0.62, 0.58), 0.45, 0.0);
+        for k in [-1.0, 1.0] {
+            let d = self.dir();
+            let p = Particle {
+                kind: Kind::Fire,
+                pos: pos + side * (0.8 * k),
+                vel: vel * 0.55 + V3::Y * -12.0 + side * (14.0 * k) + d * 4.0,
+                life: self.r(2.2, 3.0),
+                size: (0.9, 0.5),
+                color: ([1.0, 1.0, 0.92], [1.0, 0.55, 0.2]),
+                drag: 0.8,
+                gravity: 9.8,
+                ..BASE
+            };
+            self.push(p);
+            let at = pos + side * (0.6 * k);
+            let life = self.r(1.8, 2.6);
+            self.smoke(at, vel * 0.3 + side * (8.0 * k) + d * 3.0, (0.8, 5.0), life, (0.70, 0.66), 0.6, 0.0);
+            for _ in 0..6 {
+                let g = self.dir();
+                let p = Particle { kind: Kind::Spray, pos: at, vel: vel * 0.3 + side * (8.0 * k) + g * 6.0, life: self.r(0.8, 1.6), size: (0.25, 0.15), color: ([0.92, 0.94, 0.98], [0.6, 0.62, 0.66]), alpha: 0.9, drag: 1.5, ..BASE };
+                self.push(p);
+            }
+        }
     }
 
     /// A 20 mm round arriving: sparks off a target, a puff of dirt off the

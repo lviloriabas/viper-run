@@ -43,18 +43,18 @@ impl Pen<'_> {
     }
 }
 
-/// Stores line: master mode, the selected weapon and what is left.
+/// Stores line: the selected weapon by its real name and kind (the brevity
+/// code for missiles), what is left of it, and the countermeasures.
 pub fn stores_line(c: &Combat) -> String {
     let l = &c.loadout;
-    let mut s = String::new();
-    for (store, short) in [(Store::Aim9, "9M"), (Store::Aim120, "120C"), (Store::Mk82, "82")] {
-        let n = l.count(store);
-        let carried = l.stations.iter().any(|st| st.store == store);
-        if carried {
-            s.push_str(&format!("{n}{short} "));
-        }
-    }
-    format!("{s}GUN {}  CHF {} FLR {}", l.rounds, l.chaff, l.flares)
+    let left = match c.mode {
+        Mode::Nav => return format!("NAV  CHAFF {}  FLARES {}", l.chaff, l.flares),
+        Mode::Gun => l.rounds,
+        Mode::Srm => l.count(Store::Aim9),
+        Mode::Mrm => l.count(Store::Aim120),
+        Mode::Ccip => l.count(Store::Mk82),
+    };
+    format!("{} x{left}  CHAFF {}  FLARES {}", c.mode.weapon(), l.chaff, l.flares)
 }
 
 /// The selected weapon, its ammunition and what is left of it, for the HUD.
@@ -367,7 +367,7 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
     }
     let y = if chase { h - 54.0 * s } else { h * 0.058 + 31.0 * s };
     let (x, align) = if chase { (w * 0.5, Align::Center) } else { (w * 0.974, Align::Right) };
-    cv.text(&format!("{}  {}", c.mode.label(), stores_line(c)), x, y, sm, with_alpha(HUD, 0.8), align);
+    cv.text(&stores_line(c), x, y, sm, with_alpha(HUD, 0.8), align);
     if c.hp < 100.0 {
         let col = if c.hp < 40.0 { RED } else { AMBER };
         cv.text(&format!("AIRFRAME {}%", c.hp.round() as i64), x, y + 9.0 * sm, sm, col, align);
