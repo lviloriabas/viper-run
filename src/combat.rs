@@ -816,6 +816,9 @@ pub enum Event {
 pub struct Combat {
     pub kind: MissionKind,
     pub mode: Mode,
+    /// The kind of store selected within the master mode, where it holds
+    /// two (an AIM-9M and an AIM-9X both under SRM); None for the first.
+    pub pick: Option<Store>,
     pub loadout: Loadout,
     /// The player's airframe hit points, of 100.
     pub hp: f64,
@@ -1030,6 +1033,7 @@ impl Combat {
                 MissionKind::Dogfight | MissionKind::Free => Mode::Srm,
                 MissionKind::Strike => Mode::Ccip,
             },
+            pick: None,
             loadout: Loadout::for_mission(kind),
             hp: 100.0,
             hull: Hull::new(Type::F16),
@@ -1258,23 +1262,61 @@ impl Combat {
     }
 
     // ------------------------------------------------------------ controls
-    /// Master modes the stores on board allow, in the order X cycles them.
+    /// The weapons on board, in the order X cycles them: the gun while it
+    /// has rounds, then each kind of store still loaded, by master mode.
     /// Only the weapons: NAV is where the jet starts, and the chaff and
-    /// flares have their own button, never a place in the cycle.
-    fn modes(&self) -> Vec<Mode> {
-        let mut v = vec![Mode::Gun];
+    /// flares have their own button, never a place in the cycle. With
+    /// nothing left at all the gun stays, empty.
+    fn choices(&self) -> Vec<(Mode, Option<Store>)> {
+        let mut v = Vec::new();
+        if self.loadout.rounds > 0 {
+            v.push((Mode::Gun, None));
+        }
         for m in [Mode::Srm, Mode::Mrm, Mode::Ccip] {
-            if self.loadout.count_for(m) > 0 {
+            for s in self.loadout.stations.iter().filter(|s| s.loaded && s.store.mode() == m) {
+                if !v.contains(&(m, Some(s.store))) {
+                    v.push((m, Some(s.store)));
+                }
+            }
+        }
+        if v.is_empty() {
+            v.push((Mode::Gun, None));
+        }
+        v
+    }
+
+    /// Master modes the stores on board allow.
+    fn modes(&self) -> Vec<Mode> {
+        let mut v: Vec<Mode> = Vec::new();
+        for (m, _) in self.choices() {
+            if !v.contains(&m) {
                 v.push(m);
             }
         }
         v
     }
 
+    /// The station the selected weapon releases next: of the kind picked,
+    /// or of another kind in the same mode once that one is gone.
+    fn station(&self) -> Option<usize> {
+        self.station_for(self.mode)
+    }
+
+    fn station_for(&self, mode: Mode) -> Option<usize> {
+        let l = &self.loadout;
+        self.pick.filter(|s| s.mode() == mode).and_then(|s| l.stations.iter().position(|st| st.loaded && st.store == s)).or_else(|| l.next_for(mode))
+    }
+
+    /// The selected store kind, or the last one the mode had.
+    fn store(&self) -> Option<Store> {
+        self.station().map(|i| self.loadout.stations[i].store).or(self.pick.filter(|s| s.mode() == self.mode)).or_else(|| self.loadout.store_for(self.mode))
+    }
+
     pub fn cycle_weapon(&mut self) {
-        let modes = self.modes();
-        let i = modes.iter().position(|&m| m == self.mode).map(|i| (i + 1) % modes.len()).unwrap_or(0);
-        self.mode = modes[i];
+        let choices = self.choices();
+        let now = (self.mode, if self.mode == Mode::Gun { None } else { self.store() });
+        let i = choices.iter().position(|&c| c == now).map(|i| (i + 1) % choices.len()).unwrap_or(0);
+        (self.mode, self.pick) = choices[i];
         self.seeker = None;
         self.shoot = false;
     }
@@ -1284,29 +1326,29 @@ impl Combat {
         match self.mode {
             Mode::Nav => "NAV".to_string(),
             Mode::Gun => format!("{} (GUN)", self.loadout.gun.name),
-            m => self.loadout.store_for(m).map_or("", |s| s.long_name()).to_string(),
+            _ => self.store().map_or("", |s| s.long_name()).to_string(),
         }
     }
 
-    /// The selected weapon's short name and how many of it are left: of
-    /// the store that goes next, where a mode has two kinds on board.
+    /// The selected weapon's short name and how many of it are left.
     pub fn weapon_left(&self) -> (&'static str, u32) {
         match self.mode {
             Mode::Nav => ("", 0),
             Mode::Gun => (self.loadout.gun.calibre, self.loadout.rounds),
-            m => self.loadout.store_for(m).map_or(("", 0), |s| (s.name(), self.loadout.count(s))),
+            _ => self.store().map_or(("", 0), |s| (s.name(), self.loadout.count(s))),
         }
     }
 
     /// The infrared missile selected with one left: its seeker is uncaged.
     pub fn heater(&self) -> Option<&'static Spec> {
-        matches!(self.mode, Mode::Srm | Mode::Mrm).then(|| self.loadout.next_for(self.mode)).flatten().and_then(|i| self.loadout.stations[i].store.missile()).filter(|s| s.infrared())
+        matches!(self.mode, Mode::Srm | Mode::Mrm).then(|| self.station()).flatten().and_then(|i| self.loadout.stations[i].store.missile()).filter(|s| s.infrared())
     }
 
     /// Selects a master mode by name, for the test switches.
     pub fn select(&mut self, mode: Mode) {
         if mode == Mode::Nav || self.modes().contains(&mode) {
             self.mode = mode;
+            self.pick = None;
         }
     }
 
@@ -1471,7 +1513,7 @@ impl Combat {
         a.wing_stores = self.loadout.wing_mass();
         a.stores_drag = self.loadout.drag();
         self.sight.step(dt, a);
-        self.ccip = match (self.mode, self.loadout.next_for(Mode::Ccip)) {
+        self.ccip = match (self.mode, self.station()) {
             (Mode::Ccip, Some(i)) => {
                 let st = self.loadout.stations[i];
                 st.store.bomb().and_then(|b| ccip(b, a, st.at, &terrain::floor))
@@ -1568,7 +1610,7 @@ impl Combat {
             }
             Mode::Srm | Mode::Mrm if pressed => self.launch(a, self.mode),
             Mode::Ccip if pressed => {
-                if let Some(i) = self.loadout.next_for(Mode::Ccip) {
+                if let Some(i) = self.station() {
                     let st = self.loadout.stations[i];
                     self.loadout.stations[i].loaded = false;
                     let b = Bomb::release(st.store.bomb().unwrap_or(&MK82), a, st.at);
@@ -1605,7 +1647,7 @@ impl Combat {
     }
 
     fn launch(&mut self, a: &Aircraft, mode: Mode) {
-        let Some(i) = self.loadout.next_for(mode) else { return };
+        let Some(i) = self.station_for(mode) else { return };
         let st = self.loadout.stations[i];
         let Some(spec) = st.store.missile() else { return };
         // Launch rules (docs/WEAPONS.md). A heat seeker goes for what its
@@ -1678,7 +1720,7 @@ impl Combat {
         self.zone_clock -= dt;
         if self.zone_clock <= 0.0 {
             self.zone_clock = 0.25;
-            let spec = self.loadout.next_for(self.mode).and_then(|i| self.loadout.stations[i].store.missile());
+            let spec = self.station().and_then(|i| self.loadout.stations[i].store.missile());
             let shot = match (self.mode, spec) {
                 (Mode::Srm | Mode::Mrm, Some(spec)) if spec.infrared() => self.seeker.map(|s| (spec, s)),
                 (Mode::Mrm, Some(spec)) => self.radar_lock().filter(|w| matches!(w, Who::Bandit(_))).map(|l| (spec, l)),
@@ -2641,6 +2683,43 @@ mod tests {
         assert!(names.iter().any(|n| n.starts_with("FAB-")), "{names:?}");
         assert_eq!(m.time_left, crate::sim::MISSION_TIME);
         assert_eq!(m.gates.len(), 10, "the gate run keeps its gates");
+    }
+
+    /// X steps through each kind of store still on board, two kinds in one
+    /// master mode apart, and skips what is empty: a kind all fired and the
+    /// gun with no rounds.
+    #[test]
+    fn the_selector_skips_empty_weapons() {
+        terrain::init();
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Dogfight, &mut m);
+        let mut cfg = Config::for_mission(MissionKind::Dogfight);
+        (cfg.tip, cfg.outer, cfg.outboard) = (Store::Aim9x, Some(Store::Aim9), Some(Store::Aim120));
+        c.equip(&cfg);
+        let cycle = |c: &mut Combat| {
+            let mut v = Vec::new();
+            for _ in 0..c.choices().len() {
+                c.cycle_weapon();
+                v.push(c.weapon_left().0);
+            }
+            v.sort();
+            v
+        };
+        assert_eq!(cycle(&mut c), vec!["20MM", "AIM-120C", "AIM-9M", "AIM-9X"]);
+        // The AIM-9Ms all fired and the drum empty: only the rest come up.
+        for s in c.loadout.stations.iter_mut().filter(|s| s.store == Store::Aim9) {
+            s.loaded = false;
+        }
+        c.loadout.rounds = 0;
+        assert_eq!(cycle(&mut c), vec!["AIM-120C", "AIM-9X"]);
+        // The AIM-9X picked is the one that leaves.
+        while c.weapon_left().0 != "AIM-9X" {
+            c.cycle_weapon();
+        }
+        let mut a = spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0);
+        a.update(0.0, &Input::default());
+        c.launch(&a, c.mode);
+        assert_eq!(c.loadout.count(Store::Aim9x), 1);
     }
 
     /// The lock takes the bandit nearest the boresight, and T steps to the next.
