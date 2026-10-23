@@ -410,6 +410,8 @@ pub struct Flcs {
     /// Load-factor error integrator, g, and the load factor a step ago.
     pub n_int: f64,
     nz_last: f64,
+    /// Pitch attitude held with the stick at rest, radians.
+    hold: Option<f64>,
     /// Lagged roll-rate command, deg/s.
     pub p_cmd: f64,
     q_wash: f64,
@@ -485,6 +487,9 @@ struct Sensors {
     nz: f64,
     qbar: f64,
     up_y: f64,
+    /// Pitch attitude and bank, radians.
+    theta: f64,
+    phi: f64,
     inertia: (f64, f64, f64, f64),
     rotor: f64,
     /// Weight on wheels: the g integrator rests, as the FLCS ground mode does.
@@ -557,6 +562,24 @@ impl Flcs {
         // plus a correction that closes the g error in about a quarter second.
         let g_v = G0 / speed;
         let mut q_cmd = clamp(g_v * (demand + 1.0 - s.up_y) + 2.5 * g_v * (err + self.n_int), -1.0, 1.0);
+        // Attitude hold: with the stick at rest, the wings within 60 degrees
+        // of level and the nose within 70 of the horizon, the nose stays where
+        // the pilot left it, as modern rate-command, attitude-hold fly-by-wire
+        // does, instead of sinking back as the AoA of the last pull unloads.
+        let calm = s.phi.abs() < 60.0 * DEG && s.theta.abs() < 70.0 * DEG && !s.ground;
+        if stick.abs() < STICK_DEAD && calm {
+            let lead = s.theta + 0.25 * (q * s.phi.cos() - r * s.phi.sin());
+            // Past 2.2 g the hold first unloads, the nose easing down with the
+            // excess and the held attitude following it, so a hard pull ends
+            // in a quick unload and the hold settles where that leaves the nose.
+            let excess = (s.nz - 2.2).max(0.0);
+            let held = if excess > 0.0 { *self.hold.insert(lead) } else { *self.hold.get_or_insert(lead) };
+            let q_att = (2.0 * (held - s.theta) + r * s.phi.sin()) / s.phi.cos() - 2.0 * g_v * excess;
+            q_cmd = clamp(q_att, -1.0, g_v * (2.5 - s.up_y));
+            self.n_int = 0.0;
+        } else {
+            self.hold = None;
+        }
         // AoA protection: near the limits, only the pitch rate that holds the
         // AoA where it is (the path turning under the present lift) is allowed.
         let q_hold = g_v * (s.nz - s.up_y);
@@ -946,6 +969,8 @@ impl Aircraft {
             nz: self.g_load,
             qbar,
             up_y: self.q.axes().up.y,
+            theta: self.q.axes().forward.y.clamp(-1.0, 1.0).asin(),
+            phi: (-self.q.axes().right.y).atan2(self.q.axes().up.y),
             inertia: self.inertia(),
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
             ground: self.on_ground,
@@ -1293,8 +1318,12 @@ mod tests {
         assert!(peak > 8.8 && peak < G_LIMIT + 0.4, "peak {peak:.2} g");
         // Holding 9 g bleeds speed, so the g decays as the AoA limit is reached.
         assert!(a.g_load > 6.5 && a.alpha_deg < 25.5, "{:.2} g at {:.1} deg after 2 s", a.g_load, a.alpha_deg);
+        // Released, it unloads at once, and the attitude hold that takes over
+        // near 1 g lets the path settle under the nose.
         let a = run(a, 1.0, Input::default());
-        assert!((a.g_load - 1.0).abs() < 0.5, "1 s after release: {:.2} g", a.g_load);
+        assert!((a.g_load - 1.0).abs() < 0.6, "1 s after release: {:.2} g", a.g_load);
+        let a = run(a, 1.5, Input::default());
+        assert!((a.g_load - 1.0).abs() < 0.4, "2.5 s after release: {:.2} g", a.g_load);
     }
 
     #[test]
@@ -1329,6 +1358,22 @@ mod tests {
         }
         assert!(low > 0.85, "dipped to {low:.2} g after the release");
         assert!((a.g_load - 1.0).abs() < 0.1, "{:.2} g 4 s after the release", a.g_load);
+    }
+
+    #[test]
+    fn the_nose_stays_where_a_pitch_change_leaves_it() {
+        for (stick, speed) in [(0.15, 200.0), (0.3, 200.0), (0.2, 130.0), (-0.3, 220.0)] {
+            let mut a = run(aircraft(3000.0, speed), 2.0, Input { pitch_axis: stick, ..Default::default() });
+            let theta = |a: &Aircraft| a.q.axes().forward.y.asin() * RAD;
+            let left = theta(&a);
+            let (mut lo, mut hi): (f64, f64) = (left, left);
+            for _ in 0..(6.0 / DT) as usize {
+                a.update(DT, &Input::default());
+                lo = lo.min(theta(&a));
+                hi = hi.max(theta(&a));
+            }
+            assert!(lo > left - 0.6 && hi < left + 1.5, "stick {stick} at {speed} m/s: left at {left:.1}, then {lo:.1} to {hi:.1} deg");
+        }
     }
 
     #[test]
