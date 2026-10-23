@@ -27,6 +27,16 @@
 //! relative incapacitation (2 to 38 s measured); a brief spike here costs
 //! about 3 s and 2 s, a long grinding one up to 20 s and 12 s. Negative g
 //! reddens the view from about -1.5 G and fully at the jet's -3 G limit.
+//!
+//! Nothing here is all or nothing. G stress accumulates: every second hard
+//! past 3 G, or pushing below -1 G, adds to a dose that fades over minutes,
+//! and the more of it the pilot carries, the lower the tolerance, the slower
+//! the rest and the oxygen come back, and the longer a G-LOC lasts. A fresh
+//! pilot holds 9 G for about 25 s before going out, one who pulled 9 G for
+//! 15 s half a minute earlier only about 17 s. And the G-LOC itself comes on
+//! through an almost-loss of consciousness (A-LOC): as the brain runs short
+//! the hands slacken on the controls and the view dims over a few seconds,
+//! then comes back through a grey haze and confusion afterwards.
 use crate::math::*;
 use crate::sim::{Aircraft, Input, G0};
 use crate::terrain;
@@ -38,7 +48,7 @@ const MMHG_PER_G: f64 = 1060.0 * G0 * 0.28 / 133.322;
 /// Eye-level pressures (mmHg) between which the retina, and then the brain,
 /// go from fully perfused to not perfused at all.
 const RETINA: (f64, f64) = (0.0, 30.0);
-const BRAIN: (f64, f64) = (-18.0, -2.0);
+const BRAIN: (f64, f64) = (-10.0, 4.0);
 /// Seconds of oxygen each holds with no flow, and the time constant of its
 /// recovery once the flow is back.
 const RETINA_RESERVE: f64 = 3.0;
@@ -53,7 +63,7 @@ const PBG: f64 = 25.0;
 const AGSM: f64 = 65.0;
 /// Seconds of full straining that exhaust the pilot, the share of the AGSM
 /// lost when exhausted, and the seconds of rest that bring it back.
-const ENDURANCE: f64 = 22.0;
+const ENDURANCE: f64 = 26.0;
 const FATIGUE_LOSS: f64 = 1.0;
 const REST: f64 = 60.0;
 /// Baroreflex range (mmHg), and its time constants: sympathetic (raising the
@@ -67,6 +77,23 @@ const REFLEX_DOWN: f64 = 2.0;
 /// spike's, up to the longest.
 const GLOC_ABSOLUTE: (f64, f64, f64) = (3.0, 0.5, 20.0);
 const GLOC_RELATIVE: (f64, f64, f64) = (2.0, 0.3, 12.0);
+/// Accumulated G stress, the "G dose": seconds weighted by how far past 3 G,
+/// or below -1 G (which floods the head and sets up the push-pull effect),
+/// forgotten with time constant DOSE_DECAY. DOSE_REF of it is a hard fight's
+/// worth, about 20 s at 9 G. Its effect saturates: at a full dose the pilot
+/// has lost DOSE_TOLERANCE mmHg at eye level (about 0.8 G, from blood pooled
+/// in the legs and spent reserves), rests and refills oxygen DOSE_RECOVERY
+/// times slower again, and stays out DOSE_GLOC times longer again after a
+/// G-LOC.
+const DOSE_DECAY: f64 = 180.0;
+const DOSE_REF: f64 = 250.0;
+const DOSE_TOLERANCE: f64 = 12.0;
+const DOSE_RECOVERY: f64 = 1.5;
+const DOSE_GLOC: f64 = 0.8;
+/// Brain oxygen below which the pilot drifts into almost-loss of
+/// consciousness (A-LOC): the hands slacken and the view dims steadily
+/// until the G-LOC itself, instead of all at once.
+const ALOC: f64 = 0.45;
 /// Auto-GCAS recovery: roll rate (deg/s), pull (g) and the clearance it keeps (m).
 const GCAS_ROLL: f64 = 180.0;
 const GCAS_PULL: f64 = 5.0;
@@ -117,11 +144,13 @@ pub struct Pilot {
     /// the L-1 manoeuvre snatches a breath every 3 s.
     pub breath: f64,
     pub breaths: u32,
+    /// Accumulated G stress (see DOSE_REF).
+    pub dose: f64,
 }
 
 impl Default for Pilot {
     fn default() -> Pilot {
-        Pilot { reflex: 0.0, suit: 0.0, strain: 0.0, fatigue: 0.0, eye: MAP_HEART - MMHG_PER_G, retina: 1.0, brain: 1.0, red: 0.0, hypoxia: 0.0, gloc: 0.0, relative: GLOC_RELATIVE.0, glocs: 0, gcas: false, breath: 0.0, breaths: 0 }
+        Pilot { reflex: 0.0, suit: 0.0, strain: 0.0, fatigue: 0.0, eye: MAP_HEART - MMHG_PER_G, retina: 1.0, brain: 1.0, red: 0.0, hypoxia: 0.0, gloc: 0.0, relative: GLOC_RELATIVE.0, glocs: 0, gcas: false, breath: 0.0, breaths: 0, dose: 0.0 }
     }
 }
 
@@ -144,13 +173,19 @@ impl Pilot {
     }
 
     /// Share of the pilot's control inputs reaching the stick and throttle:
-    /// none while unconscious, coming back through the confusion after it.
+    /// slackening through the A-LOC as the brain runs short, none while
+    /// unconscious, coming back through the confusion after it.
     pub fn authority(&self) -> f64 {
         if self.gloc <= 0.0 {
-            1.0
+            smoothstep(0.0, ALOC, self.brain)
         } else {
             smoothstep(self.relative, 0.0, self.gloc)
         }
+    }
+
+    /// How much of a full G dose the pilot carries, 0..1, saturating.
+    pub fn dosed(&self) -> f64 {
+        1.0 - (-self.dose / DOSE_REF).exp()
     }
 
     /// Advances the physiology through one step at normal load factor `nz`.
@@ -164,7 +199,13 @@ impl Pilot {
         self.suit += pull(smoothstep(1.8, 3.0, nz) - self.suit, 0.6);
         let effort = if awake { smoothstep(3.0, 6.0, nz.max(a.flcs.n_cmd + 1.0)) } else { 0.0 };
         self.strain += pull(effort - self.strain, if effort > self.strain { 0.3 } else { 0.5 });
-        self.fatigue = clamp(self.fatigue + (self.strain * self.strain / ENDURANCE - (1.0 - self.strain) / REST) * dt, 0.0, 1.0);
+        // The dose builds with every second hard past 3 G or below -1 G, and
+        // fades slowly; the more of it, the slower the pilot recovers.
+        let stress = (nz - 3.0).max(0.0).powf(1.5) + 6.0 * (-1.0 - nz).max(0.0).powf(1.2);
+        self.dose = (self.dose + (stress - self.dose / DOSE_DECAY) * dt).max(0.0);
+        let k = self.dosed();
+        let slow = 1.0 + DOSE_RECOVERY * k;
+        self.fatigue = clamp(self.fatigue + (self.strain * self.strain / ENDURANCE - (1.0 - self.strain) / (REST * slow)) * dt, 0.0, 1.0);
         let before = self.breath;
         self.breath = if self.strain > 0.5 && awake { self.breath + dt } else { 0.0 };
         if self.breath > 0.0 && (before == 0.0 || (before / 3.0).floor() < (self.breath / 3.0).floor()) {
@@ -175,16 +216,16 @@ impl Pilot {
         // The mask pressure rises with the suit's from 4 G.
         let breathing = PBG * self.suit * smoothstep(4.0, 9.0, nz);
         let protection = SUIT * self.suit + breathing + AGSM * self.strain * (1.0 - FATIGUE_LOSS * self.fatigue * self.fatigue);
-        let raw = MAP_HEART + protection - column;
+        let raw = MAP_HEART + protection - column - DOSE_TOLERANCE * k;
         // The carotid sinus reads the head-level pressure and drives it back
         // towards its 1 g value.
         let target = clamp(0.6 * (MAP_HEART - MMHG_PER_G - raw), REFLEX_MIN, REFLEX_MAX);
         self.reflex += pull(target - self.reflex, if target > self.reflex { REFLEX_UP } else { REFLEX_DOWN });
         self.eye = raw + self.reflex;
 
-        self.retina = oxygen(self.retina, perfusion(self.eye, RETINA), RETINA_RESERVE, RETINA_RECOVERY, dt);
+        self.retina = oxygen(self.retina, perfusion(self.eye, RETINA), RETINA_RESERVE, RETINA_RECOVERY * slow, dt);
         let flow = perfusion(self.eye, BRAIN);
-        self.brain = oxygen(self.brain, flow, BRAIN_RESERVE, BRAIN_RECOVERY, dt);
+        self.brain = oxygen(self.brain, flow, BRAIN_RESERVE, BRAIN_RECOVERY * slow, dt);
         let red = smoothstep(-1.5, -3.0, nz);
         self.red += pull(red - self.red, if red > self.red { 1.5 } else { 2.0 });
 
@@ -205,9 +246,11 @@ impl Pilot {
             self.gloc = (self.gloc - dt).max(0.0);
         } else if self.brain <= 0.0 {
             // A straight drain of the reserve leaves half of it as debt.
+            // A heavy dose lengthens both parts.
             let excess = (self.hypoxia - 0.5 * BRAIN_RESERVE).max(0.0);
-            self.relative = (rel.0 + rel.1 * excess).min(rel.2);
-            self.gloc = (abs.0 + abs.1 * excess).min(abs.2) + self.relative;
+            let longer = 1.0 + DOSE_GLOC * k;
+            self.relative = ((rel.0 + rel.1 * excess) * longer).min(rel.2);
+            self.gloc = ((abs.0 + abs.1 * excess) * longer).min(abs.2) + self.relative;
             self.glocs += 1;
         }
 
@@ -255,7 +298,13 @@ impl Pilot {
     /// What the pilot sees now.
     pub fn vision(&self) -> Vision {
         let o = self.retina;
-        let mut v = Vision { tunnel: 1.0 - smoothstep(0.12, 0.96, o), grey: 1.0 - smoothstep(0.35, 0.97, o), black: 1.0 - smoothstep(0.0, 0.3, o), red: self.red };
+        let mut v = Vision { tunnel: 1.0 - smoothstep(0.12, 0.96, o), grey: 1.0 - smoothstep(0.35, 0.97, o), black: 1.0 - smoothstep(0.0, 0.45, o), red: self.red };
+        // Through the A-LOC the whole view dims and greys as the brain runs
+        // short, whatever the retina still gets.
+        let fade = 1.0 - smoothstep(0.0, ALOC + 0.15, self.brain);
+        v.black = v.black.max(fade);
+        v.grey = v.grey.max(fade);
+        v.tunnel = v.tunnel.max(fade);
         if self.gloc > 0.0 {
             // Out cold, then the view comes back through a grey haze.
             let back = smoothstep(self.relative, 0.5 * self.relative, self.gloc);
@@ -380,6 +429,65 @@ mod tests {
         assert!(p.glocs >= 1, "a minute more at 9 G");
     }
 
+
+    /// Seconds at 9 G to a G-LOC, then seconds out cold at 1 G, after a
+    /// warm-up history `before` (load factor against time) of `lead` seconds.
+    fn nine_g_after(before: impl Fn(f64) -> f64, lead: f64) -> (f64, f64, f64) {
+        let mut p = Pilot::default();
+        let mut a = jet();
+        let mut t = 0.0;
+        while t < lead {
+            let g = before(t);
+            ride(&mut p, &mut a, DT, |_| g, false);
+            t += DT;
+        }
+        let dose = p.dosed();
+        let mut to = 0.0;
+        while p.glocs == 0 && to < 60.0 {
+            ride(&mut p, &mut a, DT, |_| 9.0, false);
+            to += DT;
+        }
+        let mut out = 0.0;
+        while p.gloc > 0.0 {
+            ride(&mut p, &mut a, DT, |_| 1.0, false);
+            out += DT;
+        }
+        (to, out, dose)
+    }
+
+    #[test]
+    fn g_stress_builds_up_and_brings_the_next_g_loc_sooner() {
+        let (fresh, fresh_out, _) = nine_g_after(|_| 1.0, 0.0);
+        // A 15 s 9 G turn, then half a minute's rest at 1 G.
+        let (tired, tired_out, dose) = nine_g_after(|t| if t < 15.0 { 9.0 } else { 1.0 }, 45.0);
+        // Pushing at -2.5 G for 10 s, then a few seconds level.
+        let (pushed, _, push_dose) = nine_g_after(|t| if t < 10.0 { -2.5 } else { 1.0 }, 13.0);
+        println!("9 G to G-LOC: fresh {fresh:.1} s, after a turn {tired:.1} s (dose {dose:.2}), after a push {pushed:.1} s (dose {push_dose:.2}); out {fresh_out:.1} s fresh, {tired_out:.1} s tired");
+        assert!(fresh > 20.0 && fresh < 30.0, "fresh {fresh:.1} s");
+        assert!(tired < fresh - 4.0, "after a turn {tired:.1} s");
+        assert!(pushed < fresh && push_dose > 0.2, "after a push {pushed:.1} s");
+        assert!(tired_out > fresh_out + 1.0, "out {tired_out:.1} s tired, {fresh_out:.1} s fresh");
+        // Rested long enough, the dose fades.
+        let (rested, _, rest_dose) = nine_g_after(|t| if t < 15.0 { 9.0 } else { 1.0 }, 615.0);
+        assert!(rest_dose < 0.1 && rested > fresh - 1.5, "after ten minutes {rested:.1} s");
+    }
+
+    #[test]
+    fn the_g_loc_comes_on_through_an_a_loc() {
+        let mut p = Pilot::default();
+        let mut a = jet();
+        let (mut slack, mut t) = (0.0, 0.0);
+        while p.glocs == 0 && t < 60.0 {
+            ride(&mut p, &mut a, DT, |_| 9.0, false);
+            let k = p.authority();
+            if k > 0.05 && k < 0.95 {
+                slack += DT;
+            }
+            t += DT;
+        }
+        assert!(slack > 1.5, "the hands went slack over only {slack:.1} s");
+        assert!(p.vision().black > 0.99 && p.authority() < 0.01);
+    }
     #[test]
     fn a_held_nine_g_closes_the_view_gradually_before_the_g_loc() {
         let mut p = Pilot::default();
