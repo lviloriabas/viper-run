@@ -1088,6 +1088,18 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
     // Above the combiner, which the default head pitch lifts high on screen.
     toast_line(cv, w, 11.0 * s, s, toast, toast_t);
+    limiter_line(cv, w, 26.0 * s, s, a);
+}
+
+/// The flight computer holding the jet to its limits against the stick:
+/// steady red, so a pull that goes no further reads as protection.
+fn limiter_line(cv: &mut Canvas, w: f32, y: f32, s: f32, a: &Aircraft) {
+    if let Some(text) = a.flcs.limit.filter(|_| !a.crashed) {
+        let label = format!("{} {text}", if a.kind == crate::sim::Type::F16 { "FLCS" } else { "SOS" });
+        let tw = Canvas::text_width(&label, s);
+        cv.rect(w * 0.5 - tw * 0.5 - 6.0 * s, y - 7.0 * s, tw + 12.0 * s, 14.0 * s, rgba(4, 10, 6, 0.55));
+        cv.text(&label, w * 0.5, y, s, RED, Align::Center);
+    }
 }
 
 fn toast_line(cv: &mut Canvas, w: f32, y: f32, s: f32, toast: &str, t: f64) {
@@ -1176,6 +1188,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     }
 
     toast_line(cv, w, top_h + 12.0 * s, s, toast, toast_t);
+    limiter_line(cv, w, top_h + 27.0 * s, s, a);
     let warns = warnings(a, m);
     if !warns.is_empty() && flying && ((time * 4.5).floor() as i64) % 2 == 0 {
         let y = h * 0.60;

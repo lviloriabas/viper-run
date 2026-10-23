@@ -519,6 +519,10 @@ pub struct Flcs {
     pub ail: f64,
     pub rdr: f64,
     pub brake: f64,
+    /// What the computer is holding the jet to against the stick, the g
+    /// limit or the AoA limiter, held a moment so it reads steadily.
+    pub limit: Option<&'static str>,
+    limit_hold: f64,
 }
 
 /// Stick shaping. The real force gradients (FlightGear F-16) give almost
@@ -641,6 +645,27 @@ impl Flcs {
         let at_floor = s.nz - 1.0 + n_alpha * (-5.0 - lead);
         let limited = lead > s.alpha_lim.0 && self.n_cmd > at_limit || lead < -4.0 && self.n_cmd < at_floor;
         let demand = if lead > s.alpha_lim.0 { self.n_cmd.min(at_limit) } else { self.n_cmd }.max(if lead < -4.0 { at_floor } else { NEG_G_LIMIT - 1.0 });
+        // The pilot asking for more than the structure takes: the stick past
+        // the g limit with the jet pulling near it, or the AoA limiter capping
+        // the pull. Either holds on screen a little after it lets go.
+        let raw = pitch_command(stick);
+        let g_capped = (raw > s.g_max - 1.0 && s.nz > s.g_max - 1.0) || (raw < NEG_G_LIMIT - 1.0 && s.nz < NEG_G_LIMIT + 0.5);
+        let now = if limited && !s.ground {
+            Some("AOA LIMITER")
+        } else if g_capped && !s.ground {
+            Some("G LIMITER")
+        } else {
+            None
+        };
+        if now.is_some() {
+            self.limit = now;
+            self.limit_hold = 0.4;
+        } else {
+            self.limit_hold -= dt;
+            if self.limit_hold <= 0.0 {
+                self.limit = None;
+            }
+        }
         let err = demand - (s.nz - 1.0);
         // The integrator trims out the steady g error only; it rests while the
         // limiter holds the jet or the command is still moving, and bleeds off
@@ -1488,6 +1513,19 @@ mod tests {
         assert!((a.g_load - 1.0).abs() < 0.6, "1 s after release: {:.2} g", a.g_load);
         let a = run(a, 1.5, Input::default());
         assert!((a.g_load - 1.0).abs() < 0.4, "2.5 s after release: {:.2} g", a.g_load);
+    }
+
+    /// The limiter call: a full pull fast is held to the g limit, slow to the
+    /// AoA limit, and a gentle pull or a released stick is not limited.
+    #[test]
+    fn the_flcs_says_when_it_limits_the_pull() {
+        let pull = Input { pitch_up: true, ..Default::default() };
+        assert_eq!(run(aircraft(1000.0, 240.0), 1.0, pull).flcs.limit, Some("G LIMITER"));
+        assert_eq!(run(aircraft(3000.0, 130.0), 1.5, pull).flcs.limit, Some("AOA LIMITER"));
+        let gentle = Input { pitch_axis: 0.5, ..Default::default() };
+        assert_eq!(run(aircraft(1000.0, 240.0), 1.5, gentle).flcs.limit, None);
+        let a = run(aircraft(1000.0, 240.0), 1.0, pull);
+        assert_eq!(run(a, 1.0, Input::default()).flcs.limit, None);
     }
 
     #[test]
