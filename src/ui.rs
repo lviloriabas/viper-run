@@ -228,16 +228,11 @@ impl<'a> Ui<'a> {
         self.cv.text("COLD RIVER GORGE, SECTOR 07", x + m, yy + 7.0 * s, s.max(2.0) - 1.0, DIM, Align::Left);
         yy += 18.0 * s;
         let (copy, tag) = match mission {
-            MissionKind::Gates => ("You are already airborne, twenty clicks from the border, with ten navigation gates strung down a black river gorge. Thread the valley. Stay under the ridgeline. Make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
-            MissionKind::Dogfight => ("Aggressor jets are coming for you, as many and from where the threat setup on the loadout screen puts them. Lock them up, take the shot, and win the turning fight that follows.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
-            MissionKind::Airfield => ("Your jet sits on runway A of the valley airbase with the engine at idle. Take off, raise the gear, fly out to the steerpoint past the far end and come back to land: gear down below 300 knots, about 13 degrees of alpha on final, and stop on the runway.", match (self.pad, self.layout) {
-                    (false, _) => "GEAR, FLAPS AND WHEEL BRAKES ARE ON G, L AND B.",
-                    (true, PadLayout::Combat) => "GEAR AND FLAPS ARE ON THE D-PAD, WHEEL BRAKES ON LT.",
-                    (true, PadLayout::Classic) => "GEAR IS ON THE RS CLICK, WHEEL BRAKES ON LT.",
-                },
-            ),
-            MissionKind::Strike => ("An SA-6 battery guards the Cold River bridge. Go in low under its radar, put a bomb on the span and on the SAM, and strafe what moves. The guns along the river shoot back.", "FOUR MK-82S. PICKLE ON THE PIPPER."),
-            MissionKind::Free => ("No clock and no score to beat. The gate rings are strung down the gorge, the bridge, the convoy and the SA-6 are on the river, and a pair of bandits flies circuits round the gorge. Nobody chases you or shoots back, and whatever you shoot down or blow up comes back half a minute later.", "STOP ON THE RUNWAY TO REARM, REFUEL AND REPAIR."),
+            MissionKind::Gates => ("Thread ten gates down the river gorge and make the coast before the clock runs out.", "THE JET IS LOADED. THE WEATHER IS PERFECT. THE MOUNTAIN IS NOT."),
+            MissionKind::Dogfight => ("Aggressor jets are inbound. Find them, shoot them down and come home.", "SAME JET. SAME LIMITS. ONLY ONE OF YOU GOES HOME."),
+            MissionKind::Airfield => ("Take off from the valley airbase, fly out to the steerpoint and bring the jet back for a clean landing.", "THE RUNWAY IS LONG. THE APPROACH IS NOT FORGIVING."),
+            MissionKind::Strike => ("Drop the Cold River bridge and the SAM site that guards it. Expect fire from the ground.", "FOUR MK-82S. MAKE THEM COUNT."),
+            MissionKind::Free => ("Fly the valley at your own pace. The gates, targets and bandits are there for practice, and nothing shoots back.", "NO CLOCK. NO SCORE. JUST THE VALLEY."),
         };
         yy += self.cv.paragraph(copy, x + m, yy, left_w - m * 1.5, s.max(2.0) - 1.0, 1.7, rgba(0xc7, 0xd6, 0xc2, 1.0));
         yy += 2.0 * s;
