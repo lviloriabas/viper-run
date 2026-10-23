@@ -182,6 +182,68 @@ impl Type {
     }
 }
 
+/// Battle damage from rounds and warheads, by system, each from 0 (sound)
+/// to 1 (gone), and what it does to the jet: thrust lost from the engine
+/// (the MiG keeps its second engine), fuel pouring from holed tanks, a wing
+/// that lifts less, drags more and rolls the jet toward its side, hydraulics
+/// that move the surfaces less far, and an airframe that takes less g.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BattleDamage {
+    pub engine: f64,
+    /// Fuel leaking, kg/s.
+    pub leak: f64,
+    pub wing: f64,
+    /// The damaged wing: -1 left, 1 right.
+    pub side: f64,
+    pub controls: f64,
+    pub airframe: f64,
+}
+
+impl BattleDamage {
+    /// A hit of `points` (of the 100 an airframe can take) to the system the
+    /// two random numbers in 0..1 pick, weighted by how much of the jet each
+    /// fills. Returns that system's caution name.
+    pub fn hit(&mut self, kind: Type, points: f64, pick: f64, side: f64) -> &'static str {
+        let s = points / 100.0;
+        if pick < 0.30 {
+            // A twin loses one engine at a time.
+            let cap = if kind == Type::Mig29 && self.engine < 0.5 { 0.5 } else { 1.0 };
+            self.engine = (self.engine + s * 1.6).min(cap);
+            if self.engine >= 0.95 { "ENGINE FIRE" } else if self.engine >= 0.5 && kind == Type::Mig29 { "ENGINE OUT" } else { "ENGINE DAMAGE" }
+        } else if pick < 0.50 {
+            self.leak = (self.leak + s * 5.0).min(6.0);
+            "FUEL LEAK"
+        } else if pick < 0.70 {
+            if self.wing == 0.0 {
+                self.side = if side < 0.5 { -1.0 } else { 1.0 };
+            }
+            self.wing = (self.wing + s * 1.6).min(1.0);
+            "WING DAMAGE"
+        } else if pick < 0.85 {
+            self.controls = (self.controls + s * 1.6).min(1.0);
+            "HYDRAULICS"
+        } else {
+            self.airframe = (self.airframe + s * 1.6).min(1.0);
+            "AIRFRAME DAMAGE"
+        }
+    }
+
+    /// Fraction of the thrust left.
+    pub fn thrust(&self) -> f64 {
+        if self.engine >= 0.95 { 0.0 } else { 1.0 - self.engine }
+    }
+
+    /// Fraction of the surface travel the hydraulics still give.
+    pub fn authority(&self) -> f64 {
+        1.0 - 0.65 * self.controls
+    }
+
+    /// Fraction of the load limit the airframe still takes.
+    pub fn strength(&self) -> f64 {
+        1.0 - 0.45 * self.airframe
+    }
+}
+
 /// A landing-gear leg: the tyre's lowest point at full extension (body
 /// axes), the oleo's spring and damping, its stroke, and whether it brakes
 /// or steers. Nose gear 3.45 m ahead of the centre of gravity, main gear
@@ -670,6 +732,8 @@ pub struct Aircraft {
     pub stores_mass: f64,
     /// Zero-lift drag coefficient of the stores beyond that clean baseline.
     pub stores_drag: f64,
+    /// Battle damage (see `BattleDamage`).
+    pub battle: BattleDamage,
     pub speed: f64,
     pub airspeed_kt: f64,
     pub tas_kt: f64,
@@ -763,6 +827,7 @@ impl Aircraft {
             mass,
             stores_mass: STORES_MASS,
             stores_drag: 0.0,
+            battle: BattleDamage::default(),
             speed,
             airspeed_kt: 0.0,
             tas_kt: 0.0,
@@ -1003,14 +1068,21 @@ impl Aircraft {
             area: self.kind.area(),
             mass: self.mass,
             alpha_lim: self.kind.alpha_limits(),
-            g_max: self.kind.g_limit(self.mass),
+            g_max: self.kind.g_limit(self.mass) * self.battle.strength(),
         };
         self.flcs.update(dt, input, &sensors);
+        // Damaged hydraulics move the surfaces only part of their travel.
+        let k = self.battle.authority();
+        if k < 1.0 {
+            self.flcs.el = clamp(self.flcs.el, -STAB_MAX * k, STAB_MAX * k);
+            self.flcs.ail = clamp(self.flcs.ail, -FLAPERON_MAX * k, FLAPERON_MAX * k);
+            self.flcs.rdr = clamp(self.flcs.rdr, -RUDDER_MAX * k, RUDDER_MAX * k);
+        }
 
         let fueled = self.fuel > 0.0;
         let command = if !fueled { 0.0 } else if want_ab { 100.0 } else { 50.0 * self.throttle };
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
-        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) } else { 0.0 };
+        self.thrust_n = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) * self.battle.thrust() } else { 0.0 };
 
         let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
         let mut c = aero::coefficients(&flow);
@@ -1028,6 +1100,15 @@ impl Aircraft {
         // Bombs and missiles on the pylons drag along the wind.
         c.cx -= self.stores_drag * alpha.cos();
         c.cz -= self.stores_drag * alpha.sin();
+        // A holed wing: less lift, 150 drag counts at the worst, and a roll
+        // and yaw toward the damaged side for the ailerons to hold off.
+        let w = self.battle.wing;
+        if w > 0.0 {
+            c.cz *= 1.0 - 0.25 * w;
+            c.cx -= 0.015 * w * alpha.cos();
+            c.cl += 0.012 * w * self.battle.side;
+            c.cn += 0.002 * w * self.battle.side;
+        }
         let qs = qbar * self.kind.area();
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
@@ -1125,7 +1206,7 @@ impl Aircraft {
         let lbf = self.thrust_n.max(0.0) / 4.448222;
         let tsfc = mix(0.661, 1.9, ab);
         self.fuel_flow = if fueled { (lbf * tsfc / 3600.0 * 0.4536).max(0.12) } else { 0.0 };
-        self.fuel = (self.fuel - self.fuel_flow * dt).max(0.0);
+        self.fuel = (self.fuel - (self.fuel_flow + self.battle.leak) * dt).max(0.0);
         self.mass = self.kind.empty_mass() + self.stores_mass + self.fuel;
 
         let core = (self.power / 50.0).min(1.0);
@@ -1150,7 +1231,7 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = self.kind.g_limit(self.mass).min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        self.g_avail = (self.kind.g_limit(self.mass) * self.battle.strength()).min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
@@ -1282,6 +1363,32 @@ mod tests {
         assert!(slow.g_avail < fast.g_avail);
         assert!(slow.g_load < fast.g_load);
         assert!(roll_rate(&slow) < roll_rate(&fast));
+    }
+
+    /// Battle damage costs the jet: half its thrust gone, fuel pouring out,
+    /// a holed wing rolling it with the stick at rest, the surfaces short of
+    /// their travel and less g to pull. A twin loses one engine to a hit
+    /// that stops a single.
+    #[test]
+    fn battle_damage_costs_performance() {
+        let sound = aircraft(3000.0, 220.0);
+        let mut hit = sound.clone();
+        hit.battle = BattleDamage { engine: 0.5, leak: 3.0, wing: 0.6, side: 1.0, controls: 0.5, airframe: 0.6 };
+        let mil = Input { throttle_up: true, ..Default::default() };
+        let (f0, f1) = (sound.fuel, hit.fuel);
+        let sound = run(sound, 2.0, mil);
+        let hit = run(hit, 2.0, mil);
+        assert!(hit.thrust_n < sound.thrust_n * 0.6, "{} against {} N", hit.thrust_n, sound.thrust_n);
+        assert!((f1 - hit.fuel) - (f0 - sound.fuel) > 5.0, "the leak drains fuel");
+        assert!(hit.g_avail < sound.g_avail * 0.8);
+        assert!(hit.flcs.ail.abs() <= FLAPERON_MAX * hit.battle.authority() + 1e-9);
+        assert!(roll_rate(&hit).abs() > roll_rate(&sound).abs() + 1.0, "the wing rolls the jet");
+        let mut twin = BattleDamage::default();
+        twin.hit(Type::Mig29, 100.0, 0.1, 0.5);
+        assert!(twin.engine == 0.5 && twin.thrust() == 0.5);
+        let mut single = BattleDamage::default();
+        single.hit(Type::F16, 100.0, 0.1, 0.5);
+        assert_eq!(single.thrust(), 0.0);
     }
 
     #[test]

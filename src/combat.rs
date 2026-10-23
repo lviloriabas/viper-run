@@ -6,7 +6,7 @@
 //! moved, and reports what happened as events for the effects and the sound.
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
-use crate::sim::{spec::STORES_MASS, trim, Aircraft, Flcs, Gate, Input, Mission, Type, G0};
+use crate::sim::{spec::STORES_MASS, trim, Aircraft, BattleDamage, Flcs, Gate, Input, Mission, Type, G0};
 use crate::scenario::{self, Threats};
 use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
@@ -720,6 +720,8 @@ pub struct Combat {
     pub loadout: Loadout,
     /// The player's airframe hit points, of 100.
     pub hp: f64,
+    /// What the hits have done to the player's systems.
+    pub battle: BattleDamage,
     pub bandits: Vec<Bandit>,
     /// Bandits that join once the first one is down.
     reserve: Vec<Bandit>,
@@ -931,6 +933,7 @@ impl Combat {
             },
             loadout: Loadout::for_mission(kind),
             hp: 100.0,
+            battle: BattleDamage::default(),
             bandits: Vec::new(),
             reserve: Vec::new(),
             wrecks: Vec::new(),
@@ -1098,6 +1101,8 @@ impl Combat {
             self.rearmed = true;
             self.loadout = Loadout::configure(&self.cfg);
             self.hp = 100.0;
+            self.battle = BattleDamage::default();
+            a.battle = self.battle;
             a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
             a.stores_mass = self.loadout.mass();
             a.wing_stores = self.loadout.wing_mass();
@@ -1276,6 +1281,20 @@ impl Combat {
         }
     }
 
+    /// Spreads a hit over the jet's systems: a round hits one, a warhead's
+    /// burst several, 25 points to each. Returns the worst system's name.
+    fn wound(&mut self, battle: &mut BattleDamage, kind: Type, dmg: f64) -> &'static str {
+        let mut left = dmg;
+        let mut what = "";
+        while left > 0.0 {
+            let part = left.min(25.0);
+            let (pick, side) = (self.rnd.next(), self.rnd.next());
+            what = battle.hit(kind, part, pick, side);
+            left -= part;
+        }
+        what
+    }
+
     /// One countermeasure program from a jet: a flare and a chaff bundle.
     /// Each missile guiding on it may lose its target, by its seeker type.
     fn decoy(&mut self, who: Who, pos: V3, vel: V3) {
@@ -1309,6 +1328,7 @@ impl Combat {
     /// One fixed step of the fight, after the player's jet has moved.
     pub fn step(&mut self, dt: f64, a: &mut Aircraft, trigger: bool, m: &mut Mission) {
         self.clock += dt;
+        a.battle = self.battle;
         self.warn = (self.warn - dt).max(0.0);
         let pressed = trigger && !self.trigger_was;
         self.trigger_was = trigger;
@@ -1702,6 +1722,12 @@ impl Combat {
                 }
                 self.hp -= dmg;
                 self.events.push(Event::PlayerHit { damage: dmg });
+                if self.hp > 0.0 {
+                    let mut battle = self.battle;
+                    let what = self.wound(&mut battle, a.kind, dmg);
+                    self.battle = battle;
+                    self.events.push(Event::Toast(format!("HIT // {what}")));
+                }
                 if self.hp <= 0.0 {
                     self.hp = 0.0;
                     self.player_dead = true;
@@ -1713,6 +1739,10 @@ impl Combat {
                     b.hp -= dmg;
                     if b.hp <= 0.0 {
                         self.kill_bandit(i);
+                    } else {
+                        let (mut battle, kind) = (self.bandits[i].jet.battle, self.bandits[i].jet.kind);
+                        self.wound(&mut battle, kind, dmg);
+                        self.bandits[i].jet.battle = battle;
                     }
                 }
             }

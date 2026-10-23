@@ -262,6 +262,19 @@ and 15 per 30 mm round; a warhead's damage
 falls off with the miss distance. A damaged jet trails smoke, and a kill
 leaves a burning wreck tumbling to the ground.
 
+Hits also damage systems, for the player and the bandits alike, and the
+flight model feels it. Each hit lands on one system, weighted by how much of
+the jet it fills, and a warhead's burst on several: the engine (thrust lost;
+the MiG-29 loses one engine of its two before the other, the F-16's single
+F110 can be stopped), the fuel tanks (a leak of up to 6 kg/s), a wing (less
+lift, up to 150 drag counts and a roll and yaw toward the damaged side that
+the stick has to hold off), the hydraulics (the surfaces reach only part of
+their travel, so the jet rolls and pulls slower) and the airframe (down to
+55 % of the g limit). The HUD and the overlays name the damage (ENGINE FIRE,
+ENGINE DAMAGE, HYDRAULICS, WING DAMAGE, FUEL LEAK, STRUCT DAMAGE), the F-16's
+caution panel lights FLCS, FUEL LOW and ENGINE, and the MiG's POZHAR lamp
+shows an engine fire. Stopping on the ground in free flight repairs it all.
+
 The STRIKE targets stand on the valley floor along the river: a convoy of
 four trucks with a ZSU-23-4, the SA-6 launcher and radar with a resupply truck
 and a second ZSU, the road bridge with a third, and a depot of warehouses and

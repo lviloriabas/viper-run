@@ -944,7 +944,23 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     } else if a.structure.margin > 0.87 {
         w.push(Warn { text: "OVERSPEED", color: AMBER });
     }
-    if a.structure.damage > 0.25 {
+    // Battle damage, worst first.
+    let b = &a.battle;
+    if b.engine >= 0.95 {
+        w.push(Warn { text: "ENGINE FIRE", color: RED });
+    } else if b.engine > 0.0 {
+        w.push(Warn { text: "ENGINE DAMAGE", color: AMBER });
+    }
+    if b.controls > 0.0 {
+        w.push(Warn { text: "HYDRAULICS", color: AMBER });
+    }
+    if b.wing > 0.0 {
+        w.push(Warn { text: "WING DAMAGE", color: AMBER });
+    }
+    if b.leak > 0.0 {
+        w.push(Warn { text: "FUEL LEAK", color: AMBER });
+    }
+    if a.structure.damage > 0.25 || a.battle.airframe > 0.0 {
         w.push(Warn { text: "STRUCT DAMAGE", color: AMBER });
     }
     if a.g_smooth > 9.15 {

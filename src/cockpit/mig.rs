@@ -495,7 +495,7 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
     // Warning lamp column, its legends transliterated.
     let lamps = [
         ("OSTATOK 800", a.fuel < 800.0, false),
-        ("POZHAR", false, true),
+        ("POZHAR", a.battle.engine >= 0.95, true),
         ("GENERATOR", a.rpm < 50.0, false),
         ("MASLO", a.oil_psi < 20.0, false),
         ("ALFA KRIT", a.alpha_deg > 22.0, true),

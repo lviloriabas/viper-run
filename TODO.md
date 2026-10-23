@@ -27,7 +27,7 @@
 - [x] Agregar estructuras en tierra para que no se vea tan vacío.
 - [x] El filtro de pixelado debe ser un poquito más sutil, solo para mejorar la visibilidad, pero no lo bajes tanto.
 - [x] En la pantalla de free flight permite cambiar de avión, mueve la configuración a las pantallas de configuración de cada misión.
-- [ ] Agregar un sistema de daños, que afecte el desempeño de la aeronave.
+- [x] Agregar un sistema de daños, que afecte el desempeño de la aeronave.
 - [x] Agregar minimun fuel setting.
 - [x] Agregar misiles radar al MIG-29.
 - [x] Agregar IRST funcional al MIG-29.
