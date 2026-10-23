@@ -407,8 +407,9 @@ pub struct Flcs {
     pub n_cmd: f64,
     /// AoA seen by the limiter, degrees.
     pub alpha_f: f64,
-    /// Load-factor error integrator, g.
+    /// Load-factor error integrator, g, and the load factor a step ago.
     pub n_int: f64,
+    nz_last: f64,
     /// Lagged roll-rate command, deg/s.
     pub p_cmd: f64,
     q_wash: f64,
@@ -488,8 +489,9 @@ struct Sensors {
     rotor: f64,
     /// Weight on wheels: the g integrator rests, as the FLCS ground mode does.
     ground: bool,
-    /// Wing reference area of the airframe, m^2.
+    /// Wing reference area of the airframe, m^2, and the mass, kg.
     area: f64,
+    mass: f64,
     /// Limiter onset and hard stop (degrees), and the positive g limit.
     alpha_lim: (f64, f64),
     g_max: f64,
@@ -519,19 +521,36 @@ impl Flcs {
         let qsc = s.qbar.max(50.0) * s.area * aero::CHORD;
         let qsb = s.qbar.max(50.0) * s.area * aero::SPAN;
 
-        // Pitch. The stick commands g; above 22.5 degrees of filtered AoA,
-        // with pitch-rate anticipation, the limiter takes away 2 g per degree,
-        // which caps the slow jet near 25.5 degrees at full aft stick.
+        // Pitch. The stick commands g. The AoA limiter is a selector: past
+        // the onset AoA (filtered, with pitch-rate anticipation) it lowers the
+        // command to the g that puts the jet at the limit, worked out from the
+        // lift slope, so it caps the slow jet near 25 degrees at full aft stick
+        // without fighting the g loop. A fixed g per degree would be several
+        // times stiffer than the airframe at low speed and set the nose bobbing.
         let stick = input.pitch();
         let n_cmd = clamp(pitch_command(stick), NEG_G_LIMIT - 1.0, s.g_max - 1.0);
         self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 12.0, 0.0, 1.0);
         self.alpha_f += (alpha - self.alpha_f) * clamp(dt * 10.0, 0.0, 1.0);
         let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
-        let demand = self.n_cmd - 2.0 * (lead - s.alpha_lim.0).max(0.0) + 2.0 * (-5.0 - lead).max(0.0);
+        let lift = |alpha: f64| -aero::coefficients(&Flow { alpha, ..*f }).cz;
+        let n_alpha = (s.qbar * s.area * (lift(alpha + 1.0) - lift(alpha)) / (s.mass * G0)).max(0.05);
+        let target = s.alpha_lim.1 - 1.0 * smoothstep(s.alpha_lim.0, s.alpha_lim.1, lead);
+        let at_limit = s.nz - 1.0 + n_alpha * (target - lead);
+        let at_floor = s.nz - 1.0 + n_alpha * (-5.0 - lead);
+        let limited = lead > s.alpha_lim.0 && self.n_cmd > at_limit || lead < -4.0 && self.n_cmd < at_floor;
+        let demand = if lead > s.alpha_lim.0 { self.n_cmd.min(at_limit) } else { self.n_cmd }.max(if lead < -4.0 { at_floor } else { NEG_G_LIMIT - 1.0 });
         let err = demand - (s.nz - 1.0);
+        // The integrator trims out the steady g error only; it rests while the
+        // limiter holds the jet or the command is still moving, and bleeds off
+        // otherwise, so a release doesn't overshoot through 1 g.
+        let nz_rate = if dt > 0.0 { (s.nz - self.nz_last) / dt } else { 0.0 };
+        self.nz_last = s.nz;
+        let settling = (n_cmd - self.n_cmd).abs() > 0.3 || err.abs() > 1.0 || nz_rate.abs() > 1.5;
         if s.ground {
             self.n_int = 0.0;
-        } else if err.abs() < 3.0 {
+        } else if limited || settling {
+            self.n_int *= 1.0 - clamp(dt * 3.0, 0.0, 1.0);
+        } else {
             self.n_int = clamp(self.n_int + err * 2.5 * dt, -1.5, 1.5);
         }
         // Pitch rate that turns the flight path at the demanded load factor,
@@ -931,6 +950,7 @@ impl Aircraft {
             rotor: aero::ENGINE_MOMENTUM * self.power.min(50.0) / 50.0,
             ground: self.on_ground,
             area: self.kind.area(),
+            mass: self.mass,
             alpha_lim: self.kind.alpha_limits(),
             g_max: self.kind.g_limit(self.mass),
         };
@@ -1278,6 +1298,40 @@ mod tests {
     }
 
     #[test]
+    fn a_held_pull_near_the_aoa_limit_does_not_bob_the_nose() {
+        let mut a = aircraft(3000.0, 130.0);
+        let pull = Input { pitch_axis: 0.3, ..Default::default() };
+        let mut reversals = 0;
+        let mut last_q: f64 = 1.0;
+        for i in 0..(8.0 / DT) as usize {
+            a.update(DT, &pull);
+            if i as f64 * DT > 0.5 {
+                if a.omega.x * last_q < 0.0 && a.omega.x.abs() > 2.0 * DEG {
+                    reversals += 1;
+                }
+                if a.omega.x.abs() > 2.0 * DEG {
+                    last_q = a.omega.x;
+                }
+                assert!(a.flcs.el.abs() < 12.0, "stabilator at {:.1} deg after {:.1} s", a.flcs.el, i as f64 * DT);
+            }
+        }
+        assert!(reversals == 0, "the nose reversed {reversals} times under a steady pull");
+    }
+
+    #[test]
+    fn releasing_a_pull_settles_on_one_g_without_dropping_the_nose() {
+        let a = run(aircraft(3000.0, 200.0), 4.0, Input { pitch_axis: 0.3, ..Default::default() });
+        let mut a = a;
+        let mut low: f64 = 9.0;
+        for _ in 0..(4.0 / DT) as usize {
+            a.update(DT, &Input::default());
+            low = low.min(a.g_load);
+        }
+        assert!(low > 0.85, "dipped to {low:.2} g after the release");
+        assert!((a.g_load - 1.0).abs() < 0.1, "{:.2} g 4 s after the release", a.g_load);
+    }
+
+    #[test]
     fn aoa_limiter_holds_the_slow_jet_near_25_degrees() {
         let mut a = aircraft(3000.0, 120.0);
         let pull = Input { pitch_up: true, ..Default::default() };
@@ -1563,3 +1617,4 @@ mod tests {
         assert!(sink < 3.0, "touchdown sink {sink:.1} m/s");
     }
 }
+
