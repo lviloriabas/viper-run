@@ -40,7 +40,7 @@
 - [ ] Se supone que la fly computer protege de daño estructural, pon un texto en rojo que diga cuando la flight computer te limita
 - [ ] verifica las cabinas, hay elementos que chocan con los bordes y se cortan, también se fiel a la geometría de los side panels del f-16, siguen sin quedar del todo bien.
 - [x] el selector de armas debe ir seleccionando solo las armas disponibles, no todas.
-- [ ] En free flight que los bandits no usen countermeasures
+- [x] En free flight que los bandits no usen countermeasures
 - [ ] Modela el IRCCM y anti countermeasure de los misiles.
 
 Más adelante

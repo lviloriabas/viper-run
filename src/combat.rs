@@ -1779,10 +1779,12 @@ impl Combat {
                 })
                 .map(|m| (m.pos, m.vel))
                 .min_by(|x, y| (x.0 - self.bandits[i].jet.pos).len().partial_cmp(&(y.0 - self.bandits[i].jet.pos).len()).unwrap_or(std::cmp::Ordering::Equal));
-            // A missile closing inside 4 km gets a program every second or so.
+            // A missile closing inside 4 km gets a program every second or so;
+            // free flight's bandits hold theirs, so every shot is down to the
+            // guidance.
             let b = &mut self.bandits[i];
             b.cm_clock -= dt;
-            if threat.is_some_and(|(p, _)| (p - b.jet.pos).len() < 4000.0) && b.cm_clock <= 0.0 && b.programs > 0 {
+            if self.hostile && threat.is_some_and(|(p, _)| (p - b.jet.pos).len() < 4000.0) && b.cm_clock <= 0.0 && b.programs > 0 {
                 b.cm_clock = 1.1;
                 b.programs -= 1;
                 let (p, v) = (b.jet.pos, b.jet.vel);
@@ -2889,6 +2891,26 @@ mod tests {
         assert!(c.rounds.is_empty() && c.missiles.is_empty() && c.hp == 100.0 && !c.player_dead);
         assert!(c.bandits.iter().all(|b| b.rounds == gun_of(b.jet.kind).rounds && b.missiles == 2));
         assert!(c.emitters(&a).iter().all(|e| !e.2));
+    }
+
+    /// Free flight's bandits throw out no chaff or flares at a missile.
+    #[test]
+    fn free_flight_bandits_hold_their_countermeasures() {
+        terrain::init();
+        let mut m = Mission::new();
+        let mut c = Combat::new(MissionKind::Free, &mut m);
+        let a = spawn(v3(river_x(0.0), 4200.0, 0.0), 0.0, 240.0);
+        let fwd = a.q.axes().forward;
+        c.bandits[0].jet = spawn(a.pos + fwd * 2500.0, 0.0, 220.0);
+        let programs = c.bandits[0].programs;
+        let tail = c.bandits[0].jet.pos - fwd * 1500.0;
+        c.fire_missile(Missile::launch(&AIM9M, tail, fwd * 600.0, Who::Player, Some(Who::Bandit(0))));
+        let mut a = a;
+        for _ in 0..(2.0 / FIXED_DT_TEST) as usize {
+            c.step(FIXED_DT_TEST, &mut a, false, &mut m);
+        }
+        assert_eq!(c.bandits[0].programs, programs);
+        assert!(!c.events.iter().any(|e| matches!(e, Event::Decoy { .. })));
     }
 
     /// Free flight's bandits fly their circuits round the gorge from point
