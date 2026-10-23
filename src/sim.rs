@@ -95,8 +95,15 @@ pub enum Type {
 impl Type {
     pub fn name(self) -> &'static str {
         match self {
-            Type::F16 => "F-16C",
-            Type::Mig29 => "MIG-29A",
+            Type::F16 => "F-16C BLOCK 50",
+            Type::Mig29 => "MIG-29A 9.12",
+        }
+    }
+    /// The full name of the variant the model follows.
+    pub fn full_name(self) -> &'static str {
+        match self {
+            Type::F16 => "F-16C BLOCK 50 FIGHTING FALCON",
+            Type::Mig29 => "MIG-29A FULCRUM-A, IZDELIYE 9.12",
         }
     }
     pub fn empty_mass(self) -> f64 {

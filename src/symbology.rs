@@ -6,7 +6,7 @@
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::combat::{Combat, Mode, Store};
 use crate::math::*;
-use crate::sim::Aircraft;
+use crate::sim::{Aircraft, Type};
 use crate::targets::Kind;
 use crate::weapons::{muzzle, Who};
 use crate::world::Camera;
@@ -402,59 +402,115 @@ pub fn through_hud(los_body: V3) -> bool {
     hud || cockpit
 }
 
-/// Helmet-mounted display, in the manner of JHMCS. Visor-fixed: the aiming
-/// cross on the helmet line of sight, airspeed and altitude boxes either
-/// side of it, heading above, Mach and G under the airspeed, the master
-/// mode, arm state and weapon count at the bottom, and the off-boresight
-/// angle. World-stabilised: the aircraft boresight cross when it is in the
-/// visor, the locked target's designator box, or a locator line toward it
-/// from the cross with the angle to go, and the Sidewinder seeker, which the
-/// helmet cues off the boresight. It is blanked while the pilot looks
-/// through the HUD (`Combat::helmet` is None then).
+/// Helmet-mounted display. The F-16C Block 50 wears JHMCS, the MiG-29A
+/// (9.12) the much simpler Shchel-3UM sight (see `shchel`). It is blanked
+/// while the pilot looks through the HUD (`Combat::helmet` is None then).
 #[allow(clippy::too_many_arguments)]
 pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64) {
     let Some(look) = c.helmet else { return };
+    if a.kind == Type::Mig29 {
+        shchel(cv, w, h, s, c, time);
+    } else {
+        jhmcs(cv, w, h, s, a, c, cam, look, time);
+    }
+}
+
+/// JHMCS as on the F-16, after the HMCS chapter of the flight manual:
+/// visor-fixed, the aiming cross on the helmet line of sight with the
+/// airspeed and barometric altitude HUD repeaters either side and the
+/// heading tape of the helmet's line of sight (not the jet's) above, the
+/// whole block dropping below the cross when the pilot looks more than 30
+/// degrees up; G under the airspeed, the master arm and master mode with
+/// the selected store at the bottom left, the range in nautical miles to
+/// the locked target at the bottom right (XXX without one), and the
+/// priority RWR threat as a diamond on a circle round the cross, 12 o'clock
+/// the nose, with a gap where the helmet looks. World-stabilised: the
+/// aircraft boresight cross, the target designator box or the target
+/// locator line with its angle (not under 10 degrees), and the AIM-9
+/// missile diamond, slaved to the cross until the seeker tracks.
+#[allow(clippy::too_many_arguments)]
+fn jhmcs(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, look: V3, time: f64) {
     let sm = (s - 1.0).max(1.0);
     let col = with_alpha(HUD, 0.85);
     let flash = (time * 3.0).fract() < 0.6;
     let (cx, cy) = (w * 0.5, h * 0.5);
-    let r = 14.0 * s;
-    // Aiming cross: a ring with four ticks and a centre dot.
-    cv.circle(cx, cy, r, 1.5, col);
+    let r = 9.0 * s;
+    // Aiming cross: four arms round an open centre.
     for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
-        cv.line(cx + dx * r * 0.4, cy + dy * r * 0.4, cx + dx * r * 0.8, cy + dy * r * 0.8, 1.5, col);
+        cv.line(cx + dx * r * 0.3, cy + dy * r * 0.3, cx + dx * r, cy + dy * r, 1.5, col);
     }
-    cv.disc(cx, cy, 1.2, col);
 
-    // Visor-fixed air data round the cross.
+    // The data block: level with the cross, or under it looking high.
+    let el = look.y.clamp(-1.0, 1.0).asin();
+    let high = el > 30.0 * DEG;
+    let (row, tape) = if high { (cy + h * 0.15, cy + h * 0.07) } else { (cy, cy - h * 0.17) };
     let ad = crate::air::AirData::of(a);
-    let (dx, dy) = (h * 0.20, h * 0.03);
-    let boxed = |cv: &mut Canvas, text: &str, x: f32, y: f32| {
-        let tw = Canvas::text_width(text, s) + 6.0 * s;
-        let th = 9.0 * s;
-        cv.stroke_rect(x - tw * 0.5, y - th * 0.5, tw, th, 1.0, col);
-        cv.text(text, x, y, s, col, Align::Center);
-    };
-    boxed(cv, &format!("{}", ad.kcas.round() as i64), cx - dx, cy - dy);
-    boxed(cv, &format!("{}", ad.baro_ft.round() as i64), cx + dx, cy - dy);
-    boxed(cv, &format!("{:03}", (a.heading.round() as i64).rem_euclid(360)), cx, cy - h * 0.17);
-    cv.text(&format!("M {:.2}", ad.mach), cx - dx, cy + dy + 2.0 * s, sm, col, Align::Center);
-    cv.text(&format!("G {:.1}", a.g_smooth), cx - dx, cy + dy + 11.0 * s, sm, col, Align::Center);
-    if a.agl < 1500.0 {
-        cv.text(&format!("R {}", (a.agl * 3.28084 / 10.0).round() as i64 * 10), cx + dx, cy + dy + 2.0 * s, sm, col, Align::Center);
+    let dx = h * 0.20;
+    cv.text(&format!("{}", ad.kcas.round() as i64), cx - dx, row, s, col, Align::Center);
+    cv.text(&format!("{}", ad.baro_ft.round() as i64), cx + dx, row, s, col, Align::Center);
+    cv.text(&format!("{:.1}", a.g_smooth), cx - dx, row + 10.0 * s, sm, col, Align::Center);
+    // Heading tape of the helmet's line of sight: ticks every 5 degrees,
+    // figures every 10, 25 degrees either side, the reading boxed over it.
+    let los = look.x.atan2(-look.z) * RAD;
+    let (half, per) = (h * 0.15, h * 0.15 / 25.0);
+    let base = (los / 5.0).floor() * 5.0;
+    for k in -5..=6 {
+        let hd = base + k as f64 * 5.0;
+        let x = cx + ((hd - los) as f32) * per;
+        if (x - cx).abs() > half {
+            continue;
+        }
+        let major = (hd.rem_euclid(360.0)).round() as i64 % 10 == 0;
+        cv.line(x, tape, x, tape + if major { 4.0 } else { 2.0 } * s, 1.0, col);
+        if major {
+            cv.text(&format!("{:02}", (hd.rem_euclid(360.0) / 10.0).round() as i64 % 36), x, tape + 9.0 * s, sm, col, Align::Center);
+        }
     }
-    let oba = a.q.axes().forward.dot(look).clamp(-1.0, 1.0).acos() * RAD;
-    cv.text(&format!("{}", oba.round() as i64), cx + r + 4.0 * s, cy + r, sm, col, Align::Left);
-    let arm = if c.mode == Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) };
-    cv.text(&arm, cx - dx, cy + h * 0.16, sm, col, Align::Center);
-    cv.text(&selected(c), cx + h * 0.06, cy + h * 0.16, sm, col, Align::Left);
-    if (c.warn > 0.0 || c.inbound().next().is_some()) && flash {
-        cv.text("MISSILE", cx, cy - h * 0.11, s, col, Align::Center);
+    cv.line(cx, tape - 1.0 * s, cx, tape - 4.0 * s, 1.5, col);
+    let reading = format!("{:03}", (los.round() as i64).rem_euclid(360));
+    let tw = Canvas::text_width(&reading, sm) + 4.0 * s;
+    cv.stroke_rect(cx - tw * 0.5, tape - 13.0 * s, tw, 8.0 * s, 1.0, col);
+    cv.text(&reading, cx, tape - 9.0 * s, sm, col, Align::Center);
+
+    // Master arm and master mode, the store; range to the locked target.
+    let low = cy + h * 0.24;
+    cv.text(if c.mode == Mode::Nav { "OFF" } else { "ARM" }, cx - dx, low, sm, col, Align::Center);
+    cv.text(c.mode.label(), cx - dx, low + 9.0 * s, sm, col, Align::Center);
+    cv.text(&selected(c), cx - dx, low + 18.0 * s, sm, col, Align::Center);
+    let lock = c.lock.and_then(|l| c.track(l, a));
+    let range = lock.map(|(p, _)| format!("{:.1}", (p - a.pos).len() / 1852.0)).unwrap_or_else(|| "XXX".to_string());
+    cv.text(&range, cx + dx, low, sm, col, Align::Center);
+
+    // Priority RWR threat: a missile guiding on the jet, else whoever is
+    // locked on or shooting, nearest first.
+    let fwd = a.q.axes().forward;
+    let bearing = |v: V3| v.x.atan2(-v.z) - fwd.x.atan2(-fwd.z);
+    let threat = c.inbound().map(|m| m.pos).next().or_else(|| {
+        c.emitters(a).into_iter().filter(|e| e.2).map(|e| e.0).min_by(|p, q| (*p - a.pos).len().partial_cmp(&(*q - a.pos).len()).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    if let Some(t) = threat {
+        let rr = h * 0.10;
+        let gap = bearing(look) as f32;
+        let n = 36;
+        for k in 0..n {
+            let a0 = k as f32 * std::f32::consts::TAU / n as f32;
+            let mid = a0 + std::f32::consts::PI / n as f32;
+            // Canvas angles run clockwise from three o'clock; 12 o'clock is the nose.
+            let off = (mid - std::f32::consts::FRAC_PI_2 - gap + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            if off.abs() > 0.18 {
+                cv.arc(cx, cy, rr, a0, a0 + std::f32::consts::TAU / n as f32, 1.0, col);
+            }
+        }
+        let b = bearing(t - a.pos) as f32;
+        let (px, py) = (cx + b.sin() * rr, cy - b.cos() * rr);
+        let k = 4.0 * s;
+        if flash || c.inbound().next().is_none() {
+            cv.polyline(&[[px, py - k], [px + k, py], [px, py + k], [px - k, py]], 1.5, true, col);
+        }
     }
 
     // Aircraft boresight cross, where the nose points, when the visor sees it.
-    let ax = a.q.axes();
-    if let Some((x, y)) = project(cam, w, h, cam.eye + ax.forward * 2000.0) {
+    if let Some((x, y)) = project(cam, w, h, cam.eye + fwd * 2000.0) {
         if (x - cx).abs() < h * 0.3 && (y - cy).abs() < h * 0.3 {
             let k = 6.0 * s;
             cv.line(x - k, y, x + k, y, 1.5, col);
@@ -463,42 +519,56 @@ pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat,
     }
 
     // Locked target: designator box in the visor, or a locator line toward it.
-    if let Some((p, _)) = c.lock.and_then(|l| c.track(l, a)) {
-        let range = (p - a.pos).len();
-        let text = if range < 3700.0 { format!("{:.1} KFT", range * 3.28084 / 1000.0) } else { format!("{:.1} NM", range / 1852.0) };
-        cv.text(&text, cx + dx, cy + dy + 11.0 * s, sm, col, Align::Center);
+    if let Some((p, _)) = lock {
         let seen = project(cam, w, h, p).filter(|&(x, y)| (x - cx).abs() < h * 0.32 && (y - cy).abs() < h * 0.32);
         match seen {
             Some((x, y)) => {
-                let b = 9.0 * s;
+                let b = 7.0 * s;
                 cv.stroke_rect(x - b, y - b, 2.0 * b, 2.0 * b, 1.5, col);
             }
             None => {
                 let d = (p - cam.eye).norm();
-                let (lx, ly) = (d.dot(cam.right), d.dot(cam.up));
-                let k = (lx * lx + ly * ly).sqrt().max(1e-6);
-                let (ux, uy) = ((lx / k) as f32, (-ly / k) as f32);
-                let (x0, y0, x1) = (cx + ux * r, cy + uy * r, cx + ux * r * 3.2);
-                cv.line(x0, y0, x1, cy + uy * r * 3.2, 1.5, col);
                 let off = d.dot(cam.forward).clamp(-1.0, 1.0).acos() * RAD;
-                cv.text(&format!("{}", off.round() as i64), cx + ux * r * 4.0, cy + uy * r * 4.0, sm, col, Align::Center);
+                if off >= 10.0 {
+                    let (lx, ly) = (d.dot(cam.right), d.dot(cam.up));
+                    let k = (lx * lx + ly * ly).sqrt().max(1e-6);
+                    let (ux, uy) = ((lx / k) as f32, (-ly / k) as f32);
+                    cv.line(cx + ux * r * 1.3, cy + uy * r * 1.3, cx + ux * r * 4.5, cy + uy * r * 4.5, 1.5, col);
+                    cv.text(&format!("{}", off.round() as i64), cx, cy - r - 6.0 * s, sm, col, Align::Center);
+                }
             }
         }
     }
+
+    // AIM-9 missile diamond: on the target the seeker tracks, else on the
+    // cross, where the helmet slaves the seeker.
     if c.mode == Mode::Srm && c.loadout.count(Store::Aim9) > 0 {
-        match c.seeker.and_then(|w| c.track(w, a)).and_then(|(p, _)| project(cam, w, h, p)) {
-            Some((x, y)) => {
-                cv.circle(x, y, 11.0 * s, 2.0, col);
-                if c.shoot && flash {
-                    cv.text("SHOOT", cx, cy - r - 10.0 * sm, s, col, Align::Center);
-                }
-            }
-            None => {
-                for k in 0..8 {
-                    let a0 = k as f32 * std::f32::consts::TAU / 8.0;
-                    cv.arc(cx, cy, r * 1.6, a0, a0 + 0.4, 1.0, col);
-                }
-            }
+        let (x, y) = c.seeker.and_then(|w| c.track(w, a)).and_then(|(p, _)| project(cam, w, h, p)).unwrap_or((cx, cy));
+        let k = 6.0 * s;
+        cv.polyline(&[[x, y - k], [x + k, y], [x, y + k], [x - k, y]], 1.5, true, col);
+        if c.shoot && flash {
+            cv.text("SHOOT", cx, cy + r + 8.0 * sm, s, col, Align::Center);
         }
+    }
+}
+
+/// Shchel-3UM, the MiG-29A's helmet sight: not a display but a collimated
+/// reticle on a monocle before the right eye, which the head tracker turns
+/// into a line of sight for the IRST, the radar and the missile seekers.
+/// It shows the aiming ring and two lamps: target captured (ZAKHVAT) and
+/// launch permitted (PR); no flight data.
+fn shchel(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, time: f64) {
+    let sm = (s - 1.0).max(1.0);
+    let col = rgba(0xff, 0xb0, 0x40, 0.85);
+    let (cx, cy) = (w * 0.5, h * 0.5);
+    let r = 7.0 * s;
+    cv.circle(cx, cy, r, 1.5, col);
+    cv.disc(cx, cy, 1.5, col);
+    let captured = c.seeker.is_some() || c.lock.is_some();
+    if captured {
+        cv.text("ZAKHVAT", cx, cy + r + 8.0 * sm, sm, col, Align::Center);
+    }
+    if c.shoot && (time * 3.0).fract() < 0.6 {
+        cv.text("PR", cx, cy - r - 8.0 * sm, s, col, Align::Center);
     }
 }

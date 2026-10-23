@@ -281,8 +281,8 @@ impl<'a> Ui<'a> {
         let sm = s.max(2.0) - 1.0;
         self.cv.text(&format!("MISSION DATA // {}", mission.name()), bxx + 6.0 * s, byy + 8.0 * s, sm, AMBER, Align::Left);
         let airframe = match cfg.jet {
-            crate::sim::Type::F16 => ("AIRFRAME", "F-16C BLOCK 50", "F110-GE-129 / FLCS NORM"),
-            crate::sim::Type::Mig29 => ("AIRFRAME", "MIG-29A 9.12", "2 X RD-33 / FBW TRAINER FLCS"),
+            crate::sim::Type::F16 => ("AIRFRAME", crate::sim::Type::F16.full_name(), "LOCKHEED MARTIN, F110-GE-129"),
+            crate::sim::Type::Mig29 => ("AIRFRAME", crate::sim::Type::Mig29.full_name(), "MIKOYAN, 2 X KLIMOV RD-33"),
         };
         let bandits = format!("{} BANDITS", cfg.threats.bandits);
         let fleet = format!("{}, AIM-9, GUN", cfg.fleet_name());
@@ -455,7 +455,7 @@ impl<'a> Ui<'a> {
         self.frame(x, y, pw, ph);
         let m = 14.0 * s;
         let mut yy = y + m;
-        self.cv.text(&format!("// ARMAMENT AND FUEL, {}", mission.name()), x + m, yy, sm, DIM, Align::Left);
+        self.cv.text(&format!("// {}, {}", cfg.jet.full_name(), mission.name()), x + m, yy, sm, DIM, Align::Left);
         yy += 20.0 * s;
         self.cv.text("LOADOUT", x + m, yy, s * 3.0, GREEN, Align::Left);
         yy += 18.0 * s;
@@ -1056,7 +1056,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     cv.rect_grad(0.0, h - bottom_h, w, bottom_h, rgba(4, 10, 6, 0.0), rgba(4, 10, 6, 0.78));
     cv.rect(edge, top_h - 4.0 * s, w - 2.0 * edge, 1.0, with_alpha(HUD, 0.16));
 
-    cv.text(&format!("{}  //  CHASE VIEW", a.kind.name()), edge, 10.0 * s, sm, HUD, Align::Left);
+    cv.text(&format!("{}  //  CHASE VIEW", a.kind.full_name()), edge, 10.0 * s, sm, HUD, Align::Left);
     cv.text("COLD RIVER  /  SECTOR 07", edge, 19.0 * s, sm, with_alpha(HUD, 0.48), Align::Left);
     let title = obj.map(|o| o.label.clone()).unwrap_or_else(|| format!("GATE {} / {}", pad((m.gate_index + 1).min(m.gates.len()) as f64, 2), pad(m.gates.len() as f64, 2)));
     cv.text(&title, w * 0.5, 9.0 * s, sm, AMBER, Align::Center);
