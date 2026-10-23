@@ -115,6 +115,8 @@ pub struct RunResult {
     /// Bandits killed or primary targets destroyed, of the total.
     pub done: usize,
     pub total: usize,
+    /// What brought the jet down in the air, as the damage names it.
+    pub cause: &'static str,
 }
 
 /// What the flight overlays show for a combat mission instead of the gate
@@ -716,11 +718,15 @@ impl<'a> Ui<'a> {
                 self.status_panel(kicker, DIM, title, ACID, &text, [("TIME", format_time(r.time), GREEN), (what, tally, CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)], again, "");
             }
             Outcome::ShotDown => self.status_panel(
-                "// AIRFRAME LOST, PILOT EJECTED",
+                &if r.cause == "PILOT KILLED" { "// PILOT KILLED IN THE COCKPIT".to_string() } else { format!("// {}, PILOT EJECTED", if r.cause.is_empty() { "AIRFRAME LOST" } else { r.cause }) },
                 RED,
-                "SHOT DOWN",
+                if r.cause == "PILOT KILLED" { "KILLED" } else { "SHOT DOWN" },
                 RED,
-                &format!("The jet came apart around you and the seat did its job. You took {} {unit} with you.", r.done),
+                &if r.cause == "PILOT KILLED" {
+                    format!("The rounds came through the canopy, and the jet flew on without you. You took {} {unit} with you.", r.done)
+                } else {
+                    format!("The jet came apart around you and the seat did its job. You took {} {unit} with you.", r.done)
+                },
                 [(what, tally, RED), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("SPEED", format!("{} KT", pad(r.impact * 1.94384, 3)), CREAM)],
                 again,
                 if fight { "TIP: WATCH THE RWR. BREAK INTO A MISSILE, NOT AWAY FROM IT." } else { "TIP: STAY LOW IN THE GORGE. THE SA-6 CANNOT SEE YOU BELOW THE RIDGES." },

@@ -6,6 +6,7 @@
 //! moved, and reports what happened as events for the effects and the sound.
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
+use crate::damage::{self, Hull};
 use crate::sim::{spec::STORES_MASS, trim, Aircraft, BattleDamage, Flcs, Gate, Input, Mission, Type, G0};
 use crate::scenario::{self, Threats};
 use crate::targets::{self, Kind, Site};
@@ -328,6 +329,9 @@ pub fn irst_sees(a: &Aircraft, t: &Aircraft, margin: f64) -> bool {
     r.len() < mix(IRST_TAIL, IRST_HEAD, nose_on) * burner * margin && line_of_sight(a.pos, t.pos)
 }
 
+/// How far a bomb's fragments reach a jet, m.
+const BOMB_FRAGMENTS: f64 = 120.0;
+
 /// Range at which an active missile's own radar finds a fighter, m: past
 /// it an AMRAAM or R-77 needs the datalink to know where to fly.
 const ACTIVE_RANGE: f64 = 15000.0;
@@ -642,7 +646,10 @@ impl Trail {
 pub struct Bandit {
     pub jet: Aircraft,
     pub pilot: Pilot,
+    /// What is left of the airframe, 0 to 100 (`Hull::integrity`).
     pub hp: f64,
+    /// Its systems, module by module.
+    pub hull: Hull,
     pub callsign: &'static str,
     pub rounds: u32,
     pub missiles: u32,
@@ -720,8 +727,9 @@ pub struct Combat {
     pub loadout: Loadout,
     /// The player's airframe hit points, of 100.
     pub hp: f64,
-    /// What the hits have done to the player's systems.
-    pub battle: BattleDamage,
+    /// The player's systems, module by module, and what ended the flight.
+    pub hull: Hull,
+    pub death: &'static str,
     pub bandits: Vec<Bandit>,
     /// Bandits that join once the first one is down.
     reserve: Vec<Bandit>,
@@ -864,7 +872,7 @@ fn bandit_missile(kind: Type) -> &'static Spec {
 }
 
 fn bandit(jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
-    Bandit { rounds: gun_of(jet.kind).rounds, jet, pilot: Pilot::new(skill), hp: 100.0, callsign, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0, patrol: None }
+    Bandit { rounds: gun_of(jet.kind).rounds, hull: Hull::new(jet.kind), jet, pilot: Pilot::new(skill), hp: 100.0, callsign, missiles: 2, alive: true, gun_acc: 0.0, fired: 0, trail: None, programs: CHAFF, cm_clock: 0.0, patrol: None }
 }
 
 /// Height `over` the terrain, and never under 2,600 m: above the ridges.
@@ -933,7 +941,8 @@ impl Combat {
             },
             loadout: Loadout::for_mission(kind),
             hp: 100.0,
-            battle: BattleDamage::default(),
+            hull: Hull::new(Type::F16),
+            death: "",
             bandits: Vec::new(),
             reserve: Vec::new(),
             wrecks: Vec::new(),
@@ -1101,8 +1110,8 @@ impl Combat {
             self.rearmed = true;
             self.loadout = Loadout::configure(&self.cfg);
             self.hp = 100.0;
-            self.battle = BattleDamage::default();
-            a.battle = self.battle;
+            self.hull = Hull::new(a.kind);
+            a.battle = BattleDamage::default();
             a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
             a.stores_mass = self.loadout.mass();
             a.wing_stores = self.loadout.wing_mass();
@@ -1125,6 +1134,7 @@ impl Combat {
         }
         self.cfg = *cfg;
         self.loadout = Loadout::configure(cfg);
+        self.hull = Hull::new(cfg.jet);
         if !self.modes().contains(&self.mode) {
             self.mode = *self.modes().iter().rev().find(|&&m| m != Mode::Ccip).unwrap_or(&Mode::Gun);
         }
@@ -1180,6 +1190,15 @@ impl Combat {
     pub fn select(&mut self, mode: Mode) {
         if mode == Mode::Nav || self.modes().contains(&mode) {
             self.mode = mode;
+        }
+    }
+
+    /// Where a jet in the fight is and how it is turned.
+    fn pose(&self, who: Who, a: &Aircraft) -> Option<(V3, Quat)> {
+        match who {
+            Who::Player => (!self.player_dead).then_some((a.pos, a.q)),
+            Who::Bandit(i) => self.bandits.get(i).filter(|b| b.alive).map(|b| (b.jet.pos, b.jet.q)),
+            Who::Ground(_) => None,
         }
     }
 
@@ -1281,20 +1300,6 @@ impl Combat {
         }
     }
 
-    /// Spreads a hit over the jet's systems: a round hits one, a warhead's
-    /// burst several, 25 points to each. Returns the worst system's name.
-    fn wound(&mut self, battle: &mut BattleDamage, kind: Type, dmg: f64) -> &'static str {
-        let mut left = dmg;
-        let mut what = "";
-        while left > 0.0 {
-            let part = left.min(25.0);
-            let (pick, side) = (self.rnd.next(), self.rnd.next());
-            what = battle.hit(kind, part, pick, side);
-            left -= part;
-        }
-        what
-    }
-
     /// One countermeasure program from a jet: a flare and a chaff bundle.
     /// Each missile guiding on it may lose its target, by its seeker type.
     fn decoy(&mut self, who: Who, pos: V3, vel: V3) {
@@ -1328,7 +1333,15 @@ impl Combat {
     /// One fixed step of the fight, after the player's jet has moved.
     pub fn step(&mut self, dt: f64, a: &mut Aircraft, trigger: bool, m: &mut Mission) {
         self.clock += dt;
-        a.battle = self.battle;
+        // Fire, and what the damage does to the flight.
+        if !self.player_dead {
+            self.hull.step(dt, &mut self.rnd);
+            self.hp = self.hull.integrity();
+            if let Some(cause) = self.hull.dead {
+                self.lose_player(cause, a);
+            }
+        }
+        a.battle = self.hull.effects();
         self.warn = (self.warn - dt).max(0.0);
         let pressed = trigger && !self.trigger_was;
         self.trigger_was = trigger;
@@ -1349,6 +1362,7 @@ impl Combat {
             _ => None,
         };
         self.sensors(dt, a);
+        self.bandit_hulls(dt);
         self.step_bandits(dt, a);
         self.step_wrecks(dt);
         self.step_rounds(dt, a);
@@ -1557,6 +1571,26 @@ impl Combat {
         }
     }
 
+    /// The bandits' fires burn, and their damage reaches their flight; a
+    /// bandit put in another airframe gets that airframe's systems.
+    fn bandit_hulls(&mut self, dt: f64) {
+        for i in 0..self.bandits.len() {
+            let b = &mut self.bandits[i];
+            if !b.alive {
+                continue;
+            }
+            if b.hull.kind != b.jet.kind {
+                b.hull = Hull::new(b.jet.kind);
+            }
+            b.hull.step(dt, &mut self.rnd);
+            b.hp = b.hull.integrity();
+            b.jet.battle = b.hull.effects();
+            if b.hull.dead.is_some() {
+                self.kill_bandit(i);
+            }
+        }
+    }
+
     fn step_bandits(&mut self, dt: f64, a: &Aircraft) {
         // The flanker arrives once the first bandit is down.
         if self.kills >= 1 && !self.reserve.is_empty() {
@@ -1565,7 +1599,7 @@ impl Combat {
             b.jet.pos.y = (terrain::floor(b.jet.pos.x, b.jet.pos.z) + 1200.0).max(a.pos.y + 600.0);
             b.jet.vel = (a.pos - b.jet.pos).norm() * 240.0;
             let h = heading_of(b.jet.vel);
-            b.jet = spawn(b.jet.pos, h, 240.0);
+            b.jet = spawn_type(b.jet.kind, b.jet.pos, h, 240.0);
             self.events.push(Event::Lock { text: format!("{} INBOUND", b.callsign) });
             self.bandits.push(b);
         }
@@ -1711,41 +1745,55 @@ impl Combat {
         }
     }
 
-    fn damage(&mut self, who: Who, dmg: f64, a: &Aircraft) {
-        if dmg <= 0.0 {
-            return;
-        }
+    /// A hit on a jet, applied to its modules by `apply`, and what follows:
+    /// the messages, the flight model's damage and, if a loss ends the
+    /// flight, the kill.
+    fn harm_jet(&mut self, who: Who, a: &Aircraft, apply: impl FnOnce(&mut Hull, &mut Lcg) -> Vec<&'static str>) {
         match who {
             Who::Player => {
                 if self.player_dead {
                     return;
                 }
-                self.hp -= dmg;
-                self.events.push(Event::PlayerHit { damage: dmg });
-                if self.hp > 0.0 {
-                    let mut battle = self.battle;
-                    let what = self.wound(&mut battle, a.kind, dmg);
-                    self.battle = battle;
-                    self.events.push(Event::Toast(format!("HIT // {what}")));
-                }
-                if self.hp <= 0.0 {
-                    self.hp = 0.0;
-                    self.player_dead = true;
-                    self.events.push(Event::Airburst { pos: a.pos, vel: a.vel, scale: 1.0 });
+                let before = self.hp;
+                let names = apply(&mut self.hull, &mut self.rnd);
+                self.hp = self.hull.integrity();
+                self.events.push(Event::PlayerHit { damage: (before - self.hp).max(2.0) });
+                if let Some(cause) = self.hull.dead {
+                    self.lose_player(cause, a);
+                } else if !names.is_empty() {
+                    self.events.push(Event::Toast(format!("HIT // {}", names.join(", "))));
                 }
             }
             Who::Bandit(i) => {
-                if let Some(b) = self.bandits.get_mut(i).filter(|b| b.alive) {
-                    b.hp -= dmg;
-                    if b.hp <= 0.0 {
-                        self.kill_bandit(i);
-                    } else {
-                        let (mut battle, kind) = (self.bandits[i].jet.battle, self.bandits[i].jet.kind);
-                        self.wound(&mut battle, kind, dmg);
-                        self.bandits[i].jet.battle = battle;
-                    }
+                let Some(b) = self.bandits.get_mut(i).filter(|b| b.alive) else { return };
+                apply(&mut b.hull, &mut self.rnd);
+                b.hp = b.hull.integrity();
+                b.jet.battle = b.hull.effects();
+                if b.hull.dead.is_some() {
+                    self.kill_bandit(i);
                 }
             }
+            Who::Ground(_) => {}
+        }
+    }
+
+    /// The player's flight ends in the air: killed, or ejected from a jet
+    /// that is coming apart.
+    fn lose_player(&mut self, cause: &'static str, a: &Aircraft) {
+        self.hp = 0.0;
+        self.player_dead = true;
+        self.death = cause;
+        self.events.push(Event::Toast(cause.to_string()));
+        self.events.push(Event::Airburst { pos: a.pos, vel: a.vel, scale: 1.0 });
+    }
+
+    fn damage(&mut self, who: Who, dmg: f64) {
+        if dmg <= 0.0 {
+            return;
+        }
+        match who {
+            // Jets take their damage module by module (`harm_jet`).
+            Who::Player | Who::Bandit(_) => {}
             Who::Ground(i) => {
                 let Some(s) = self.sites.get_mut(i).filter(|s| !s.dead) else { return };
                 s.hp -= dmg;
@@ -1767,6 +1815,9 @@ impl Combat {
 
     fn step_rounds(&mut self, dt: f64, a: &Aircraft) {
         let mut hits: Vec<(Who, f64)> = Vec::new();
+        // Rounds into jets: the target, the round's path through it in its
+        // body axes, and the round's damage and explosive reach.
+        let mut strikes: Vec<(Who, V3, V3, f64, f64)> = Vec::new();
         let mut i = 0;
         while i < self.rounds.len() {
             let mut r = self.rounds[i];
@@ -1777,16 +1828,18 @@ impl Combat {
                 events.push(Event::Hit { pos: at });
             };
             if !gone && r.from != Who::Player && !self.player_dead && (r.pos - a.pos).len() < 40.0 {
-                if let Some(t) = hits_airframe(a, r.prev - (a.pos - a.vel * dt), r.pos - a.pos) {
-                    hit(Who::Player, r.prev.lerp(r.pos, t), r.damage, &mut self.events);
+                if let Some((t, p0, p1)) = round_path(a, &r, dt) {
+                    self.events.push(Event::Hit { pos: r.prev.lerp(r.pos, t) });
+                    strikes.push((Who::Player, p0, p1, r.damage, splash(r.damage)));
                     gone = true;
                 }
             }
             if !gone && r.from == Who::Player {
                 for (k, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
                     if (r.pos - b.jet.pos).len() < 40.0 {
-                        if let Some(t) = hits_airframe(&b.jet, r.prev - (b.jet.pos - b.jet.vel * dt), r.pos - b.jet.pos) {
-                            hit(Who::Bandit(k), r.prev.lerp(r.pos, t), r.damage, &mut self.events);
+                        if let Some((t, p0, p1)) = round_path(&b.jet, &r, dt) {
+                            self.events.push(Event::Hit { pos: r.prev.lerp(r.pos, t) });
+                            strikes.push((Who::Bandit(k), p0, p1, r.damage, splash(r.damage)));
                             gone = true;
                             break;
                         }
@@ -1821,7 +1874,10 @@ impl Combat {
             }
         }
         for (who, dmg) in hits {
-            self.damage(who, dmg, a);
+            self.damage(who, dmg);
+        }
+        for (who, p0, p1, dmg, reach) in strikes {
+            self.harm_jet(who, a, |h, r| h.strike(p0, p1, dmg, reach, r).unwrap_or_default());
         }
     }
 
@@ -1876,11 +1932,20 @@ impl Combat {
                 }
                 Fate::Burst(p, miss) => {
                     let m = &self.missiles[i];
-                    let dmg = m.spec.damage(miss);
-                    let (who, vel) = (m.target, m.vel);
+                    let (spec, who, vel) = (m.spec, m.target, m.vel);
                     self.events.push(Event::Airburst { pos: p, vel: vel * 0.1, scale: 0.55 });
-                    if let Some(w) = who {
-                        self.damage(w, dmg, a);
+                    match who {
+                        // A jet takes the warhead's fragments and blast where
+                        // they reach it.
+                        Some(w @ (Who::Player | Who::Bandit(_))) => {
+                            if let Some((pos, q)) = self.pose(w, a) {
+                                let inv = q.conj();
+                                let (at, axis) = (inv.rotate(p - pos), inv.rotate(vel.norm()));
+                                self.harm_jet(w, a, |h, r| h.burst(at, axis, spec.lethal, spec.outer, (spec.outer * 8.0) as usize, r));
+                            }
+                        }
+                        Some(w) => self.damage(w, spec.damage(miss)),
+                        None => {}
                     }
                 }
                 Fate::Ground(p) => self.events.push(Event::Blast { pos: p, scale: 0.5, burn: 0.0 }),
@@ -1909,12 +1974,15 @@ impl Combat {
             for k in 0..self.sites.len() {
                 if !self.sites[k].dead {
                     let d = self.sites[k].distance(p);
-                    self.damage(Who::Ground(k), blast_damage(spec.damage, spec.lethal, spec.outer, d), a);
+                    self.damage(Who::Ground(k), blast_damage(spec.damage, spec.lethal, spec.outer, d));
                 }
             }
             // Fragments reach a jet that drops too low.
-            let d = (a.pos - p).len();
-            self.damage(Who::Player, blast_damage(60.0, 30.0, 160.0, d), a);
+            if (a.pos - p).len() < BOMB_FRAGMENTS {
+                let inv = a.q.conj();
+                let at = inv.rotate(p - a.pos);
+                self.harm_jet(Who::Player, a, |h, r| h.burst(at, inv.rotate(V3::Y), 15.0, BOMB_FRAGMENTS, 600, r));
+            }
         }
     }
 
@@ -1986,7 +2054,7 @@ impl Combat {
             let v = aim * 970.0;
             let v = v + self.dispersion(v, 0.010);
             let tracer = self.rnd.next() < 0.33;
-            self.rounds.push(Round::new(gun, v, tracer, Who::Ground(k), 3.0));
+            self.rounds.push(Round::new(gun, v, tracer, Who::Ground(k), 5.0));
         }
     }
 
@@ -2095,6 +2163,26 @@ impl Combat {
     pub fn inbound(&self) -> impl Iterator<Item = &Missile> {
         self.missiles.iter().filter(|m| m.target == Some(Who::Player) && m.tracking)
     }
+}
+
+/// A round's path through a jet over the last step, in the jet's body
+/// axes and carried on 12 m past where it ends so it goes through: the
+/// fraction of the step where it struck and the path, if it struck any
+/// system at all; a round can pass clean between the wing and the tail.
+fn round_path(jet: &Aircraft, r: &Round, dt: f64) -> Option<(f64, V3, V3)> {
+    let inv = jet.q.conj();
+    let p0 = inv.rotate(r.prev - (jet.pos - jet.vel * dt));
+    let p1 = inv.rotate(r.pos - jet.pos);
+    let len = (p1 - p0).len().max(1e-6);
+    let through = p0 + (p1 - p0) * ((len + 12.0) / len);
+    let at = damage::first_hit(jet.kind, p0, through)?;
+    (at <= len).then_some((at / len, p0, through))
+}
+
+/// Reach of a round's explosive charge: about 0.3 m for the 20 mm PGU-28,
+/// 0.75 m for the 30 mm OFZ.
+fn splash(damage: f64) -> f64 {
+    0.05 * damage
 }
 
 fn flat_of(v: V3) -> V3 {
@@ -2406,27 +2494,30 @@ mod tests {
         assert_eq!(c.lock, None);
     }
 
-    /// Rounds and a missile from the player bring a bandit down; the kill
-    /// leaves a falling wreck and counts toward the objective.
+    /// Rounds through a bandit's wing hole it without killing it; a
+    /// warhead bursting beside it brings it down, and the kill leaves a
+    /// falling wreck and counts toward the objective. The player survives
+    /// a burst at the edge of a Sidewinder's reach, not one alongside.
     #[test]
     fn damage_kills_and_scores() {
         terrain::init();
         let mut m = Mission::new();
         let mut c = Combat::new(MissionKind::Dogfight, &mut m);
         let a = spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0);
-        for _ in 0..10 {
-            c.damage(Who::Bandit(0), 6.0, &a);
+        for _ in 0..8 {
+            c.harm_jet(Who::Bandit(0), &a, |h, r| h.strike(v3(-4.6, 3.0, 1.2), v3(-4.6, -3.0, 1.2), 6.0, 0.3, r).unwrap_or_default());
         }
-        assert!((c.bandits[0].hp - 40.0).abs() < 1e-9 && c.bandits[0].alive);
-        c.damage(Who::Bandit(0), AIM9M.damage(3.0), &a);
+        let b = &c.bandits[0];
+        assert!(b.alive && b.hp < 100.0 && b.jet.battle.wing > 0.3 && b.jet.battle.side < 0.0, "a holed left wing");
+        c.harm_jet(Who::Bandit(0), &a, |h, r| h.burst(v3(0.0, 2.0, 0.0), V3::Z, AIM9M.lethal, AIM9M.outer, 112, r));
         assert!(!c.bandits[0].alive && c.kills == 1 && c.wrecks.len() == 1);
         assert!(c.events.iter().any(|e| matches!(e, Event::Kill { .. })));
         assert_eq!(c.tally(), (1, 3));
-        // The player survives a near miss, not a direct hit.
-        c.damage(Who::Player, AIM9M.damage(12.0), &a);
-        assert!(!c.player_dead && c.hp < 100.0);
-        c.damage(Who::Player, AIM9M.damage(1.0), &a);
-        assert!(c.player_dead);
+        c.equip(&Config::for_mission(MissionKind::Dogfight));
+        c.harm_jet(Who::Player, &a, |h, r| h.burst(v3(13.5, 0.0, 0.0), V3::Z, AIM9M.lethal, AIM9M.outer, 112, r));
+        assert!(!c.player_dead);
+        c.harm_jet(Who::Player, &a, |h, r| h.burst(v3(0.0, 2.2, -3.0), V3::Z, AIM9M.lethal, AIM9M.outer, 112, r));
+        assert!(c.player_dead && !c.death.is_empty(), "{}", c.death);
     }
 
     /// A Sidewinder fired at a locked bandit ahead flies to it and kills it.
@@ -2518,7 +2609,8 @@ mod tests {
         assert!(c.sites.iter().all(|s| !s.dead));
         let i = c.loadout.next(Store::Aim9).unwrap();
         c.loadout.stations[i].loaded = false;
-        c.hp = 30.0;
+        c.harm_jet(Who::Player, &a.clone(), |h, r| h.strike(v3(-4.5, 3.0, 1.2), v3(-4.5, -3.0, 1.2), 6.0, 0.3, r).unwrap_or_default());
+        assert!(c.hp < 100.0);
         c.practice(&mut a);
         a.on_ground = true;
         a.vel = V3::ZERO;

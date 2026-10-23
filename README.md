@@ -257,23 +257,45 @@ breaking into missiles, unloading to regain speed, extending past 2 km
 after a close pass so the fight keeps room to turn, and an Auto-GCAS-style
 recovery that predicts the pull-up and overrides everything near the terrain.
 They shoot the gun inside 900 m on a lead solution and fire AIM-9s (R-73s
-from a MiG) from inside the launch zone. Hit points take 6 per 20 mm round
-and 15 per 30 mm round; a warhead's damage
-falls off with the miss distance. A damaged jet trails smoke, and a kill
+from a MiG) from inside the launch zone. A damaged jet trails smoke, and a kill
 leaves a burning wreck tumbling to the ground.
 
-Hits also damage systems, for the player and the bandits alike, and the
-flight model feels it. Each hit lands on one system, weighted by how much of
-the jet it fills, and a warhead's burst on several: the engine (thrust lost;
-the MiG-29 loses one engine of its two before the other, the F-16's single
-F110 can be stopped), the fuel tanks (a leak of up to 6 kg/s), a wing (less
-lift, up to 150 drag counts and a roll and yaw toward the damaged side that
-the stick has to hold off), the hydraulics (the surfaces reach only part of
-their travel, so the jet rolls and pulls slower) and the airframe (down to
-55 % of the g limit). The HUD and the overlays name the damage (ENGINE FIRE,
-ENGINE DAMAGE, HYDRAULICS, WING DAMAGE, FUEL LEAK, STRUCT DAMAGE), the F-16's
-caution panel lights FLCS, FUEL LOW and ENGINE, and the MiG's POZHAR lamp
-shows an engine fire. Stopping on the ground in free flight repairs it all.
+Damage goes where the hits land (`damage.rs`), for the player and the
+bandits alike, in a simplified version of module damage. Each jet is a set
+of systems in its own geometry, each with its own hit points: the pilot,
+the engine (two on the MiG-29), the fuselage and wing fuel tanks, the
+wings, the stabilators, the fin (twin fins on the MiG), the hydraulics and
+the airframe structure round them. A round flies its real path through
+the jet: it holes the skin and spends itself in what it crosses, the first
+system most, and its high explosive (8 points for the 20 mm PGU-28, 24 for
+the 30 mm OFZ, 5 for the ZSU's 23 mm) reaches what lies within half a
+metre or so; a round can pass clean between the wing and the tail. A
+missile warhead throws a ring of fragments round its axis that hit
+whatever they meet out to its outer radius, weaker the further they fly,
+and its blast wrecks everything within its lethal radius but the pilot,
+whom only fragments reach. Rounds and fragments can set a tank or an
+engine on fire; a fire burns the system and the structure round it until
+it goes out, the MiG-29's extinguisher puts out its first engine fire,
+the F-16C has none, and a burning tank that burns through explodes.
+
+There are no hit points for the whole jet: what ends a flight is losing
+the pilot (a single 20 mm round through the cockpit can do it), a wing,
+the stabilators or the structure, or a tank exploding. Short of that the
+damage reaches the flight model: a damaged engine gives less thrust and a
+wrecked or burning one none (the MiG keeps its other engine), holed tanks
+leak up to 3 kg/s each, a damaged wing lifts less, drags more and rolls
+the jet toward its side, damaged hydraulics, stabilators or fin cut the
+surface travel, and a damaged structure takes less g. In the tests an
+AIM-9M bursting 4 m from an F-16 brings it down nine times in ten and
+almost never from 10 m, the 39 kg R-27R reaches further, and spread over
+the whole jet it takes about 15 hits of 20 mm or 4 of 30 mm. The HUD and
+the overlays name the damage (ENGINE FIRE, ENGINE DAMAGE, HYDRAULICS, WING
+DAMAGE, FUEL LEAK, STRUCT DAMAGE) and every hit is announced with the
+systems it struck; AIRFRAME % shows what is left of the systems overall;
+the F-16's caution panel lights FLCS, FUEL LOW and ENGINE, and the MiG's
+POZHAR lamp an engine fire. The result screen says what brought the jet
+down; a pilot killed in the cockpit does not eject. Stopping on the
+ground in free flight repairs it all.
 
 The STRIKE targets stand on the valley floor along the river: a convoy of
 four trucks with a ZSU-23-4, the SA-6 launcher and radar with a resupply truck

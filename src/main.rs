@@ -10,6 +10,7 @@ mod canvas;
 mod capture;
 mod combat;
 mod cockpit;
+mod damage;
 mod font;
 mod fx;
 mod gamepad;
@@ -494,7 +495,7 @@ impl App {
                 };
                 let (_, total) = self.combat.tally();
                 let done = if kind == Outcome::Win { total } else { total.saturating_sub(1) };
-                self.result = Some(RunResult { kind, time: 112.0, gates: if kind == Outcome::Win { 10 } else { 6 }, score: 7650.0, impact: 190.0, mission: self.kind, done, total });
+                self.result = Some(RunResult { kind, time: 112.0, gates: if kind == Outcome::Win { 10 } else { 6 }, score: 7650.0, impact: 190.0, mission: self.kind, done, total, cause: "" });
                 self.state = State::Result;
             }
             _ => {}
@@ -790,7 +791,7 @@ impl App {
         let a = self.aircraft.as_ref().unwrap();
         self.mission.score = if self.kind == MissionKind::Gates { self.mission.final_score() } else { self.combat.score(&self.mission) };
         let (done, total) = self.combat.tally();
-        self.result = Some(RunResult { kind, time: self.mission.elapsed, gates: self.mission.passed, score: self.mission.score, impact: if a.crashed { a.impact_speed } else { a.speed }, mission: self.kind, done, total });
+        self.result = Some(RunResult { kind, time: self.mission.elapsed, gates: self.mission.passed, score: self.mission.score, impact: if a.crashed { a.impact_speed } else { a.speed }, mission: self.kind, done, total, cause: self.combat.death });
         self.transition_kind = kind;
         self.transition_timer = match kind {
             Outcome::Win => 1.35,

@@ -91,6 +91,10 @@ The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
   jet has a missile approach warner, so a bandit sees an infrared missile
   only by its smoke (inside 6 km while the motor burns) or close in (3 km).
 - Flares fool only infrared seekers and chaff only radar ones.
+- A burst damages the target by where its fragments and blast reach it
+  (`src/damage.rs`): a ring of fragments round the missile's axis out to
+  its outer radius and a blast inside its lethal radius, so bigger
+  warheads (the R-27s' 39 kg against the AIM-9M's 9.4 kg) kill from further.
 
 ## Sources
 

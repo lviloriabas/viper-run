@@ -33,7 +33,9 @@ pub struct Gun {
     pub velocity: f64,
     /// Drag factor k = rho Cd A / 2m of the projectile at sea level.
     pub k: f64,
-    /// Damage to a 100-point airframe per hit.
+    /// Damage per hit to the system it strikes (`damage::Hull::strike`), by
+    /// the round's explosive charge: 8 for the 20 mm PGU-28/B, 24 for the
+    /// 30 mm OFZ with about three times the high explosive.
     pub damage: f64,
     /// Mass the jet loses per round, kg.
     pub expended: f64,
@@ -53,7 +55,7 @@ pub const M61A1: Gun = Gun {
     rate: 100.0,
     velocity: 1036.0,
     k: 0.5 * 1.225 * 0.28 * 3.14e-4 / 0.10,
-    damage: 6.0,
+    damage: 8.0,
     expended: 0.14,
     port: v3(-0.72, 0.52, -3.40),
 };
@@ -61,7 +63,7 @@ pub const M61A1: Gun = Gun {
 /// GSh-30-1 (9A-4071K): 150 rounds of 30 x 165 mm in the port LERX root,
 /// 1,500 to 1,800 rounds per minute, the 390 g OFZ high-explosive round at
 /// 860 m/s. Heavier and slower than the 20 mm round, it carries its speed
-/// further, and each hit does about two and a half times the damage.
+/// further, and each hit does about three times the damage.
 pub const GSH301: Gun = Gun {
     name: "GSH-30-1",
     calibre: "30MM",
@@ -69,7 +71,7 @@ pub const GSH301: Gun = Gun {
     rate: 27.5,
     velocity: 860.0,
     k: 0.5 * 1.225 * 0.28 * 7.07e-4 / 0.39,
-    damage: 15.0,
+    damage: 24.0,
     expended: 0.39 + 0.16,
     port: v3(-0.63, 0.69, -3.40),
 };
@@ -151,7 +153,9 @@ pub fn closest(r0: V3, r1: V3) -> (f64, f64) {
 /// Hit test of a swept round against an aircraft-sized ellipsoid (4.5 m half
 /// span, 1.4 m half height, 7 m half length) in the target's body axes.
 /// `p0`, `p1` are the round's positions relative to the target at the start
-/// and the end of the step.
+/// and the end of the step. The game hits the systems inside instead
+/// (`damage::first_hit`); the tests aim with this coarser shape.
+#[cfg(test)]
 pub fn hits_airframe(a: &Aircraft, p0: V3, p1: V3) -> Option<f64> {
     let inv = a.q.conj();
     let scale = |p: V3| {

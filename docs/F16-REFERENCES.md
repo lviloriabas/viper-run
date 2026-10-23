@@ -247,8 +247,8 @@ Limitations: there is no leading-edge flap schedule nor stall tables past
 45° AOA (a flat-plate nose-down moment is added), the visual model's centre
 of gravity is somewhat forward of the real one, and thermal limits and wind
 are not modelled. External stores change the mass and drag but not the
-inertias or the stability. Battle damage hits systems (engine, fuel, wing,
-hydraulics and airframe; see the README) as well as the hit points.
+inertias or the stability. Battle damage lands on the systems a round or a
+fragment actually strikes (`src/damage.rs`; see the README).
 
 ### Exterior proportions
 

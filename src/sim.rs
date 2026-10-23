@@ -182,11 +182,11 @@ impl Type {
     }
 }
 
-/// Battle damage from rounds and warheads, by system, each from 0 (sound)
-/// to 1 (gone), and what it does to the jet: thrust lost from the engine
-/// (the MiG keeps its second engine), fuel pouring from holed tanks, a wing
-/// that lifts less, drags more and rolls the jet toward its side, hydraulics
-/// that move the surfaces less far, and an airframe that takes less g.
+/// Battle damage in the terms the flight model uses, each from 0 (sound) to
+/// 1 (gone), worked out from the hit modules (`damage::Hull::effects`):
+/// thrust lost from the engines, fuel pouring from holed tanks, a wing that
+/// lifts less, drags more and rolls the jet toward its side, hydraulics and
+/// tail surfaces that move less far, and an airframe that takes less g.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BattleDamage {
     pub engine: f64,
@@ -200,34 +200,6 @@ pub struct BattleDamage {
 }
 
 impl BattleDamage {
-    /// A hit of `points` (of the 100 an airframe can take) to the system the
-    /// two random numbers in 0..1 pick, weighted by how much of the jet each
-    /// fills. Returns that system's caution name.
-    pub fn hit(&mut self, kind: Type, points: f64, pick: f64, side: f64) -> &'static str {
-        let s = points / 100.0;
-        if pick < 0.30 {
-            // A twin loses one engine at a time.
-            let cap = if kind == Type::Mig29 && self.engine < 0.5 { 0.5 } else { 1.0 };
-            self.engine = (self.engine + s * 1.6).min(cap);
-            if self.engine >= 0.95 { "ENGINE FIRE" } else if self.engine >= 0.5 && kind == Type::Mig29 { "ENGINE OUT" } else { "ENGINE DAMAGE" }
-        } else if pick < 0.50 {
-            self.leak = (self.leak + s * 5.0).min(6.0);
-            "FUEL LEAK"
-        } else if pick < 0.70 {
-            if self.wing == 0.0 {
-                self.side = if side < 0.5 { -1.0 } else { 1.0 };
-            }
-            self.wing = (self.wing + s * 1.6).min(1.0);
-            "WING DAMAGE"
-        } else if pick < 0.85 {
-            self.controls = (self.controls + s * 1.6).min(1.0);
-            "HYDRAULICS"
-        } else {
-            self.airframe = (self.airframe + s * 1.6).min(1.0);
-            "AIRFRAME DAMAGE"
-        }
-    }
-
     /// Fraction of the thrust left.
     pub fn thrust(&self) -> f64 {
         if self.engine >= 0.95 { 0.0 } else { 1.0 - self.engine }
@@ -1367,8 +1339,7 @@ mod tests {
 
     /// Battle damage costs the jet: half its thrust gone, fuel pouring out,
     /// a holed wing rolling it with the stick at rest, the surfaces short of
-    /// their travel and less g to pull. A twin loses one engine to a hit
-    /// that stops a single.
+    /// their travel and less g to pull; a wrecked engine gives nothing.
     #[test]
     fn battle_damage_costs_performance() {
         let sound = aircraft(3000.0, 220.0);
@@ -1383,12 +1354,7 @@ mod tests {
         assert!(hit.g_avail < sound.g_avail * 0.8);
         assert!(hit.flcs.ail.abs() <= FLAPERON_MAX * hit.battle.authority() + 1e-9);
         assert!(roll_rate(&hit).abs() > roll_rate(&sound).abs() + 1.0, "the wing rolls the jet");
-        let mut twin = BattleDamage::default();
-        twin.hit(Type::Mig29, 100.0, 0.1, 0.5);
-        assert!(twin.engine == 0.5 && twin.thrust() == 0.5);
-        let mut single = BattleDamage::default();
-        single.hit(Type::F16, 100.0, 0.1, 0.5);
-        assert_eq!(single.thrust(), 0.0);
+        assert_eq!(BattleDamage { engine: 1.0, ..Default::default() }.thrust(), 0.0);
     }
 
     #[test]
