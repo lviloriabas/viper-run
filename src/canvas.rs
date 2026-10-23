@@ -274,18 +274,122 @@ impl Canvas {
     }
 
     // ---------------------------------------------------------- text
+    /// Width of a line; `{A}`, `{LB}` and the other controller tokens count
+    /// as the button glyphs `text` draws for them.
     pub fn text_width(s: &str, scale: f32) -> f32 {
-        let n = s.chars().count() as f32;
-        if n == 0.0 {
+        let units: f32 = spans(s).map(|sp| match sp {
+            Span::Text(t) => t.chars().count() as f32 * font::ADVANCE,
+            Span::Pad(b) => b.width() + 1.0,
+        }).sum();
+        if units == 0.0 {
             0.0
         } else {
-            (n * font::ADVANCE - 1.0) * scale
+            (units - 1.0) * scale
         }
     }
 
-    /// Pixel text; `y` is the vertical centre of the line.
+    /// Pixel text; `y` is the vertical centre of the line. Controller tokens
+    /// in braces draw as the pad's buttons: coloured face buttons, shoulder
+    /// and trigger caps, sticks, the D-pad and the menu and view buttons.
     pub fn text(&mut self, s: &str, x: f32, y: f32, scale: f32, col: Col, align: Align) {
+        if !s.contains('{') {
+            return self.plain_text(s, x, y, scale, col, align);
+        }
         let w = Canvas::text_width(s, scale);
+        let mut px = match align {
+            Align::Left => x,
+            Align::Center => x - w * 0.5,
+            Align::Right => x - w,
+        };
+        for sp in spans(s) {
+            match sp {
+                Span::Text(t) => {
+                    self.plain_text(t, px, y, scale, col, Align::Left);
+                    px += t.chars().count() as f32 * font::ADVANCE * scale;
+                }
+                Span::Pad(b) => {
+                    self.pad_button(b, px.round(), y, scale, (col[3] * 1.6).min(1.0));
+                    px += (b.width() + 1.0) * scale;
+                }
+            }
+        }
+    }
+
+    /// One controller button glyph, 9 units tall, left edge at x. Glyphs stay
+    /// bolder than the dimmed hint text round them.
+    fn pad_button(&mut self, b: PadButton, x: f32, y: f32, k: f32, alpha: f32) {
+        let a = |c: Col| with_alpha(c, alpha);
+        let ink = a(rgba(0x0e, 0x12, 0x10, 1.0));
+        let body = a(rgba(0xd4, 0xda, 0xd6, 1.0));
+        let dark = a(rgba(0x26, 0x2c, 0x2a, 1.0));
+        let top = (y - 4.5 * k).round();
+        let w = b.width() * k;
+        let (cx, cy) = (x + w * 0.5, top + 4.5 * k);
+        let pill = |cv: &mut Canvas, y0: f32, h: f32, col: Col| {
+            let r = h * 0.5;
+            cv.rect(x + r, y0, w - h, h, col);
+            cv.disc(x + r, y0 + r, r, col);
+            cv.disc(x + w - r, y0 + r, r, col);
+        };
+        match b {
+            PadButton::Face(ch, c) => {
+                self.disc(cx, cy, 4.6 * k, a(c));
+                self.plain_text(ch, cx, cy, k, ink, Align::Center);
+            }
+            PadButton::Bumper(l) => {
+                pill(self, top + 1.0 * k, 7.0 * k, body);
+                self.plain_text(l, cx, cy, k, ink, Align::Center);
+            }
+            PadButton::Trigger(l) => {
+                let r = 3.0 * k;
+                self.rect(x, top + r, w, 9.0 * k - r, body);
+                self.rect(x + r, top, w - 2.0 * r, r, body);
+                self.disc(x + r, top + r, r, body);
+                self.disc(x + w - r, top + r, r, body);
+                self.plain_text(l, cx, cy + 0.5 * k, k, ink, Align::Center);
+            }
+            PadButton::Stick(l, click) => {
+                let sx = x + 4.5 * k;
+                self.disc(sx, cy, 4.6 * k, dark);
+                self.circle(sx, cy, 3.9 * k, 1.2 * k, body);
+                self.plain_text(l, sx, cy, k, body, Align::Center);
+                if click {
+                    let ax = x + 11.0 * k;
+                    self.rect(ax - 0.5 * k, cy - 3.5 * k, 1.0 * k, 4.0 * k, body);
+                    self.tri([ax - 2.0 * k, cy + 0.5 * k], [ax + 2.0 * k, cy + 0.5 * k], [ax, cy + 3.5 * k], body);
+                }
+            }
+            PadButton::Dpad(lit) => {
+                let arm = 3.0 * k;
+                let grey = a(rgba(0x5a, 0x62, 0x5f, 1.0));
+                self.rect(cx - arm * 0.5, top, arm, 9.0 * k, grey);
+                self.rect(x, cy - arm * 0.5, 9.0 * k, arm, grey);
+                // up, down, left, right
+                let arms = [(cx - arm * 0.5, top), (cx - arm * 0.5, top + 6.0 * k), (x, cy - arm * 0.5), (x + 6.0 * k, cy - arm * 0.5)];
+                for (i, &(ax, ay)) in arms.iter().enumerate() {
+                    if lit & (1 << i) != 0 {
+                        self.rect(ax, ay, arm, arm, a(rgba(0xf4, 0xf8, 0xf0, 1.0)));
+                    }
+                }
+            }
+            PadButton::Menu => {
+                pill(self, top + 1.0 * k, 7.0 * k, body);
+                for i in 0..3 {
+                    self.rect(cx - 2.5 * k, top + (2.5 + 2.0 * i as f32) * k, 5.0 * k, 1.0 * k, ink);
+                }
+            }
+            PadButton::View => {
+                pill(self, top + 1.0 * k, 7.0 * k, body);
+                self.stroke_rect(cx - 2.5 * k, top + 2.5 * k, 3.5 * k, 3.0 * k, k, ink);
+                self.rect(cx - 1.0 * k, top + 4.0 * k, 3.5 * k, 3.0 * k, body);
+                self.stroke_rect(cx - 1.0 * k, top + 4.0 * k, 3.5 * k, 3.0 * k, k, ink);
+            }
+        }
+    }
+
+    fn plain_text(&mut self, s: &str, x: f32, y: f32, scale: f32, col: Col, align: Align) {
+        let n = s.chars().count() as f32;
+        let w = if n == 0.0 { 0.0 } else { (n * font::ADVANCE - 1.0) * scale };
         let mut px = match align {
             Align::Left => x,
             Align::Center => x - w * 0.5,
@@ -334,4 +438,83 @@ impl Canvas {
         }
         yy - y
     }
+}
+
+/// A controller button that pixel text can show in place of its name.
+#[derive(Clone, Copy)]
+enum PadButton {
+    Face(&'static str, Col),
+    Bumper(&'static str),
+    Trigger(&'static str),
+    Stick(&'static str, bool),
+    /// Lit arms as bits: up, down, left, right.
+    Dpad(u8),
+    Menu,
+    View,
+}
+
+impl PadButton {
+    fn parse(t: &str) -> Option<PadButton> {
+        Some(match t {
+            "A" => PadButton::Face("A", rgba(0x6c, 0xc2, 0x3e, 1.0)),
+            "B" => PadButton::Face("B", rgba(0xe8, 0x4c, 0x3d, 1.0)),
+            "X" => PadButton::Face("X", rgba(0x3f, 0x8e, 0xe8, 1.0)),
+            "Y" => PadButton::Face("Y", rgba(0xf2, 0xc2, 0x32, 1.0)),
+            "LB" => PadButton::Bumper("LB"),
+            "RB" => PadButton::Bumper("RB"),
+            "LT" => PadButton::Trigger("LT"),
+            "RT" => PadButton::Trigger("RT"),
+            "LS" => PadButton::Stick("L", false),
+            "RS" => PadButton::Stick("R", false),
+            "L3" => PadButton::Stick("L", true),
+            "R3" => PadButton::Stick("R", true),
+            "DPAD" => PadButton::Dpad(0b1111),
+            "DU" => PadButton::Dpad(0b0001),
+            "DD" => PadButton::Dpad(0b0010),
+            "DLR" => PadButton::Dpad(0b1100),
+            "START" => PadButton::Menu,
+            "BACK" => PadButton::View,
+            _ => return None,
+        })
+    }
+
+    /// Width in font units.
+    fn width(self) -> f32 {
+        match self {
+            PadButton::Face(..) | PadButton::Dpad(_) => 9.0,
+            PadButton::Stick(_, click) => if click { 13.0 } else { 9.0 },
+            PadButton::Bumper(_) => 15.0,
+            PadButton::Trigger(_) => 13.0,
+            PadButton::Menu | PadButton::View => 12.0,
+        }
+    }
+}
+
+enum Span<'a> {
+    Text(&'a str),
+    Pad(PadButton),
+}
+
+/// Splits a line into plain runs and `{TOKEN}` buttons; an unknown token
+/// stays as text, braces and all.
+fn spans(s: &str) -> impl Iterator<Item = Span<'_>> {
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        if let Some(body) = rest.strip_prefix('{') {
+            if let Some(end) = body.find('}') {
+                if let Some(b) = PadButton::parse(&body[..end]) {
+                    rest = &body[end + 1..];
+                    return Some(Span::Pad(b));
+                }
+            }
+        }
+        let first = rest.chars().next().map_or(1, char::len_utf8);
+        let cut = rest[first..].find('{').map_or(rest.len(), |i| i + first);
+        let (t, r) = rest.split_at(cut);
+        rest = r;
+        Some(Span::Text(t))
+    })
 }

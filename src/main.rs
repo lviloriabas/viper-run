@@ -597,7 +597,7 @@ impl App {
         self.keys.clear();
         self.center_stick();
         self.grab(true);
-        self.flash_toast(if self.pad_active { "Y CHASE // RS LOOK" } else { "V CHASE // C CENTER" }, 1.8);
+        self.flash_toast(if self.pad_active { "{Y} CHASE // {RS} LOOK" } else { "V CHASE // C CENTER" }, 1.8);
         self.last_frame = date::now();
         self.accumulator = 0.0;
     }
@@ -609,7 +609,7 @@ impl App {
             State::Flying => {
                 self.state = State::Frozen;
                 self.keys.clear();
-                self.flash_toast(if self.pad_active { "PAUSED // START RESUME // B MENU" } else { "PAUSED // P RESUME // ESC MENU" }, 1.6);
+                self.flash_toast(if self.pad_active { "PAUSED // {START} RESUME // {B} MENU" } else { "PAUSED // P RESUME // ESC MENU" }, 1.6);
             }
             State::Frozen => {
                 self.state = State::Flying;
