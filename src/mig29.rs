@@ -282,13 +282,13 @@ fn deck_point(side: f64, z: f64, s: f64, upper: bool) -> V3 {
 }
 
 // ------------------------------------------------------------------ nacelles
-// z, half width, centre height, half height, superellipse exponent: squarish
-// behind the intakes, round at the nozzles.
+// z, half width, centre height, half height, superellipse exponent: a rounded
+// box behind the intakes, easing round at the nozzles.
 const NACELLE: [[f64; 5]; 5] = [
-    [-2.00, 0.42, -0.10, 0.44, 3.4],
-    [0.50, 0.45, -0.10, 0.46, 3.0],
-    [3.50, 0.47, -0.06, 0.48, 2.6],
-    [5.00, 0.50, 0.00, 0.50, 2.2],
+    [-2.00, 0.42, -0.10, 0.44, 9.0],
+    [0.50, 0.45, -0.10, 0.46, 7.0],
+    [3.50, 0.47, -0.06, 0.48, 4.5],
+    [5.00, 0.50, 0.00, 0.50, 2.6],
     [5.95, 0.53, 0.05, 0.53, 2.0],
 ];
 const NACELLE_END: f64 = 5.95;
@@ -462,22 +462,22 @@ pub fn build() -> Fulcrum {
         // Engine nacelle from the raked intake to the nozzle, its intake
         // lip and the dark duct inside, and the afterburner nozzle.
         let n_axis = move |p: V3| nacelle_axis(side, p.z);
-        m.surface(18, 14, move |u, v| {
+        m.surface(18, 16, move |u, v| {
             let th = v * TAU;
             nacelle_point(side, mix(intake_lip(th), NACELLE_END, u), th, 1.0)
         }, |p, n| if p.z > 4.8 { BARE } else { skin(p, n) }, Some(&n_axis));
-        m.surface(1, 14, move |u, v| {
+        m.surface(1, 16, move |u, v| {
             let th = v * TAU;
             nacelle_point(side, intake_lip(th), th, mix(1.0, 0.80, u))
         }, |_, _| LIGHT, Some(&|p: V3| p + v3(0.0, 0.5, 1.0)));
-        m.surface(3, 14, move |u, v| {
+        m.surface(3, 16, move |u, v| {
             let th = v * TAU;
             nacelle_point(side, intake_lip(th) + 1.1 * u, th, 0.80 * (1.0 - u.powi(3)))
         }, |_, _| DUCT, Some(&move |p: V3| n_axis(p) * 2.0 - p));
         let base = nacelle_axis(side, NACELLE_END);
         let dir = v3(side * 0.027, 0.0, 1.0).norm();
-        m.lathe(base, dir, &[(0.0, 0.53), (0.30, 0.52), (1.30, 0.46)], 14, METAL);
-        m.lathe(base, dir, &[(1.30, 0.46), (1.31, 0.40), (0.70, 0.34), (0.60, 0.0)], 14, SOOT);
+        m.lathe(base, dir, &[(0.0, 0.53), (0.30, 0.52), (1.30, 0.46)], 16, METAL);
+        m.lathe(base, dir, &[(1.30, 0.46), (1.31, 0.40), (0.70, 0.34), (0.60, 0.0)], 16, SOOT);
 
         // Tail boom carrying the fin and the stabilator.
         let b_axis = move |p: V3| v3(side * BOOM_X, BOOM_Y, p.z);
