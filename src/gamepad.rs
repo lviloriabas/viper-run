@@ -104,6 +104,14 @@ impl Gamepad {
         self.held(b) && self.then < t && self.now >= t
     }
 
+    /// The controller is being used this frame: a button went down, or a
+    /// stick or trigger is well off its rest.
+    pub fn active(&self) -> bool {
+        let s = &self.state;
+        let m = |(x, y): (f64, f64)| x.abs().max(y.abs());
+        s.connected && (s.buttons & !self.prev.buttons != 0 || m(s.left) > 0.3 || m(s.right) > 0.3 || s.lt > 0.3 || s.rt > 0.3)
+    }
+
     /// Menu directions newly pushed this frame.
     pub fn nav(&self) -> u16 {
         dirs(&self.state) & !dirs(&self.prev)

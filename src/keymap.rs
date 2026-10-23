@@ -18,7 +18,7 @@ pub enum Bind {
     Weapon,
     Lock,
     Countermeasures,
-    Speedbrake,
+    Airbrake,
     Gear,
     Flaps,
     WheelBrake,
@@ -42,7 +42,7 @@ pub const BINDS: [Bind; 21] = [
     Bind::Weapon,
     Bind::Lock,
     Bind::Countermeasures,
-    Bind::Speedbrake,
+    Bind::Airbrake,
     Bind::Gear,
     Bind::Flaps,
     Bind::WheelBrake,
@@ -73,7 +73,7 @@ impl Bind {
             Bind::Weapon => "CYCLE WEAPON",
             Bind::Lock => "LOCK TARGET",
             Bind::Countermeasures => "CHAFF / FLARE",
-            Bind::Speedbrake => "SPEEDBRAKE",
+            Bind::Airbrake => "AIRBRAKE",
             Bind::Gear => "LANDING GEAR",
             Bind::Flaps => "FLAPS",
             Bind::WheelBrake => "WHEEL BRAKES",
@@ -100,7 +100,7 @@ impl Bind {
             Bind::Weapon => "weapon",
             Bind::Lock => "lock",
             Bind::Countermeasures => "countermeasures",
-            Bind::Speedbrake => "speedbrake",
+            Bind::Airbrake => "airbrake",
             Bind::Gear => "gear",
             Bind::Flaps => "flaps",
             Bind::WheelBrake => "wheel_brake",
@@ -127,7 +127,7 @@ impl Bind {
             Bind::Weapon => (X, None),
             Bind::Lock => (T, None),
             Bind::Countermeasures => (Z, None),
-            Bind::Speedbrake => (H, None),
+            Bind::Airbrake => (H, None),
             Bind::Gear => (G, None),
             Bind::Flaps => (L, None),
             Bind::WheelBrake => (B, None),
@@ -200,6 +200,8 @@ impl Keymap {
 
     /// Reads one settings entry; unknown names are ignored.
     pub fn load(&mut self, id: &str, value: &str) {
+        // Older versions called the airbrake the speedbrake.
+        let id = if id == "speedbrake" { "airbrake" } else { id };
         let Some(b) = BINDS.iter().copied().find(|b| b.id() == id) else { return };
         let mut it = value.split(',').map(|s| parse_key(s.trim()));
         self.keys[b.index()] = [it.next().flatten(), it.next().flatten()];

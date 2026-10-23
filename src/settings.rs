@@ -21,6 +21,17 @@ pub enum PadLayout {
     Classic,
 }
 
+/// Cockpit vertical field of view range, degrees.
+pub const FOV_MIN: f64 = 40.0;
+pub const FOV_MAX: f64 = 95.0;
+
+/// RC-style stick expo, y = (1 - e) x + e x^3: a gentle slope round the
+/// centre for small corrections that steepens to full deflection at the rim,
+/// so a quick flick still reaches the stops.
+pub fn stick_expo(x: f64, e: f64) -> f64 {
+    (1.0 - e) * x + e * x * x * x
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     pub sensitivity: f64,
@@ -28,6 +39,8 @@ pub struct Settings {
     /// Flips every pitch input: mouse, W / S and the controller.
     pub invert_pitch: bool,
     pub pad_layout: PadLayout,
+    /// Controller stick expo, 0 (linear) to 1 (cubic): see `stick_expo`.
+    pub expo: f64,
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
@@ -38,7 +51,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, fov: 58.0, muted: false, fullscreen: false, clock: true, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, clock: true, keys: Keymap::default() }
     }
 }
 
@@ -69,7 +82,8 @@ pub fn load() -> (Settings, Best) {
         let num = v.parse::<f64>().ok().filter(|n| n.is_finite());
         match (k.as_str(), num) {
             ("sensitivity", Some(n)) => s.sensitivity = clamp(n, 0.5, 5.0),
-            ("fov", Some(n)) => s.fov = clamp(n, 45.0, 72.0),
+            ("fov", Some(n)) => s.fov = clamp(n, FOV_MIN, FOV_MAX),
+            ("expo", Some(n)) => s.expo = clamp(n, 0.0, 1.0),
             ("pitch", _) => s.pitch = if v == "keys" { PitchSource::Keys } else { PitchSource::Mouse },
             // Older versions saved "invert_y", when only the mouse flipped.
             ("invert_pitch", _) | ("invert_y", _) => s.invert_pitch = v == "true",
@@ -92,8 +106,8 @@ pub fn save(s: &Settings, b: &Best) {
         return;
     }
     let text = format!(
-        "sensitivity={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
-        s.sensitivity, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.clock, b.score.round(), b.time
+        "sensitivity={:.1}\nexpo={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
+        s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.clock, b.score.round(), b.time
     );
     let text = text + &s.keys.save();
     let _ = std::fs::write(d.join("settings.txt"), text);

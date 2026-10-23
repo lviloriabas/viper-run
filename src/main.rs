@@ -253,6 +253,9 @@ struct App {
 
     keys: HashSet<KeyCode>,
     pad: Gamepad,
+    /// The controller was the last input used: on-screen prompts show its
+    /// buttons until the keyboard or mouse is touched again.
+    pad_active: bool,
     /// Smoothed right-stick position driving the head or chase camera.
     pad_look: (f64, f64),
     mouse: (f64, f64),
@@ -374,6 +377,7 @@ impl App {
             crash_time: 0.0,
             keys: HashSet::new(),
             pad: Gamepad::new(),
+            pad_active: false,
             pad_look: (0.0, 0.0),
             mouse: (0.0, 0.0),
             key_pitch: 0.0,
@@ -583,7 +587,7 @@ impl App {
         self.keys.clear();
         self.center_stick();
         self.grab(true);
-        self.flash_toast("V CHASE // C CENTER", 1.8);
+        self.flash_toast(if self.pad_active { "Y CHASE // RS LOOK" } else { "V CHASE // C CENTER" }, 1.8);
         self.last_frame = date::now();
         self.accumulator = 0.0;
     }
@@ -595,7 +599,7 @@ impl App {
             State::Flying => {
                 self.state = State::Frozen;
                 self.keys.clear();
-                self.flash_toast("PAUSED // P RESUME // ESC MENU", 1.6);
+                self.flash_toast(if self.pad_active { "PAUSED // START RESUME // B MENU" } else { "PAUSED // P RESUME // ESC MENU" }, 1.6);
             }
             State::Frozen => {
                 self.state = State::Flying;
@@ -665,10 +669,14 @@ impl App {
             Action::Menu => self.go_menu(),
             Action::Quit => window::order_quit(),
             Action::Mute => self.toggle_mute(),
+            Action::SensDown | Action::SensUp if self.pad_active => {
+                let step = if a == Action::SensUp { 0.1 } else { -0.1 };
+                self.settings.expo = clamp(((self.settings.expo + step) * 10.0).round() / 10.0, 0.0, 1.0);
+            }
             Action::SensDown => self.settings.sensitivity = clamp(((self.settings.sensitivity - 0.1) * 10.0).round() / 10.0, 0.5, 5.0),
             Action::SensUp => self.settings.sensitivity = clamp(((self.settings.sensitivity + 0.1) * 10.0).round() / 10.0, 0.5, 5.0),
-            Action::FovDown => self.settings.fov = clamp(self.settings.fov - 1.0, 45.0, 72.0),
-            Action::FovUp => self.settings.fov = clamp(self.settings.fov + 1.0, 45.0, 72.0),
+            Action::FovDown => self.settings.fov = clamp(self.settings.fov - 1.0, settings::FOV_MIN, settings::FOV_MAX),
+            Action::FovUp => self.settings.fov = clamp(self.settings.fov + 1.0, settings::FOV_MIN, settings::FOV_MAX),
             Action::Pitch => {
                 self.settings.pitch = if self.settings.pitch == PitchSource::Mouse { PitchSource::Keys } else { PitchSource::Mouse };
                 self.key_pitch = 0.0;
@@ -832,7 +840,8 @@ impl App {
         // applies inversion later.
         let pad = &self.pad;
         let on_ground = self.aircraft.as_ref().is_some_and(|a| a.on_ground);
-        let lx = pad.state.left.0;
+        let e = self.settings.expo;
+        let (lx, ly) = (settings::stick_expo(pad.state.left.0, e), settings::stick_expo(pad.state.left.1, e));
         let (roll, yaw, up, down, burner, brake_clear) = match self.settings.pad_layout {
             // LB / LT run the throttle (held at the stop, LB lights the
             // burner) and the bumpers are free of the rudder: holding X turns
@@ -856,7 +865,7 @@ impl App {
             roll_right: k(Bind::RollRight),
             yaw_left: k(Bind::YawLeft),
             yaw_right: k(Bind::YawRight),
-            pitch_axis: pitch_axis - pad.state.left.1,
+            pitch_axis: pitch_axis - ly,
             roll_axis: roll,
             yaw_axis: clamp(stick_curve(mouse.0) + yaw, -1.0, 1.0),
             throttle_up: k(Bind::ThrottleUp) || up,
@@ -911,7 +920,7 @@ impl App {
             self.key_down_event(k, KeyMods::default(), false);
         }
         if !menu {
-            let speedbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Speedbrake)) };
+            let airbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Airbrake)) };
             let actions = match self.settings.pad_layout {
                 // Fire (RT), lock (RB) and countermeasures (L3) never take a
                 // thumb off a stick; the d-pad and face buttons are for what
@@ -919,7 +928,7 @@ impl App {
                 PadLayout::Combat => [(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
                 PadLayout::Classic => [(Y, Bind::View), (X, Bind::Center), (RS, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
             };
-            for (button, b) in actions.into_iter().chain(speedbrake) {
+            for (button, b) in actions.into_iter().chain(airbrake) {
                 if self.pad.pressed(button) {
                     self.bind_pressed(b);
                 }
@@ -1309,9 +1318,9 @@ impl App {
                     self.combat.countermeasures(a);
                 }
             }
-            Bind::Speedbrake if flying => {
+            Bind::Airbrake if flying => {
                 self.airbrake = !self.airbrake;
-                self.flash_toast(if self.airbrake { "SPEEDBRAKE OUT" } else { "SPEEDBRAKE IN" }, 1.4);
+                self.flash_toast(if self.airbrake { "AIRBRAKE OUT" } else { "AIRBRAKE IN" }, 1.4);
             }
             Bind::Gear if flying => self.toggle_gear(),
             Bind::Flaps if flying => {
@@ -1368,6 +1377,12 @@ impl EventHandler for App {
             }
         }
         self.pad_buttons();
+        // Keyboard and mouse events hand the prompts back to themselves.
+        if self.pad.active() {
+            self.pad_active = true;
+        } else if !self.pad.state.connected {
+            self.pad_active = false;
+        }
         self.toast_timer = (self.toast_timer - dt).max(0.0);
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
@@ -1505,7 +1520,7 @@ impl EventHandler for App {
         // 2D overlays at native resolution.
         let mut buttons = Vec::new();
         let i = if self.state == State::Flying { self.read_control_positions() } else { Input { airbrake: self.airbrake, ..Default::default() } };
-        let pad = self.pad.state.connected;
+        let pad = self.pad_active;
         let obj = self.objective();
         let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, pad, brake: self.airbrake };
         {
@@ -1600,6 +1615,9 @@ impl EventHandler for App {
             return;
         }
         let (dx, dy) = (dx as f64, dy as f64);
+        if dx.abs() + dy.abs() > 6.0 {
+            self.pad_active = false;
+        }
         if self.state == State::Frozen || self.keys.contains(&KeyCode::LeftAlt) || self.keys.contains(&KeyCode::RightAlt) {
             if self.view == View::Cockpit {
                 self.look.0 = clamp(self.look.0 + dx * 0.003, -155.0 * DEG, 155.0 * DEG);
@@ -1616,10 +1634,14 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        if (x - self.mouse_pos.0).abs() + (y - self.mouse_pos.1).abs() > 6.0 {
+            self.pad_active = false;
+        }
         self.mouse_pos = (x, y);
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
+        self.pad_active = false;
         self.mouse_pos = (x, y);
         if matches!(self.state, State::Flying | State::Frozen) && !self.controls_open {
             match button {
@@ -1647,6 +1669,7 @@ impl EventHandler for App {
     }
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
+        self.pad_active = false;
         if key == KeyCode::F11 && !repeat {
             self.toggle_fullscreen();
             return;

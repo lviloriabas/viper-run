@@ -6,7 +6,7 @@ use crate::cockpit::pad;
 use crate::combat::{Config, MissionKind, Store};
 use crate::keymap::{key_name, Keymap, BINDS};
 use crate::math::*;
-use crate::settings::{Best, PadLayout, PitchSource, Settings};
+use crate::settings::{Best, PadLayout, PitchSource, Settings, FOV_MAX, FOV_MIN};
 use crate::sim::{Aircraft, Mission};
 use crate::world::Camera;
 
@@ -126,7 +126,23 @@ pub fn ui_scale(w: f32, h: f32) -> f32 {
 }
 
 impl<'a> Ui<'a> {
+    /// A key hint as the active input shows it: the keyboard key, or the
+    /// controller button that does the same in menus (none if there is none).
+    fn hint<'b>(&self, key: &'b str) -> &'b str {
+        if !self.pad {
+            return key;
+        }
+        match key {
+            "ENTER" => "A",
+            "ESC" => "B",
+            "K" => "BACK",
+            "P" | "R" => "START",
+            _ => "",
+        }
+    }
+
     fn button(&mut self, label: &str, hint: &str, x: f32, y: f32, primary: bool, action: Action) -> f32 {
+        let hint = self.hint(hint);
         let s = self.s;
         let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, s.max(2.0) - 1.0) + 8.0 * s } + 16.0 * s;
         let h = 15.0 * s;
@@ -284,12 +300,12 @@ impl<'a> Ui<'a> {
         // what flying the route and landing need.
         let armed = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
         let keys = match (armed, self.pad, self.layout) {
-            (true, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "FIRE"), ("RB", "LOCK TARGET"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("A", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("X + LS", "RUDDER"), ("B", "SPEEDBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
-            (true, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("A", "FIRE"), ("D-PAD DOWN", "LOCK TARGET"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("D-PAD UP", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("LB RB", "RUDDER"), ("B", "SPEEDBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
-            (false, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("X + LS", "RUDDER"), ("B", "SPEEDBRAKE"), ("D-PAD DOWN", "LANDING GEAR"), ("D-PAD UP", "FLAPS"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
-            (false, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("LB RB", "RUDDER"), ("B", "SPEEDBRAKE"), ("RS CLICK", "LANDING GEAR"), ("X", "CENTER VIEW"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
-            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "SPEEDBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE, MENU")],
-            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "SPEEDBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE, MENU")],
+            (true, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "FIRE"), ("RB", "LOCK TARGET"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("A", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("X + LS", "RUDDER"), ("B", "AIRBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
+            (true, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("A", "FIRE"), ("D-PAD DOWN", "LOCK TARGET"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("D-PAD UP", "NEXT WEAPON"), ("LS CLICK", "CHAFF / FLARE"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE"), ("Y", "CAMERA"), ("START", "PAUSE")],
+            (false, true, PadLayout::Combat) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("LB", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("X + LS", "RUDDER"), ("B", "AIRBRAKE"), ("D-PAD DOWN", "LANDING GEAR"), ("D-PAD UP", "FLAPS"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
+            (false, true, PadLayout::Classic) => [("LS", "PITCH / ROLL"), ("RS", "LOOK"), ("RT", "THROTTLE UP"), ("LT", "THROTTLE DOWN"), ("LB RB", "RUDDER"), ("B", "AIRBRAKE"), ("RS CLICK", "LANDING GEAR"), ("X", "CENTER VIEW"), ("LT GROUND", "WHEEL BRAKES"), ("Y", "CAMERA"), ("START", "PAUSE"), ("BACK", "CONTROLS")],
+            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE, MENU")],
+            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE, MENU")],
         };
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
@@ -336,6 +352,7 @@ impl<'a> Ui<'a> {
         yy += 40.0 * s;
         let mut bx = x + m;
         for (i, (label, hint, act)) in actions.iter().enumerate() {
+            let hint = self.hint(hint);
             let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, sm) + 8.0 * s } + 16.0 * s;
             if bx + w > x + pw - m {
                 bx = x + m;
@@ -344,7 +361,9 @@ impl<'a> Ui<'a> {
             let used = self.button(label, hint, bx, yy, i == 0, *act);
             bx += used + 6.0 * s;
         }
-        self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        let small = if self.pad { small.replace("ESC RESUME, R RESTART", "B RESUME, A SELECT").replace("R RESTART", "START RESTART").replace("ESC MENU", "B MENU") } else { small.to_string() };
+        let small = if self.pad { small.split(", M AUDIO").next().unwrap_or("").to_string() } else { small };
+        self.cv.text(&small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
     }
 
     pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool, obj: Option<&Objective>) {
@@ -364,7 +383,7 @@ impl<'a> Ui<'a> {
                 ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
                 ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
             ],
-            &[("RESUME", "P", Action::Resume), ("RESTART", "R", Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
+            &[("RESUME", "P", Action::Resume), ("RESTART", if self.pad { "" } else { "R" }, Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
             &format!("ESC RESUME, R RESTART, M AUDIO {}", if muted { "OFF" } else { "ON" }),
         );
     }
@@ -461,7 +480,7 @@ impl<'a> Ui<'a> {
         let tw = 29000.0 / lb;
         let stats = format!("GROSS {} LB   DRAG +{} COUNTS   T/W {:.2}", (lb / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
         self.cv.text(&stats, x + m, yy + 4.0 * s, sm, AMBER, Align::Left);
-        self.cv.text("CLICK A STORE TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G.", x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        self.cv.text(if self.pad { "D-PAD TO A STORE, A TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." } else { "CLICK A STORE TO CHANGE IT. HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." }, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
     }
 
     /// Result of a DOGFIGHT or STRIKE sortie.
@@ -586,7 +605,7 @@ impl<'a> Ui<'a> {
                 ("X + LS", "Rudder"),
                 ("LS CLICK", "Chaff and flare"),
                 ("A", "Next weapon"),
-                ("B", "Speedbrake"),
+                ("B", "Airbrake"),
                 ("Y", "Cockpit / chase camera"),
                 ("D-PAD L R", "Left / right MFD page"),
                 ("D-PAD DOWN", "Landing gear"),
@@ -605,7 +624,7 @@ impl<'a> Ui<'a> {
                 ("LB RB", "Rudder left / right"),
                 ("LS CLICK", "Chaff and flare"),
                 ("D-PAD UP", "Next weapon"),
-                ("B", "Speedbrake"),
+                ("B", "Airbrake"),
                 ("X", "Center view"),
                 ("RS CLICK", "Landing gear"),
                 ("Y", "Cockpit / chase camera"),
@@ -634,23 +653,33 @@ impl<'a> Ui<'a> {
             ui.cv.rect(tx + tw * t as f32 - 2.0 * s, by + 3.0 * s, 4.0 * s, 9.0 * s, ACID);
             ui.button("+", "", w - m - bw + 1.0 * s, by, false, up);
         };
-        slider(self, y, "MOUSE SENSITIVITY", format!("{:.1}X", st.sensitivity), (st.sensitivity - 0.5) / 4.5, Action::SensDown, Action::SensUp);
+        if self.pad {
+            slider(self, y, "STICK RESPONSE (EXPO)", format!("{:.0}%", st.expo * 100.0), st.expo, Action::SensDown, Action::SensUp);
+        } else {
+            slider(self, y, "MOUSE SENSITIVITY", format!("{:.1}X", st.sensitivity), (st.sensitivity - 0.5) / 4.5, Action::SensDown, Action::SensUp);
+        }
         y += 30.0 * s;
-        slider(self, y, "COCKPIT FIELD OF VIEW", format!("{}°", st.fov.round()), (st.fov - 45.0) / 27.0, Action::FovDown, Action::FovUp);
+        slider(self, y, "COCKPIT FIELD OF VIEW", format!("{}°", st.fov.round()), (st.fov - FOV_MIN) / (FOV_MAX - FOV_MIN), Action::FovDown, Action::FovUp);
         y += 30.0 * s;
-        self.button(if st.pitch == PitchSource::Mouse { "PITCH INPUT: MOUSE" } else { "PITCH INPUT: W / S" }, "", m, y, false, Action::Pitch);
-        y += 18.0 * s;
+        if !self.pad {
+            self.button(if st.pitch == PitchSource::Mouse { "PITCH INPUT: MOUSE" } else { "PITCH INPUT: W / S" }, "", m, y, false, Action::Pitch);
+            y += 18.0 * s;
+        }
         self.button(if st.invert_pitch { "[X] INVERT PITCH" } else { "[ ] INVERT PITCH" }, "", m, y, false, Action::Invert);
         y += 18.0 * s;
-        self.button(if st.pad_layout == PadLayout::Combat { "PAD LAYOUT: COMBAT" } else { "PAD LAYOUT: CLASSIC" }, "", m, y, false, Action::PadLayout);
-        y += 18.0 * s;
+        if self.pad {
+            self.button(if st.pad_layout == PadLayout::Combat { "PAD LAYOUT: COMBAT" } else { "PAD LAYOUT: CLASSIC" }, "", m, y, false, Action::PadLayout);
+            y += 18.0 * s;
+        }
         self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
         y += 18.0 * s;
-        self.cv.paragraph("Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller.", m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
-        y += 16.0 * s;
+        let note = if self.pad { "Expo softens the stick round the centre for fine aiming and keeps full travel at the rim. Invert pitch flips the controller too." } else { "Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller." };
+        y += self.cv.paragraph(note, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0)) + 2.0 * s;
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
-        self.cv.paragraph(if self.pad { "Press K or BACK to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
-        self.key_bindings(&st.keys, w, waiting);
+        self.cv.paragraph(if self.pad { "Press BACK or B to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        if !self.pad {
+            self.key_bindings(&st.keys, w, waiting);
+        }
     }
 
     /// Key bindings beside the drawer: every flight action with its key and
@@ -809,7 +838,7 @@ fn stick_cue(cv: &mut Canvas, x: f32, y: f32, s: f32, c: &StickCue) {
     };
     cv.text(label, x - 4.0 * s, y + 4.0 * s, sm, with_alpha(HUD, 0.55), Align::Right);
     if c.brake {
-        cv.text("SPD BRK", x - 4.0 * s, y + b - 4.0 * s, sm, AMBER, Align::Right);
+        cv.text("AIR BRK", x - 4.0 * s, y + b - 4.0 * s, sm, AMBER, Align::Right);
     }
 }
 

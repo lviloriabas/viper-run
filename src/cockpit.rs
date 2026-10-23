@@ -1030,7 +1030,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // Caution light panel.
     let r = R_CAUTION;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x20, 0x27, 0x29, 1.0));
-    let labels = [("FLCS", a.alpha_deg > 25.0), ("FUEL LOW", a.fuel < 450.0), ("ENGINE", a.fuel <= 0.0), ("OIL", a.oil_psi < 20.0), ("ALT LOW", ad.radar_ft < 300.0), ("SPD BRK", a.brake > 0.1)];
+    let labels = [("FLCS", a.alpha_deg > 25.0), ("FUEL LOW", a.fuel < 450.0), ("ENGINE", a.fuel <= 0.0), ("OIL", a.oil_psi < 20.0), ("ALT LOW", ad.radar_ft < 300.0), ("AIR BRK", a.brake > 0.1)];
     for (i, (s, lit)) in labels.iter().enumerate() {
         let (x, y) = (r.x + (i % 2) as f32 * 128.0, r.y + (i / 2) as f32 * 42.6);
         cv.rect(x + 3.0, y + 3.0, 122.0, 36.0, if *lit { rgba(0xd4, 0x96, 0x38, 1.0) } else { rgba(0x0c, 0x14, 0x14, 1.0) });

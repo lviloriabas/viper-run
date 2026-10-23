@@ -278,7 +278,7 @@ pub struct Airframe {
     pub flame: Mesh,
     pub stab: [Mesh; 2],
     pub rudder: Mesh,
-    /// Speedbrake petals: left upper, left lower, right upper, right lower.
+    /// Airbrake petals: left upper, left lower, right upper, right lower.
     pub brakes: [Mesh; 4],
     /// Left and right wingtip AIM-9s.
     pub tips: [Mesh; 2],
@@ -583,7 +583,7 @@ pub fn build() -> Airframe {
             let (v0, v1) = (k as f64 / WING_NV as f64, (k + 1) as f64 / WING_NV as f64);
             ext.quad(wing_point(side, 1.0, v0, true), wing_point(side, 1.0, v1, true), wing_point(side, 1.0, v1, false), wing_point(side, 1.0, v0, false), WHITE);
         }
-        // Aft strakes beside the engine, carrying the stabilators and speedbrakes.
+        // Aft strakes beside the engine, carrying the stabilators and airbrakes.
         let boom_point = move |u: f64, v: f64, upper: bool| {
             let x = 0.62 + 0.48 * u;
             let z = mix(WING_TE - 0.2, BRAKE_HINGE_Z, v);

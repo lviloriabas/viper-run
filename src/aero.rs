@@ -173,7 +173,7 @@ const GROUND_EFFECT: [(f64, f64); 11] = [
 /// Transonic aft shift of the aerodynamic centre, fraction of MAC (FlightGear estimate).
 const AC_SHIFT: [(f64, f64); 3] = [(0.6, 0.0), (0.8, 0.05), (1.1, 0.19)];
 
-/// Speedbrake: drag at full 60 degree opening, and its wave-drag factor.
+/// Airbrake: drag at full 60 degree opening, and its wave-drag factor.
 const CD_BRAKE: f64 = 0.075;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -190,7 +190,7 @@ pub struct Flow {
     pub el: f64,
     pub ail: f64,
     pub rdr: f64,
-    /// Speedbrake opening 0..1.
+    /// Airbrake opening 0..1.
     pub brake: f64,
     /// Centre of gravity, fraction of MAC.
     pub xcg: f64,
@@ -373,7 +373,7 @@ mod tests {
         assert!(coefficients(&Flow { rdr: 10.0, ..base }).cn < c0.cn, "positive rudder yaws left");
         assert!(coefficients(&Flow { beta: 5.0, ..base }).cn > 0.0, "weathercock stable");
         assert!(coefficients(&Flow { p: 1.0, ..base }).cl < 0.0, "roll damping");
-        assert!(coefficients(&Flow { brake: 1.0, ..base }).cx < c0.cx, "speedbrake drag");
+        assert!(coefficients(&Flow { brake: 1.0, ..base }).cx < c0.cx, "airbrake drag");
     }
 
     #[test]

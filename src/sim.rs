@@ -415,7 +415,7 @@ pub struct Flcs {
     q_wash: f64,
     r_wash: f64,
     /// Surface positions in degrees (stabilator and flaperon trailing edge
-    /// down, rudder trailing edge left positive) and speedbrake opening 0..1.
+    /// down, rudder trailing edge left positive) and airbrake opening 0..1.
     pub el: f64,
     pub ail: f64,
     pub rdr: f64,
