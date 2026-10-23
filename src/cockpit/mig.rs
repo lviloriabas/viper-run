@@ -259,15 +259,18 @@ pub fn build_static(m: &mut Mesh) {
         p - inward(p, 0.025)
     }).collect();
     crate::cockpit::pilot::band(m, &arch, 0.012, 0.022, V3::Z, FRAME);
-    for d in [-0.42, 0.0, 0.42] {
+    // The mirrors are big rounded convex glasses in domed housings, the
+    // centre one widest, each on a short stalk off the arch and turned to
+    // the pilot.
+    for d in [-0.44, 0.0, 0.44] {
         let p = cp(za, PI / 2.0 + d);
-        let c = p - inward(p, 0.05) + V3::Z * 0.03;
+        let c = p - inward(p, 0.085) + V3::Z * 0.035;
         let n = (crate::airframe::EYE - c).norm();
         let x = V3::Y.cross(n).norm();
         let f = Frame { o: c, x, y: n.cross(x), z: n };
-        m.block(&f, v3(0.036, 0.016, 0.005), FRAME.scale(0.8));
-        super::mirror_glass(m, &f.at(0.0, 0.0, 0.0056), 0.062, 0.024, -d / 0.42);
-        crate::cockpit::pilot::bar(m, f.p(0.0, 0.0, -0.006), p - inward(p, 0.03), 0.005, 0.005, V3::Z, FRAME.scale(0.8));
+        let (w, h) = if d == 0.0 { (0.17, 0.075) } else { (0.14, 0.066) };
+        super::convex_mirror(m, &f, w, h, -d / 0.44, FRAME.scale(0.8));
+        crate::cockpit::pilot::bar(m, f.p(0.0, 0.0, -0.034), p - inward(p, 0.03), 0.007, 0.007, V3::Z, FRAME.scale(0.8));
     }
 
     // KI-13 standby compass on its bracket at the top of the right

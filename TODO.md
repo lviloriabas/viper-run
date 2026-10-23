@@ -34,7 +34,7 @@
 - [x] Mejorar el sistema de íconos de teclas o botones a presionar por opción, por ej a veces dice (A) para ciertas opciones, pero al presionar A cambia la opción seleccionada, haz que sea consistente e inspírate en otros juegos.
 - [x] El zoom es hold, no toggle.
 - [x] Para los bandits camuflaje de aggressor si son F-16.
-- [ ] Los espejos del MIG-29 tienen que tener la forma de los reales, son más grandes y más redondeados, no tan planos.
+- [x] Los espejos del MIG-29 tienen que tener la forma de los reales, son más grandes y más redondeados, no tan planos.
 - [ ] Investiga que misiles se pueden lanzar sin lock y cuales no, cuales pueden lockear después, etc.
 - [ ] Agregar más tipos de misiles, como los AIM-9X, AIM-120D, R-77, R-73, etc. Otros tipos de lock como el sparrow, y siempre reales e implementar el análogo ruso para el MIG-29, ordena las armas en categorías claras en el código para que sea más fácil saber qué tipos de armas le faltan a cuales aviones.
 

@@ -1439,14 +1439,49 @@ pub fn mirror_camera(a: &Aircraft) -> Camera {
     Camera { eye: eye_world(a) + ax.up * 0.12, forward: f, right: r, up: r.cross(f).norm(), fov: MIRROR_FOV }
 }
 
-/// Rear-view mirror glass `w` by `h` on frame `f`, showing the slice of the
-/// rear picture its place looks at, left for right as a mirror does: `side`
-/// -1 looks back down the left, 1 down the right, 0 straight back.
-fn mirror_glass(m: &mut Mesh, f: &Frame, w: f64, h: f64, side: f64) {
+/// A convex rear-view mirror `w` by `h` on frame `f` (glass facing +z): a
+/// rounded, nearly oval outline, the glass bulging forward like a car's
+/// wide-angle mirror and showing the slice of the rear picture its place
+/// looks at, left for right as a mirror does, in a housing whose back swells
+/// into a dome. `side` -1 looks back down the left, 1 down the right, 0
+/// straight back.
+fn convex_mirror(m: &mut Mesh, f: &Frame, w: f64, h: f64, side: f64, housing: Rgb) {
+    let outline = rounded_rect(w, h, h * 0.46, 4);
+    let n = outline.len();
+    // Rim: a lip round the glass, then the back closing in to a dome.
+    let rim = 0.007;
+    let ring = |s: f64, grow: f64, depth: f64| -> Vec<V3> { outline.iter().map(|&(x, y)| f.p(x * s + x.signum() * grow, y * s + y.signum() * grow, depth)).collect() };
+    let rings = [ring(1.0, 0.0, 0.004), ring(1.0, rim, 0.004), ring(1.0, rim, -0.010), ring(0.92, rim, -0.024), ring(0.62, 0.0, -0.034), ring(0.3, 0.0, -0.038)];
+    for (j, pair) in rings.windows(2).enumerate() {
+        let col = if j == 0 { housing.scale(1.15) } else { housing };
+        for k in 0..n {
+            let k2 = (k + 1) % n;
+            m.quad(pair[0][k2], pair[0][k], pair[1][k], pair[1][k2], col);
+        }
+    }
+    let back: Vec<V3> = rings[5].iter().rev().copied().collect();
+    m.polygon(&back, housing);
+    // Glass: rings from the centre out, bulging 9 mm at the middle.
     let rm = R_MIRROR;
     let sw = 0.42 * rm.w;
     let sh = (sw * (h / w) as f32).min(rm.h);
     let c = 0.5 - 0.29 * side as f32;
-    let x = rm.x + c * rm.w + sw / 2.0;
-    screen(m, f, w, h, r(x, rm.y + (rm.h - sh) / 2.0, -sw, sh));
+    let (u0, v0, u1, v1) = uv(r(rm.x + c * rm.w + sw / 2.0, rm.y + (rm.h - sh) / 2.0, -sw, sh));
+    let bulge = 0.009;
+    let at = |k: usize, t: f64| {
+        let (x, y) = (outline[k % n].0 * t, outline[k % n].1 * t);
+        let p = f.p(x, y, 0.004 + bulge * (1.0 - t * t));
+        let normal = (f.z + f.x * (2.0 * bulge * x / (w * w / 4.0)) + f.y * (2.0 * bulge * y / (h * h / 4.0))).norm();
+        (p, normal, (u0 + (x / w + 0.5) * (u1 - u0), v0 + (0.5 - y / h) * (v1 - v0)))
+    };
+    let white = Rgb(1.0, 1.0, 1.0);
+    let steps = [0.0, 0.45, 0.8, 1.0];
+    for s in steps.windows(2) {
+        for k in 0..n {
+            let quad = [at(k, s[0]), at(k + 1, s[0]), at(k + 1, s[1]), at(k, s[1])];
+            for i in [0, 2, 1, 0, 3, 2] {
+                m.vert(quad[i].0, quad[i].1, white, quad[i].2);
+            }
+        }
+    }
 }
