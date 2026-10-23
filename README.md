@@ -464,8 +464,10 @@ out of margin.
   towards the flutter speed (920 KEAS, 15 % past the 800 KCAS placard, with a
   transonic dip and lower with heavy underwing stores) and past it grows into
   a limit cycle that breaks the wing; torsional divergence and 1.5 times the
-  +9 / -3 g limits break it outright. The wings bend and flutter on the
-  model, the cockpit shakes, the HUD warns FLUTTER.
+  +9 / -3 g limits break it outright. The wings of both jets bend on the
+  model, some 36 cm at the tips at 9 g through a 3.5 Hz bending mode that
+  lags and swings past a sudden pull, and the stores ride with them; the
+  airframe buzzes and the cockpit shakes as the airspeed nears the placard.
 - Condensation where the expanding flow cools the air past saturation (60 to
   70 % humidity under the cumulus, drier above): the LERX vortices stream
   over the wings at high AoA and burst past 25 degrees, the wingtip vortices

@@ -56,8 +56,13 @@ const EXCITE: f64 = 0.0015;
 const SAFE_AMPLITUDE: f64 = 0.06;
 const DAMAGE_SCALE: f64 = 0.10;
 const BREAK_AMPLITUDE: f64 = 0.30;
-/// Static tip deflection per g of wing load (m): about 20 cm at 9 g.
-const BEND_PER_G: f64 = 0.022;
+/// Tip deflection per g of wing load (m): about 36 cm at 9 g, near 8 % of
+/// the semispan, an estimate on the flexible side so a hard pull shows.
+const BEND_PER_G: f64 = 0.04;
+/// Symmetric first bending mode: frequency and damping. The wing takes a
+/// load change a beat late and swings a little past it.
+const BEND_HZ: f64 = 3.5;
+const BEND_ZETA: f64 = 0.4;
 /// Ultimate load: 1.5 times the +9 / -3 g limits.
 pub const N_LIMIT: (f64, f64) = (-3.0, 9.0);
 const ULTIMATE: f64 = 1.5;
@@ -106,8 +111,9 @@ pub struct Structure {
     pub rate: f64,
     /// Amplitude of the oscillation, m.
     pub amplitude: f64,
-    /// Static tip deflection under the wing load, m.
+    /// Tip deflection under the wing load (m, up positive) and its rate.
     pub bend: f64,
+    bend_rate: f64,
     /// Equivalent airspeed over the present flutter speed.
     pub margin: f64,
     /// Flutter speed now, KEAS.
@@ -127,7 +133,9 @@ impl Structure {
         self.clock += dt;
         self.vf = flutter_keas(mach, wing_stores);
         self.margin = keas / self.vf;
-        self.bend = BEND_PER_G * nz;
+        let wb = TAU * BEND_HZ;
+        self.bend_rate += (wb * wb * (BEND_PER_G * nz - self.bend) - 2.0 * BEND_ZETA * wb * self.bend_rate) * dt;
+        self.bend += self.bend_rate * dt;
 
         // Damping falls steeply towards the flutter speed and turns negative
         // past it; the oscillation's own aerodynamic damping caps the cycle.
@@ -197,6 +205,29 @@ mod tests {
         assert!((flutter_keas(0.5, 0.0) - 920.0).abs() < 1e-9);
         assert!(flutter_keas(0.97, 0.0) < 820.0);
         assert!(flutter_keas(0.5, 1500.0) < 700.0);
+    }
+
+    /// A sudden 9 g pull bends the tips up a beat late, past the steady
+    /// 36 cm, and they settle there.
+    #[test]
+    fn the_wing_bends_late_and_settles_under_load() {
+        let mut s = Structure::default();
+        for _ in 0..(1.0 / DT) as usize {
+            s.update(DT, 400.0, 0.6, 1.0, 0.0, 0.0);
+        }
+        assert!((s.bend - BEND_PER_G).abs() < 0.002, "1 g: {:.3} m", s.bend);
+        let mut peak: f64 = 0.0;
+        let mut at_25ms = 0.0;
+        for i in 0..(2.0 / DT) as usize {
+            s.update(DT, 400.0, 0.6, 9.0, 0.0, 0.0);
+            peak = peak.max(s.bend);
+            if i == (0.025 / DT) as usize {
+                at_25ms = s.bend;
+            }
+        }
+        assert!(at_25ms < 0.15, "lags the pull: {at_25ms:.3} m after 25 ms");
+        assert!(peak > 0.37 && peak < 0.46, "swings past: peak {peak:.3} m");
+        assert!((s.bend - 9.0 * BEND_PER_G).abs() < 0.005, "settles: {:.3} m", s.bend);
     }
 
     #[test]

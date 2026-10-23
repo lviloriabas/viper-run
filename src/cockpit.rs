@@ -1392,8 +1392,6 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
         Some("AOA")
     } else if a.g_smooth > 9.15 {
         Some("G LIMIT")
-    } else if a.structure.amplitude > 0.03 || a.structure.margin > 0.97 {
-        Some("FLUTTER")
     } else if ad.overspeed() {
         Some("OVERSPEED")
     } else if a.fuel < 450.0 {

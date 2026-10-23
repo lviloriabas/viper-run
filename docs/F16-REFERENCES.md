@@ -317,10 +317,13 @@ makes up for these effects as its gain scheduling on dynamic pressure
 would. The wing's antisymmetric bending and torsion mode with its tip
 missile (8 Hz) loses damping toward the flutter speed and grows beyond it,
 to a limit cycle that damages the structure and breaks the wing in seconds;
-turbulence and buffet excite it. The wingtip bends about 20 cm at 9 G and
-the flutter shows on the exterior model. Past 1.5 times the +9 and -3 G
-limits the wing breaks; above the limit damage builds up. The HUD warns
-FLUTTER, and the outside view also OVERSPEED and STRUCT DAMAGE.
+turbulence, buffet and the rough air of high dynamic pressure excite it, and
+the cockpit shakes with it. The wingtip bends about 36 cm at 9 G, an estimate
+on the flexible side, through a 3.5 Hz symmetric bending mode that lags a
+sudden pull and swings past it; the bend and the flutter show on the exterior
+model of both jets, stores included. Past 1.5 times the +9 and -3 G limits
+the wing breaks; above the limit damage builds up. The HUD warns OVERSPEED,
+and the outside view also STRUCT DAMAGE.
 
 ### Condensation and Mach effects
 

@@ -1210,8 +1210,10 @@ impl App {
     }
 
     fn shake(&self, a: &Aircraft) -> f64 {
-        // The wing mode shakes the whole airframe, the seat included.
+        // The wing mode shakes the whole airframe, the seat included, and the
+        // airframe buzzes as the equivalent airspeed climbs towards the placard.
         let mut s = 0.00055 + a.turbulence * 0.0012 + a.buffet * 0.004 + a.afterburner_visual * 0.0007 + a.structure.amplitude * 0.05;
+        s += 0.0016 * smoothstep(0.6, 1.0, a.structure.margin);
         if a.mach > 0.92 {
             s += 0.0007;
         }

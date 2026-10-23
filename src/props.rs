@@ -125,8 +125,12 @@ fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
 impl Props for Scene<'_> {
     fn draw(&self, w: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera) {
         let (m, c, eye) = (self.models, self.combat, cam.eye);
-        // The stations sit where the F-16 hangs them; a MiG carries them on its own pylons.
-        let shift = |a: &Aircraft, at: V3| if a.kind == Type::Mig29 { crate::mig29::store_shift(at) } else { V3::ZERO };
+        // The stations sit where the F-16 hangs them; a MiG carries them on
+        // its own pylons. Either way they ride the wing as it bends.
+        let shift = |a: &Aircraft, at: V3| {
+            let d = if a.kind == Type::Mig29 { crate::mig29::store_shift(at) } else { V3::ZERO };
+            d + V3::Y * a.flex_lift(at + d)
+        };
         let tip_at = |i: usize| {
             let t = crate::airframe::AIM9_TIP;
             v3(if i == 0 { -t.x } else { t.x }, t.y, t.z)

@@ -185,6 +185,16 @@ impl Type {
             _ => G_LIMIT,
         }
     }
+    /// The flexing part of the wing, in the model's own axes: the span
+    /// stations where the bend starts and where it reaches the full tip
+    /// deflection, and the station aft of which nothing bends (the
+    /// stabilators and fins stay rigid).
+    pub fn flex_span(self) -> (f64, f64, f64) {
+        match self {
+            Type::F16 => (1.2, 4.8, 3.6),
+            Type::Mig29 => (1.7, 5.68, 5.3),
+        }
+    }
     pub fn inertia_scale(self) -> f64 {
         match self {
             Type::F16 => 1.0,
@@ -803,6 +813,26 @@ pub struct Aircraft {
 }
 
 impl Aircraft {
+    /// How far the elastic wing lifts a point of the airframe (model axes),
+    /// m: the bend under load and the tips swapping in the flutter mode,
+    /// growing with the square of the span out from the root. The shader
+    /// bends the skin the same way, and the stores ride on it.
+    pub fn flex_lift(&self, at: V3) -> f64 {
+        let (root, tip, aft) = self.kind.flex_span();
+        if at.z > aft {
+            return 0.0;
+        }
+        let span = clamp((at.x.abs() - root) / (tip - root), 0.0, 1.0);
+        (self.structure.bend - at.x.signum() * self.structure.flutter) * span * span
+    }
+
+    /// The shader's wing flex: bend, flutter, root and tip stations, and the
+    /// aft limit.
+    pub fn flex(&self) -> ([f32; 4], f32) {
+        let (root, tip, aft) = self.kind.flex_span();
+        ([self.structure.bend as f32, self.structure.flutter as f32, root as f32, tip as f32], aft as f32)
+    }
+
     pub fn new(m: &Mission) -> Aircraft {
         let mass = EMPTY_MASS + STORES_MASS + FUEL_MAX;
         let speed = m.start_vel.len();
@@ -1088,9 +1118,11 @@ impl Aircraft {
         let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
         let mut c = aero::coefficients(&flow);
         self.separation(&flow, &mut c, dt);
-        // The wing's antisymmetric mode, shaken by gusts and buffet, rolls the jet.
+        // The wing's antisymmetric mode, shaken by gusts, buffet and the rough
+        // air of high dynamic pressure, rolls the jet.
         let keas = speed * (atm.rho / RHO0).sqrt() * KT;
-        self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet, self.wing_stores);
+        let rough = 0.5 * smoothstep(0.55, 0.95, keas / self.structure.vf.max(1.0));
+        self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet + rough, self.wing_stores);
         c.cl += self.structure.roll();
         // Gear legs and doors drag; the flaps add lift, drag and a nose-down
         // moment the FLCS trims out.

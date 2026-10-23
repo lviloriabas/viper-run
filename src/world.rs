@@ -360,7 +360,8 @@ uniform vec3 u_fog;
 uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
-uniform vec2 u_flex;
+uniform vec4 u_flex;
+uniform float u_flex_aft;
 uniform vec4 u_paint;
 out vec3 v_rel;
 out vec3 v_normal;
@@ -372,7 +373,7 @@ void main() {
     // Elastic wing: bent up under load, the tips swapping in the flutter
     // mode, the root and everything inboard or aft of the wing held still.
     vec3 p = pos;
-    float span = clamp((abs(pos.x) - 1.2) / 3.6, 0.0, 1.0) * step(pos.z, 3.6);
+    float span = clamp((abs(pos.x) - u_flex.z) / (u_flex.w - u_flex.z), 0.0, 1.0) * step(pos.z, u_flex_aft);
     p.y += (u_flex.x - sign(pos.x) * u_flex.y) * span * span;
     vec4 rel = u_model * vec4(p, 1.0);
     v_rel = rel.xyz;
@@ -546,6 +547,9 @@ struct GateU {
     glow: f32,
     inflate: f32,
 }
+/// A rigid part: no bend, and a span that keeps the shader's division finite.
+const NO_FLEX: [f32; 4] = [0.0, 0.0, 1.0, 2.0];
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AirU {
@@ -556,8 +560,10 @@ pub struct AirU {
     pub alpha: f32,
     pub glow: f32,
     pub cutout: f32,
-    /// Static wingtip bend and the antisymmetric flutter deflection, m.
-    pub flex: [f32; 2],
+    /// Wingtip bend and the antisymmetric flutter deflection (m), and the
+    /// span stations of the root and the tip; nothing aft of `flex_aft` bends.
+    pub flex: [f32; 4],
+    pub flex_aft: f32,
     /// Repaint colour and mode (0 none, 1 aggressor camouflage, 2 tint).
     pub paint: [f32; 4],
 }
@@ -784,7 +790,7 @@ impl World {
         let gate_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &gv)], index_buffer: gfx::immutable_ib(ctx, &gi), images: vec![] };
 
         // Exterior aircraft.
-        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float2), ("u_paint", Float4)];
+        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float4), ("u_flex_aft", Float1), ("u_paint", Float4)];
         let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
@@ -980,7 +986,7 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint: [0.0; 4] };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4] };
             ctx.apply_pipeline(&self.air);
             if a.kind == Type::Mig29 {
                 // The player's canopy is glass from outside (below) and gone from the seat.
@@ -1060,7 +1066,7 @@ impl World {
             let canopy = if a.kind == Type::Mig29 { &self.mig_canopy } else { &self.canopy };
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint: [0.0; 4] };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4] };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);
@@ -1094,7 +1100,7 @@ impl World {
         let ax = a.q.axes();
         let rel = a.pos - cam.eye;
         let model = basis(ax.right, ax.up, ax.back, rel);
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [a.structure.bend as f32, a.structure.flutter as f32], paint };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint };
         ctx.apply_pipeline(&self.air);
         if a.kind == Type::Mig29 {
             self.draw_mig(ctx, a, &base, &model, true);
@@ -1121,10 +1127,8 @@ impl World {
     }
 
     /// The MiG-29 with its stabilators at their deflection and its gear.
-    /// The wing flex is shaped to the F-16's planform, so the MiG stays rigid.
     /// `canopy` draws the canopy opaque, as on the bandits.
     fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, canopy: bool) {
-        let base = &AirU { flex: [0.0; 2], ..*base };
         self.draw_part(ctx, &self.mig, base, model);
         if canopy {
             self.draw_part(ctx, &self.mig_canopy, base, model);
@@ -1175,7 +1179,7 @@ impl World {
     /// A prop part (store, missile, bomb or ground target) at a model
     /// transform relative to the eye.
     pub fn draw_prop(&self, ctx: &mut dyn RenderingBackend, vp: M4, part: &Part, model: M4, paint: [f32; 4]) {
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [0.0; 2], paint };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint };
         ctx.apply_pipeline(&self.air);
         self.draw_part(ctx, part, &base, &model);
     }
