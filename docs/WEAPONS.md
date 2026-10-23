@@ -90,7 +90,26 @@ The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
   missile; its laser ranges inside 6.5 km. The IRST is passive, and neither
   jet has a missile approach warner, so a bandit sees an infrared missile
   only by its smoke (inside 6 km while the motor burns) or close in (3 km).
-- Flares fool only infrared seekers and chaff only radar ones.
+- Flares fool only infrared seekers and chaff only radar ones. Flares work
+  best against a target seen from ahead or abeam, with its tailpipe hidden,
+  and worst against an afterburner seen from behind; chaff works best with
+  the target on the beam, where its Doppler matches the chaff cloud's.
+- Each seeker then rejects a share of the decoys by its counter-
+  countermeasures (`Spec::ccm`; estimates, the real figures are secret):
+
+  | Missile | Seeker | Rejects |
+  |---|---|---|
+  | AIM-9X | imaging infrared | 85 % |
+  | AIM-120D | active radar | 75 % |
+  | AIM-120C | active radar | 60 % |
+  | AIM-9M | infrared, two-colour IRCCM | 55 % |
+  | R-77 | active radar | 50 % |
+  | R-73 | cooled infrared | 45 % |
+  | AIM-7M | semi-active monopulse | 45 % |
+  | R-27T | infrared | 30 % |
+  | R-27R | semi-active | 30 % |
+  | SA-6 | semi-active | 20 % |
+  | R-60M | early cooled infrared | 15 % |
 - A burst damages the target by where its fragments and blast reach it
   (`src/damage.rs`): a ring of fragments round the missile's axis out to
   its outer radius and a blast inside its lethal radius, so bigger

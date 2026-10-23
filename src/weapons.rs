@@ -321,6 +321,12 @@ pub struct Spec {
     /// missile flies to where the target is, not where it was at launch,
     /// until its seeker takes over.
     pub datalink: bool,
+    /// Counter-countermeasures, the share of decoys the seeker rejects
+    /// (0 none, 1 all), by generation and design: an infrared seeker's
+    /// two-colour, kinematic and imaging flare rejection (IRCCM), a radar
+    /// seeker's monopulse and Doppler discrimination against chaff (ECCM).
+    /// Estimates: the real figures are secret.
+    pub ccm: f64,
     /// Brevity call on launch.
     pub call: &'static str,
 }
@@ -354,6 +360,7 @@ pub const AIM9M: Spec = Spec {
     seeker: Seeker::Infrared,
     loal: false,
     datalink: false,
+    ccm: 0.55,
     call: "FOX 2",
 };
 
@@ -387,6 +394,7 @@ pub const AIM9X: Spec = Spec {
     seeker: Seeker::Infrared,
     loal: true,
     datalink: true,
+    ccm: 0.85,
     call: "FOX 2",
 };
 
@@ -419,6 +427,7 @@ pub const R60M: Spec = Spec {
     seeker: Seeker::Infrared,
     loal: false,
     datalink: false,
+    ccm: 0.15,
     call: "FOX 2",
 };
 
@@ -452,6 +461,7 @@ pub const R73: Spec = Spec {
     seeker: Seeker::Infrared,
     loal: false,
     datalink: false,
+    ccm: 0.45,
     call: "FOX 2",
 };
 
@@ -486,6 +496,7 @@ pub const R27T: Spec = Spec {
     seeker: Seeker::Infrared,
     loal: false,
     datalink: false,
+    ccm: 0.3,
     call: "FOX 2",
 };
 
@@ -521,6 +532,7 @@ pub const AIM7M: Spec = Spec {
     seeker: Seeker::SemiActive,
     loal: false,
     datalink: false,
+    ccm: 0.45,
     call: "FOX 1",
 };
 
@@ -554,6 +566,7 @@ pub const R27R: Spec = Spec {
     seeker: Seeker::SemiActive,
     loal: false,
     datalink: false,
+    ccm: 0.3,
     call: "FOX 1",
 };
 
@@ -587,6 +600,7 @@ pub const AIM120C: Spec = Spec {
     seeker: Seeker::Active,
     loal: true,
     datalink: true,
+    ccm: 0.6,
     call: "FOX 3",
 };
 
@@ -618,6 +632,7 @@ pub const AIM120D: Spec = Spec {
     seeker: Seeker::Active,
     loal: true,
     datalink: true,
+    ccm: 0.75,
     call: "FOX 3",
 };
 
@@ -651,6 +666,7 @@ pub const R77: Spec = Spec {
     seeker: Seeker::Active,
     loal: true,
     datalink: true,
+    ccm: 0.5,
     call: "FOX 3",
 };
 
@@ -829,25 +845,33 @@ pub fn dispenser_of(kind: Type) -> &'static str {
 }
 
 /// Chance that one countermeasure program (a flare and a chaff bundle)
-/// pulls a missile's seeker off its target. Flares only fool an infrared
-/// seeker, and the AIM-9M's rejection logic ignores most of them; chaff only
-/// fools a radar seeker, and works best with the target on the beam, where
-/// its Doppler is close to the chaff cloud's. Nothing works on a missile
-/// still far out, which has not yet closed on the decoy's position.
-pub fn decoy_chance(spec: &Spec, missile: V3, target: V3, target_vel: V3) -> f64 {
+/// pulls a missile's seeker off its target, before the seeker's own
+/// rejection (`Spec::ccm`) throws most of that away.
+///
+/// Flares only fool an infrared seeker. They work best where the target is
+/// faint: from ahead or abeam, with the hot tailpipe hidden, and least
+/// against an afterburner's plume. Chaff only fools a radar seeker, and works
+/// best with the target on the beam, where its Doppler is close to the
+/// still-standing chaff cloud's. Nothing works on a missile still far out,
+/// which has not yet closed on the decoy's position.
+pub fn decoy_chance(spec: &Spec, missile: V3, target: V3, target_vel: V3, burner: bool) -> f64 {
     let r = target - missile;
     let range = r.len();
     if range > 6000.0 {
         return 0.0;
     }
     let near = 1.0 - smoothstep(2500.0, 6000.0, range);
-    if spec.infrared() {
-        0.35 * near
+    let speed = target_vel.len().max(1.0);
+    // 1 flying straight away from the missile, -1 straight at it.
+    let away = r.dot(target_vel) / (range.max(1.0) * speed);
+    let raw = if spec.infrared() {
+        let tail = away.max(0.0);
+        0.8 * (1.0 - 0.4 * tail) * if burner { 0.6 } else { 1.0 }
     } else {
-        let speed = target_vel.len().max(1.0);
-        let beam = 1.0 - (r.dot(target_vel) / (range.max(1.0) * speed)).abs();
-        (0.08 + 0.55 * beam * beam) * near
-    }
+        let beam = 1.0 - away.abs();
+        0.2 + 1.2 * beam * beam
+    };
+    (raw * (1.0 - spec.ccm)).min(0.9) * near
 }
 
 /// Launch-zone check: flies a missile out against the target's straight-line
@@ -1146,10 +1170,27 @@ mod tests {
         let t = v3(0.0, 3000.0, 0.0);
         let nose_on = v3(0.0, 0.0, 250.0);
         let beam = v3(250.0, 0.0, 0.0);
-        assert!(decoy_chance(&AIM9M, m, t, nose_on) > 0.2);
-        let (head, side) = (decoy_chance(&AIM120C, m, t, nose_on), decoy_chance(&AIM120C, m, t, beam));
+        let tail = v3(0.0, 0.0, -250.0);
+        assert!(decoy_chance(&AIM9M, m, t, nose_on, false) > 0.2);
+        let (head, side) = (decoy_chance(&AIM120C, m, t, nose_on, false), decoy_chance(&AIM120C, m, t, beam, false));
         assert!(side > 0.5 && head < 0.15, "beam {side:.2}, nose-on {head:.2}");
-        assert_eq!(decoy_chance(&AIM9M, v3(0.0, 3000.0, 9000.0), t, beam), 0.0);
+        assert_eq!(decoy_chance(&AIM9M, v3(0.0, 3000.0, 9000.0), t, beam, false), 0.0);
+        // Flares do best against a faint target seen from ahead, worst
+        // against an afterburner seen from behind.
+        let ir = |v, burner| decoy_chance(&AIM9M, m, t, v, burner);
+        assert!(ir(nose_on, false) > ir(tail, false) && ir(tail, false) > ir(tail, true));
+    }
+
+    /// Newer seekers reject more decoys: the imaging AIM-9X shrugs off most
+    /// flares the old R-60M follows, and the AMRAAM sees through chaff the
+    /// R-27R takes.
+    #[test]
+    fn counter_countermeasures_rank_by_generation() {
+        let (m, t, beam) = (v3(0.0, 3000.0, 2000.0), v3(0.0, 3000.0, 0.0), v3(250.0, 0.0, 0.0));
+        let p = |s: &Spec| decoy_chance(s, m, t, beam, false);
+        assert!(p(&R60M) > p(&R27T) && p(&R27T) > p(&R73) && p(&R73) > p(&AIM9M) && p(&AIM9M) > p(&AIM9X));
+        assert!(p(&AIM9X) < 0.15 && p(&R60M) > 0.6, "AIM-9X {:.2}, R-60M {:.2}", p(&AIM9X), p(&R60M));
+        assert!(p(&R27R) > p(&R77) && p(&R77) > p(&AIM120C) && p(&AIM120C) > p(&AIM120D));
     }
 
     /// The CCIP pipper is the real bomb's impact point: a bomb released at

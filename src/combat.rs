@@ -667,6 +667,7 @@ pub const SA6: Spec = Spec {
     seeker: Seeker::SemiActive,
     loal: false,
     datalink: false,
+    ccm: 0.2,
     call: "SAM LAUNCH",
 };
 
@@ -1460,15 +1461,16 @@ impl Combat {
     }
 
     /// One countermeasure program from a jet: a flare and a chaff bundle.
-    /// Each missile guiding on it may lose its target, by its seeker type.
-    fn decoy(&mut self, who: Who, pos: V3, vel: V3) {
+    /// Each missile guiding on it may lose its target, by its seeker type
+    /// and its counter-countermeasures; an afterburner outshines flares.
+    fn decoy(&mut self, who: Who, pos: V3, vel: V3, burner: bool) {
         self.events.push(Event::Decoy { pos, vel });
         for k in 0..self.missiles.len() {
             let m = &self.missiles[k];
             if m.target != Some(who) || !m.tracking {
                 continue;
             }
-            let p = decoy_chance(m.spec, m.pos, pos, vel);
+            let p = decoy_chance(m.spec, m.pos, pos, vel, burner);
             if self.rnd.next() < p {
                 self.missiles[k].tracking = false;
                 if who == Who::Player {
@@ -1485,7 +1487,7 @@ impl Combat {
         }
         self.loadout.chaff = self.loadout.chaff.saturating_sub(1);
         self.loadout.flares = self.loadout.flares.saturating_sub(1);
-        self.decoy(Who::Player, a.pos, a.vel);
+        self.decoy(Who::Player, a.pos, a.vel, a.power > 50.0);
     }
 
     // ------------------------------------------------------------ step
@@ -1787,8 +1789,8 @@ impl Combat {
             if self.hostile && threat.is_some_and(|(p, _)| (p - b.jet.pos).len() < 4000.0) && b.cm_clock <= 0.0 && b.programs > 0 {
                 b.cm_clock = 1.1;
                 b.programs -= 1;
-                let (p, v) = (b.jet.pos, b.jet.vel);
-                self.decoy(Who::Bandit(i), p, v);
+                let (p, v, burner) = (b.jet.pos, b.jet.vel, b.jet.power > 50.0);
+                self.decoy(Who::Bandit(i), p, v, burner);
             }
             let b = &mut self.bandits[i];
             // On patrol the foe it steers for is a mark parked on its next
