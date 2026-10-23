@@ -1248,7 +1248,8 @@ impl App {
     /// Renders the world behind the jet, seen from over the pilot's head,
     /// into the rear-view mirrors' picture and hands it to the cockpit atlas.
     fn draw_mirrors(&mut self) {
-        let Some(a) = self.aircraft.as_ref() else { return };
+        // Only the MiG-29 has mirrors; the F-16 cockpit has none.
+        let Some(a) = self.aircraft.as_ref().filter(|a| a.kind == sim::Type::Mig29) else { return };
         let rear = cockpit::mirror_camera(a);
         let m = &self.mirror;
         self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));

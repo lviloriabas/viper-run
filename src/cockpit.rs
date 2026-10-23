@@ -55,7 +55,8 @@ const R_DIALS: [R; 7] = [
     r(768.0, 320.0, 128.0, 128.0),
 ];
 const R_GMETER: R = r(896.0, 320.0, 128.0, 128.0);
-/// The rear-view picture (see `mirror_camera`), shared by both cockpits.
+/// The rear-view picture (see `mirror_camera`), for the cockpits with mirrors
+/// (the MiG-29; the F-16 has none).
 const R_MIRROR: R = r(1024.0, 1280.0, 512.0, 160.0);
 /// Vertical field of view of the rear-view camera; its picture is 512 by 160.
 pub const MIRROR_SIZE: (u32, u32) = (512, 160);
@@ -675,23 +676,7 @@ fn build_static(m: &mut Mesh) {
     let bow: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.985, k as f64 / nv as f64)).collect();
     pilot::band(m, &bow, 0.03, 0.026, V3::Z, Rgb(0.13, 0.15, 0.16));
     let bulk: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.995, k as f64 / nv as f64)).collect();
-    m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));
-
-    // Rear-view mirrors on arms off the canopy frame ahead of the pilot,
-    // left and right, turned to the eye.
-    for (v, side) in [(0.17, 1.0), (0.83, -1.0)] {
-        let p = airframe::canopy_point(0.26, v);
-        let c = p + (v3(0.0, EYE.y, p.z) - p).norm() * 0.05;
-        let n = (EYE - c).norm();
-        let x = V3::Y.cross(n).norm();
-        let f = Frame { o: c, x, y: n.cross(x), z: n };
-        m.block(&f, v3(0.042, 0.016, 0.006), Rgb(0.13, 0.15, 0.16));
-        mirror_glass(m, &f.at(0.0, 0.0, 0.0066), 0.076, 0.026, side);
-        // Arm down to the canopy frame on the sill.
-        let rail = airframe::canopy_point(0.26, if side > 0.0 { 0.01 } else { 0.99 });
-        pilot::bar(m, f.p(0.0, -0.012, -0.006), rail, 0.007, 0.007, V3::Z, Rgb(0.13, 0.15, 0.16));
-    }
-    m.facet();
+    m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));    m.facet();
 }
 
 // ================================================================ pages
