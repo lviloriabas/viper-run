@@ -38,7 +38,7 @@
 - [x] Investiga que misiles se pueden lanzar sin lock y cuales no, cuales pueden lockear después, etc.
 - [x] Agregar más tipos de misiles, como los AIM-9X, AIM-120D, R-77, R-73, etc. Otros tipos de lock como el sparrow, y siempre reales e implementar el análogo ruso para el MIG-29, ordena las armas en categorías claras en el código para que sea más fácil saber qué tipos de armas le faltan a cuales aviones.
 - [x] Se supone que la fly computer protege de daño estructural, pon un texto en rojo que diga cuando la flight computer te limita
-- [ ] verifica las cabinas, hay elementos que chocan con los bordes y se cortan, también se fiel a la geometría de los side panels del f-16, siguen sin quedar del todo bien.
+- [x] verifica las cabinas, hay elementos que chocan con los bordes y se cortan, también se fiel a la geometría de los side panels del f-16, siguen sin quedar del todo bien.
 - [x] el selector de armas debe ir seleccionando solo las armas disponibles, no todas.
 - [x] En free flight que los bandits no usen countermeasures
 - [x] Modela el IRCCM y anti countermeasure de los misiles.

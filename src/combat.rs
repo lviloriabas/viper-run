@@ -610,6 +610,7 @@ impl Loadout {
     }
 
     /// Stores left that a master mode releases.
+    #[cfg(test)]
     pub fn count_for(&self, mode: Mode) -> u32 {
         self.stations.iter().filter(|s| s.loaded && s.store.mode() == mode).count() as u32
     }

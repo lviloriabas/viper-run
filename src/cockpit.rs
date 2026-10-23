@@ -139,14 +139,15 @@ fn panel_at(u: f64, y: f64, w: f64) -> Frame {
 }
 
 /// Auxiliary consoles: under the panel wings, ramps that carry each side
-/// console on forward and up at 45 degrees, keeping its 10 degree lean and
-/// toed 7.3 degrees toward the pilot (the FlightGear cockpit's offsets),
-/// from just under the console's front edge, outboard of the knees, to the
-/// wall. A shelf closes the gap from the top edge to the panel. Returns the
+/// console on forward and up at 35 degrees, keeping its 10 degree lean and
+/// toed 7.3 degrees toward the pilot (the FlightGear cockpit's toe), from
+/// just under the console's front edge, outboard of the knees, to the wall.
+/// Laid back that far its top edge nearly meets the panel, as on the real
+/// jet; a short shelf closes what is left. Returns the
 /// face's bottom-left corner, its axes across (to the right), up and out,
 /// and its width and height in metres.
 fn aux_face(s: f64) -> (V3, V3, V3, V3, f64, f64) {
-    const PITCH: f64 = 45.0 * DEG;
+    const PITCH: f64 = 35.0 * DEG;
     const TOE: f64 = 7.3 * DEG;
     // The inboard top edge stays under the sight line to the MFD bottoms.
     const TOP: f64 = 0.68;

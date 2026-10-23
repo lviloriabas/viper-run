@@ -108,16 +108,20 @@ the real seat. The default tilt is a single constant, `LOOK_PITCH` in
 `src/main.rs`. A test pins the reference positions of the stick and the
 throttle. The outer thirds of the main panel fold 30 degrees toward the
 pilot on vertical hinges beside the MFDs. Under them, outboard of the knees,
-the auxiliary consoles carry each side console forward on a 45 degree ramp,
-with its same 10 degree tilt and turned 7.3 degrees toward the pilot, as in
-the FlightGear model (`panels_mlu_left-aux-console` and `right-aux-console`
-in `cockpit.xml`) and the cockpit photos on Wikimedia Commons; a shelf joins
-them to the panel below the line of sight to the MFDs. The left one carries
+the auxiliary consoles carry each side console forward on a ramp laid back
+35 degrees, with its same 10 degree tilt and turned 7.3 degrees toward the
+pilot (the toe of the FlightGear model's `panels_mlu_left-aux-console` and
+`right-aux-console` in `cockpit.xml`); laid back that far, the top edge
+nearly meets the panel below the line of sight to the MFDs, as in the cockpit
+photos on Wikimedia Commons, and a short shelf closes the rest. The throttle
+quadrant starts a little aft of the ramp and its lever swings about a pivot
+under the console. The left one carries
 the gear (a handle with a red light in transit, green NOSE LEFT RIGHT
 lights, ALT GEAR, hook, ALT FLAPS, brakes, landing lights, STORES CONFIG and
 emergency jettison), and the right one the A and B hydraulic pressure, EPU
-fuel, oxygen, cabin altitude, the clock and the warning lights (ENG FIRE,
-ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY, OXY LOW). Under
+fuel, oxygen, cabin altitude and the clock under the warning lights (ENG
+FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY, OXY LOW),
+which sit at the top, clear of the stick grip. Under
 the UFC sit in a row the standby airspeed indicator, ADI, altimeter and
 accelerometer, as in the F-16C. Under the MFDs are the VVI and the fuel
 gauge, over the columns the TWP and the fuel flow, and on the walls the

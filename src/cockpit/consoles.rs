@@ -38,6 +38,8 @@ const WID: f64 = 12.7;
 /// console, and the lever slot.
 pub(super) const QUADRANT_TOP: f64 = 0.575;
 pub(super) const SLOT_X: f64 = -0.495;
+/// The housing's fore and aft ends, m aft of the front edge.
+pub(super) const THROTTLE_SLOT: (f64, f64) = (2.5 * IN, 9.25 * IN);
 /// Panel faces stand this far proud of the console top.
 const LIFT: f64 = 0.0015;
 
@@ -340,8 +342,8 @@ pub struct Lamps {
 /// wings (cockpit::aux_face). The left one is laid out as the Block 50
 /// landing gear panel: stores jettison, the wheel lights and the hook along
 /// the top, the gear handle down the inboard side. The right one carries
-/// the hydraulic, EPU, oxygen and cabin dials, the clock and the warning
-/// lights.
+/// the warning lights, then the hydraulic, EPU, oxygen and cabin dials and
+/// the clock.
 struct Aux {
     side: f64,
     rect: R,
@@ -354,32 +356,36 @@ const AUX_H: f64 = 10.0;
 #[rustfmt::skip]
 const AUX: [Aux; 2] = [
     Aux { side: L, rect: R { x: 1024.0, y: 1024.0, w: 360.0, h: 360.0 }, items: &[
-        T(2.7, 0.35, "EMER STORES"), T(2.7, 0.6, "JETTISON"), Sq(2.7, 1.65, 1.6, 1.2, "JETT"),
-        T(5.3, 0.35, "WHEELS"), Lp(5.3, 0.95, 1.2, 0.5, "NOSE", 0), Lp(4.6, 1.7, 1.2, 0.5, "LEFT", 1), Lp(6.0, 1.7, 1.2, 0.5, "RIGHT", 2),
-        T(8.4, 0.35, "HOOK"), Tg(8.4, 1.05, 1), T(8.4, 1.75, "UP"),
-        Ln(0.5, 2.45, 7.6, 2.45),
-        T(1.8, 2.8, "GND JETT"), Gd(1.8, 3.6, false), T(1.8, 4.35, "ENABLE"),
-        T(3.7, 2.8, "BRAKES"), T(3.7, 3.05, "CHAN"), Tw(3.7, 3.7, -1), T(3.2, 4.35, "1"), T(4.2, 4.35, "2"),
-        T(5.6, 2.8, "ANTI-SKID"), Tg(5.6, 3.6, 0), T(5.6, 4.35, "PARKING"), Lp(5.6, 5.0, 1.4, 0.5, "BRAKES", 4),
-        T(9.0, 2.6, "LG UP"), Ln(9.0, 2.9, 9.0, 7.6), T(9.0, 7.9, "DN"),
-        T(7.3, 5.9, "DN LOCK"), T(7.3, 6.15, "REL"), Pb(7.3, 6.8, 0.14),
-        Ln(0.5, 5.65, 6.4, 5.65),
-        T(1.8, 6.0, "STORES"), T(1.8, 6.25, "CONFIG"), Tw(1.8, 6.9, -1), T(1.8, 7.55, "CAT I  III"),
-        T(4.2, 6.0, "ALT FLAPS"), Tg(4.2, 6.7, 1), T(4.2, 7.35, "NORM"), Lp(4.2, 7.95, 1.4, 0.5, "FLAPS", 3),
-        Ln(0.5, 8.45, 9.5, 8.45),
-        T(2.0, 8.75, "LIGHTS"), Tg(3.6, 9.25, 1), T(2.0, 9.15, "LANDING"), T(2.0, 9.55, "TAXI"),
-        T(7.6, 8.75, "ALT GEAR"), Th(7.6, 9.45),
+        T(2.65, 0.35, "EMER STORES"), T(2.65, 0.6, "JETTISON"), Sq(2.65, 1.65, 1.6, 1.2, "JETT"),
+        T(4.95, 0.35, "WHEELS"), Lp(4.95, 0.95, 1.2, 0.5, "NOSE", 0), Lp(4.3, 1.7, 1.2, 0.5, "LEFT", 1), Lp(5.6, 1.7, 1.2, 0.5, "RIGHT", 2),
+        T(7.0, 0.35, "HOOK"), Tg(7.0, 1.05, 1), T(7.0, 1.75, "UP"),
+        Ln(0.5, 2.45, 7.2, 2.45),
+        T(1.9, 2.8, "GND JETT"), Gd(1.9, 3.6, false), T(1.9, 4.35, "ENABLE"),
+        T(3.65, 2.8, "BRAKES"), T(3.65, 3.05, "CHAN"), Tw(3.65, 3.7, -1), T(3.15, 4.35, "1"), T(4.15, 4.35, "2"),
+        T(5.45, 2.8, "ANTI-SKID"), Tg(5.45, 3.6, 0), T(5.45, 4.35, "PARKING"), Lp(5.45, 5.0, 1.4, 0.5, "BRAKES", 4),
+        // The gear handle's slot down the inboard side, its UP and DN on
+        // the side toward the pilot, where the knob never hides them.
+        Ln(GEAR_HANDLE.0, GEAR_HANDLE.1, GEAR_HANDLE.0, GEAR_HANDLE.2), T(9.6, GEAR_HANDLE.1, "UP"), T(9.6, GEAR_HANDLE.2, "DN"),
+        Ln(0.5, 5.65, 6.9, 5.65),
+        T(1.5, 6.0, "STORES"), T(1.5, 6.25, "CONFIG"), Tw(1.5, 6.9, -1), T(1.5, 7.55, "CAT I  III"),
+        T(3.6, 6.0, "ALT FLAPS"), Tg(3.6, 6.7, 1), T(3.6, 7.35, "NORM"), Lp(3.6, 7.95, 1.4, 0.5, "FLAPS", 3),
+        T(5.7, 6.0, "DN LOCK"), T(5.7, 6.25, "REL"), Pb(5.7, 6.9, 0.14),
+        Ln(0.5, 8.45, 7.2, 8.45),
+        T(1.4, 8.75, "LIGHTS"), T(1.4, 9.15, "LANDING"), T(1.4, 9.55, "TAXI"), Tg(3.0, 9.25, 1),
+        T(5.6, 8.75, "ALT GEAR"), Th(5.6, 9.45),
     ]},
+    // The warning lights along the top, clear of the stick grip, which
+    // stands in front of the plate's lower half; the dial faces carry their
+    // own names, so the plate needs none to crowd between the flanges.
     Aux { side: RT, rect: R { x: 1392.0, y: 1024.0, w: 360.0, h: 360.0 }, items: &[
-        T(3.5, 0.35, "HYD PRESS"), Ga(2.0, 1.65, 1.0, 0), Ga(5.0, 1.65, 1.0, 1), T(2.0, 2.9, "A"), T(5.0, 2.9, "B"),
-        T(8.0, 0.35, "CLOCK"), Ga(8.0, 1.65, 1.0, 5),
-        T(2.0, 3.3, "EPU FUEL"), Ga(2.0, 4.45, 0.9, 2), T(5.0, 3.3, "OXYGEN"), Ga(5.0, 4.45, 0.9, 3), T(8.0, 3.3, "CABIN"), Ga(8.0, 4.45, 0.9, 4),
-        Ln(0.5, 5.6, 9.5, 5.6),
-        Lp(2.7, 6.05, 3.6, 0.6, "ENG FIRE", 5), Lp(7.3, 6.05, 3.6, 0.6, "ENGINE", 6),
-        Lp(2.7, 6.85, 3.6, 0.6, "HYD/OIL PRESS", 7), Lp(7.3, 6.85, 3.6, 0.6, "FLCS", 8),
-        Lp(2.7, 7.65, 3.6, 0.6, "DBU ON", 9), Lp(7.3, 7.65, 3.6, 0.6, "TO/LDG CONFIG", 10),
-        Lp(2.7, 8.45, 3.6, 0.6, "CANOPY", 11), Lp(7.3, 8.45, 3.6, 0.6, "OXY LOW", 11),
-        T(2.7, 9.4, "MAL & IND"), Pb(4.4, 9.4, 0.15), T(7.3, 9.4, "EXT FUEL TRANS"),
+        Lp(2.6, 0.75, 3.4, 0.55, "ENG FIRE", 5), Lp(7.0, 0.75, 3.4, 0.55, "ENGINE", 6),
+        Lp(2.6, 1.4, 3.4, 0.55, "HYD/OIL PRESS", 7), Lp(7.0, 1.4, 3.4, 0.55, "FLCS", 8),
+        Lp(2.6, 2.05, 3.4, 0.55, "DBU ON", 9), Lp(7.0, 2.05, 3.4, 0.55, "TO/LDG CONFIG", 10),
+        Lp(2.6, 2.7, 3.4, 0.55, "CANOPY", 11), Lp(7.0, 2.7, 3.4, 0.55, "OXY LOW", 11),
+        Ln(0.5, 3.3, 9.5, 3.3),
+        Ga(1.75, 4.85, 0.85, 0), Ga(5.0, 4.85, 0.85, 1), Ga(8.25, 4.85, 0.85, 5),
+        Ga(1.75, 7.65, 0.85, 2), Ga(5.0, 7.65, 0.85, 3), Ga(8.25, 7.65, 0.85, 4),
+        T(2.7, 9.5, "MAL & IND"), Pb(4.4, 9.5, 0.15), T(7.3, 9.5, "EXT FUEL TRANS"),
     ]},
 ];
 
@@ -393,7 +399,7 @@ pub(super) fn aux_frame(side: f64) -> Frame {
 
 /// Gear handle travel on the left auxiliary plate: the knob's place (in)
 /// with the handle up and down.
-pub(super) const GEAR_HANDLE: (f64, f64, f64) = (9.0, 3.3, 7.2);
+pub(super) const GEAR_HANDLE: (f64, f64, f64) = (8.4, 3.6, 7.4);
 
 /// Cover plates over the empty Dzus spaces: side, s, l, len, wid (inches).
 #[rustfmt::skip]
@@ -656,8 +662,10 @@ pub fn build(m: &mut Mesh) {
     }
 
     // Throttle quadrant housing along the outboard side of the left
-    // console's forward section, raised to carry the lever slot.
-    let (sa, sb, la, lb) = (0.0, 9.25 * IN, 8.75 * IN, WID * IN);
+    // console's forward section, raised to carry the lever slot. It starts
+    // a little aft of the front edge, clear of the auxiliary ramp rising
+    // from there, and ends at the EPU panel.
+    let (sa, sb, la, lb) = (THROTTLE_SLOT.0, THROTTLE_SLOT.1, 8.75 * IN, WID * IN);
     let hi = |s: f64, l: f64| {
         let p = top(-1.0, s, l);
         v3(p.x, QUADRANT_TOP, p.z)
@@ -670,7 +678,7 @@ pub fn build(m: &mut Mesh) {
     // Slot for the lever, and the friction control on the aft face.
     let sx = SLOT_X.abs();
     let slot = |s: f64, dx: f64| v3(-(sx + dx), QUADRANT_TOP + 0.0008, FRONT_Z + s);
-    m.quad(slot(0.012, -0.007), slot(0.012, 0.007), slot(sb - 0.012, 0.007), slot(sb - 0.012, -0.007), Rgb(0.02, 0.02, 0.022));
+    m.quad(slot(sa + 0.012, -0.007), slot(sa + 0.012, 0.007), slot(sb - 0.012, 0.007), slot(sb - 0.012, -0.007), Rgb(0.02, 0.02, 0.022));
     let fr = v3(-(sx + 0.035), QUADRANT_TOP - 0.03, FRONT_Z + sb);
     prism(m, fr, fr + V3::Z * 0.012, 0.012, 0.011, 8, V3::Y, KNOB);
 }

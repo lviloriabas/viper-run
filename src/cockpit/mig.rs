@@ -175,10 +175,11 @@ pub fn build_static(m: &mut Mesh) {
         m.capsule(f.p(0.0, 0.0, 0.004), f.p(0.0, 0.0, 0.022), 0.011, 0.010, KNOB, 8);
     }
 
-    // Warning lamp column along the right sill, facing in and aft.
+    // Warning lamp column on the right wall under the sill, facing in and
+    // aft, its top a few centimetres below the canopy rail.
     let n = v3(-0.85, 0.15, 0.50).norm();
     let y = (V3::Y - n * n.y).norm();
-    plate(m, &Frame { o: v3(0.372, 0.86, -3.80), x: y.cross(n), y, z: n }, 0.045, 0.15, R_WARN);
+    plate(m, &Frame { o: v3(0.404, 0.735, -3.80), x: y.cross(n), y, z: n }, 0.045, 0.15, R_WARN);
 
     // Tub: floor, walls up to the sills, the canopy rails and the consoles.
     m.quad(v3(-WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, BULKHEAD_Z), v3(-WALL_X, FLOOR, BULKHEAD_Z), WALL.scale(0.5));

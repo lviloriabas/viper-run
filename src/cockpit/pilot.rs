@@ -394,11 +394,14 @@ fn palm(k: &Grip) -> V3 {
 
 fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     let k = throttle_grip(h);
-    let z = k.o.z + 0.01;
 
     // Broad lever from the quadrant slot to a pivot under the root, and the
-    // cutoff release trigger on its outboard side.
-    let foot = v3(consoles::SLOT_X, consoles::QUADRANT_TOP, z + 0.02);
+    // cutoff release trigger on its outboard side. The lever swings about a
+    // pivot under the console, so its foot travels less than the grip and
+    // stays in the slot, leaning aft at idle.
+    let (sa, sb) = consoles::THROTTLE_SLOT;
+    let foot_s = mix(sb - 0.022, sa + 0.025, h.throttle);
+    let foot = v3(consoles::SLOT_X, consoles::QUADRANT_TOP, consoles::FRONT_Z + foot_s);
     bar(m, foot, k.p(0.0, -0.090, -0.032), 0.017, 0.034, V3::Z, Rgb(0.20, 0.22, 0.22));
     strap(m, &[foot + v3(-0.018, 0.03, 0.0), foot + v3(-0.026, 0.06, -0.01), foot + v3(-0.022, 0.075, -0.035)], 0.004, 0.006, V3::X, METALC);
 
@@ -437,7 +440,7 @@ fn gear_handle(m: &mut Mesh, h: &Hands) {
     let (u, up, down) = consoles::GEAR_HANDLE;
     let v = mix(up, down, h.gear);
     let base = f.p(u * 0.0254, -v * 0.0254, 0.0);
-    let tip = base + f.z * 0.075 + f.y * 0.01;
+    let tip = base + f.z * 0.05 + f.y * 0.01;
     loft(m, &[St(base, 0.006, 0.006, METALC), St(tip, 0.005, 0.005, METALC)], f.x, &OCT);
     loft(m, &[St(tip - f.z * 0.004, 0.024, 0.024, Rgb(0.86, 0.86, 0.82)), St(tip + f.z * 0.012, 0.024, 0.024, Rgb(0.86, 0.86, 0.82))], f.x, &OCT);
     let lamp = if h.gear_warn { Rgb(1.6, 0.22, 0.12) } else { Rgb(0.32, 0.08, 0.06) };
