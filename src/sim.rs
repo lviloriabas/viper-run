@@ -2,10 +2,12 @@
 //! JSBSim F-16 that FlightGear flies: NASA TP-1538 aerodynamics (aero.rs), an
 //! F-16 FLCS (g command with an AoA limiter, roll-rate command, aileron-rudder
 //! interconnect, yaw damper) driving rate-limited surface actuators,
-//! F110-GE-129 thrust with spool lag, fuel burn changing mass and inertia, ISA
+//! F110-GE-129 thrust with spool lag (the MiG-29 on its own data,
+//! aero_mig29.rs), fuel burn changing mass and inertia, ISA
 //! atmosphere and compressible pitot. On top of the tables, each wing panel
 //! stalls on its own, so a stall can drop a wing and start a departure.
 use crate::aero::{self, Coeffs, Flow};
+use crate::aero_mig29;
 use crate::air::{KT, RHO0};
 use crate::math::*;
 use crate::structure::Structure;
@@ -77,17 +79,17 @@ const SUBSTEPS: usize = 4;
 
 pub use crate::air::{atmosphere_at, calibrated_airspeed};
 
-/// Which jet: the F-16C the tables describe, or a MiG-29S (9.13S) flown on
-/// the same aerodynamic tables scaled to its size, weight and engines. The
-/// MiG-29 is an approximation built from published figures, not wind-tunnel
-/// data: 38.06 m^2 of wing against 27.9, 11,200 kg empty (the 9.13's manual
+/// Which jet: the F-16C the tables describe, or a MiG-29S (9.13S) on its own
+/// lift, drag, pitch and engine data (aero_mig29.rs), fitted to published
+/// manual figures since no wind-tunnel tables of it are public. Its
+/// mass properties: 38.06 m^2 of wing against 27.9, 11,200 kg empty (the 9.13's manual
 /// figure, 300 kg over the 9.12 for the enlarged spine and its jammer),
 /// 3,820 kg of internal fuel (the 9.12's 3,630 and the 240 litres the
 /// enlarged No. 1 tank in the spine adds), two RD-33s giving 22,200 lbf dry
 /// and 36,600 lbf in afterburner, and about 35 % more inertia. The flight
 /// manuals cited for the 9.12 and 9.13 limit the AoA to 24 degrees (Russian)
 /// or 26 (German), against 26 to 28 degrees critical, and allow 9 g only
-/// below 14,200 kg, 8 g above.
+/// below 14,200 kg, 8 g above, and 7 g past Mach 0.85.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Type {
     #[default]
@@ -119,14 +121,28 @@ impl Type {
     pub fn area(self) -> f64 {
         match self {
             Type::F16 => aero::WING_AREA,
-            Type::Mig29 => 38.06,
+            Type::Mig29 => aero_mig29::WING_AREA,
         }
     }
-    /// Thrust against the F110's at the same power setting.
-    pub fn thrust_scale(self, power: f64) -> f64 {
+    /// Wing span and mean aerodynamic chord, m.
+    pub fn span(self) -> f64 {
         match self {
-            Type::F16 => 1.0,
-            Type::Mig29 => mix(22200.0 / 17000.0, 36600.0 / 29000.0, ((power - 50.0) / 50.0).clamp(0.0, 1.0)),
+            Type::F16 => aero::SPAN,
+            Type::Mig29 => aero_mig29::SPAN,
+        }
+    }
+    pub fn chord(self) -> f64 {
+        match self {
+            Type::F16 => aero::CHORD,
+            Type::Mig29 => aero_mig29::CHORD,
+        }
+    }
+    /// Thrust-specific fuel consumption, lb/(lbf h), from dry (0) to full
+    /// afterburner (1): the F110's, and the RD-33's 0.77 and 1.85.
+    pub fn tsfc(self, ab: f64) -> f64 {
+        match self {
+            Type::F16 => mix(0.661, 1.9, ab),
+            Type::Mig29 => mix(0.77, 1.85, ab),
         }
     }
     /// Internal fuel, kg.
@@ -162,8 +178,9 @@ impl Type {
         }
     }
     /// Positive load limit at a gross weight (kg).
-    pub fn g_limit(self, mass: f64) -> f64 {
+    pub fn g_limit(self, mass: f64, mach: f64) -> f64 {
         match self {
+            Type::Mig29 if mach > 0.85 => 7.0,
             Type::Mig29 if mass > 14200.0 => 8.0,
             _ => G_LIMIT,
         }
@@ -385,10 +402,15 @@ pub struct Trim {
 }
 
 pub fn trim(altitude: f64, speed: f64, mass: f64) -> Trim {
+    trim_type(Type::F16, altitude, speed, mass)
+}
+
+/// Wings-level 1 g trim of either airframe.
+pub fn trim_type(kind: Type, altitude: f64, speed: f64, mass: f64) -> Trim {
     let atm = atmosphere_at(altitude);
-    let qs = 0.5 * atm.rho * speed * speed * aero::WING_AREA;
+    let qs = 0.5 * atm.rho * speed * speed * kind.area();
     let mach = speed / atm.sound;
-    let flow = |alpha: f64, el: f64| Flow { alpha, el, speed, mach, xcg: XCG, h_over_b: 10.0, qbar: qs / aero::WING_AREA, ..Default::default() };
+    let flow = |alpha: f64, el: f64| Flow { alpha, el, speed, mach, xcg: XCG, h_over_b: 10.0, qbar: qs / kind.area(), kind, ..Default::default() };
     // Pitching moment falls with stabilator, so bisect it to zero at each AoA.
     let el_for = |alpha: f64| {
         let (mut lo, mut hi) = (-STAB_MAX, STAB_MAX);
@@ -427,7 +449,7 @@ pub fn trim(altitude: f64, speed: f64, mass: f64) -> Trim {
     let (mut lo, mut hi) = (0.0, 100.0);
     for _ in 0..40 {
         let mid = 0.5 * (lo + hi);
-        if aero::thrust(mid, mach, altitude) < thrust {
+        if aero::thrust(kind, mid, mach, altitude) < thrust {
             lo = mid;
         } else {
             hi = mid;
@@ -588,8 +610,8 @@ impl Flcs {
         let (alpha, speed) = (f.alpha, f.speed.max(40.0));
         let (p, q, r) = (f.p, f.q, f.r);
         let (ixx, iyy, izz, ixz) = s.inertia;
-        let qsc = s.qbar.max(50.0) * s.area * aero::CHORD;
-        let qsb = s.qbar.max(50.0) * s.area * aero::SPAN;
+        let qsc = s.qbar.max(50.0) * s.area * f.kind.chord();
+        let qsb = s.qbar.max(50.0) * s.area * f.kind.span();
 
         // Pitch. The stick commands g. The AoA limiter is a selector: past
         // the onset AoA (filtered, with pitch-rate anticipation) it lowers the
@@ -974,8 +996,8 @@ impl Aircraft {
 
     fn flow(&self, speed: f64, alpha: f64, beta: f64, p: f64, q: f64, r: f64, mach: f64, qbar: f64) -> Flow {
         let f = &self.flcs;
-        let h_over_b = self.agl.max(0.0) / aero::SPAN;
-        Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, qbar, h_over_b }
+        let h_over_b = self.agl.max(0.0) / self.kind.span();
+        Flow { alpha: alpha * RAD, beta: beta * RAD, p, q, r, speed, mach, el: f.el, ail: f.ail, rdr: f.rdr, brake: f.brake, xcg: XCG, qbar, h_over_b, kind: self.kind }
     }
 
     /// Critical AoA for the present condition, degrees. Shock-induced
@@ -987,7 +1009,7 @@ impl Aircraft {
         let thin_air = 1.5 * smoothstep(4000.0, 15000.0, self.pos.y);
         let ground = 2.5 * (1.0 - smoothstep(0.0, 1.0, f.h_over_b));
         let slip = 0.2 * f.beta.abs();
-        let dynamic = clamp(f.q * aero::CHORD / (2.0 * f.speed.max(30.0)) * 300.0, -2.0, 4.0);
+        let dynamic = clamp(f.q * self.kind.chord() / (2.0 * f.speed.max(30.0)) * 300.0, -2.0, 4.0);
         ALPHA_CRIT * compressibility - thin_air - ground - slip + dynamic
     }
 
@@ -1020,7 +1042,7 @@ impl Aircraft {
         c.cz -= lost * (sl + sr);
         c.cx -= plate * (sl + sr) * ca;
         c.cz -= plate * (sl + sr) * sa;
-        let arm = PANEL_ARM / aero::SPAN;
+        let arm = PANEL_ARM / self.kind.span();
         c.cl += lost * (sl - sr) * arm;
         c.cn -= plate * (sl - sr) * arm;
         c.cm -= 0.03 * 0.5 * (sl + sr) * f.alpha.signum();
@@ -1045,7 +1067,7 @@ impl Aircraft {
             area: self.kind.area(),
             mass: self.mass,
             alpha_lim: self.kind.alpha_limits(),
-            g_max: self.kind.g_limit(self.mass) * self.battle.strength(),
+            g_max: self.kind.g_limit(self.mass, mach) * self.battle.strength(),
         };
         self.flcs.update(dt, input, &sensors);
         // Damaged hydraulics move the surfaces only part of their travel.
@@ -1060,7 +1082,7 @@ impl Aircraft {
         let fueled = self.fuel > 0.0 && self.battle.thrust() > 0.0;
         let command = if !fueled { 0.0 } else if want_ab { 100.0 } else { 50.0 * self.throttle };
         self.power = clamp(self.power + aero::power_rate(self.power, command) * dt, 0.0, 100.0);
-        let full = if fueled { aero::thrust(self.power, mach, self.pos.y) * self.kind.thrust_scale(self.power) } else { 0.0 };
+        let full = if fueled { aero::thrust(self.kind, self.power, mach, self.pos.y) } else { 0.0 };
         self.thrust_n = full * self.battle.thrust();
 
         let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
@@ -1090,7 +1112,8 @@ impl Aircraft {
         }
         let qs = qbar * self.kind.area();
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
-        let (l, m, n) = (qs * aero::SPAN * c.cl, qs * aero::CHORD * c.cm, qs * aero::SPAN * c.cn);
+        let (span, chord) = (self.kind.span(), self.kind.chord());
+        let (l, m, n) = (qs * span * c.cl, qs * chord * c.cm, qs * span * c.cn);
         // The MiG's engines sit 1.1 m either side of the centreline.
         let n = n + full * self.battle.asymmetry * 1.1;
         let (gf, gm) = self.wheel_forces(input, dt);
@@ -1182,10 +1205,10 @@ impl Aircraft {
             return;
         }
 
-        // Fuel: specific consumption of the F110 dry and in afterburner.
+        // Fuel: specific consumption of the engines dry and in afterburner.
         let ab = ((self.power - 50.0) / 50.0).max(0.0);
         let lbf = self.thrust_n.max(0.0) / 4.448222;
-        let tsfc = mix(0.661, 1.9, ab);
+        let tsfc = self.kind.tsfc(ab);
         self.fuel_flow = if fueled { (lbf * tsfc / 3600.0 * 0.4536).max(0.12) } else { 0.0 };
         self.fuel = (self.fuel - (self.fuel_flow + self.battle.leak) * dt).max(0.0);
         self.mass = self.kind.empty_mass() + self.stores_mass + self.fuel;
@@ -1213,7 +1236,7 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = (self.kind.g_limit(self.mass) * self.battle.strength()).min(self.qbar * self.kind.area() * (aero::cl_max() + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        self.g_avail = (self.kind.g_limit(self.mass, self.mach) * self.battle.strength()).min(self.qbar * self.kind.area() * (aero::cl_max(self.kind) + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);

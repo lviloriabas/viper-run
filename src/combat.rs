@@ -7,7 +7,7 @@
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
 use crate::damage::{self, Hull};
-use crate::sim::{spec::STORES_MASS, trim, Aircraft, BattleDamage, Flcs, Gate, Input, Mission, Type, G0};
+use crate::sim::{spec::STORES_MASS, trim_type, Aircraft, BattleDamage, Flcs, Gate, Input, Mission, Type, G0};
 use crate::scenario::{self, Threats};
 use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
@@ -888,19 +888,18 @@ pub fn spawn(pos: V3, heading: f64, speed: f64) -> Aircraft {
     spawn_type(Type::F16, pos, heading, speed)
 }
 
-/// Wings-level 1 g trim for any airframe: the F-16 tables at the wing
-/// loading this jet has, then the power its own engines need for the drag
-/// of its own wing area and of the stores.
+/// Wings-level 1 g trim for any airframe on its own data, then the power its
+/// engines need for the drag of the stores as well.
 fn trim_for(a: &Aircraft, alt: f64, speed: f64) -> crate::sim::Trim {
     let k = a.kind;
-    let mut t = trim(alt, speed, a.mass * crate::aero::WING_AREA / k.area());
+    let mut t = trim_type(k, alt, speed, a.mass);
     let atm = crate::sim::atmosphere_at(alt);
     let mach = speed / atm.sound;
-    let need = crate::aero::thrust(t.power, mach, alt) * k.area() / crate::aero::WING_AREA + 0.5 * atm.rho * speed * speed * k.area() * a.stores_drag;
+    let need = crate::aero::thrust(k, t.power, mach, alt) + 0.5 * atm.rho * speed * speed * k.area() * a.stores_drag;
     let (mut lo, mut hi) = (0.0, 100.0);
     for _ in 0..40 {
         let mid = 0.5 * (lo + hi);
-        if crate::aero::thrust(mid, mach, alt) * k.thrust_scale(mid) < need {
+        if crate::aero::thrust(k, mid, mach, alt) < need {
             lo = mid;
         } else {
             hi = mid;
@@ -2557,7 +2556,7 @@ mod tests {
         }
         assert!(!a.crashed && (a.pos.y - 3000.0).abs() < 150.0 && (a.speed - 230.0).abs() < 25.0, "after 20 s: {:.0} m, {:.0} m/s", a.pos.y, a.speed);
         let f16 = spawn(v3(0.0, 3000.0, 0.0), 0.0, 230.0);
-        let ab = |k: Type| crate::aero::thrust(100.0, 0.0, 0.0) * k.thrust_scale(100.0) / (k.empty_mass() + 3000.0);
+        let ab = |k: Type| crate::aero::thrust(k, 100.0, 0.0, 0.0) / (k.empty_mass() + 3000.0);
         assert!(ab(Type::Mig29) > ab(Type::F16), "{} vs {}", ab(Type::Mig29), ab(f16.kind));
     }
 

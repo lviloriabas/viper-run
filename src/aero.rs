@@ -8,7 +8,12 @@
 //! ground effect follow the FlightGear F-16 (jsb-aerodynamics-block15-subtle),
 //! and thrust follows its F110-GE-129 tables. Engine power dynamics are the
 //! Stevens & Lewis power-lag model.
+//!
+//! The MiG-29 has its own longitudinal data and engines (aero_mig29.rs);
+//! `coefficients` and `thrust` hand it over by the flow's airframe type.
+use crate::aero_mig29;
 use crate::math::{clamp, smoothstep};
+use crate::sim::Type;
 use crate::structure;
 
 pub const WING_AREA: f64 = 27.87; // 300 ft^2
@@ -29,7 +34,7 @@ fn bracket(n: usize, x0: f64, dx: f64, x: f64) -> (usize, usize, f64) {
     (i, i + 1, s - i as f64)
 }
 
-fn lerp1(t: &[f64], x0: f64, dx: f64, x: f64) -> f64 {
+pub(crate) fn lerp1(t: &[f64], x0: f64, dx: f64, x: f64) -> f64 {
     let (i, j, f) = bracket(t.len(), x0, dx, x);
     t[i] + (t[j] - t[i]) * f
 }
@@ -146,7 +151,7 @@ const DNDR: [[f64; 12]; 7] = [
 ];
 
 /// Rate derivatives: CXq, CYr, CYp, CZq, Clr, Clp, Cmq, Cnr, Cnp.
-const DAMP: [[f64; 12]; 9] = [
+pub(crate) const DAMP: [[f64; 12]; 9] = [
     [-0.267, -0.110, 0.308, 1.34, 2.08, 2.91, 2.76, 2.05, 1.50, 1.49, 1.83, 1.21],
     [0.882, 0.852, 0.876, 0.958, 0.962, 0.974, 0.819, 0.483, 0.590, 1.21, -0.493, -1.04],
     [-0.108, -0.108, -0.188, 0.110, 0.258, 0.226, 0.344, 0.362, 0.611, 0.529, 0.298, -0.227],
@@ -165,7 +170,7 @@ const CD_WAVE: [(f64, f64); 12] = [
 ];
 
 /// Lift increment in ground effect against height over span (FlightGear, halved there).
-const GROUND_EFFECT: [(f64, f64); 11] = [
+pub(crate) const GROUND_EFFECT: [(f64, f64); 11] = [
     (0.0, 0.229), (0.2, 0.124), (0.3, 0.116), (0.4, 0.1105), (0.6, 0.105), (0.8, 0.041),
     (1.0, 0.034), (1.2, 0.019), (1.4, 0.008), (1.6, 0.003), (1.8, 0.001),
 ];
@@ -174,7 +179,7 @@ const GROUND_EFFECT: [(f64, f64); 11] = [
 const AC_SHIFT: [(f64, f64); 3] = [(0.6, 0.0), (0.8, 0.05), (1.1, 0.19)];
 
 /// Airbrake: drag at full 60 degree opening, and its wave-drag factor.
-const CD_BRAKE: f64 = 0.075;
+pub(crate) const CD_BRAKE: f64 = 0.075;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Flow {
@@ -198,6 +203,8 @@ pub struct Flow {
     pub qbar: f64,
     /// Height of the wing above the ground over the span.
     pub h_over_b: f64,
+    /// Airframe whose data the coefficients come from.
+    pub kind: Type,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -211,18 +218,20 @@ pub struct Coeffs {
 }
 
 pub fn coefficients(f: &Flow) -> Coeffs {
+    if f.kind == Type::Mig29 {
+        return aero_mig29::coefficients(f);
+    }
     let a = clamp(f.alpha, -10.0, 45.0);
     let b = clamp(f.beta, -30.0, 30.0);
     let el = clamp(f.el, -25.0, 25.0);
     let d: [f64; 9] = std::array::from_fn(|i| lerp1(&DAMP[i], -10.0, 5.0, a));
     let v = f.speed.max(30.0);
-    let (cq, bv) = (CHORD / (2.0 * v), SPAN / (2.0 * v));
+    let cq = CHORD / (2.0 * v);
     // The elastic wing sheds lift outboard and the flaperons lose power.
-    let (e_lift, shift, e_roll) = structure::effectiveness(f.qbar, f.mach);
-    let ail = f.ail * e_roll;
+    let (e_lift, shift, _) = structure::effectiveness(f.qbar, f.mach);
 
     let mut cx = lerp2(&CX, -24.0, 12.0, el, a) + cq * d[0] * f.q;
-    let cy = -0.02 * b + 0.021 * (ail / 20.0) + 0.086 * (f.rdr / 30.0) + bv * (d[1] * f.r + d[2] * f.p);
+    let (cy, cl, cn) = lateral(f, SPAN);
     let mut cz = lerp1(&CZ, -10.0, 5.0, a) * (1.0 - (b / 57.3).powi(2)) * e_lift - 0.19 * (el / 25.0) + cq * d[3] * f.q;
 
     // Wind-axis drag and lift increments resolved into body axes.
@@ -233,24 +242,40 @@ pub fn coefficients(f: &Flow) -> Coeffs {
     cz += -drag * sa - lift * ca;
 
     let arm = XCG_REF - f.xcg + curve(&AC_SHIFT, f.mach) - shift;
+    let cm = lerp2(&CM, -24.0, 12.0, el, a) + cz * arm + cq * d[6] * f.q - 0.02 * f.brake
+        // Beyond the data the jet pitches out of a deep stall like a flat plate.
+        - 0.4 * smoothstep(50.0, 80.0, f.alpha.abs()) * f.alpha.signum();
+    let cn = cn - cy * (XCG_REF - f.xcg) * CHORD / SPAN;
+    Coeffs { cx, cy, cz, cl, cm, cn }
+}
+
+/// Side force, rolling and yawing moments from the F-16 tables, made
+/// dimensionless on the span `span` for the rate terms. No lateral data of
+/// the MiG-29 is public, so it flies these too, on its own span.
+pub(crate) fn lateral(f: &Flow, span: f64) -> (f64, f64, f64) {
+    let a = clamp(f.alpha, -10.0, 45.0);
+    let b = clamp(f.beta, -30.0, 30.0);
+    let d: [f64; 9] = std::array::from_fn(|i| lerp1(&DAMP[i], -10.0, 5.0, a));
+    let bv = span / (2.0 * f.speed.max(30.0));
+    let ail = f.ail * structure::effectiveness(f.qbar, f.mach).2;
+    let cy = -0.02 * b + 0.021 * (ail / 20.0) + 0.086 * (f.rdr / 30.0) + bv * (d[1] * f.r + d[2] * f.p);
     let sb = b.signum();
     let cl = lerp2(&CL, 0.0, 5.0, b.abs(), a) * sb
         + lerp2(&DLDA, -30.0, 10.0, b, a) * (ail / 20.0)
         + lerp2(&DLDR, -30.0, 10.0, b, a) * (f.rdr / 30.0)
         + bv * (d[4] * f.r + d[5] * f.p);
-    let cm = lerp2(&CM, -24.0, 12.0, el, a) + cz * arm + cq * d[6] * f.q - 0.02 * f.brake
-        // Beyond the data the jet pitches out of a deep stall like a flat plate.
-        - 0.4 * smoothstep(50.0, 80.0, f.alpha.abs()) * f.alpha.signum();
     let cn = lerp2(&CN, 0.0, 5.0, b.abs(), a) * sb
         + lerp2(&DNDA, -30.0, 10.0, b, a) * (ail / 20.0)
         + lerp2(&DNDR, -30.0, 10.0, b, a) * (f.rdr / 30.0)
-        + bv * (d[7] * f.r + d[8] * f.p)
-        - cy * (XCG_REF - f.xcg) * CHORD / SPAN;
-    Coeffs { cx, cy, cz, cl, cm, cn }
+        + bv * (d[7] * f.r + d[8] * f.p);
+    (cy, cl, cn)
 }
 
 /// Lift coefficient available at the 25 degree AoA limit.
-pub fn cl_max() -> f64 {
+pub fn cl_max(kind: Type) -> f64 {
+    if kind == Type::Mig29 {
+        return aero_mig29::cl_max();
+    }
     let a = 25.0f64.to_radians();
     -lerp1(&CZ, -10.0, 5.0, 25.0) * a.cos() + lerp2(&CX, -24.0, 12.0, 0.0, 25.0) * a.sin()
 }
@@ -310,16 +335,22 @@ fn inlet_factor(mach: f64) -> f64 {
     shock / (1.0 - 0.075 * (mach - 1.0).powf(1.35))
 }
 
-/// Installed thrust in newtons for engine power 0..100 (50 = military).
-pub fn thrust(power: f64, mach: f64, altitude_m: f64) -> f64 {
+/// Installed thrust in newtons for engine power 0..100 (50 = military) of
+/// one F110 or the MiG-29's pair of RD-33s. Both are low-bypass afterburning
+/// turbofans, so the RD-33s follow the F110's lapse with Mach and altitude
+/// from their own sea-level ratings, behind their own inlets.
+pub fn thrust(kind: Type, power: f64, mach: f64, altitude_m: f64) -> f64 {
+    let (mil_sl, max_sl, inlet) = match kind {
+        Type::F16 => (MIL_THRUST, MAX_THRUST, inlet_factor(mach)),
+        Type::Mig29 => (aero_mig29::MIL_THRUST, aero_mig29::MAX_THRUST, aero_mig29::inlet_factor(mach)),
+    };
     let ft = altitude_m / 0.3048;
-    let inlet = inlet_factor(mach);
-    let mil = engine_table(&MIL, mach, ft) * MIL_THRUST * inlet;
+    let mil = engine_table(&MIL, mach, ft) * mil_sl * inlet;
     if power < 50.0 {
-        let idle = engine_table(&IDLE, mach, ft) * MIL_THRUST;
+        let idle = engine_table(&IDLE, mach, ft) * mil_sl;
         idle + (mil - idle) * power * 0.02
     } else {
-        let max = engine_table(&AUG, mach, ft) * MAX_THRUST * inlet;
+        let max = engine_table(&AUG, mach, ft) * max_sl * inlet;
         mil + (max - mil) * (power - 50.0) * 0.02
     }
 }
@@ -361,7 +392,7 @@ mod tests {
         assert!((lerp1(&CZ, -10.0, 5.0, 2.5) - (-0.2575)).abs() < 1e-9);
         assert_eq!(lerp1(&CZ, -10.0, 5.0, 90.0), -2.229);
         assert_eq!(lerp2(&CM, -24.0, 12.0, 0.0, 10.0), -0.006);
-        assert!(cl_max() > 1.4 && cl_max() < 1.7);
+        assert!(cl_max(Type::F16) > 1.4 && cl_max(Type::F16) < 1.7);
     }
 
     #[test]
@@ -378,10 +409,10 @@ mod tests {
 
     #[test]
     fn thrust_lapses_with_altitude_and_grows_with_afterburner() {
-        assert!((thrust(50.0, 0.0, 0.0) - MIL_THRUST).abs() < 1.0);
-        assert!((thrust(100.0, 0.0, 0.0) - MAX_THRUST).abs() < 1.0);
-        assert!(thrust(100.0, 0.9, 9000.0) < thrust(100.0, 0.9, 1000.0));
-        assert!(thrust(0.0, 0.8, 0.0) < 0.0, "idle ram drag at speed");
+        assert!((thrust(Type::F16, 50.0, 0.0, 0.0) - MIL_THRUST).abs() < 1.0);
+        assert!((thrust(Type::F16, 100.0, 0.0, 0.0) - MAX_THRUST).abs() < 1.0);
+        assert!(thrust(Type::F16, 100.0, 0.9, 9000.0) < thrust(Type::F16, 100.0, 0.9, 1000.0));
+        assert!(thrust(Type::F16, 0.0, 0.8, 0.0) < 0.0, "idle ram drag at speed");
     }
 
     #[test]

@@ -345,15 +345,25 @@ Fulcrum is a low-poly model after the published three-view (17.3 m long, 11.4 m 
 bubble canopy, leading-edge root extensions, the flat centre body between
 two widely spaced nacelles with wedge intakes, 42 degree wings, twin fins
 canted out 6 degrees, moving stabilators, two afterburner flames, in the
-two-tone grey of the type with red stars. It flies the F-16 aerodynamic
-tables scaled to its own size, weight and engines, an approximation from
-public figures rather than wind-tunnel data: 38.06 m² of wing, 11,200 kg
+two-tone grey of the type with red stars. It flies its own lift, drag,
+pitch and engine data (src/aero_mig29.rs). No wind-tunnel tables of the
+Fulcrum are public, so the model is fitted to the published figures: Cx0 =
+0.022, Cy = 1.43 at 24 degrees AoA and an Oswald factor of 0.87 from the
+MiG-29A aerodynamics manual; 6.6 g sustained at Mach 0.9 and 5,000 m, and a
+6 g turn at 1,000 m and 900 km/h in afterburner still gaining 20 km/h a
+second, from its turn charts; and 1,500 km/h (Mach 1.26) at sea level and
+2,450 km/h (Mach 2.3) high. The model gives 6.8 g, 20 km/h a second, Mach
+1.28 and Mach 2.32. Lateral data and rate damping are still the F-16's, on
+the MiG's 11.36 m span and 3.73 m chord. The rest comes from public
+figures: 38.06 m² of wing, 11,200 kg
 empty, 3,820 kg of internal fuel (the 9.12's 3,630 and the spine tank's
 extra 240 litres), two RD-33s with 49.4 kN (11,111 lbf) dry
-and 81.8 kN (18,387 lbf) in afterburner each, and about 35 % more inertia.
+and 81.8 kN (18,387 lbf) in afterburner each (0.77 and 1.85 lb/lbf/h),
+behind variable-ramp inlets, and about 35 % more inertia.
 The limits follow what the 9.12 and 9.13 flight manuals are cited as giving: the AoA
 held near 25 degrees (24 in the Russian manual, 26 in the German one, against
-26 to 28 critical) and 9 g only below 14,200 kg, 8 g above. The cockpit
+26 to 28 critical), 9 g only below 14,200 kg, 8 g above, and 7 g past
+Mach 0.85 (German manual). The cockpit
 is the Fulcrum's own (docs/MIG29-REFERENCES.md).
 
 ### Airbase, take-off and landing

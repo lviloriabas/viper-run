@@ -89,3 +89,38 @@ Sources: [R-27 (Wikipedia)](https://en.wikipedia.org/wiki/R-27_(air-to-air_missi
 [FAB-500](https://en.wikipedia.org/wiki/FAB-500),
 [FAB-250](https://en.wikipedia.org/wiki/FAB-250),
 [FAB-500M-62 (GlobalSecurity)](https://www.globalsecurity.org/military/world/russia/fab-500m-62.htm).
+
+## MiG-29 flight model
+
+src/aero_mig29.rs gives the Fulcrum its own lift, drag, pitch and engine
+data. No wind-tunnel tables of the type are public, so the tables are fitted
+to these published figures, and its tests check that the model still meets
+them:
+
+| Figure | Published | Model |
+|---|---|---|
+| Zero-lift drag Cx0 | 0.022 | 0.022 |
+| Lift Cy at 24 degrees AoA | 1.43 | 1.43 |
+| Oswald factor at small lift | 0.87 | 0.87 (K = 0.108) |
+| Sustained g, Mach 0.9, 5,000 m, 1,500 kg fuel | 6.6 | 6.8 |
+| Speed gain in a 6 g afterburner turn, 1,000 m, 900 km/h | about 20 km/h/s | 20.3 km/h/s |
+| Top speed at sea level | 1,500 km/h (Mach 1.26) | Mach 1.28 |
+| Top speed at altitude | 2,450 km/h (Mach 2.3) | Mach 2.32 at 11 km |
+
+Other inputs: 38.06 m² wing, 11.36 m span, 42 degree sweep; a 3.73 m mean
+chord worked out from the planform; about 40 % of the lift from the body;
+two RD-33s of 5,040 kgf dry and 8,300 kgf in afterburner, 0.77 and 1.85
+lb/lbf/h, following the F110's lapse tables behind variable-ramp inlets;
+9 g below Mach 0.85 and 7 g above. Lateral-directional data and rate damping
+are still the F-16's, on the MiG's span and chord, and the static margin
+(slightly stable subsonic) and stabilator power are estimates from the tail
+geometry.
+
+The drag polar, Cy and turn-chart figures come from the MiG-29A practical
+aerodynamics manual as its charts are quoted in public discussions; the
+manual itself was not available.
+
+Sources: [MiG-29 (Wikipedia)](https://en.wikipedia.org/wiki/Mikoyan_MiG-29),
+[МиГ-29 (Russian Wikipedia)](https://ru.wikipedia.org/wiki/МиГ-29),
+[Klimov RD-33 (Wikipedia)](https://en.wikipedia.org/wiki/Klimov_RD-33),
+[F-16 vs MiG-29 energy manoeuvrability (F-16.net)](https://www.f-16.net/forum/viewtopic.php?f=30&t=53852).
