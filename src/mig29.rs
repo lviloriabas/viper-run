@@ -39,6 +39,7 @@ pub const GEAR_PIVOTS: [(V3, f64); 3] = [(v3(0.0, 0.14, -1.72), -95.0 * DEG), (v
 pub const EYE: V3 = v3(0.0, 1.38, -3.55);
 /// Box the first-person view cuts out of the skin, so the cockpit model
 /// shows inside: half width, floor, and from the windscreen to the spine.
+#[cfg(test)]
 pub const CUTOUT: (f64, f64, f64, f64) = (0.44, 0.55, -4.78, -2.0);
 
 pub struct Fulcrum {
