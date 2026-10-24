@@ -765,6 +765,9 @@ impl Missile {
         let qs = q * s.area();
         let burn = self.age - s.drop;
         let (thrust, flow) = if burn >= 0.0 { s.thrust(burn) } else { (0.0, 0.0) };
+        // The motor figures are sea-level; with less back-pressure on the
+        // nozzle exit (about the body's cross-section) thrust grows with height.
+        let thrust = if thrust > 0.0 { thrust + (101_325.0 - atm.pressure).max(0.0) * 0.7 * s.area() } else { 0.0 };
         self.mass = (self.mass - flow * dt).max(s.mass - s.propellant);
 
         let mut lateral = V3::ZERO;
@@ -1009,6 +1012,28 @@ pub fn ccip(spec: &'static BombSpec, a: &Aircraft, station: V3, floor: &dyn Fn(f
     }
     None
 }
+
+/// Strafe pipper: where a round fired now meets the ground, flown with the
+/// gun's own ballistics, and its time of flight. Nothing past STRF_TOF,
+/// beyond any useful strafing range.
+pub fn gun_ccip(a: &Aircraft, floor: &dyn Fn(f64, f64) -> f64) -> Option<(V3, f64)> {
+    let (mut p, mut v) = muzzle(a);
+    let k = gun_of(a.kind).k;
+    let dt = 0.02;
+    let mut t = 0.0;
+    while t < STRF_TOF {
+        let p0 = p;
+        ballistic(&mut p, &mut v, k, dt);
+        t += dt;
+        if let Some(hit) = ground_crossing(p0, p, floor) {
+            return Some((hit, t));
+        }
+    }
+    None
+}
+
+/// Longest time of flight the strafe pipper looks ahead, s.
+pub const STRF_TOF: f64 = 4.0;
 
 #[cfg(test)]
 mod tests {

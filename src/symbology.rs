@@ -219,6 +219,28 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
                 pen.text(cv, &format!("{} {tof:.1}", if ru { "Т" } else { "TOF" }), -half, 94.0, pen.small, Align::Left);
             }
         }
+        Mode::Strf => {
+            // Strafe pipper: a ring with a centre dot where the rounds would
+            // hit, the slant range under it and IN RNG inside 4,000 ft.
+            if let Some((p, _)) = c.ccip {
+                let slant = (p - a.pos).len();
+                if let Some(q) = pen.point(p) {
+                    let r = 9.0 * big;
+                    cv.circle(q[0], q[1], r, lw, pen.col);
+                    cv.disc(q[0], q[1], 1.2 * big, pen.col);
+                }
+                let text = if ru { format!("Д {:.1}", slant / 1000.0) } else { format!("{:.1} RNG", slant * 3.28084 / 1000.0) };
+                pen.text(cv, &text, -half, 106.0, pen.small, Align::Left);
+                if slant < 1220.0 {
+                    if !ru {
+                        pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
+                    }
+                    if flash && slant > 300.0 {
+                        pen.text(cv, if ru { "ПР" } else { "SHOOT" }, 0.0, -36.0, big, Align::Center);
+                    }
+                }
+            }
+        }
     }
 }
 

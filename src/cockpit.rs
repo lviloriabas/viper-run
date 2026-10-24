@@ -1646,7 +1646,7 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
         Mode::Nav => "МАРШ",
         Mode::Gun | Mode::Srm => "БВБ",
         Mode::Mrm => "ДВБ",
-        Mode::Ccip => "ЗЕМЛЯ",
+        Mode::Ccip | Mode::Strf => "ЗЕМЛЯ",
     };
     ht(cv, mode, -half, 70.0, small, Align::Left);
     if c.mode != Mode::Nav {

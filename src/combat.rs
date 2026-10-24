@@ -74,6 +74,8 @@ pub enum Mode {
     Mrm,
     /// Bombs on the continuously computed impact point.
     Ccip,
+    /// Gun against the ground: the strafe pipper where the rounds hit.
+    Strf,
 }
 
 impl Mode {
@@ -84,10 +86,11 @@ impl Mode {
             Mode::Srm => "SRM",
             Mode::Mrm => "MRM",
             Mode::Ccip => "CCIP",
+            Mode::Strf => "STRF",
         }
     }
     pub fn air_to_ground(self) -> bool {
-        self == Mode::Ccip
+        matches!(self, Mode::Ccip | Mode::Strf)
     }
 }
 
@@ -1286,7 +1289,7 @@ impl Combat {
         self.loadout = Loadout::configure(cfg);
         self.hull = Hull::new(cfg.jet);
         if !self.modes().contains(&self.mode) {
-            self.mode = *self.modes().iter().rev().find(|&&m| m != Mode::Ccip).unwrap_or(&Mode::Gun);
+            self.mode = *self.modes().iter().rev().find(|&&m| !m.air_to_ground()).unwrap_or(&Mode::Gun);
         }
     }
 
@@ -1307,6 +1310,10 @@ impl Combat {
                     v.push((m, Some(s.store)));
                 }
             }
+        }
+        // The gun again against the ground, where there is ground to strafe.
+        if self.loadout.rounds > 0 && !self.sites.is_empty() {
+            v.push((Mode::Strf, None));
         }
         if v.is_empty() {
             v.push((Mode::Gun, None));
@@ -1341,9 +1348,27 @@ impl Combat {
         self.station().map(|i| self.loadout.stations[i].store).or(self.pick.filter(|s| s.mode() == self.mode)).or_else(|| self.loadout.store_for(self.mode))
     }
 
+    /// Selective jettison: the selected store comes off its station unarmed,
+    /// one per press; the gun stays.
+    pub fn jettison(&mut self, a: &Aircraft) {
+        if self.player_dead || matches!(self.mode, Mode::Gun | Mode::Strf) {
+            return;
+        }
+        let Some(i) = self.station() else {
+            self.events.push(Event::Toast("NOTHING TO JETTISON".to_string()));
+            return;
+        };
+        let st = self.loadout.stations[i];
+        self.loadout.stations[i].loaded = false;
+        self.events.push(Event::Release { pos: a.pos + a.q.rotate(st.at) });
+        self.events.push(Event::Toast(format!("JETTISON // {}", st.store.name())));
+        self.seeker = None;
+        self.shoot = false;
+    }
+
     pub fn cycle_weapon(&mut self) {
         let choices = self.choices();
-        let now = (self.mode, if self.mode == Mode::Gun { None } else { self.store() });
+        let now = (self.mode, if matches!(self.mode, Mode::Gun | Mode::Strf) { None } else { self.store() });
         let i = choices.iter().position(|&c| c == now).map(|i| (i + 1) % choices.len()).unwrap_or(0);
         self.select(choices[i].0);
         self.pick = choices[i].1;
@@ -1356,6 +1381,7 @@ impl Combat {
         match self.mode {
             Mode::Nav => "NAV".to_string(),
             Mode::Gun => format!("{} (GUN)", self.loadout.gun.name),
+            Mode::Strf => format!("{} (STRAFE)", self.loadout.gun.name),
             _ => self.store().map_or("", |s| s.long_name()).to_string(),
         }
     }
@@ -1364,7 +1390,7 @@ impl Combat {
     pub fn weapon_left(&self) -> (&'static str, u32) {
         match self.mode {
             Mode::Nav => ("", 0),
-            Mode::Gun => (self.loadout.gun.calibre, self.loadout.rounds),
+            Mode::Gun | Mode::Strf => (self.loadout.gun.calibre, self.loadout.rounds),
             _ => self.store().map_or(("", 0), |s| (s.name(), self.loadout.count(s))),
         }
     }
@@ -1577,6 +1603,7 @@ impl Combat {
                 let st = self.loadout.stations[i];
                 st.store.bomb().and_then(|b| ccip(b, a, st.at, &terrain::floor))
             }
+            (Mode::Strf, _) => gun_ccip(a, &terrain::floor),
             _ => None,
         };
 
@@ -1648,7 +1675,7 @@ impl Combat {
 
     fn player_weapons(&mut self, dt: f64, a: &Aircraft, trigger: bool, pressed: bool) {
         match self.mode {
-            Mode::Gun => {
+            Mode::Gun | Mode::Strf => {
                 if pressed {
                     // The barrels spin up and the first round leaves at once.
                     self.gun_acc = 1.0;
@@ -2258,6 +2285,19 @@ impl Combat {
                 }
             }
             let target = self.missiles[i].target.and_then(|w| self.track(w, a));
+            // A heat seeker looking at a target close to the sun sees the sun
+            // instead: the old reticle seekers within a few degrees, the
+            // imaging AIM-9X only nearly straight into it.
+            if let (true, true, Some((tp, _))) = (spec.infrared(), self.missiles[i].tracking, target) {
+                let los = (tp - self.missiles[i].pos).norm();
+                let glare = (1.0 + 5.0 * (1.0 - spec.ccm)) * DEG;
+                if los.dot(crate::world::sun_dir()) > glare.cos() {
+                    self.missiles[i].tracking = false;
+                    if self.missiles[i].from == Who::Player {
+                        self.events.push(Event::Toast("SEEKER LOST IN THE SUN".into()));
+                    }
+                }
+            }
             let fate = self.missiles[i].step(dt, target, &terrain::floor);
             let (pos, burning, trail) = (self.missiles[i].pos, self.missiles[i].burning(), self.missile_trails[i]);
             if burning {
@@ -2855,7 +2895,7 @@ mod tests {
         (cfg.outboard, cfg.inboard) = (Some(Store::Fab250), Some(Store::R27r));
         f.equip(&cfg);
         let mut names = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..5 {
             f.cycle_weapon();
             assert_ne!(f.mode, Mode::Nav);
             let line = crate::symbology::weapon_line(&f);
@@ -2866,6 +2906,7 @@ mod tests {
         assert!(names.iter().any(|n| n.starts_with("R-73 ARCHER (FOX 2) x2")), "{names:?}");
         assert!(names.iter().any(|n| n.starts_with("R-27R ALAMO-A (FOX 1) x2")), "{names:?}");
         assert!(names.iter().any(|n| n.starts_with("FAB-")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("GSH-30-1 (STRAFE)")), "{names:?}");
         assert_eq!(m.time_left, crate::sim::MISSION_TIME);
         assert_eq!(m.gates.len(), 10, "the gate run keeps its gates");
     }

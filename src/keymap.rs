@@ -20,6 +20,8 @@ pub enum Bind {
     /// The MiG-29's sensor switch: radar or IRST.
     Sensor,
     Countermeasures,
+    /// Selective jettison: the selected store, one at a time.
+    Jettison,
     Airbrake,
     Gear,
     Flaps,
@@ -30,7 +32,7 @@ pub enum Bind {
     RightMfd,
 }
 
-pub const BINDS: [Bind; 22] = [
+pub const BINDS: [Bind; 23] = [
     Bind::PitchUp,
     Bind::PitchDown,
     Bind::RollLeft,
@@ -45,6 +47,7 @@ pub const BINDS: [Bind; 22] = [
     Bind::Lock,
     Bind::Sensor,
     Bind::Countermeasures,
+    Bind::Jettison,
     Bind::Airbrake,
     Bind::Gear,
     Bind::Flaps,
@@ -77,6 +80,7 @@ impl Bind {
             Bind::Lock => "LOCK TARGET",
             Bind::Sensor => "RADAR / IRST (MIG)",
             Bind::Countermeasures => "CHAFF / FLARE",
+            Bind::Jettison => "JETTISON STORE",
             Bind::Airbrake => "AIRBRAKE",
             Bind::Gear => "LANDING GEAR",
             Bind::Flaps => "FLAPS",
@@ -105,6 +109,7 @@ impl Bind {
             Bind::Lock => "lock",
             Bind::Sensor => "sensor",
             Bind::Countermeasures => "countermeasures",
+            Bind::Jettison => "jettison",
             Bind::Airbrake => "airbrake",
             Bind::Gear => "gear",
             Bind::Flaps => "flaps",
@@ -133,6 +138,7 @@ impl Bind {
             Bind::Lock => (T, None),
             Bind::Sensor => (I, None),
             Bind::Countermeasures => (Z, None),
+            Bind::Jettison => (J, None),
             Bind::Airbrake => (H, None),
             Bind::Gear => (G, None),
             Bind::Flaps => (L, None),

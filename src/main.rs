@@ -191,6 +191,7 @@ fn parse_opts() -> Opts {
                 o.weapon = match next(&mut i).as_str() {
                     "nav" => Some(Mode::Nav),
                     "gun" => Some(Mode::Gun),
+                    "strf" => Some(Mode::Strf),
                     "aim9" | "srm" => Some(Mode::Srm),
                     "aim120" | "mrm" => Some(Mode::Mrm),
                     "mk82" | "ccip" => Some(Mode::Ccip),
@@ -1550,6 +1551,11 @@ impl App {
             Bind::Countermeasures if flying => {
                 self.cm_hold = 0.0;
                 self.dispense();
+            }
+            Bind::Jettison if flying => {
+                if let Some(a) = &self.aircraft {
+                    self.combat.jettison(a);
+                }
             }
             Bind::Airbrake if flying => {
                 self.airbrake = !self.airbrake;
