@@ -261,19 +261,23 @@ pub fn build_static(m: &mut Mesh) {
         p - inward(p, 0.025)
     }).collect();
     crate::cockpit::pilot::band(m, &arch, 0.012, 0.022, V3::Z, FRAME);
-    // The mirrors are big rounded convex glasses in domed housings, the
-    // centre one widest, each on a short stalk off the arch and turned to
-    // the pilot.
-    for d in [-0.44, 0.0, 0.44] {
-        let p = cp(za, PI / 2.0 + d);
-        let c = p - inward(p, 0.085) + V3::Z * 0.035;
-        let n = (crate::airframe::EYE - c).norm();
-        let x = V3::Y.cross(n).norm();
-        let f = Frame { o: c, x, y: n.cross(x), z: n };
-        let (w, h) = if d == 0.0 { (0.17, 0.075) } else { (0.14, 0.066) };
-        super::convex_mirror(m, &f, w, h, -d / 0.44, FRAME.scale(0.8));
-        crate::cockpit::pilot::bar(m, f.p(0.0, 0.0, -0.034), p - inward(p, 0.03), 0.007, 0.007, V3::Z, FRAME.scale(0.8));
-    }
+    // The rear-view mirror: one wide glass up under the canopy just aft of
+    // the arch, curved along it nearly from post to post and tilted to face
+    // the pilot, so it sits above the arch and clear of the HUD.
+    let z0 = za + 0.15;
+    let rad = (cp(z0, PI / 2.0) - v3(0.0, sill(1.0, z0).y, z0)).len() - 0.02;
+    let place = |x: f64, y: f64, d: f64| {
+        let phi = PI / 2.0 - x / rad;
+        let p = cp(z0, phi);
+        let q = p - inward(p, 0.02);
+        let out = inward(p, 1.0);
+        let n = (crate::airframe::EYE - q).norm();
+        let up = (out - n * out.dot(n)).norm();
+        q + up * y + n * d
+    };
+    super::curved_mirror(m, 0.8 * rad, 0.06, &place, FRAME.scale(0.8));
+    let top = cp(z0, PI / 2.0);
+    crate::cockpit::pilot::bar(m, place(0.0, 0.0, -0.024), top - inward(top, 0.004), 0.008, 0.008, V3::Z, FRAME.scale(0.8));
 
     // KI-13 standby compass on its bracket at the top of the right
     // windscreen post, the bowl's window turned to the pilot.
