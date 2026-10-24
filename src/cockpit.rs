@@ -1377,8 +1377,8 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     let half = 70.0;
     let ad = AirData::of(a);
     let alt_ft = ad.baro_ft;
-    // Left: load factor, the KCAS box, then Mach, angle of attack, peak G and
-    // the master mode. Right: the barometric altitude box (altimeter on QNH),
+    // Left: load factor, the KCAS box, then Mach, peak G and the master
+    // mode; AOA has no readout, only the bracket with the gear down. Right: the barometric altitude box (altimeter on QNH),
     // radar altitude, vertical velocity and steering to the next gate.
     ht(cv, &format!("G {:.1}", ad.g), -half, -62.0, small, Align::Left);
     boxed(cv, &pad(ad.kcas, 3), -half, 0.0, Align::Left);
@@ -1386,9 +1386,8 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     boxed(cv, &hud::altitude(alt_ft), half, 0.0, Align::Right);
     ht(cv, "B", half, 13.0, small, Align::Right);
     ht(cv, &format!("M {:.2}", ad.mach), -half, 34.0, small, Align::Left);
-    ht(cv, &format!("AOA {:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
-    ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 58.0, small, Align::Left);
-    ht(cv, &if c.mode == crate::combat::Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) }, -half, 70.0, small, Align::Left);
+    ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 46.0, small, Align::Left);
+    ht(cv, &if c.mode == crate::combat::Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) }, -half, 58.0, small, Align::Left);
     // Radar altitude is a separately boxed repeater, resolved to ten feet.
     if ad.radar_ft <= 5000.0 {
         if let Some(p) = at(half, 34.0) {
@@ -1575,8 +1574,8 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
 /// altitude (Р) under 1,500 m and the climb rate in m/s; heading in tens
 /// of degrees along the top and the bank scale along the bottom; a fixed
 /// aircraft symbol on the boresight against a pitch ladder every 10
-/// degrees, the velocity vector only for landing; AoA (α) and g lower
-/// left; the mode bottom left (МАРШ route, ПОС landing, БВБ close and ДВБ
+/// degrees, the velocity vector only for landing; AoA (α, a scale for
+/// landing) and load factor (n) lower left; the mode bottom left (МАРШ route, ПОС landing, БВБ close and ДВБ
 /// long-range air combat, ЗЕМЛЯ ground attack) and the sensor bottom right
 /// (РЛ radar, ТП infrared); warnings in the middle, as the voice warner
 /// calls them.
@@ -1604,9 +1603,25 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
         ht(cv, &format!("{:.0}Р", radio_m), half, -28.0, small, Align::Right);
     }
     ht(cv, &format!("{:+.0}", ad.vs_fpm * 0.00508), half, -16.0, small, Align::Right);
-    ht(cv, &format!("α{:.0}", a.alpha_deg), -half, 46.0, small, Align::Left);
-    ht(cv, &format!("{:.1}", ad.g), -half, 58.0, small, Align::Left);
     let landing = a.gear > 0.5;
+    if landing {
+        // Landing: a vertical α scale, 0 to 25 degrees with a tick every 5,
+        // and a pointer at the present angle.
+        let (sx, y0) = (-62.0, 30.0);
+        let y = |deg: f64| y0 - deg * 1.6;
+        hl(cv, sx, y(0.0), sx, y(25.0));
+        for d in (0..=25).step_by(5) {
+            hl(cv, sx - if d % 10 == 0 { 4.0 } else { 2.5 }, y(d as f64), sx, y(d as f64));
+        }
+        let p = y(clamp(a.alpha_deg, 0.0, 25.0));
+        hl(cv, sx + 1.0, p, sx + 4.0, p - 2.0);
+        hl(cv, sx + 1.0, p, sx + 4.0, p + 2.0);
+        hl(cv, sx + 4.0, p - 2.0, sx + 4.0, p + 2.0);
+        ht(cv, "α", sx, y(25.0) - 6.0, small, Align::Center);
+    } else {
+        ht(cv, &format!("α{:.0}", a.alpha_deg), -half, 46.0, small, Align::Left);
+    }
+    ht(cv, &format!("ⁿ{:.1}", ad.g), -half, 58.0, small, Align::Left);
     let mode = match c.mode {
         Mode::Nav if landing => "ПОС",
         Mode::Nav => "МАРШ",

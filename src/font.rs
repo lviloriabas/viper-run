@@ -102,7 +102,7 @@ const DEGREE: [u8; 5] = [0x00, 0x06, 0x09, 0x09, 0x06];
 
 /// Cyrillic letters with no Latin twin, for the MiG-29's Russian lettering,
 /// drawn as rows top to bottom; the rest share the Latin glyphs (`cell_for`).
-const CYRILLIC: [(char, [&str; 7]); 19] = [
+const CYRILLIC: [(char, [&str; 7]); 20] = [
     ('Б', ["#####", "#....", "#....", "####.", "#...#", "#...#", "####."]),
     ('Г', ["#####", "#....", "#....", "#....", "#....", "#....", "#...."]),
     ('Д', [".###.", ".#.#.", ".#.#.", ".#.#.", ".#.#.", "#####", "#...#"]),
@@ -122,6 +122,8 @@ const CYRILLIC: [(char, [&str; 7]); 19] = [
     ('Ю', ["#..#.", "#.#.#", "#.#.#", "###.#", "#.#.#", "#.#.#", "#..#."]),
     ('Я', [".####", "#...#", "#...#", ".####", "..#.#", ".#..#", "#...#"]),
     ('α', [".....", ".....", ".##.#", "#..#.", "#..#.", "#..#.", ".##.#"]),
+    // The load factor n, kept lower case as Russian displays write it.
+    ('ⁿ', [".....", ".....", "####.", "#...#", "#...#", "#...#", "#...#"]),
 ];
 /// First atlas cell of the Cyrillic glyphs.
 const CYRILLIC_CELL: usize = 98;
