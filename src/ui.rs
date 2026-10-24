@@ -175,10 +175,17 @@ impl<'a> Ui<'a> {
         }
     }
 
-    fn button(&mut self, label: &str, hint: &str, x: f32, y: f32, primary: bool, action: Action) -> f32 {
+    /// Width `button` gives a label and its shortcut.
+    fn button_width(&self, label: &str, hint: &str) -> f32 {
         let hint = self.hint(hint);
         let s = self.s;
-        let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, s.max(2.0) - 1.0) + 8.0 * s } + 16.0 * s;
+        Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, s.max(2.0) - 1.0) + 8.0 * s } + 16.0 * s
+    }
+
+    fn button(&mut self, label: &str, hint: &str, x: f32, y: f32, primary: bool, action: Action) -> f32 {
+        let w = self.button_width(label, hint);
+        let hint = self.hint(hint);
+        let s = self.s;
         let h = 15.0 * s;
         let i = self.buttons.len();
         let hot = self.selected == i || Button { x, y, w, h, action }.hit(self.mouse.0, self.mouse.1);
@@ -775,7 +782,8 @@ impl<'a> Ui<'a> {
         let m = 10.0 * s;
         let mut y = m + 4.0 * s;
         self.cv.text("CONTROLS / CONFIG", m, y, s, CREAM, Align::Left);
-        self.button("CLOSE", "K", w - m - 50.0 * s, y - 7.5 * s, false, Action::Controls);
+        let cw = self.button_width("CLOSE", "K");
+        self.button("CLOSE", "K", w - m - cw, y - 7.5 * s, false, Action::Controls);
         y += 16.0 * s;
         let heading = match (paused_flight, self.pad) {
             (true, _) => "FLIGHT PAUSED",
@@ -837,11 +845,16 @@ impl<'a> Ui<'a> {
             ],
             (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("P", "Freeze flight"), ("ESC", "Pause menu"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("KEYS", "Change them at right")],
         };
-        for &(k, v) in pitch_rows.iter().chain(rest.iter()) {
-            self.cv.text(k, m, y, sm, ACID, Align::Left);
-            self.cv.text(v, m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
-            y += 11.0 * sm;
-            self.cv.rect(m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
+        // The controller map is long: like the key bindings, it gets its own
+        // panel beside the drawer, which then holds only the settings.
+        let rows: Vec<(&str, &str)> = pitch_rows.iter().chain(rest.iter()).copied().collect();
+        if !(self.pad && self.pad_map(&rows, w)) {
+            for &(k, v) in &rows {
+                self.cv.text(k, m, y, sm, ACID, Align::Left);
+                self.cv.text(v, m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
+                y += 11.0 * sm;
+                self.cv.rect(m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
+            }
         }
         y += 6.0 * s;
         let slider = |ui: &mut Ui, y: f32, label: &str, value: String, t: f64, down: Action, up: Action| {
@@ -878,10 +891,39 @@ impl<'a> Ui<'a> {
         let note = if self.pad { "Expo softens the stick round the centre for fine aiming and keeps full travel at the rim. Invert pitch flips the controller too." } else { "Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller." };
         y += self.cv.paragraph(note, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0)) + 2.0 * s;
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
-        self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, self.h - 16.0 * s, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        y += 15.0 * s + 8.0 * s;
+        self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
         if !self.pad {
             self.key_bindings(&st.keys, w, waiting);
         }
+    }
+
+    /// The controller map beside the drawer, in the same frame as the key
+    /// bindings. False when the screen is too narrow for it.
+    fn pad_map(&mut self, rows: &[(&str, &str)], x0: f32) -> bool {
+        let s = self.s;
+        let sm = s.max(2.0) - 1.0;
+        let m = 8.0 * s;
+        let row = 11.0 * sm;
+        let need = rows.iter().map(|&(_, v)| Canvas::text_width(v, sm)).fold(0.0, f32::max) + 72.0 * sm + 2.0 * m;
+        let w = (240.0 * s).max(need);
+        if w > self.w - x0 - 4.0 {
+            return false;
+        }
+        let h = (rows.len() as f32 + 1.0) * row + 12.0 * s + 2.0 * m;
+        let (x, y0) = (x0 + 4.0, (12.0 * s).min((self.h - h).max(0.0)));
+        self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
+        self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
+        let mut y = y0 + m + 4.0 * s;
+        self.cv.text("XBOX CONTROLLER", x + m, y, s, CREAM, Align::Left);
+        y += 12.0 * s;
+        for &(k, v) in rows {
+            self.cv.text(k, x + m, y, sm, ACID, Align::Left);
+            self.cv.text(v, x + m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
+            y += row;
+            self.cv.rect(x + m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
+        }
+        true
     }
 
     /// Key bindings beside the drawer: every flight action with its key and

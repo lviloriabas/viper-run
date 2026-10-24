@@ -94,6 +94,8 @@ struct Opts {
     /// Start speed as a Mach number, for screenshots of transonic effects.
     mach: Option<f64>,
     controls: bool,
+    /// Show the controller prompts, for screenshots without a pad.
+    pad: bool,
     fov: Option<f64>,
     /// Chase camera distance scale, for close-ups of the airframe.
     zoom: Option<f64>,
@@ -187,6 +189,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--controls" => o.controls = true,
+            "--pad" => o.pad = true,
             "--fov" => o.fov = next(&mut i).parse().ok(),
             "--zoom" => o.zoom = next(&mut i).parse().ok(),
             "--bench" => o.bench = next(&mut i).parse().ok(),
@@ -197,7 +200,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--pad] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -1469,7 +1472,7 @@ impl EventHandler for App {
         }
         self.pad_buttons();
         // Keyboard and mouse events hand the prompts back to themselves.
-        if self.pad.active() {
+        if self.pad.active() || self.opts.pad {
             self.pad_active = true;
         } else if !self.pad.state.connected {
             self.pad_active = false;
