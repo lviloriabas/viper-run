@@ -218,7 +218,7 @@ fn leg(m: &mut Mesh, s: f64, rudder: f64) {
     // The pedals travel 7 cm, far more than the real ones, so the knees
     // visibly drop and rise with the yaw input.
     let hip = v3(s * 0.10, 0.60, -3.48);
-    let ankle = v3(s * 0.165, 0.31, -4.25 - s * rudder * 0.07);
+    let ankle = v3(s * 0.165, 0.30, -4.30 - s * rudder * 0.07);
     let knee = joint(hip, ankle, LEG, v3(s * 0.12, 1.0, -0.35));
     let thigh = (knee - hip).norm();
     let shin = (ankle - knee).norm();

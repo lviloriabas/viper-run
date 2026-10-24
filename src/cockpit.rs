@@ -210,6 +210,11 @@ const OUTLINE: [(f64, f64); 16] = [
     (HINGE, 0.579), (0.28, 0.60), (-0.28, 0.60), (-HINGE, 0.579), (-0.34, 0.57), (-0.40, 0.52), (-0.45, 0.44), (-0.47, 0.36),
 ];
 
+/// Knee wells under the centre panel: inner and outer edge (m from the
+/// centreline) and the height of their tops up the panel face, clear of the
+/// HSI and the gauges over them.
+const KNEE_WELL: (f64, f64, f64) = (0.072, 0.232, 0.167);
+
 /// Combiner glass corners in body coordinates: bottom-left, bottom-right, top-right, top-left.
 pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012), v3(0.10, 1.35, -3.958), v3(-0.10, 1.35, -3.958)];
 
@@ -558,11 +563,24 @@ fn build_static(m: &mut Mesh) {
     // Panel face in three parts, the centre and the two folded wings, and
     // its shoulder rim.
     let face = |pts: &[(f64, f64)]| -> Vec<V3> { pts.iter().map(|&(u, v)| pp(u, v, 0.0)).collect() };
-    m.polygon(&face(&[OUTLINE[1], OUTLINE[2], OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
+    // The centre part stops short of the floor either side of the pedestal
+    // under the HSI: two knee wells, boxed in behind, that the shins pass
+    // through to the pedals as in the real cockpit.
+    let (k0, k1, kv) = KNEE_WELL;
+    m.polygon(&face(&[(-HINGE, kv), (HINGE, kv), OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
+    for (a, b) in [(-HINGE, -k1), (-k0, k0), (k1, HINGE)] {
+        m.polygon(&face(&[(a, 0.0), (b, 0.0), (b, kv), (a, kv)]), PANEL);
+    }
     m.polygon(&face(&OUTLINE[2..9]), PANEL.scale(0.96));
     m.polygon(&face(&[OUTLINE[0], OUTLINE[1], OUTLINE[11], OUTLINE[12], OUTLINE[13], OUTLINE[14], OUTLINE[15]]), PANEL.scale(0.96));
-    for k in 0..OUTLINE.len() {
-        let (a, b) = (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()]);
+    let mut rim: Vec<((f64, f64), (f64, f64))> = (0..OUTLINE.len()).filter(|&k| k != 1).map(|k| (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()])).collect();
+    rim.extend([((-HINGE, 0.0), (-k1, 0.0)), ((-k0, 0.0), (k0, 0.0)), ((k1, 0.0), (HINGE, 0.0))]);
+    for s in [-1.0, 1.0] {
+        let (i, o) = (s * k0, s * k1);
+        rim.extend([((o, 0.0), (o, kv)), ((o, kv), (i, kv)), ((i, kv), (i, 0.0))]);
+        m.polygon(&[pp(i, 0.0, -0.20), pp(o, 0.0, -0.20), pp(o, kv, -0.20), pp(i, kv, -0.20)], PANEL.scale(0.45));
+    }
+    for (a, b) in rim {
         m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), pp(b.0, b.1, -0.20), pp(a.0, a.1, -0.20), PANEL.scale(0.7));
     }
     // Glare shield: a hood from the panel top edge up toward the windscreen.
