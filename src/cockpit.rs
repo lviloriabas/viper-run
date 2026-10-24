@@ -86,6 +86,8 @@ const DIM: Col = rgba(0xa2, 0xb8, 0xb6, 1.0);
 const AMBER: Col = rgba(0xe6, 0xbc, 0x7a, 1.0);
 const RED: Col = rgba(0xff, 0x66, 0x54, 1.0);
 pub const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
+/// The ILS-31's single colour, a yellower green than the F-16's.
+const ILS_GREEN: Col = rgba(0xb4, 0xff, 0x6a, 1.0);
 
 // Materials.
 const PANEL: Rgb = Rgb(0.165, 0.185, 0.195);
@@ -1278,6 +1280,11 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             cv.stroke_rect(x0 - pad - 1.0, p[1] - 3.5 * big - pad, tw + 2.0 * pad + 2.0, 7.0 * big + 2.0 * pad, lw, col);
         }
     };
+    if a.kind == crate::sim::Type::Mig29 {
+        ils31(cv, a, c, cam, &world_dir, &at, big, small, lw);
+        cv.set_clip(None);
+        return;
+    }
     let half = 70.0;
     let ad = AirData::of(a);
     let alt_ft = ad.baro_ft;
@@ -1403,9 +1410,159 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     if let Some(wn) = warning {
         ht(cv, wn, 0.0, 22.0, big, Align::Center);
     }
-    let pen = symbology::Pen { dir: &world_dir, at: &at, eye: cam.eye, big, small, lw };
+    let pen = symbology::Pen { dir: &world_dir, at: &at, eye: cam.eye, big, small, lw, col, russian: false };
     symbology::hud(cv, &pen, a, c, c.clock);
     cv.set_clip(None);
+}
+
+
+/// The MiG-29's ILS-31 head-up display: one yellow-green colour, Russian
+/// lettering and metric units. Speed in km/h top left with the Mach number
+/// under it, barometric altitude in metres top right with the radio
+/// altitude (Р) under 1,500 m and the climb rate in m/s; heading in tens
+/// of degrees along the top and the bank scale along the bottom; a fixed
+/// aircraft symbol on the boresight against a pitch ladder every 10
+/// degrees, the velocity vector only for landing; AoA (α) and g lower
+/// left; the mode bottom left (МАРШ route, ПОС landing, БВБ close and ДВБ
+/// long-range air combat, ЗЕМЛЯ ground attack) and the sensor bottom right
+/// (РЛ radar, ТП infrared); warnings in the middle, as the voice warner
+/// calls them.
+#[allow(clippy::too_many_arguments)]
+fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dyn Fn(V3) -> Option<[f32; 2]>, at: &dyn Fn(f64, f64) -> Option<[f32; 2]>, big: f32, small: f32, lw: f32) {
+    use crate::combat::Mode;
+    let col = ILS_GREEN;
+    let ht = |cv: &mut Canvas, s: &str, x: f64, y: f64, scale: f32, align: Align| {
+        if let Some(p) = at(x, y) {
+            cv.text(s, p[0], p[1], scale, col, align);
+        }
+    };
+    let hl = |cv: &mut Canvas, x: f64, y: f64, x2: f64, y2: f64| {
+        if let (Some(p), Some(q)) = (at(x, y), at(x2, y2)) {
+            cv.line(p[0], p[1], q[0], q[1], lw, col);
+        }
+    };
+    let half = 70.0;
+    let ad = AirData::of(a);
+    let radio_m = ad.radar_ft * 0.3048;
+    ht(cv, &format!("{:.0}", (ad.kcas * 1.852 / 5.0).round() * 5.0), -half, -40.0, big, Align::Left);
+    ht(cv, &format!("М{:.2}", ad.mach), -half, -28.0, small, Align::Left);
+    ht(cv, &format!("{:.0}", (ad.baro_ft * 0.3048 / 10.0).round() * 10.0), half, -40.0, big, Align::Right);
+    if radio_m < 1500.0 {
+        ht(cv, &format!("{:.0}Р", radio_m), half, -28.0, small, Align::Right);
+    }
+    ht(cv, &format!("{:+.0}", ad.vs_fpm * 0.00508), half, -16.0, small, Align::Right);
+    ht(cv, &format!("α{:.0}", a.alpha_deg), -half, 46.0, small, Align::Left);
+    ht(cv, &format!("{:.1}", ad.g), -half, 58.0, small, Align::Left);
+    let landing = a.gear > 0.5;
+    let mode = match c.mode {
+        Mode::Nav if landing => "ПОС",
+        Mode::Nav => "МАРШ",
+        Mode::Gun | Mode::Srm => "БВБ",
+        Mode::Mrm => "ДВБ",
+        Mode::Ccip => "ЗЕМЛЯ",
+    };
+    ht(cv, mode, -half, 70.0, small, Align::Left);
+    if c.mode != Mode::Nav {
+        ht(cv, if c.irst { "ТП" } else { "РЛ" }, half, 70.0, small, Align::Right);
+    }
+
+    // Heading scale: ticks every 5 degrees, tens of degrees over them.
+    let base = (a.heading / 5.0).round() * 5.0;
+    for k in -4..=4 {
+        let n = wrap(base + k as f64 * 5.0, 360.0);
+        let diff = wrap180(n - a.heading);
+        if diff.abs() > 11.0 {
+            continue;
+        }
+        let x = diff * 4.0;
+        let major = (n.round() as i64) % 10 == 0;
+        hl(cv, x, -74.0, x, if major { -78.0 } else { -76.0 });
+        if major {
+            ht(cv, &pad((n / 10.0).round() % 36.0, 2), x, -84.0, small, Align::Center);
+        }
+    }
+    hl(cv, 0.0, -72.0, -2.0, -69.0);
+    hl(cv, 0.0, -72.0, 2.0, -69.0);
+
+    // Bank scale: an arc of ticks under the centre, the pointer at the bank.
+    let (bx, by, br) = (0.0, 52.0, 26.0);
+    for b in [-60.0f64, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0] {
+        let t = b * DEG;
+        let r2 = if b == 0.0 { br + 5.0 } else { br + 3.0 };
+        hl(cv, bx + t.sin() * br, by + t.cos() * br, bx + t.sin() * r2, by + t.cos() * r2);
+    }
+    let t = clamp(-a.bank, -65.0, 65.0) * DEG;
+    let tip = (bx + t.sin() * (br - 1.0), by + t.cos() * (br - 1.0));
+    let side = (t.cos() * 2.0, -t.sin() * 2.0);
+    let foot = (bx + t.sin() * (br - 5.0), by + t.cos() * (br - 5.0));
+    hl(cv, tip.0, tip.1, foot.0 + side.0, foot.1 + side.1);
+    hl(cv, tip.0, tip.1, foot.0 - side.0, foot.1 - side.1);
+
+    // Pitch ladder every 10 degrees: the horizon long and broken in the
+    // middle, the climbing bars solid and the diving ones dashed, numbered.
+    let hd = a.heading * DEG;
+    for pitch in (-80i32..=80).step_by(10) {
+        if (pitch as f64 - a.pitch).abs() > 25.0 {
+            continue;
+        }
+        let e = pitch as f64 * DEG;
+        let dir = |az: f64| {
+            let hh = hd + az * DEG;
+            v3(hh.sin() * e.cos(), e.sin(), -hh.cos() * e.cos())
+        };
+        let (i0, i1) = if pitch == 0 { (3.0, 14.0) } else { (3.0, 8.0) };
+        for s in [-1.0, 1.0] {
+            if let (Some(p), Some(q)) = (world_dir(dir(s * i0)), world_dir(dir(s * i1))) {
+                if pitch < 0 {
+                    cv.dashed(p[0], p[1], q[0], q[1], lw, 4.0 * big, 3.0 * big, col);
+                } else {
+                    cv.line(p[0], p[1], q[0], q[1], lw, col);
+                }
+                if pitch != 0 {
+                    cv.text(&format!("{}", pitch.abs()), q[0] + s as f32 * 3.0 * big, q[1], small, col, if s > 0.0 { Align::Left } else { Align::Right });
+                }
+            }
+        }
+    }
+
+    // Fixed aircraft symbol on the boresight: wings, a fin and a centre ring.
+    if let Some(p) = at(0.0, 0.0) {
+        let s = big * 2.2;
+        cv.circle(p[0], p[1], s, lw, col);
+        cv.line(p[0] - s * 4.0, p[1], p[0] - s, p[1], lw, col);
+        cv.line(p[0] + s, p[1], p[0] + s * 4.0, p[1], lw, col);
+        cv.line(p[0], p[1] - s, p[0], p[1] - s * 2.2, lw, col);
+    }
+    // Landing: the velocity vector, a ring with stubs.
+    if landing {
+        if let Some(f) = world_dir(a.vel.norm()) {
+            let s = big * 1.6;
+            cv.circle(f[0], f[1], s, lw, col);
+            cv.line(f[0] - s * 2.2, f[1], f[0] - s, f[1], lw, col);
+            cv.line(f[0] + s, f[1], f[0] + s * 2.2, f[1], lw, col);
+        }
+    }
+
+    let warning = if a.fuel <= 0.0 {
+        Some("ДВИГАТЕЛЬ")
+    } else if a.agl < 150.0 && a.vs < -10.0 {
+        Some("ОПАСНАЯ ВЫСОТА")
+    } else if a.alpha_deg > 25.0 {
+        Some("КРИТИЧЕСКИЙ УГОЛ")
+    } else if a.g_smooth > a.kind.g_limit(a.mass, a.mach) + 0.15 {
+        Some("ПЕРЕГРУЗКА")
+    } else if ad.overspeed() {
+        Some("СКОРОСТЬ")
+    } else if a.fuel < 450.0 {
+        Some("ОСТАТОК ТОПЛИВА")
+    } else {
+        None
+    };
+    if let Some(wn) = warning {
+        ht(cv, wn, 0.0, 22.0, small, Align::Center);
+    }
+    let pen = symbology::Pen { dir: world_dir, at, eye: cam.eye, big, small, lw, col, russian: true };
+    symbology::hud(cv, &pen, a, c, c.clock);
 }
 
 /// Camera in body axes, for the cockpit pass and the combiner projection.

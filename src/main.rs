@@ -300,6 +300,9 @@ struct App {
     mouse_pos: (f32, f32),
     grabbed: bool,
     look: (f64, f64),
+    /// Chase camera orbit: yaw (positive swings the camera to the jet's
+    /// right, so the view turns left; the controls feed it negated, so
+    /// right looks right as in the cockpit) and pitch.
     chase_look: (f64, f64),
     controls_open: bool,
     controls_was_flying: bool,
@@ -454,7 +457,7 @@ impl App {
             if self.view == View::Cockpit {
                 self.look = (clamp(y * DEG, -155.0 * DEG, 155.0 * DEG), clamp(p * DEG, -85.0 * DEG, 85.0 * DEG));
             } else {
-                self.chase_look = (y * DEG, p * DEG);
+                self.chase_look = (-y * DEG, p * DEG);
             }
         }
         self.airbrake = self.opts.input.airbrake;
@@ -1065,7 +1068,7 @@ impl App {
         }
         let (lx, ly) = self.pad_look;
         self.look = (lx * 150.0 * DEG, clamp(LOOK_PITCH + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
-        self.chase_look = (lx * PI, -ly * 60.0 * DEG);
+        self.chase_look = (-lx * PI, -ly * 60.0 * DEG);
     }
 
     /// While frozen the right stick pans the view and leaves it there, so a
@@ -1077,7 +1080,7 @@ impl App {
             self.look.0 = clamp(self.look.0 + x * 1.6 * dt, -155.0 * DEG, 155.0 * DEG);
             self.look.1 = clamp(self.look.1 + y * 1.2 * dt, -85.0 * DEG, 85.0 * DEG);
         } else {
-            self.chase_look.0 += x * 1.6 * dt;
+            self.chase_look.0 -= x * 1.6 * dt;
             self.chase_look.1 = clamp(self.chase_look.1 - y * 1.2 * dt, -65.0 * DEG, 65.0 * DEG);
         }
     }
@@ -1832,7 +1835,7 @@ impl EventHandler for App {
                 self.look.0 = clamp(self.look.0 + dx * 0.003, -155.0 * DEG, 155.0 * DEG);
                 self.look.1 = clamp(self.look.1 - dy * 0.003, -85.0 * DEG, 85.0 * DEG);
             } else {
-                self.chase_look.0 += dx * 0.003;
+                self.chase_look.0 -= dx * 0.003;
                 self.chase_look.1 = clamp(self.chase_look.1 + dy * 0.003, -65.0 * DEG, 65.0 * DEG);
             }
             return;

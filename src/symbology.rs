@@ -30,6 +30,10 @@ pub struct Pen<'a> {
     pub big: f32,
     pub small: f32,
     pub lw: f32,
+    /// Symbology colour: the F-16's green, or the ILS-31's yellower one.
+    pub col: Col,
+    /// Russian lettering and metric units, as on the MiG-29's ILS-31.
+    pub russian: bool,
 }
 
 impl Pen<'_> {
@@ -38,7 +42,7 @@ impl Pen<'_> {
     }
     fn text(&self, cv: &mut Canvas, s: &str, x: f64, y: f64, scale: f32, align: Align) {
         if let Some(p) = (self.at)(x, y) {
-            cv.text(s, p[0], p[1], scale, HUD, align);
+            cv.text(s, p[0], p[1], scale, self.col, align);
         }
     }
 }
@@ -59,11 +63,16 @@ pub fn stores_line(c: &Combat) -> String {
 }
 
 /// The selected weapon, its ammunition and what is left of it, for the HUD.
-fn selected(c: &Combat) -> String {
+fn selected(c: &Combat, russian: bool) -> String {
     let (what, n) = match c.weapon_left() {
         ("", _) => return String::new(),
         w => w,
     };
+    if russian {
+        // The GSh-301 and the R- and FAB- stores in their own letters.
+        let name = if what.ends_with("MM") { "ГШ-301".to_string() } else { what.replacen("R-", "Р-", 1).replacen("FAB-", "ФАБ-", 1) };
+        return format!("{name} {n}");
+    }
     if n == 0 {
         format!("{what} EMPTY")
     } else {
@@ -76,12 +85,13 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
     let (big, lw) = (pen.big, pen.lw);
     let half = 70.0;
     let flash = (time * 3.0).fract() < 0.6;
-    pen.text(cv, &selected(c), -half, 82.0, pen.small, Align::Left);
+    let ru = pen.russian;
+    pen.text(cv, &selected(c, ru), -half, 82.0, pen.small, Align::Left);
     if c.hp < 100.0 {
-        pen.text(cv, &format!("DMG {}", (100.0 - c.hp).round() as i64), half, 82.0, pen.small, Align::Right);
+        pen.text(cv, &format!("{} {}", if ru { "ПОВР" } else { "DMG" }, (100.0 - c.hp).round() as i64), half, 82.0, pen.small, Align::Right);
     }
     if (c.warn > 0.0 || c.inbound().next().is_some()) && flash {
-        pen.text(cv, "MISSILE", 0.0, 10.0, big, Align::Center);
+        pen.text(cv, if ru { "РАКЕТА" } else { "MISSILE" }, 0.0, 10.0, big, Align::Center);
     }
     let ax = a.q.axes();
     let lock = c.lock.and_then(|w| c.track(w, a));
@@ -91,15 +101,18 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
         match pen.point(tp) {
             Some(p) => {
                 let s = 5.0 * big;
-                cv.stroke_rect(p[0] - s, p[1] - s, 2.0 * s, 2.0 * s, lw, HUD);
+                cv.stroke_rect(p[0] - s, p[1] - s, 2.0 * s, 2.0 * s, lw, pen.col);
             }
             None => locator(cv, pen, a, tp),
         }
         let closure = -(tv - a.vel).dot((tp - a.pos).norm()) * 1.94384;
         // An IRST track has a range only inside the laser's reach.
         let ranged = !c.irst || c.laser_range(a).is_some();
+        // The ILS-31 gives range in kilometres, the laser's ЛД.
         let text = if !ranged {
-            "LASER ---".to_string()
+            if ru { "ЛД ---" } else { "LASER ---" }.to_string()
+        } else if ru {
+            format!("Д {:.1}", range / 1000.0)
         } else if range < 3700.0 {
             format!("{:.1} KFT", range * 3.28084 / 1000.0)
         } else {
@@ -107,10 +120,12 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
         };
         pen.text(cv, &text, half, 94.0, pen.small, Align::Right);
         if matches!(c.lock, Some(Who::Bandit(_))) && ranged {
-            pen.text(cv, &format!("VC {}", closure.round() as i64), half, 106.0, pen.small, Align::Right);
+            let vc = if ru { format!("V {}", (closure * 1.852).round() as i64) } else { format!("VC {}", closure.round() as i64) };
+            pen.text(cv, &vc, half, 106.0, pen.small, Align::Right);
         }
     }
-    if c.irst {
+    // The MiG's own HUD names its sensor, radar or IRST.
+    if c.irst && !ru {
         pen.text(cv, "IRST", -half, 106.0, pen.small, Align::Left);
     }
     match c.mode {
@@ -130,24 +145,24 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
                 }
             }
             if left.len() > 1 {
-                cv.polyline(&left, lw, false, HUD);
-                cv.polyline(&right, lw, false, HUD);
+                cv.polyline(&left, lw, false, pen.col);
+                cv.polyline(&right, lw, false, pen.col);
             }
             // LCOS pipper at the target's range, or 2,000 ft without a lock.
             let range = lock.map(|(p, _)| (p - gun).len()).filter(|&r| matches!(c.lock, Some(Who::Bandit(_))) && r < 1600.0).unwrap_or(GUN_DEFAULT);
             if let Some(p) = c.sight.at_range(gun, range).and_then(|p| pen.point(p)) {
                 let r = 9.0 * big;
-                cv.circle(p[0], p[1], r, lw, HUD);
-                cv.disc(p[0], p[1], 1.2 * big, HUD);
+                cv.circle(p[0], p[1], r, lw, pen.col);
+                cv.disc(p[0], p[1], 1.2 * big, pen.col);
                 if lock.is_some() && range != GUN_DEFAULT {
                     // Range bar: the ring's arc shrinks as the range closes, full at 4,000 ft.
                     let f = clamp(range / 1220.0, 0.0, 1.0) as f32;
-                    cv.arc(p[0], p[1], r + 2.5 * big, -std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2 + f * std::f32::consts::TAU, lw * 1.5, HUD);
+                    cv.arc(p[0], p[1], r + 2.5 * big, -std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2 + f * std::f32::consts::TAU, lw * 1.5, pen.col);
                 }
                 if let Some((tp, _)) = lock {
                     let on = pen.point(tp).is_some_and(|t| ((t[0] - p[0]).powi(2) + (t[1] - p[1]).powi(2)).sqrt() < r);
                     if on && range < 1100.0 && flash {
-                        pen.text(cv, "SHOOT", 0.0, -36.0, big, Align::Center);
+                        pen.text(cv, if ru { "ПР" } else { "SHOOT" }, 0.0, -36.0, big, Align::Center);
                     }
                 }
             }
@@ -158,22 +173,17 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
             // Allowable steering error circle with the steering dot on the target.
             if let Some(cen) = (pen.at)(0.0, 0.0) {
                 let edge = (pen.at)(0.0, 30.0).map(|e| e[1] - cen[1]).unwrap_or(40.0);
-                cv.circle(cen[0], cen[1], edge, lw, HUD);
+                cv.circle(cen[0], cen[1], edge, lw, pen.col);
                 if let Some((tp, _)) = lock {
                     let d = a.q.conj().rotate((tp - a.pos).norm());
                     let (x, y) = (d.x.atan2(-d.z) * 650.0, -d.y.atan2(-d.z) * 650.0);
                     let k = (30.0 / (x * x + y * y).sqrt().max(1e-6)).min(1.0);
                     if let Some(p) = (pen.at)(x * k, y * k) {
-                        cv.disc(p[0], p[1], 2.2 * big, HUD);
+                        cv.disc(p[0], p[1], 2.2 * big, pen.col);
                     }
                 }
             }
-            if c.shoot {
-                pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
-                if flash {
-                    pen.text(cv, "SHOOT", 0.0, -36.0, big, Align::Center);
-                }
-            }
+            shoot_cue(cv, pen, c, half, big, flash);
         }
         Mode::Srm | Mode::Mrm => {
             // Seeker circle: on its target when tracking (solid), on the
@@ -182,38 +192,47 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
             if let (Some(p), Some(e)) = ((pen.dir)(look), (pen.dir)((look + ax.up * (2.5 * DEG)).norm())) {
                 let r = ((p[1] - e[1]).abs()).max(6.0 * big);
                 if c.seeker.is_some() {
-                    cv.circle(p[0], p[1], r, lw * 1.5, HUD);
+                    cv.circle(p[0], p[1], r, lw * 1.5, pen.col);
                 } else {
                     for k in 0..8 {
                         let a0 = k as f32 * std::f32::consts::TAU / 8.0;
-                        cv.arc(p[0], p[1], r, a0, a0 + 0.45, lw, HUD);
+                        cv.arc(p[0], p[1], r, a0, a0 + 0.45, lw, pen.col);
                     }
                 }
             }
-            if c.shoot {
-                pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
-                if flash {
-                    pen.text(cv, "SHOOT", 0.0, -36.0, big, Align::Center);
-                }
-            }
+            shoot_cue(cv, pen, c, half, big, flash);
         }
         Mode::Ccip => {
             if let Some((p, tof)) = c.ccip {
                 let fpm = (pen.dir)(a.vel.norm());
                 if let Some(q) = pen.point(p) {
                     let r = 6.0 * big;
-                    cv.circle(q[0], q[1], r, lw, HUD);
-                    cv.disc(q[0], q[1], 1.2 * big, HUD);
+                    cv.circle(q[0], q[1], r, lw, pen.col);
+                    cv.disc(q[0], q[1], 1.2 * big, pen.col);
                     // Bomb fall line from the flight-path marker down to the pipper.
                     if let Some(f) = fpm {
                         let (dx, dy) = (q[0] - f[0], q[1] - f[1]);
                         let len = (dx * dx + dy * dy).sqrt().max(1.0);
-                        cv.line(f[0], f[1], q[0] - dx / len * r, q[1] - dy / len * r, lw, HUD);
+                        cv.line(f[0], f[1], q[0] - dx / len * r, q[1] - dy / len * r, lw, pen.col);
                     }
                 }
-                pen.text(cv, &format!("TOF {tof:.1}"), -half, 94.0, pen.small, Align::Left);
+                pen.text(cv, &format!("{} {tof:.1}", if ru { "Т" } else { "TOF" }), -half, 94.0, pen.small, Align::Left);
             }
         }
+    }
+}
+
+/// In range: IN RNG and a flashing SHOOT, or on the ILS-31 a flashing ПР
+/// (launch authorised).
+fn shoot_cue(cv: &mut Canvas, pen: &Pen, c: &Combat, half: f64, big: f32, flash: bool) {
+    if !c.shoot {
+        return;
+    }
+    if !pen.russian {
+        pen.text(cv, "IN RNG", -half, 94.0, pen.small, Align::Left);
+    }
+    if flash {
+        pen.text(cv, if pen.russian { "ПР" } else { "SHOOT" }, 0.0, -36.0, big, Align::Center);
     }
 }
 
@@ -487,7 +506,7 @@ fn jhmcs(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam:
     let low = cy + h * 0.24;
     cv.text(if c.mode == Mode::Nav { "OFF" } else { "ARM" }, cx - dx, low, sm, col, Align::Center);
     cv.text(c.mode.label(), cx - dx, low + 9.0 * s, sm, col, Align::Center);
-    cv.text(&selected(c), cx - dx, low + 18.0 * s, sm, col, Align::Center);
+    cv.text(&selected(c, false), cx - dx, low + 18.0 * s, sm, col, Align::Center);
     let lock = c.lock.and_then(|l| c.track(l, a));
     let range = lock.map(|(p, _)| format!("{:.1}", (p - a.pos).len() / 1852.0)).unwrap_or_else(|| "XXX".to_string());
     cv.text(&range, cx + dx, low, sm, col, Align::Center);
@@ -566,8 +585,8 @@ fn jhmcs(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam:
 /// Shchel-3UM, the MiG-29S's helmet sight: not a display but a collimated
 /// reticle on a monocle before the right eye, which the head tracker turns
 /// into a line of sight for the IRST, the radar and the missile seekers.
-/// It shows the aiming ring and two lamps: target captured (ZAKHVAT) and
-/// launch permitted (PR); no flight data.
+/// It shows the aiming ring and two lamps: target captured (ЗАХВАТ) and
+/// launch permitted (ПР); no flight data.
 fn shchel(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, time: f64) {
     let sm = (s - 1.0).max(1.0);
     let col = rgba(0xff, 0xb0, 0x40, 0.85);
@@ -577,9 +596,9 @@ fn shchel(cv: &mut Canvas, w: f32, h: f32, s: f32, c: &Combat, time: f64) {
     cv.disc(cx, cy, 1.5, col);
     let captured = c.seeker.is_some() || c.lock.is_some();
     if captured {
-        cv.text("ZAKHVAT", cx, cy + r + 8.0 * sm, sm, col, Align::Center);
+        cv.text("ЗАХВАТ", cx, cy + r + 8.0 * sm, sm, col, Align::Center);
     }
     if c.shoot && (time * 3.0).fract() < 0.6 {
-        cv.text("PR", cx, cy - r - 8.0 * sm, s, col, Align::Center);
+        cv.text("ПР", cx, cy - r - 8.0 * sm, s, col, Align::Center);
     }
 }

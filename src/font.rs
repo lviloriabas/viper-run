@@ -100,6 +100,45 @@ const GLYPHS: [[u8; 5]; 95] = [
 ];
 const DEGREE: [u8; 5] = [0x00, 0x06, 0x09, 0x09, 0x06];
 
+/// Cyrillic letters with no Latin twin, for the MiG-29's Russian lettering,
+/// drawn as rows top to bottom; the rest share the Latin glyphs (`cell_for`).
+const CYRILLIC: [(char, [&str; 7]); 19] = [
+    ('Б', ["#####", "#....", "#....", "####.", "#...#", "#...#", "####."]),
+    ('Г', ["#####", "#....", "#....", "#....", "#....", "#....", "#...."]),
+    ('Д', [".###.", ".#.#.", ".#.#.", ".#.#.", ".#.#.", "#####", "#...#"]),
+    ('Ж', ["#.#.#", "#.#.#", ".###.", "..#..", ".###.", "#.#.#", "#.#.#"]),
+    ('З', [".###.", "#...#", "....#", "..##.", "....#", "#...#", ".###."]),
+    ('И', ["#...#", "#...#", "#..##", "#.#.#", "##..#", "#...#", "#...#"]),
+    ('Л', ["..###", ".#..#", ".#..#", ".#..#", ".#..#", ".#..#", "#...#"]),
+    ('П', ["#####", "#...#", "#...#", "#...#", "#...#", "#...#", "#...#"]),
+    ('У', ["#...#", "#...#", "#...#", ".####", "....#", "#...#", ".###."]),
+    ('Ф', ["..#..", ".###.", "#.#.#", "#.#.#", ".###.", "..#..", "..#.."]),
+    ('Ц', ["#..#.", "#..#.", "#..#.", "#..#.", "#..#.", "#####", "....#"]),
+    ('Ч', ["#...#", "#...#", "#...#", ".####", "....#", "....#", "....#"]),
+    ('Ш', ["#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####"]),
+    ('Ы', ["#...#", "#...#", "#...#", "##..#", "#.#.#", "#.#.#", "##..#"]),
+    ('Ь', ["#....", "#....", "#....", "####.", "#...#", "#...#", "####."]),
+    ('Э', [".###.", "#...#", "....#", "..###", "....#", "#...#", ".###."]),
+    ('Ю', ["#..#.", "#.#.#", "#.#.#", "###.#", "#.#.#", "#.#.#", "#..#."]),
+    ('Я', [".####", "#...#", "#...#", ".####", "..#.#", ".#..#", "#...#"]),
+    ('α', [".....", ".....", ".##.#", "#..#.", "#..#.", "#..#.", ".##.#"]),
+];
+/// First atlas cell of the Cyrillic glyphs.
+const CYRILLIC_CELL: usize = 98;
+
+/// A glyph drawn as rows, as the column bytes `GLYPHS` holds.
+fn columns(rows: &[&str; 7]) -> [u8; 5] {
+    let mut cols = [0u8; 5];
+    for (y, row) in rows.iter().enumerate() {
+        for (x, c) in row.chars().enumerate() {
+            if c == '#' {
+                cols[x] |= 1 << y;
+            }
+        }
+    }
+    cols
+}
+
 pub const CELL: usize = 8;
 pub const COLS: usize = 16;
 pub const ATLAS_W: usize = COLS * CELL;
@@ -118,7 +157,22 @@ pub fn cell_for(ch: char) -> usize {
         '−' | '–' | '—' => '-' as usize - 32,
         '′' => '\'' as usize - 32,
         '″' => '"' as usize - 32,
-        _ => '?' as usize - 32,
+        // Cyrillic capitals that look like Latin ones.
+        'А' => 'A' as usize - 32,
+        'В' => 'B' as usize - 32,
+        'Е' => 'E' as usize - 32,
+        'К' => 'K' as usize - 32,
+        'М' => 'M' as usize - 32,
+        'Н' => 'H' as usize - 32,
+        'О' => 'O' as usize - 32,
+        'Р' => 'P' as usize - 32,
+        'С' => 'C' as usize - 32,
+        'Т' => 'T' as usize - 32,
+        'Х' => 'X' as usize - 32,
+        _ => match CYRILLIC.iter().position(|(c, _)| *c == ch) {
+            Some(i) => CYRILLIC_CELL + i,
+            None => '?' as usize - 32,
+        },
     }
 }
 
@@ -140,6 +194,9 @@ pub fn atlas() -> Vec<u8> {
         put(i, g);
     }
     put(DEGREE_CELL, &DEGREE);
+    for (i, (_, rows)) in CYRILLIC.iter().enumerate() {
+        put(CYRILLIC_CELL + i, &columns(rows));
+    }
     let (cx, cy) = ((SOLID % COLS) * CELL, (SOLID / COLS) * CELL);
     for y in 0..CELL {
         for x in 0..CELL {
