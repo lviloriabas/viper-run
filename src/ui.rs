@@ -812,6 +812,7 @@ impl<'a> Ui<'a> {
                 ("{LT} GROUND", "Wheel brakes"),
                 ("{X} + {LS}", "Rudder"),
                 ("{L3}", "Chaff and flare"),
+                ("{L3} + {R3}", "Limiters off / on"),
                 ("{A}", "Next weapon"),
                 ("{B}", "Airbrake"),
                 ("{Y}", "Cockpit / chase camera"),
@@ -832,6 +833,7 @@ impl<'a> Ui<'a> {
                 ("{LT} GROUND", "Wheel brakes"),
                 ("{LB} {RB}", "Rudder left / right"),
                 ("{L3}", "Chaff and flare"),
+                ("{L3} + {R3}", "Limiters off / on"),
                 ("{DU}", "Next weapon"),
                 ("{B}", "Airbrake"),
                 ("{X}", "Landing gear"),
@@ -843,7 +845,7 @@ impl<'a> Ui<'a> {
                 ("{B} FROZEN", "Pause menu"),
                 ("{BACK}", "Controls and settings"),
             ],
-            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("P", "Freeze flight"), ("ESC", "Pause menu"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("KEYS", "Change them at right")],
+            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("ALT+O", "Limiters off / on"), ("P", "Freeze flight"), ("ESC", "Pause menu"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("KEYS", "Change them at right")],
         };
         // The controller map is long: like the key bindings, it gets its own
         // panel beside the drawer, which then holds only the settings.
@@ -991,6 +993,10 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if stall(a) {
         w.push(Warn { text: "STALL", color: RED });
     }
+    // Past the limits the overridden computer no longer holds.
+    if let Some(text) = a.flcs.danger {
+        w.push(Warn { text, color: RED });
+    }
     if a.gear < 0.95 && !a.on_ground && a.agl < 300.0 && a.vs < -2.0 && a.airspeed_kt < 220.0 {
         w.push(Warn { text: "GEAR UP", color: RED });
     }
@@ -1135,9 +1141,22 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
 
 /// The flight computer holding the jet to its limits against the stick:
 /// steady red, so a pull that goes no further reads as protection.
+/// With the limiters overridden it says so in amber, and in red what the
+/// jet is doing past them.
 fn limiter_line(cv: &mut Canvas, w: f32, y: f32, s: f32, a: &Aircraft) {
+    let name = if a.kind == crate::sim::Type::F16 { "FLCS" } else { "SOS" };
+    if a.flcs.limits_off && !a.crashed {
+        let (label, col) = match a.flcs.danger {
+            Some(text) => (format!("{text} // {name} LIMITERS OFF"), RED),
+            None => (format!("{name} LIMITERS OFF"), AMBER),
+        };
+        let tw = Canvas::text_width(&label, s);
+        cv.rect(w * 0.5 - tw * 0.5 - 6.0 * s, y - 7.0 * s, tw + 12.0 * s, 14.0 * s, rgba(4, 10, 6, 0.55));
+        cv.text(&label, w * 0.5, y, s, col, Align::Center);
+        return;
+    }
     if let Some(text) = a.flcs.limit.filter(|_| !a.crashed) {
-        let label = format!("{} {text}", if a.kind == crate::sim::Type::F16 { "FLCS" } else { "SOS" });
+        let label = format!("{name} {text}");
         let tw = Canvas::text_width(&label, s);
         cv.rect(w * 0.5 - tw * 0.5 - 6.0 * s, y - 7.0 * s, tw + 12.0 * s, 14.0 * s, rgba(4, 10, 6, 0.55));
         cv.text(&label, w * 0.5, y, s, RED, Align::Center);

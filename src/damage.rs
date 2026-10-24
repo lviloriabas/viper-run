@@ -11,7 +11,7 @@
 //! and some losses end the flight at once: the pilot killed, a wing or the
 //! tail shot away, the structure broken or a burning tank exploding.
 use crate::math::*;
-use crate::sim::{BattleDamage, Type};
+use crate::sim::{BattleDamage, Breakup, Type};
 use crate::weapons::hits_box;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -301,6 +301,19 @@ impl Hull {
         hit.sort_unstable();
         hit.dedup();
         hit.into_iter().map(|i| layout(self.kind)[i].name).collect()
+    }
+}
+
+/// The parts a loss tears off the airframe: the wing or the tail shot away,
+/// or, when the structure breaks up, a wing (which one by `pick`, 0..1) and
+/// the tail with it. Other losses leave the airframe whole.
+pub fn breakup(cause: &str, pick: f64) -> Breakup {
+    match cause {
+        "LEFT WING SHOT OFF" => Breakup { wing: [true, false], tail: false },
+        "RIGHT WING SHOT OFF" => Breakup { wing: [false, true], tail: false },
+        "TAIL SHOT AWAY" => Breakup { wing: [false, false], tail: true },
+        "AIRFRAME BROKE UP" => Breakup { wing: [pick < 0.5, pick >= 0.5], tail: true },
+        _ => Breakup::default(),
     }
 }
 

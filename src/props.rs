@@ -135,8 +135,13 @@ impl Props for Scene<'_> {
             let t = crate::airframe::AIM9_TIP;
             v3(if i == 0 { -t.x } else { t.x }, t.y, t.z)
         };
+        // What hung under a wing that broke off went with it.
+        let kept = |a: &Aircraft, at: V3| !a.lost.wing[(at.x > 0.0) as usize] || at.x.abs() < a.kind.break_station();
         if let Some(a) = self.player {
             for (i, st) in c.loadout.stations.iter().enumerate().filter(|(_, s)| s.loaded) {
+                if !kept(a, st.at) {
+                    continue;
+                }
                 if st.tip {
                     w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st.at), eye), NONE);
                     continue;
@@ -157,6 +162,9 @@ impl Props for Scene<'_> {
         }
         for wr in &c.wrecks {
             w.draw_jet(ctx, vp, cam, &wr.jet, BURNT);
+        }
+        for d in &c.debris {
+            w.draw_debris(ctx, vp, cam, d.kind, d.piece, d.pos, d.q, if d.burnt { BURNT } else { NONE });
         }
         for ms in &c.missiles {
             if (ms.pos - eye).len() < 9000.0 && ms.vel.len() > 1.0 {

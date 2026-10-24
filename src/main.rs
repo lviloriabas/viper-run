@@ -93,6 +93,8 @@ struct Opts {
     vision: Option<[f64; 3]>,
     /// Start speed as a Mach number, for screenshots of transonic effects.
     mach: Option<f64>,
+    /// Parts broken off the jet at the start, to show it coming apart.
+    breakup: Option<sim::Breakup>,
     controls: bool,
     /// Show the controller prompts, for screenshots without a pad.
     pad: bool,
@@ -152,6 +154,7 @@ fn parse_opts() -> Opts {
                         }
                         "throttle" => o.input.throttle_up = true,
                         "brake" => o.input.airbrake = true,
+                        "nolimit" => o.input.limiters_off = true,
                         "gear" => o.input.gear_down = true,
                         "flaps" => o.input.flaps = true,
                         "wheelbrake" => o.input.wheel_brake = true,
@@ -165,6 +168,10 @@ fn parse_opts() -> Opts {
             }
             "--screen" => o.screen = Some(next(&mut i)),
             "--mach" => o.mach = next(&mut i).parse().ok(),
+            "--break" => {
+                let s = next(&mut i);
+                o.breakup = Some(sim::Breakup { wing: [s == "left", s == "right"], tail: s == "tail" });
+            }
             "--vision" => {
                 let v: Vec<f64> = next(&mut i).split(',').filter_map(|s| s.parse().ok()).collect();
                 o.vision = Some([v.first().copied().unwrap_or(1.0), v.get(1).copied().unwrap_or(0.0), v.get(2).copied().unwrap_or(0.0)]);
@@ -200,7 +207,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--controls] [--pad] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -264,6 +271,8 @@ struct App {
     /// Decaying jolt added to the camera shake by a light-off or an impact.
     kick: f64,
     crash_time: f64,
+    /// The player's jet broken in the air and still falling.
+    falling: bool,
 
     keys: HashSet<KeyCode>,
     pad: Gamepad,
@@ -281,6 +290,8 @@ struct App {
     /// Keyboard pitch, ramped so a tap gives a partial pull and a hold a full one.
     key_pitch: f64,
     airbrake: bool,
+    /// The FLCS limiters overridden (ALT+O, or both sticks clicked).
+    limiters_off: bool,
     /// Landing gear handle down, and the flaps switch.
     gear_lever: bool,
     flaps_switch: bool,
@@ -396,6 +407,7 @@ impl App {
             breaths: 0,
             kick: 0.0,
             crash_time: 0.0,
+            falling: false,
             keys: HashSet::new(),
             pad: Gamepad::new(),
             pad_active: false,
@@ -406,6 +418,7 @@ impl App {
             mouse: (0.0, 0.0),
             key_pitch: 0.0,
             airbrake: false,
+            limiters_off: false,
             gear_lever: false,
             flaps_switch: false,
             rebinding: None,
@@ -445,9 +458,13 @@ impl App {
             }
         }
         self.airbrake = self.opts.input.airbrake;
+        self.limiters_off = self.opts.input.limiters_off;
         if let (Some(mach), Some(a)) = (self.opts.mach, self.aircraft.as_mut()) {
             a.vel = a.vel.norm() * mach * sim::atmosphere_at(a.pos.y).sound;
             a.update(0.0, &Input::default());
+        }
+        if let (Some(parts), Some(a)) = (self.opts.breakup, self.aircraft.as_mut()) {
+            a.lose(parts);
         }
         if let (true, Some(a)) = (self.opts.irst, self.aircraft.as_ref()) {
             self.combat.toggle_irst(a);
@@ -470,6 +487,7 @@ impl App {
                     }
                     // Let an impact play out, so a screenshot can show it.
                     State::Transition => {
+                        self.fall(FIXED_DT);
                         self.advance_effects(FIXED_DT);
                         self.flash = (self.flash - FIXED_DT * 2.4).max(0.0);
                     }
@@ -577,6 +595,8 @@ impl App {
         self.hands = Hands { throttle: self.mission.start_throttle, ..Default::default() };
         self.airbrake = false;
         self.key_pitch = 0.0;
+        self.limiters_off = false;
+        self.falling = false;
         self.keys.clear();
         self.center_stick();
         (self.zoom_pad, self.zoom) = (false, 0.0);
@@ -801,11 +821,18 @@ impl App {
         }
         if kind == Outcome::ShotDown {
             // The jet comes apart in the air: it stops being flown, and the
-            // outside camera circles the fireball.
+            // outside camera circles the fireball, or follows what is left
+            // of it down when a wing or the tail was shot away.
+            let lost = self.combat.player_lost;
             let a = self.aircraft.as_mut().unwrap();
-            a.crashed = true;
-            a.impact_speed = a.speed;
-            a.collision_label = "shot down";
+            if lost.any() {
+                a.lose(lost);
+                self.falling = true;
+            } else {
+                a.crashed = true;
+                a.impact_speed = a.speed;
+                a.collision_label = "shot down";
+            }
         }
         let a = self.aircraft.as_ref().unwrap();
         self.mission.score = if self.kind == MissionKind::Gates { self.mission.final_score() } else { self.combat.score(&self.mission) };
@@ -814,6 +841,9 @@ impl App {
         self.transition_kind = kind;
         self.transition_timer = match kind {
             Outcome::Win => 1.35,
+            // A broken jet falls until it hits (or for at most this long),
+            // then the fireball plays as after any impact.
+            Outcome::Crash | Outcome::ShotDown if self.falling => 20.0,
             // Long enough to watch the fireball from the wreck camera.
             Outcome::Crash | Outcome::ShotDown => 2.6,
             Outcome::Timeout => 0.85,
@@ -830,6 +860,14 @@ impl App {
                 self.audio.tone(520.0, 0.18, 0.04, Wave::Square, 0.0);
                 self.audio.tone(780.0, 0.26, 0.04, Wave::Square, 0.17);
                 self.audio.tone(1040.0, 0.36, 0.035, Wave::Square, 0.37);
+            }
+            Outcome::Crash if self.falling => {
+                self.flash_color = [255, 150, 70];
+                self.flash = 0.5;
+                self.toast_timer = 0.0;
+                self.kick = 0.8;
+                self.crash_time = self.time;
+                self.audio.burst(0.9, 3.0, 900.0, 60.0, 0.0);
             }
             Outcome::Crash => {
                 let a = self.aircraft.as_ref().unwrap();
@@ -930,6 +968,7 @@ impl App {
             throttle_down: k(Bind::ThrottleDown) || down,
             afterburner: k(Bind::Afterburner) || burner,
             airbrake: self.airbrake,
+            limiters_off: self.limiters_off,
             gear_down: self.gear_lever,
             flaps: self.flaps_switch,
             wheel_brake: k(Bind::WheelBrake) || pad.state.lt > 0.3 && brake_clear && on_ground,
@@ -988,11 +1027,17 @@ impl App {
                 PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
                 PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
             };
+            // Both sticks clicked together: the limiter override, which then
+            // drops no countermeasures.
+            let both = self.pad.pressed(LS) && self.pad.held(RS) || self.pad.pressed(RS) && self.pad.held(LS);
+            if both {
+                self.toggle_limiters();
+            }
             // The MiG has no MFDs: its left d-pad works the radar / IRST switch.
             let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
             for (button, b) in actions.iter().copied().chain(airbrake) {
                 let b = if mig && b == Bind::LeftMfd { Bind::Sensor } else { b };
-                if self.pad.pressed(button) {
+                if self.pad.pressed(button) && !(both && button == LS) {
                     self.bind_pressed(b);
                 }
             }
@@ -1045,9 +1090,22 @@ impl App {
             m.time_left = (m.time_left - dt).max(0.0);
         }
         let input = self.pilot.controls(a, input);
+        let broken = a.gear_broken;
         a.update(dt, &input);
+        // A leg folding under a hard arrival, and the airframe scraping the
+        // runway in sparks.
+        let folded = (0..3).find(|&i| a.gear_broken[i] && !broken[i]);
+        let sparks = (a.skid > 3.0 && !a.crashed && (m.elapsed * 30.0).fract() < dt * 30.0).then_some(a.skid_at);
         let (glocs, gcas) = (self.pilot.glocs, self.pilot.gcas);
         self.pilot.update(dt, a);
+        if let Some(i) = folded {
+            self.flash_toast(&format!("{} COLLAPSED", sim::WHEELS[i].name.to_uppercase()), 2.4);
+            self.kick = self.kick.max(0.6);
+            self.audio.burst(0.5, 2.2, 700.0, 60.0, 0.0);
+        }
+        if let Some(at) = sparks {
+            self.world.fx.impact(at, fx::Impact::Metal);
+        }
         if self.pilot.glocs > glocs {
             self.flash_toast("G-LOC // PILOT UNCONSCIOUS", 3.0);
         } else if self.pilot.gcas && !gcas {
@@ -1092,11 +1150,18 @@ impl App {
         if self.fight(dt) {
             return;
         }
-        if self.aircraft.as_ref().unwrap().crashed {
+        // A wing that broke off in flight: the pieces fly and the rest falls.
+        let a = self.aircraft.as_ref().unwrap();
+        if a.lost.any() && !a.crashed {
+            self.combat.break_up(a, a.lost);
+            let what = a.structure.failed.unwrap_or("airframe");
+            self.falling = true;
             self.begin_finish(Outcome::Crash);
-            if let Some(what) = self.aircraft.as_ref().unwrap().structure.failed {
-                self.flash_toast(&format!("{} // STRUCTURAL FAILURE", what.to_uppercase()), 2.6);
-            }
+            self.flash_toast(&format!("{} // STRUCTURAL FAILURE", what.to_uppercase()), 2.6);
+            return;
+        }
+        if a.crashed {
+            self.begin_finish(Outcome::Crash);
             return;
         }
         if self.mission.timed && self.mission.time_left <= 0.0 {
@@ -1223,6 +1288,32 @@ impl App {
         s + self.kick * 0.02
     }
 
+    /// After the flight has ended: the wrecks and broken-off pieces fall,
+    /// and a player's jet that came apart in the air falls with nobody
+    /// flying it until it hits, when it blows up as any crash does.
+    fn fall(&mut self, dt: f64) {
+        let Some(a) = self.aircraft.as_mut() else { return };
+        if self.falling {
+            a.update(dt, &Input::default());
+        }
+        self.combat.aftermath(dt, a);
+        let fb = props::present(&mut self.combat, &mut self.world.fx, &self.audio, self.camera.eye, self.settings.muted);
+        self.kick = self.kick.max(fb.kick * 0.5);
+        let a = self.aircraft.as_ref().unwrap();
+        if self.falling && a.crashed {
+            self.falling = false;
+            self.flash_color = if a.impact_water { [200, 232, 255] } else { [255, 100, 58] };
+            self.flash = 1.0;
+            self.kick = 1.0;
+            self.audio.crash(a.impact_water);
+            self.world.fx.explode(a);
+            self.transition_timer = self.transition_timer.min(2.6);
+            if let Some(r) = self.result.as_mut() {
+                r.impact = a.impact_speed;
+            }
+        }
+    }
+
     fn advance_effects(&mut self, dt: f64) {
         self.world.fx.update(dt);
         let flying = self.aircraft.as_ref().filter(|_| matches!(self.state, State::Flying | State::Transition));
@@ -1238,8 +1329,11 @@ impl App {
         let back = if course.len() > 1e-6 { -course.norm() } else { a.q.axes().back };
         let pull_out = smoothstep(0.0, 2.5, t);
         let around = Quat::axis_angle(V3::Y, 0.55 + t * 0.12).rotate(back);
-        let target = a.pos + V3::Y * (5.0 + 10.0 * pull_out);
-        let mut eye = target + around * (60.0 + 55.0 * pull_out) + V3::Y * (14.0 + 18.0 * pull_out);
+        // A jet still falling in pieces is followed close; the fireball
+        // from further back.
+        let near = if a.crashed { 1.0 } else { 0.4 };
+        let target = a.pos + V3::Y * ((5.0 + 10.0 * pull_out) * near);
+        let mut eye = target + around * ((60.0 + 55.0 * pull_out) * near) + V3::Y * ((14.0 + 18.0 * pull_out) * near);
         let shake = self.kick * 9.0;
         eye = eye + v3((t * 31.1).sin(), (t * 26.3 + 1.7).sin(), (t * 18.3).sin()) * shake;
         eye.y = eye.y.max(terrain::floor(eye.x, eye.z) + 3.0);
@@ -1326,7 +1420,7 @@ impl App {
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
             (_, State::Attract | State::Loadout) | (None, _) => self.attract_camera(self.attract_time),
-            (Some(a), _) if a.crashed => self.wreck_camera(a),
+            (Some(a), _) if a.crashed || a.lost.any() => self.wreck_camera(a),
             (Some(a), _) => {
                 if self.view == View::Chase {
                     self.chase_camera(a)
@@ -1425,6 +1519,23 @@ impl App {
             _ => {}
         }
         true
+    }
+
+    /// The F-16's manual pitch override or the MiG-29's SOS switch: the
+    /// stick then reaches past the g and AoA limiters.
+    fn toggle_limiters(&mut self) {
+        if self.state != State::Flying {
+            return;
+        }
+        self.limiters_off = !self.limiters_off;
+        let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
+        let text = match (mig, self.limiters_off) {
+            (false, true) => "FLCS LIMITERS OFF // G AND AOA UNPROTECTED",
+            (false, false) => "FLCS LIMITERS ON",
+            (true, true) => "SOS OFF // G AND AOA UNPROTECTED",
+            (true, false) => "SOS ON",
+        };
+        self.flash_toast(text, 2.0);
     }
 
     /// Gear handle: it will not come up with weight on the wheels.
@@ -1527,6 +1638,7 @@ impl EventHandler for App {
                 }
             }
             State::Transition => {
+                self.fall(dt.min(1.0 / 30.0));
                 self.transition_timer -= dt;
                 if self.transition_timer <= 0.0 {
                     self.complete_transition();
@@ -1846,6 +1958,13 @@ impl EventHandler for App {
             // Turning the head must not add a flight-control demand.
             self.mouse = (0.0, 0.0);
             self.keys.insert(key);
+            return;
+        }
+        // ALT+O: the limiter override, a fixed combination so no flight key
+        // can set it off by itself.
+        let alt_held = self.keys.contains(&KeyCode::LeftAlt) || self.keys.contains(&KeyCode::RightAlt);
+        if key == KeyCode::O && alt_held && !repeat {
+            self.toggle_limiters();
             return;
         }
         if repeat {

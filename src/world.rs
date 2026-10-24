@@ -7,7 +7,7 @@ use crate::gfx::{self, Target};
 use crate::math::*;
 use crate::mesh::Mesh;
 use crate::physio::Vision;
-use crate::sim::{Aircraft, Mission, Type, GATE_RADIUS};
+use crate::sim::{Aircraft, Mission, Piece, Type, GATE_RADIUS};
 use crate::terrain::{self, CHUNKS, CHUNK_M, X0, Z0};
 use crate::texture;
 use miniquad::*;
@@ -402,9 +402,17 @@ uniform float u_alpha;
 uniform float u_glow;
 uniform float u_cutout;
 uniform vec4 u_paint;
+uniform vec4 u_cut;
+uniform float u_flex_aft;
 uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
+    // A wing broken off: outboard of the break, ahead of the tail and low
+    // enough to miss the fins. The rest of the jet leaves it out; the
+    // falling piece is drawn with only it.
+    float wing = step(u_cut.w, abs(v_local.x)) * step(v_local.z, u_flex_aft) * step(v_local.y, 1.0);
+    float gone = wing * (v_local.x < 0.0 ? u_cut.x : u_cut.y);
+    if (u_cut.z > 0.5 ? gone < 0.5 : gone > 0.5) discard;
     // From the seat, the cockpit model replaces the skin inside the canopy.
     // The MiG-29 box is mig29::CUTOUT.
     if (u_cutout > 1.5) {
@@ -549,6 +557,7 @@ struct GateU {
 }
 /// A rigid part: no bend, and a span that keeps the shader's division finite.
 const NO_FLEX: [f32; 4] = [0.0, 0.0, 1.0, 2.0];
+const NO_CUT: [f32; 4] = [0.0; 4];
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -566,6 +575,10 @@ pub struct AirU {
     pub flex_aft: f32,
     /// Repaint colour and mode (0 none, 1 aggressor camouflage, 2 tint).
     pub paint: [f32; 4],
+    /// Wings broken off: left and right gone (1), whether to draw only what
+    /// is gone (the falling piece) instead of the rest, and the span station
+    /// of the break.
+    pub cut: [f32; 4],
 }
 #[repr(C)]
 struct PostU {
@@ -651,6 +664,7 @@ pub struct World {
     mig_stab: [Part; 2],
     mig_gear: [Part; 3],
     mig_canopy: Part,
+    mig_brakes: [Part; 2],
     /// Skins of the aggressor F-16s, one per airframe::SCHEMES entry.
     aggressor: Vec<TextureId>,
     /// Buildings, trees and pylons (scenery.rs), each at its cluster origin.
@@ -790,7 +804,7 @@ impl World {
         let gate_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &gv)], index_buffer: gfx::immutable_ib(ctx, &gi), images: vec![] };
 
         // Exterior aircraft.
-        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float4), ("u_flex_aft", Float1), ("u_paint", Float4)];
+        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float4), ("u_flex_aft", Float1), ("u_paint", Float4), ("u_cut", Float4)];
         let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
@@ -829,6 +843,7 @@ impl World {
         let (mig, mig_stab) = (skinned(&fulcrum.body), [skinned(&fulcrum.stabs[0]), skinned(&fulcrum.stabs[1])]);
         let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
         let mig_canopy = skinned(&fulcrum.canopy);
+        let mig_brakes = [skinned(&fulcrum.brakes[0]), skinned(&fulcrum.brakes[1])];
         let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
         World {
             post_bind: fullscreen.clone(),
@@ -867,6 +882,7 @@ impl World {
             mig_stab,
             mig_gear,
             mig_canopy,
+            mig_brakes,
             aggressor,
             scenery,
             post,
@@ -986,7 +1002,7 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4] };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4], cut: cut_of(a) };
             ctx.apply_pipeline(&self.air);
             if a.kind == Type::Mig29 {
                 // The player's canopy is glass from outside (below) and gone from the seat.
@@ -1000,7 +1016,9 @@ impl World {
                 let angle = clamp(-pitch * 25.0 * DEG + side * -roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
                 let pivot = v3(side * airframe::STAB_PIVOT.x, airframe::STAB_PIVOT.y, airframe::STAB_PIVOT.z);
                 let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
-                self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
+                if !a.lost.tail {
+                    self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
+                }
             }
             let (hinge, axis) = airframe::rudder_axis();
             let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
@@ -1066,7 +1084,7 @@ impl World {
             let canopy = if a.kind == Type::Mig29 { &self.mig_canopy } else { &self.canopy };
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4] };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4], cut: NO_CUT };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);
@@ -1100,7 +1118,7 @@ impl World {
         let ax = a.q.axes();
         let rel = a.pos - cam.eye;
         let model = basis(ax.right, ax.up, ax.back, rel);
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint, cut: cut_of(a) };
         ctx.apply_pipeline(&self.air);
         if a.kind == Type::Mig29 {
             self.draw_mig(ctx, a, &base, &model, true);
@@ -1116,7 +1134,9 @@ impl World {
             let angle = clamp(-a.surf_pitch * 25.0 * DEG + side * -a.surf_roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
             let pivot = v3(side * airframe::STAB_PIVOT.x, airframe::STAB_PIVOT.y, airframe::STAB_PIVOT.z);
             let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
-            self.draw_part_in(ctx, &self.stab[i], camo, &base, &mat_mul(&model, &local));
+            if !a.lost.tail {
+                self.draw_part_in(ctx, &self.stab[i], camo, &base, &mat_mul(&model, &local));
+            }
         }
         let (hinge, axis) = airframe::rudder_axis();
         let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
@@ -1139,7 +1159,15 @@ impl World {
             let angle = clamp(-pitch * 25.0 * DEG + side * -roll * 5.0 * DEG, -25.0 * DEG, 25.0 * DEG);
             let p = crate::mig29::STAB_PIVOT;
             let local = rotate_about(v3(side * p.x, p.y, p.z), Quat::axis_angle(V3::X, angle));
-            self.draw_part(ctx, &self.mig_stab[i], base, &mat_mul(model, &local));
+            if !a.lost.tail {
+                self.draw_part(ctx, &self.mig_stab[i], base, &mat_mul(model, &local));
+            }
+        }
+        // The petals swing apart about their leading edges, up and down.
+        for (i, upper) in [true, false].into_iter().enumerate() {
+            let angle = a.brake * crate::mig29::BRAKE_OPEN * if upper { -1.0 } else { 1.0 };
+            let local = rotate_about(crate::mig29::brake_hinge(upper), Quat::axis_angle(V3::X, angle));
+            self.draw_part(ctx, &self.mig_brakes[i], base, &mat_mul(model, &local));
         }
         self.draw_legs(ctx, a, base, model, &self.mig_gear, &crate::mig29::GEAR_PIVOTS);
     }
@@ -1159,6 +1187,8 @@ impl World {
         for (i, part) in legs.iter().enumerate() {
             let (pivot, axis, swing) = pivots[i];
             let t = smoothstep(if i == 0 { 0.15 } else { 0.25 }, if i == 0 { 0.9 } else { 1.0 }, a.gear);
+            // A leg broken in a hard landing lies folded half way into its well.
+            let t = if a.gear_broken[i] { t.min(0.45) } else { t };
             let local = rotate_about(pivot, Quat::axis_angle(axis, (1.0 - t) * swing));
             self.draw_part(ctx, part, base, &mat_mul(model, &local));
         }
@@ -1176,10 +1206,33 @@ impl World {
         }
     }
 
+    /// A piece broken off a jet, its centre at `pos` (relative to nothing:
+    /// world space) turned by `q`: the wing cut from the whole airframe, or
+    /// the stabilators at rest.
+    pub fn draw_debris(&self, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera, kind: Type, piece: Piece, pos: V3, q: Quat, paint: [f32; 4]) {
+        let ax = q.axes();
+        let c = piece.centre(kind);
+        let model = mat_mul(&basis(ax.right, ax.up, ax.back, pos - cam.eye), &basis(V3::X, V3::Y, V3::Z, -c));
+        let (root, tip, aft) = kind.flex_span();
+        let mut base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [0.0, 0.0, root as f32, tip as f32], flex_aft: aft as f32, paint, cut: NO_CUT };
+        ctx.apply_pipeline(&self.air);
+        match piece {
+            Piece::Wing(i) => {
+                base.cut = [(i == 0) as i32 as f32, (i == 1) as i32 as f32, 1.0, kind.break_station() as f32];
+                self.draw_part(ctx, if kind == Type::Mig29 { &self.mig } else { &self.exterior }, &base, &model);
+            }
+            Piece::Tail => {
+                for part in if kind == Type::Mig29 { &self.mig_stab } else { &self.stab } {
+                    self.draw_part(ctx, part, &base, &model);
+                }
+            }
+        }
+    }
+
     /// A prop part (store, missile, bomb or ground target) at a model
     /// transform relative to the eye.
     pub fn draw_prop(&self, ctx: &mut dyn RenderingBackend, vp: M4, part: &Part, model: M4, paint: [f32; 4]) {
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint, cut: NO_CUT };
         ctx.apply_pipeline(&self.air);
         self.draw_part(ctx, part, &base, &model);
     }
@@ -1285,3 +1338,9 @@ fn torus() -> (Vec<f32>, Vec<u16>) {
     (v, idx)
 }
 
+
+/// The shader's wing cut for a jet: the wings it has lost and where they
+/// broke off.
+fn cut_of(a: &Aircraft) -> [f32; 4] {
+    [a.lost.wing[0] as i32 as f32, a.lost.wing[1] as i32 as f32, 0.0, a.kind.break_station() as f32]
+}

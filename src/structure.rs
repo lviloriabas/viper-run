@@ -56,9 +56,9 @@ const EXCITE: f64 = 0.0015;
 const SAFE_AMPLITUDE: f64 = 0.06;
 const DAMAGE_SCALE: f64 = 0.10;
 const BREAK_AMPLITUDE: f64 = 0.30;
-/// Tip deflection per g of wing load (m): about 36 cm at 9 g, near 8 % of
-/// the semispan, an estimate on the flexible side so a hard pull shows.
-const BEND_PER_G: f64 = 0.04;
+/// Tip deflection per g of wing load (m): about 14 cm at 9 g, 3 % of the
+/// semispan, enough to see in a hard pull without looking rubbery.
+const BEND_PER_G: f64 = 0.016;
 /// Symmetric first bending mode: frequency and damping. The wing takes a
 /// load change a beat late and swings a little past it.
 const BEND_HZ: f64 = 3.5;
@@ -225,8 +225,8 @@ mod tests {
                 at_25ms = s.bend;
             }
         }
-        assert!(at_25ms < 0.15, "lags the pull: {at_25ms:.3} m after 25 ms");
-        assert!(peak > 0.37 && peak < 0.46, "swings past: peak {peak:.3} m");
+        assert!(at_25ms < 0.06, "lags the pull: {at_25ms:.3} m after 25 ms");
+        assert!(peak > 1.03 * 9.0 * BEND_PER_G && peak < 1.28 * 9.0 * BEND_PER_G, "swings past: peak {peak:.3} m");
         assert!((s.bend - 9.0 * BEND_PER_G).abs() < 0.005, "settles: {:.3} m", s.bend);
     }
 
@@ -259,6 +259,6 @@ mod tests {
         for _ in 0..480 {
             s.update(DT, 500.0, 0.8, 9.0, 0.0, 0.0);
         }
-        assert!(s.failed.is_none() && s.damage == 0.0 && s.bend > 0.15);
+        assert!(s.failed.is_none() && s.damage == 0.0 && s.bend > 0.06);
     }
 }

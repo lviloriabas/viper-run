@@ -7,7 +7,7 @@
 use crate::ai::{Picture, Pilot};
 use crate::math::*;
 use crate::damage::{self, Hull};
-use crate::sim::{spec::STORES_MASS, trim_type, Aircraft, BattleDamage, Flcs, Gate, Input, Mission, Type, G0};
+use crate::sim::{spec::STORES_MASS, trim_type, Aircraft, BattleDamage, Breakup, Flcs, Gate, Input, Mission, Piece, Type, G0};
 use crate::scenario::{self, Threats};
 use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
@@ -794,6 +794,19 @@ pub struct Wreck {
     trail: usize,
 }
 
+/// A piece broken off a jet, tumbling down with a fire trail.
+pub struct Debris {
+    pub kind: Type,
+    pub piece: Piece,
+    pub pos: V3,
+    pub vel: V3,
+    pub q: Quat,
+    /// Burnt black on a bandit, as its wreck is.
+    pub burnt: bool,
+    spin: V3,
+    trail: usize,
+}
+
 /// What happened in a step, for the effects, the sound and the messages.
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -831,6 +844,12 @@ pub struct Combat {
     /// Bandits that join once the first one is down.
     reserve: Vec<Bandit>,
     pub wrecks: Vec<Wreck>,
+    /// Wings and tails broken off, falling.
+    pub debris: Vec<Debris>,
+    /// What the player's jet lost when it was shot apart, and the fire
+    /// trailing from the break.
+    pub player_lost: Breakup,
+    stump: Option<usize>,
     pub sites: Vec<Site>,
     pub rounds: Vec<Round>,
     pub missiles: Vec<Missile>,
@@ -1043,6 +1062,9 @@ impl Combat {
             bandits: Vec::new(),
             reserve: Vec::new(),
             wrecks: Vec::new(),
+            debris: Vec::new(),
+            player_lost: Breakup::default(),
+            stump: None,
             sites: Vec::new(),
             rounds: Vec::new(),
             missiles: Vec::new(),
@@ -1819,6 +1841,11 @@ impl Combat {
                 self.scored_kill(Who::Bandit(i), format!("{name} CRASHED"));
                 continue;
             }
+            // Overstressed until a wing came off.
+            if b.jet.lost.any() {
+                self.kill_bandit(i);
+                continue;
+            }
             let mut shots = Vec::new();
             if self.hostile && o.gun && b.rounds > 0 && !self.player_dead {
                 b.gun_acc += gun_of(b.jet.kind).rate * dt;
@@ -1878,11 +1905,68 @@ impl Combat {
             self.trails[t].open = false;
         }
         jet.vel = jet.vel * 0.8 + V3::Y * 15.0;
-        let spin = v3(self.rnd.next() - 0.5, self.rnd.next() - 0.5, (self.rnd.next() - 0.5) * 6.0);
+        let mut spin = v3(self.rnd.next() - 0.5, self.rnd.next() - 0.5, (self.rnd.next() - 0.5) * 6.0);
         let trail = self.open_trail(Smoke::Fire);
-        self.events.push(Event::Airburst { pos: jet.pos, vel: jet.vel, scale: 1.0 });
+        if jet.lost.any() {
+            // Shot apart rather than blown up: the pieces fly off and what
+            // is left rolls hard towards a missing wing.
+            self.shed(&jet, jet.lost, true);
+            let roll = jet.lost.wing[1] as i32 as f64 - jet.lost.wing[0] as i32 as f64;
+            spin.z -= roll * 4.0;
+            self.events.push(Event::Airburst { pos: jet.pos, vel: jet.vel, scale: 0.45 });
+        } else {
+            self.events.push(Event::Airburst { pos: jet.pos, vel: jet.vel, scale: 1.0 });
+        }
         self.wrecks.push(Wreck { jet, spin, trail });
         self.scored_kill(Who::Bandit(i), format!("SPLASH {name}"));
+    }
+
+    /// Pieces breaking off a jet: each flies off its own way from where it
+    /// sat, tumbling, in a puff of fire and trailing burning fuel (a wing)
+    /// or smoke (the tail).
+    fn shed(&mut self, jet: &Aircraft, parts: Breakup, burnt: bool) {
+        let pieces = [(parts.wing[0], Piece::Wing(0)), (parts.wing[1], Piece::Wing(1)), (parts.tail, Piece::Tail)];
+        let w_world = jet.q.rotate(jet.omega);
+        for (_, piece) in pieces.into_iter().filter(|(gone, _)| *gone) {
+            let r = jet.q.rotate(piece.centre(jet.kind));
+            let pos = jet.pos + r;
+            let out = v3(r.x, 0.0, r.z).norm();
+            let kick = out * mix(4.0, 10.0, self.rnd.next()) + V3::Y * mix(2.0, 8.0, self.rnd.next());
+            let vel = jet.vel + w_world.cross(r) + kick;
+            let axis = v3(self.rnd.next() - 0.5, self.rnd.next() - 0.5, self.rnd.next() - 0.5).norm();
+            let spin = axis * mix(2.0, 6.0, self.rnd.next());
+            let trail = self.open_trail(if matches!(piece, Piece::Wing(_)) { Smoke::Fire } else { Smoke::Damage });
+            self.events.push(Event::Airburst { pos, vel, scale: 0.3 });
+            self.debris.push(Debris { kind: jet.kind, piece, pos, vel, q: jet.q, burnt, spin, trail });
+        }
+    }
+
+    /// The player's jet coming apart: the pieces shed, and fire from the
+    /// break follows what is left down.
+    pub fn break_up(&mut self, a: &Aircraft, parts: Breakup) {
+        self.shed(a, parts, false);
+        if self.stump.is_none() {
+            self.stump = Some(self.open_trail(if parts.wing[0] || parts.wing[1] { Smoke::Fire } else { Smoke::Damage }));
+        }
+    }
+
+    /// What goes on after the player's flight has ended in the air, while
+    /// the broken jet falls: wrecks and pieces fall, the break trails fire
+    /// and the smoke drifts away.
+    pub fn aftermath(&mut self, dt: f64, a: &Aircraft) {
+        self.clock += dt;
+        self.step_wrecks(dt);
+        if let Some(t) = self.stump {
+            if a.crashed {
+                self.trails[t].open = false;
+                self.stump = None;
+            } else {
+                let side = if a.lost.wing[0] { -1.0 } else if a.lost.wing[1] { 1.0 } else { 0.0 };
+                let at = if side == 0.0 { Piece::Tail.centre(a.kind) } else { v3(side * a.kind.break_station(), 0.3, 1.5) };
+                self.lay(t, a.pos + a.q.rotate(at));
+            }
+        }
+        self.age_trails();
     }
 
     fn step_wrecks(&mut self, dt: f64) {
@@ -1906,6 +1990,32 @@ impl Combat {
             self.trails[w.trail].open = false;
             let water = in_river(w.jet.pos) || w.jet.pos.y < 2.0;
             self.events.push(if water { Event::Splash { pos: w.jet.pos } } else { Event::Blast { pos: w.jet.pos, scale: 1.3, burn: 18.0 } });
+        }
+        // A loose wing or tail flutters down, slowed hard by its own area:
+        // a wing falls at about 60 m/s, flat and spinning.
+        let mut down = Vec::new();
+        for (i, d) in self.debris.iter_mut().enumerate() {
+            let v = d.vel.len();
+            d.vel += (d.vel * (-2.6e-3 * v) - V3::Y * G0) * dt;
+            d.pos += d.vel * dt;
+            d.q = d.q.integrate(d.spin, dt);
+            if d.pos.y < terrain::floor(d.pos.x, d.pos.z) + 0.5 {
+                down.push(i);
+            }
+        }
+        for i in 0..self.debris.len() {
+            let (p, t) = (self.debris[i].pos, self.debris[i].trail);
+            self.lay(t, p);
+        }
+        for &i in down.iter().rev() {
+            let d = self.debris.remove(i);
+            self.trails[d.trail].open = false;
+            let water = in_river(d.pos) || d.pos.y < 2.0;
+            self.events.push(match (water, d.piece) {
+                (true, _) => Event::Splash { pos: d.pos },
+                (false, Piece::Wing(_)) => Event::Blast { pos: d.pos, scale: 0.45, burn: 6.0 },
+                (false, Piece::Tail) => Event::Dirt { pos: d.pos },
+            });
         }
     }
 
@@ -1933,7 +2043,9 @@ impl Combat {
                 apply(&mut b.hull, &mut self.rnd);
                 b.hp = b.hull.integrity();
                 b.jet.battle = b.hull.effects();
-                if b.hull.dead.is_some() {
+                if let Some(cause) = b.hull.dead {
+                    let pick = self.rnd.next();
+                    self.bandits[i].jet.lose(damage::breakup(cause, pick));
                     self.kill_bandit(i);
                 }
             }
@@ -1942,13 +2054,20 @@ impl Combat {
     }
 
     /// The player's flight ends in the air: killed, or ejected from a jet
-    /// that is coming apart.
+    /// that is coming apart. A wing or the tail shot away breaks off and the
+    /// rest falls; anything else ends in a fireball.
     fn lose_player(&mut self, cause: &'static str, a: &Aircraft) {
         self.hp = 0.0;
         self.player_dead = true;
         self.death = cause;
         self.events.push(Event::Toast(cause.to_string()));
-        self.events.push(Event::Airburst { pos: a.pos, vel: a.vel, scale: 1.0 });
+        let parts = damage::breakup(cause, self.rnd.next());
+        if parts.any() {
+            self.player_lost = parts;
+            self.break_up(a, parts);
+        } else {
+            self.events.push(Event::Airburst { pos: a.pos, vel: a.vel, scale: 1.0 });
+        }
     }
 
     fn damage(&mut self, who: Who, dmg: f64) {
@@ -2261,6 +2380,11 @@ impl Combat {
                 Some(i) => self.bandits[i].smoke = smoke,
             }
         }
+        self.age_trails();
+    }
+
+    /// Smoke older than its life drifts away.
+    fn age_trails(&mut self) {
         let now = self.clock;
         for t in self.trails.iter_mut() {
             while t.points.front().is_some_and(|p| now - p.1 > t.kind.life()) {

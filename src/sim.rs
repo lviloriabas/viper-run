@@ -189,6 +189,21 @@ impl Type {
     /// stations where the bend starts and where it reaches the full tip
     /// deflection, and the station aft of which nothing bends (the
     /// stabilators and fins stay rigid).
+    /// Span station where a wing breaks off, outboard of the fuselage (and
+    /// on the MiG-29 of its tail booms).
+    pub fn break_station(self) -> f64 {
+        match self {
+            Type::F16 => 1.35,
+            Type::Mig29 => 2.1,
+        }
+    }
+    /// The points of the airframe that can strike the ground.
+    pub fn contacts(self) -> &'static [ContactPoint] {
+        match self {
+            Type::F16 => &COLLISION_POINTS,
+            Type::Mig29 => &MIG_COLLISION_POINTS,
+        }
+    }
     pub fn flex_span(self) -> (f64, f64, f64) {
         match self {
             Type::F16 => (1.2, 4.8, 3.6),
@@ -206,6 +221,43 @@ impl Type {
             Type::F16 => Type::Mig29,
             Type::Mig29 => Type::F16,
         }
+    }
+}
+
+/// A part that has broken off a jet and falls on its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Piece {
+    /// The left (0) or right (1) wing, outboard of `Type::break_station`.
+    Wing(usize),
+    /// Both stabilators.
+    Tail,
+}
+
+impl Piece {
+    /// Where the piece's mass sits on the intact jet (model axes).
+    pub fn centre(self, kind: Type) -> V3 {
+        let side = |i: usize| if i == 0 { -1.0 } else { 1.0 };
+        match (self, kind) {
+            (Piece::Wing(i), Type::F16) => v3(side(i) * 2.9, 0.28, 1.6),
+            (Piece::Wing(i), Type::Mig29) => v3(side(i) * 3.6, 0.35, 3.1),
+            (Piece::Tail, Type::F16) => v3(0.0, 0.30, 6.0),
+            (Piece::Tail, Type::Mig29) => v3(0.0, 0.36, 6.9),
+        }
+    }
+}
+
+/// Parts gone from the airframe: a wing (left, right) or the stabilators,
+/// broken off by overload or flutter or shot away. The rest of the jet
+/// flies on, out of control, until it strikes the ground.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Breakup {
+    pub wing: [bool; 2],
+    pub tail: bool,
+}
+
+impl Breakup {
+    pub fn any(&self) -> bool {
+        self.wing[0] || self.wing[1] || self.tail
     }
 }
 
@@ -249,46 +301,93 @@ impl BattleDamage {
 }
 
 /// A landing-gear leg: the tyre's lowest point at full extension (body
-/// axes), the oleo's spring and damping, its stroke, and whether it brakes
-/// or steers. Nose gear 3.45 m ahead of the centre of gravity, main gear
-/// 0.55 m behind it on a 2.36 m track: the jet stands 5.09 m to the fin tip
-/// with about 14 % of its weight on the nose wheel.
+/// axes), the oleo's spring and damping, its stroke, the load that breaks
+/// it, and whether it brakes or steers. Nose gear 3.45 m ahead of the centre
+/// of gravity, main gear 0.55 m behind it on a 2.36 m track: the jet stands
+/// 5.09 m to the fin tip with about 14 % of its weight on the nose wheel.
+/// The gas spring stiffens through the stroke and the tyre takes what is
+/// left at the bottom, so a firm arrival bottoms the strut without breaking
+/// it; a leg gives way at about four times its share of the weight, past a
+/// sink rate near 4 m/s (13 ft/s) on the mains, and folds instead of
+/// holding the jet up.
 pub struct Wheel {
     pub name: &'static str,
     pub local: V3,
     k: f64,
     d: f64,
     stroke: f64,
+    limit: f64,
     brakes: bool,
     steers: bool,
 }
 
 pub const WHEELS: [Wheel; 3] = [
-    Wheel { name: "nose gear", local: v3(0.0, -1.55, -3.45), k: 1.6e5, d: 1.7e4, stroke: 0.30, brakes: false, steers: true },
-    Wheel { name: "left main gear", local: v3(-1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, brakes: true, steers: false },
-    Wheel { name: "right main gear", local: v3(1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, brakes: true, steers: false },
+    Wheel { name: "nose gear", local: v3(0.0, -1.55, -3.45), k: 1.6e5, d: 1.7e4, stroke: 0.30, limit: 2.2e5, brakes: false, steers: true },
+    Wheel { name: "left main gear", local: v3(-1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, limit: 3.4e5, brakes: true, steers: false },
+    Wheel { name: "right main gear", local: v3(1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, limit: 3.4e5, brakes: true, steers: false },
 ];
 
+/// Stiffening of the oleo's gas spring at the end of the stroke, and the
+/// tyre's own stiffness once the strut has bottomed (times `k`).
+const OLEO_STIFFEN: f64 = 2.0;
+const TYRE_STIFF: f64 = 6.0;
+
+/// A point of the airframe that can touch the ground. A `fatal` one (the
+/// canopy, a fin) touching means the jet is on its back or cartwheeling;
+/// the others skid along the ground on a stiff spring with sliding friction.
 pub struct ContactPoint {
     pub name: &'static str,
     pub local: V3,
     pub margin: f64,
+    pub fatal: bool,
+}
+
+const fn cp(name: &'static str, local: V3, margin: f64, fatal: bool) -> ContactPoint {
+    ContactPoint { name, local, margin, fatal }
 }
 
 /// Body-space contact points sampled against the terrain every step, so a
 /// banked wing can clip a canyon wall before the centre of mass gets there.
 pub const COLLISION_POINTS: [ContactPoint; 10] = [
-    ContactPoint { name: "nose", local: v3(0.0, 0.31, -7.09), margin: 0.10 },
-    ContactPoint { name: "canopy", local: v3(0.0, 1.58, -3.06), margin: 0.10 },
-    ContactPoint { name: "tail", local: v3(0.0, 0.55, 6.73), margin: 0.15 },
-    ContactPoint { name: "left wing", local: v3(-4.86, 0.33, 2.40), margin: 0.08 },
-    ContactPoint { name: "right wing", local: v3(4.86, 0.33, 2.40), margin: 0.08 },
-    ContactPoint { name: "intake", local: v3(0.0, -0.43, -3.06), margin: 0.08 },
-    ContactPoint { name: "belly", local: v3(0.0, -0.45, 0.40), margin: 0.10 },
-    ContactPoint { name: "fin", local: v3(0.0, 3.64, 6.55), margin: 0.10 },
-    ContactPoint { name: "left stabilator", local: v3(-2.79, 0.25, 6.20), margin: 0.06 },
-    ContactPoint { name: "right stabilator", local: v3(2.79, 0.25, 6.20), margin: 0.06 },
+    cp("nose", v3(0.0, 0.31, -7.09), 0.10, false),
+    cp("canopy", v3(0.0, 1.58, -3.06), 0.10, true),
+    cp("tail", v3(0.0, 0.55, 6.73), 0.15, false),
+    cp("left wing", v3(-4.86, 0.33, 2.40), 0.08, false),
+    cp("right wing", v3(4.86, 0.33, 2.40), 0.08, false),
+    cp("intake", v3(0.0, -0.43, -3.06), 0.08, false),
+    cp("belly", v3(0.0, -0.45, 0.40), 0.10, false),
+    cp("fin", v3(0.0, 3.64, 6.55), 0.10, true),
+    cp("left stabilator", v3(-2.79, 0.25, 6.20), 0.06, false),
+    cp("right stabilator", v3(2.79, 0.25, 6.20), 0.06, false),
 ];
+
+/// The MiG-29's, from its model: radome, canopy, the nozzles under the
+/// tail, the wing and stabilator tips, the intakes and the nacelles'
+/// bellies, and the twin fins.
+pub const MIG_COLLISION_POINTS: [ContactPoint; 14] = [
+    cp("nose", v3(0.0, 0.27, -7.50), 0.10, false),
+    cp("canopy", v3(0.0, 1.72, -3.20), 0.10, true),
+    cp("left nozzle", v3(-1.10, -0.38, 7.10), 0.05, false),
+    cp("right nozzle", v3(1.10, -0.38, 7.10), 0.05, false),
+    cp("left wing", v3(-5.62, 0.26, 4.00), 0.08, false),
+    cp("right wing", v3(5.62, 0.26, 4.00), 0.08, false),
+    cp("intake", v3(-1.30, -0.46, -1.10), 0.06, false),
+    cp("intake", v3(1.30, -0.46, -1.10), 0.06, false),
+    cp("belly", v3(-0.92, -0.56, 0.40), 0.06, false),
+    cp("belly", v3(0.92, -0.56, 0.40), 0.06, false),
+    cp("left fin", v3(-2.05, 3.18, 6.78), 0.10, true),
+    cp("right fin", v3(2.05, 3.18, 6.78), 0.10, true),
+    cp("left stabilator", v3(-3.82, 0.36, 7.70), 0.06, false),
+    cp("right stabilator", v3(3.82, 0.36, 7.70), 0.06, false),
+];
+
+/// Skid contacts: spring and damping per point, sliding friction, and the
+/// sink rate (m/s) and depth (m) of an arrival that is a crash, not a skid.
+const SKID_K: f64 = 6.0e5;
+const SKID_D: f64 = 6.0e4;
+const SKID_MU: f64 = 0.45;
+const CRASH_SINK: f64 = 9.0;
+const CRASH_DEPTH: f64 = 1.0;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Input {
@@ -310,6 +409,9 @@ pub struct Input {
     pub gear_down: bool,
     pub flaps: bool,
     pub wheel_brake: bool,
+    /// The limiter override (the F-16's MPO switch held, the MiG's SOS
+    /// switched off): the stick reaches past the g limit and the AoA limiter.
+    pub limiters_off: bool,
 }
 
 impl Input {
@@ -523,6 +625,9 @@ pub struct Flcs {
     /// limit or the AoA limiter, held a moment so it reads steadily.
     pub limit: Option<&'static str>,
     limit_hold: f64,
+    /// The limiters overridden, and what the jet is then doing past them.
+    pub limits_off: bool,
+    pub danger: Option<&'static str>,
 }
 
 /// Stick shaping. The real force gradients (FlightGear F-16) give almost
@@ -534,6 +639,9 @@ pub struct Flcs {
 const STICK_DEAD: f64 = 0.03;
 const PITCH_EXP: f64 = 1.3;
 const ROLL_EXP: f64 = 1.5;
+/// How much further the stick reaches with the limiters overridden: full
+/// aft stick asks for about 12.5 g, full forward for -4.7.
+const OVERRIDE_GAIN: f64 = 1.35;
 
 fn live(s: f64) -> f64 {
     ((s.abs() - STICK_DEAD) / (1.0 - STICK_DEAD)).max(0.0)
@@ -633,8 +741,16 @@ impl Flcs {
         // lift slope, so it caps the slow jet near 25 degrees at full aft stick
         // without fighting the g loop. A fixed g per degree would be several
         // times stiffer than the airframe at low speed and set the nose bobbing.
+        // With the limiters overridden the stick reaches OVERRIDE_GAIN times
+        // further, past the g limit towards the ultimate load, and the AoA
+        // limiter and its pitch-rate guard stand aside: the jet can be pulled
+        // into the stall and broken. The computer still says when it is.
+        let off = input.limiters_off;
+        self.limits_off = off;
         let stick = input.pitch();
-        let n_cmd = clamp(pitch_command(stick), NEG_G_LIMIT - 1.0, s.g_max - 1.0);
+        let gain = if off { OVERRIDE_GAIN } else { 1.0 };
+        let (g_top, g_floor) = if off { (s.g_max * 1.5, NEG_G_LIMIT * 1.5) } else { (s.g_max, NEG_G_LIMIT) };
+        let n_cmd = clamp(pitch_command(stick) * gain, g_floor - 1.0, g_top - 1.0);
         self.n_cmd += (n_cmd - self.n_cmd) * clamp(dt * 12.0, 0.0, 1.0);
         self.alpha_f += (alpha - self.alpha_f) * clamp(dt * 10.0, 0.0, 1.0);
         let lead = self.alpha_f + 0.1 * washout(&mut self.q_wash, q * RAD, 1.0, dt);
@@ -643,16 +759,23 @@ impl Flcs {
         let target = s.alpha_lim.1 - 1.0 * smoothstep(s.alpha_lim.0, s.alpha_lim.1, lead);
         let at_limit = s.nz - 1.0 + n_alpha * (target - lead);
         let at_floor = s.nz - 1.0 + n_alpha * (-5.0 - lead);
-        let limited = lead > s.alpha_lim.0 && self.n_cmd > at_limit || lead < -4.0 && self.n_cmd < at_floor;
-        let demand = if lead > s.alpha_lim.0 { self.n_cmd.min(at_limit) } else { self.n_cmd }.max(if lead < -4.0 { at_floor } else { NEG_G_LIMIT - 1.0 });
+        let limited = !off && (lead > s.alpha_lim.0 && self.n_cmd > at_limit || lead < -4.0 && self.n_cmd < at_floor);
+        let demand = if off {
+            self.n_cmd
+        } else {
+            if lead > s.alpha_lim.0 { self.n_cmd.min(at_limit) } else { self.n_cmd }.max(if lead < -4.0 { at_floor } else { NEG_G_LIMIT - 1.0 })
+        };
         // The pilot asking for more than the structure takes: the stick past
         // the g limit with the jet pulling near it, or the AoA limiter capping
-        // the pull. Either holds on screen a little after it lets go.
+        // the pull. Either holds on screen a little after it lets go. With
+        // the limiters off, the jet past them instead.
         let raw = pitch_command(stick);
-        let g_capped = (raw > s.g_max - 1.0 && s.nz > s.g_max - 1.0) || (raw < NEG_G_LIMIT - 1.0 && s.nz < NEG_G_LIMIT + 0.5);
-        let now = if limited && !s.ground {
+        let g_capped = !off && ((raw > s.g_max - 1.0 && s.nz > s.g_max - 1.0) || (raw < NEG_G_LIMIT - 1.0 && s.nz < NEG_G_LIMIT + 0.5));
+        let now = if s.ground {
+            None
+        } else if limited {
             Some("AOA LIMITER")
-        } else if g_capped && !s.ground {
+        } else if g_capped {
             Some("G LIMITER")
         } else {
             None
@@ -666,6 +789,15 @@ impl Flcs {
                 self.limit = None;
             }
         }
+        self.danger = if !off || s.ground {
+            None
+        } else if s.nz > s.g_max || s.nz < NEG_G_LIMIT {
+            Some("OVER G")
+        } else if alpha > s.alpha_lim.1 || alpha < -6.0 {
+            Some("AOA HIGH")
+        } else {
+            None
+        };
         let err = demand - (s.nz - 1.0);
         // The integrator trims out the steady g error only; it rests while the
         // limiter holds the jet or the command is still moving, and bleeds off
@@ -706,7 +838,9 @@ impl Flcs {
         // AoA where it is (the path turning under the present lift) is allowed.
         let q_hold = g_v * (s.nz - s.up_y);
         let a = alpha * DEG;
-        q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (s.alpha_lim.1 * DEG - a));
+        if !off {
+            q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (s.alpha_lim.1 * DEG - a));
+        }
         let qdot = 7.0 * (q_cmd - q);
         let m_req = iyy * qdot - (izz - ixx) * p * r + ixz * (p * p - r * r) + r * s.rotor;
         let el_cmd = invert(STAB_MAX, m_req / qsc, |el| aero::coefficients(&Flow { el, ..*f }).cm);
@@ -768,6 +902,8 @@ pub struct Aircraft {
     pub stores_drag: f64,
     /// Battle damage (see `BattleDamage`).
     pub battle: BattleDamage,
+    /// Wings or tail broken off (see `Breakup`).
+    pub lost: Breakup,
     pub speed: f64,
     pub airspeed_kt: f64,
     pub tas_kt: f64,
@@ -780,6 +916,9 @@ pub struct Aircraft {
     pub mach: f64,
     pub qbar: f64,
     pub g_load: f64,
+    /// The share of it the air carries, which is what loads the wings: the
+    /// jolt of an arrival on the ground goes into the gear.
+    pub g_air: f64,
     pub g_smooth: f64,
     pub max_g: f64,
     pub min_g: f64,
@@ -831,6 +970,13 @@ pub struct Aircraft {
     pub on_ground: bool,
     pub compression: [f64; 3],
     pub wheel_brake: f64,
+    /// Legs that broke under a hard landing and folded.
+    pub gear_broken: [bool; 3],
+    /// Speed of the airframe scraping along the ground (m/s), and what of
+    /// it is touching.
+    pub skid: f64,
+    pub skid_part: &'static str,
+    pub skid_at: V3,
     /// Gear lowered or held down past its limit speed: the doors are bent.
     pub gear_overspeed: bool,
     /// The airframe flown.
@@ -882,6 +1028,7 @@ impl Aircraft {
             stores_mass: STORES_MASS,
             stores_drag: 0.0,
             battle: BattleDamage::default(),
+            lost: Breakup::default(),
             speed,
             airspeed_kt: 0.0,
             tas_kt: 0.0,
@@ -894,6 +1041,7 @@ impl Aircraft {
             mach: 0.0,
             qbar: 0.0,
             g_load: 1.0,
+            g_air: 1.0,
             g_smooth: 1.0,
             max_g: 1.0,
             min_g: 1.0,
@@ -933,6 +1081,10 @@ impl Aircraft {
             flaps: if parked { 1.0 } else { 0.0 },
             on_ground: parked,
             compression: [0.0; 3],
+            gear_broken: [false; 3],
+            skid: 0.0,
+            skid_part: "",
+            skid_at: V3::ZERO,
             wheel_brake: 0.0,
             gear_overspeed: false,
             kind: Type::F16,
@@ -942,28 +1094,33 @@ impl Aircraft {
         a
     }
 
+    /// The end of a flight against the ground: the jet sinking faster than
+    /// CRASH_SINK as a point touches, one dug in deeper than CRASH_DEPTH (a
+    /// hillside met head on), the canopy or a fin touching, or anything
+    /// touching water. Lighter contacts are skids, which `ground_forces`
+    /// holds up.
     fn detect_terrain_collision(&mut self) {
         let mut min_clearance = f64::INFINITY;
-        let mut hit: Option<(&ContactPoint, V3, f64)> = None;
-        let mut hit_floor = 0.0;
-        for point in COLLISION_POINTS.iter() {
-            let p = self.pos + self.q.rotate(point.local);
+        let mut hit: Option<(&ContactPoint, f64)> = None;
+        for point in self.kind.contacts() {
+            let r = self.q.rotate(point.local);
+            let p = self.pos + r;
             let floor = terrain::floor(p.x, p.z);
             let clearance = p.y - floor - point.margin;
-            if clearance < min_clearance {
-                min_clearance = clearance;
-                hit_floor = floor;
+            min_clearance = min_clearance.min(clearance);
+            if clearance >= 0.0 || hit.is_some() {
+                continue;
             }
-            if clearance < 0.0 && hit.is_none() {
-                hit = Some((point, p, floor));
-                hit_floor = floor;
+            let sink = -self.vel.y;
+            if point.fatal || floor < 0.5 || sink > CRASH_SINK || -clearance > CRASH_DEPTH {
+                hit = Some((point, floor));
             }
         }
         self.clearance = min_clearance.max(0.0);
-        if let Some((point, _p, floor)) = hit {
+        if let Some((point, floor)) = hit {
             self.crashed = true;
             self.impact_speed = self.vel.len();
-            self.impact_water = hit_floor < 0.5;
+            self.impact_water = floor < 0.5;
             self.collision_label = point.name;
             self.vel = self.vel * 0.08;
             self.omega = V3::ZERO;
@@ -987,23 +1144,31 @@ impl Aircraft {
         self.mass = kind.empty_mass() + self.stores_mass + self.fuel;
     }
 
-    /// Tyre and oleo forces on the legs that touch the ground, as force and
-    /// moment in aircraft axes (x forward, y right, z down). Each strut is a
-    /// spring and damper; the tyres roll with a little resistance, the main
-    /// wheels brake, the nose wheel steers with the pedals (32 degrees at a
-    /// taxi, a few at speed) and every tyre grips sideways up to its limit.
-    fn wheel_forces(&mut self, input: &Input, dt: f64) -> (V3, V3) {
+    /// Ground forces as force and moment in aircraft axes (x forward, y
+    /// right, z down). Each strut is a spring and damper that stiffens to its
+    /// stop; the tyres roll with a little resistance, the main wheels brake,
+    /// the nose wheel steers with the pedals (32 degrees at a taxi, a few at
+    /// speed) and every tyre grips sideways up to its limit. A leg loaded past
+    /// its limit folds. Any other part of the airframe on the ground skids
+    /// on it with sliding friction.
+    fn ground_forces(&mut self, input: &Input, dt: f64) -> (V3, V3) {
         let mut force = V3::ZERO;
         let mut moment = V3::ZERO;
         self.on_ground = false;
-        if self.gear < 0.98 {
-            self.compression = [0.0; 3];
-            return (force, moment);
-        }
         let w_world = self.q.rotate(self.omega);
+        let mut add = |f: V3, local: V3, q: Quat| {
+            let fb = q.conj().rotate(f);
+            let mb = local.cross(fb);
+            force += v3(-fb.z, fb.x, -fb.y);
+            moment += v3(-mb.z, mb.x, -mb.y);
+        };
         let ground_speed = v3(self.vel.x, 0.0, self.vel.z).len();
         let steer = -input.yaw() * mix(32.0, 4.0, smoothstep(8.0, 45.0, ground_speed)) * DEG;
         for (i, wh) in WHEELS.iter().enumerate() {
+            if self.gear < 0.98 || self.gear_broken[i] {
+                self.compression[i] = 0.0;
+                continue;
+            }
             let r = self.q.rotate(wh.local);
             let p = self.pos + r;
             let c = terrain::floor(p.x, p.z) - p.y;
@@ -1012,11 +1177,15 @@ impl Aircraft {
                 continue;
             }
             self.compression[i] = c;
-            if c > wh.stroke && dt > 0.0 {
-                self.structure.failed = Some(wh.name);
-            }
             let v = self.vel + w_world.cross(r);
-            let normal = (wh.k * c - wh.d * v.y).max(0.0);
+            let x = c / wh.stroke;
+            let spring = wh.k * c * (1.0 + OLEO_STIFFEN * x.min(1.0).powi(2)) + TYRE_STIFF * wh.k * (c - wh.stroke).max(0.0);
+            let normal = (spring - wh.d * v.y).max(0.0);
+            if normal > wh.limit && dt > 0.0 {
+                self.gear_broken[i] = true;
+                self.compression[i] = 0.0;
+                continue;
+            }
             if normal <= 0.0 {
                 continue;
             }
@@ -1031,11 +1200,26 @@ impl Aircraft {
             let mu = 0.015 + if wh.brakes { 0.55 * self.wheel_brake } else { 0.0 };
             let f_long = -clamp(v_long * 8.0, -1.0, 1.0) * mu * normal;
             let f_lat = -clamp(v_lat * 2.0, -1.0, 1.0) * 0.75 * normal;
-            let f = V3::Y * normal + fw * f_long + side * f_lat;
-            let fb = self.q.conj().rotate(f);
-            let mb = wh.local.cross(fb);
-            force += v3(-fb.z, fb.x, -fb.y);
-            moment += v3(-mb.z, mb.x, -mb.y);
+            add(V3::Y * normal + fw * f_long + side * f_lat, wh.local, self.q);
+        }
+        self.skid = 0.0;
+        for point in self.kind.contacts() {
+            let r = self.q.rotate(point.local);
+            let p = self.pos + r;
+            let depth = terrain::floor(p.x, p.z) + point.margin - p.y;
+            if depth <= 0.0 {
+                continue;
+            }
+            let v = self.vel + w_world.cross(r);
+            let normal = (SKID_K * depth - SKID_D * v.y).max(0.0);
+            let slide = v3(v.x, 0.0, v.z);
+            let friction = slide * (-SKID_MU * normal * clamp(slide.len() * 2.0, 0.0, 1.0) / slide.len().max(1e-6));
+            add(V3::Y * normal + friction, point.local, self.q);
+            if slide.len() > self.skid {
+                self.skid = slide.len();
+                self.skid_part = point.name;
+                self.skid_at = p;
+            }
         }
         (force, moment)
     }
@@ -1147,7 +1331,7 @@ impl Aircraft {
         // air of high dynamic pressure, rolls the jet.
         let keas = speed * (atm.rho / RHO0).sqrt() * KT;
         let rough = 0.5 * smoothstep(0.55, 0.95, keas / self.structure.vf.max(1.0));
-        self.structure.update(dt, keas, mach, self.g_load, 0.3 * self.turbulence + self.buffet + rough, self.wing_stores);
+        self.structure.update(dt, keas, mach, self.g_air, 0.3 * self.turbulence + self.buffet + rough, self.wing_stores);
         c.cl += self.structure.roll();
         // Gear legs and doors drag; the flaps add lift, drag and a nose-down
         // moment the FLCS trims out.
@@ -1167,13 +1351,29 @@ impl Aircraft {
             c.cl += 0.012 * w * self.battle.side;
             c.cn += 0.002 * w * self.battle.side;
         }
+        // A wing gone: half the lift, and the one left rolls the jet hard
+        // over towards the stump and yaws it there. The tail gone: nothing
+        // holds the nose, which pitches up into a tumble.
+        for (i, s) in [-1.0, 1.0].into_iter().enumerate() {
+            if self.lost.wing[i] {
+                c.cl += s * (0.06 + 0.12 * c.cz.abs());
+                c.cn += s * 0.015;
+                c.cz *= 0.5;
+                c.cx -= 0.02 * alpha.cos();
+            }
+        }
+        if self.lost.tail {
+            c.cm += 0.10;
+            c.cn += 0.01;
+        }
         let qs = qbar * self.kind.area();
         let (fx, fy, fz) = (qs * c.cx + self.thrust_n, qs * c.cy, qs * c.cz);
         let (span, chord) = (self.kind.span(), self.kind.chord());
         let (l, m, n) = (qs * span * c.cl, qs * chord * c.cm, qs * span * c.cn);
         // The MiG's engines sit 1.1 m either side of the centreline.
         let n = n + full * self.battle.asymmetry * 1.1;
-        let (gf, gm) = self.wheel_forces(input, dt);
+        self.g_air = -fz / (self.mass * G0);
+        let (gf, gm) = self.ground_forces(input, dt);
         let (fx, fy, fz) = (fx + gf.x, fy + gf.y, fz + gf.z);
         let (l, m, n) = (l + gm.x, m + gm.y, n + gm.z);
 
@@ -1207,10 +1407,21 @@ impl Aircraft {
         self.drag_n = qs * cd;
     }
 
+    /// Parts break off: they stay gone, the surfaces left stop answering the
+    /// stick and the gear stays where it was.
+    pub fn lose(&mut self, parts: Breakup) {
+        self.lost.wing[0] |= parts.wing[0];
+        self.lost.wing[1] |= parts.wing[1];
+        self.lost.tail |= parts.tail;
+    }
+
     pub fn update(&mut self, dt: f64, input: &Input) {
         if self.crashed {
             return;
         }
+        // A jet coming apart is flown by nobody.
+        let wreck = Input { gear_down: input.gear_down, ..Default::default() };
+        let input = if self.lost.any() { &wreck } else { input };
         self.last_pos = self.pos;
         if input.throttle_up {
             self.throttle = clamp(self.throttle + dt * 0.62, 0.0, 1.0);
@@ -1253,13 +1464,10 @@ impl Aircraft {
             (self.thrust_n, self.cl, self.cd, self.lift_n, self.drag_n, self.alpha_crit) = (thrust, cl, cd, lift, drag, crit);
         }
 
-        // A wing that breaks ends the flight where it is.
-        if let Some(what) = self.structure.failed {
-            self.crashed = true;
-            self.impact_speed = self.vel.len();
-            self.impact_water = false;
-            self.collision_label = what;
-            return;
+        // A wing that breaks comes off: the one the flutter mode last threw
+        // up, and the jet falls on without it.
+        if self.structure.failed.is_some() && !self.lost.any() {
+            self.lose(Breakup { wing: [self.structure.flutter >= 0.0, self.structure.flutter < 0.0], tail: false });
         }
 
         // Fuel: specific consumption of the engines dry and in afterburner.
@@ -1751,7 +1959,7 @@ mod tests {
 
     /// Heavy stores under the wings bring the flutter speed, sagging in the
     /// transonic dip, down into reach: the clean jet shrugs off Mach 1 at
-    /// 1,500 m, the loaded one flutters until the wing breaks.
+    /// 1,500 m, the loaded one flutters until a wing breaks off.
     #[test]
     fn loaded_wings_flutter_through_mach_one_low_down() {
         let burner = Input { afterburner: true, throttle_up: true, ..Default::default() };
@@ -1766,7 +1974,7 @@ mod tests {
             loaded.update(DT, &burner);
         }
         assert!(!clean.crashed && clean.structure.amplitude < 0.02, "clean: {:.3} m, {}", clean.structure.amplitude, clean.collision_label);
-        assert!(loaded.crashed && loaded.collision_label == "wing flutter", "loaded: margin {:.2}, {:.3} m", loaded.structure.margin, loaded.structure.amplitude);
+        assert!(loaded.lost.any() && loaded.structure.failed == Some("wing flutter"), "loaded: margin {:.2}, {:.3} m", loaded.structure.margin, loaded.structure.amplitude);
     }
 
     #[test]
@@ -1865,3 +2073,131 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod ground_tests {
+    use super::*;
+    const DT: f64 = 1.0 / 120.0;
+
+    /// Down a glide path of `glide` degrees at `kt` onto runway A, flaring
+    /// from `flare` m (0: flown straight on), then the brakes to a stop.
+    fn land(kind: Type, glide: f64, flare: f64, kt: f64) -> Aircraft {
+        terrain::init();
+        let e = terrain::base_elevation();
+        let (dx, dz) = terrain::runway_dir();
+        let fwd = v3(dx, 0.0, dz);
+        let (tx, tz) = terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH + 320.0, 0.0);
+        let aim = v3(tx, e + 1.6, tz);
+        let start = aim - fwd * 3000.0 + V3::Y * (3000.0 * (glide * DEG).tan());
+        let mut a = crate::combat::spawn(start, dx.atan2(-dz), kt / 1.944);
+        a.set_type(kind);
+        let mut touched = false;
+        for _ in 0..(90.0 / DT) as usize {
+            let (pitch, roll) = if touched {
+                (0.0, 0.0)
+            } else {
+                let target = if a.agl < flare { a.pos + fwd * 200.0 + V3::Y * (1.0 - a.agl) } else { aim + fwd * 400.0 };
+                crate::ai::steer(&a, (target - a.pos).norm(), 2.0)
+            };
+            let throttle_up = !touched && a.airspeed_kt < kt;
+            let input = Input { gear_down: true, pitch_axis: pitch, roll_axis: roll, throttle_up, throttle_down: !throttle_up, wheel_brake: touched, ..Default::default() };
+            a.update(DT, &input);
+            if a.crashed {
+                break;
+            }
+            touched |= a.on_ground || a.skid > 0.0;
+            if touched && a.speed < 1.0 {
+                break;
+            }
+        }
+        a
+    }
+
+    /// A firm arrival flown straight onto the runway without a flare (about
+    /// 4 m/s) bottoms the struts and holds; one at about 6 m/s folds the
+    /// gear and the jet slides to a stop on its belly instead of exploding.
+    #[test]
+    fn hard_landings_fold_the_gear_instead_of_exploding() {
+        for kind in [Type::F16, Type::Mig29] {
+            let firm = land(kind, 3.0, 0.0, 150.0);
+            assert!(!firm.crashed && firm.gear_broken == [false; 3] && firm.speed < 1.0, "{kind:?} firm: {} {:?}", firm.collision_label, firm.gear_broken);
+            let hard = land(kind, 5.0, 0.0, 160.0);
+            assert!(!hard.crashed && hard.gear_broken.iter().any(|b| *b) && hard.speed < 1.0, "{kind:?} hard: {} {:?}", hard.collision_label, hard.gear_broken);
+        }
+    }
+
+    #[test]
+    fn the_mig29_lands_and_takes_off() {
+        let a = land(Type::Mig29, 3.0, 9.0, 150.0);
+        assert!(!a.crashed && a.gear_broken == [false; 3] && a.speed < 1.0, "{}", a.collision_label);
+        terrain::init();
+        let mut m = Mission::new();
+        let _ = crate::combat::Combat::new(crate::combat::MissionKind::Airfield, &mut m);
+        let mut a = Aircraft::new(&m);
+        a.set_type(Type::Mig29);
+        let mut up = None;
+        for k in 0..(40.0 / DT) as usize {
+            let pull = if a.airspeed_kt > 140.0 && a.pitch < 10.0 { 0.4 } else { 0.0 };
+            a.update(DT, &Input { gear_down: true, afterburner: true, pitch_axis: pull, ..Default::default() });
+            assert!(!a.crashed, "{} at {:.0} kt", a.collision_label, a.airspeed_kt);
+            if a.agl > 30.0 {
+                up = Some(k as f64 * DT);
+                break;
+            }
+        }
+        assert!(up.is_some_and(|t| t < 30.0), "never left the ground");
+    }
+
+    /// The canopy meeting the ground is still the end, as is a dive into it.
+    #[test]
+    fn inverted_or_steep_arrivals_still_crash() {
+        terrain::init();
+        let floor = terrain::floor(0.0, 0.0);
+        let mut a = crate::combat::spawn(v3(0.0, floor + 3.0, 0.0), 0.0, 120.0);
+        a.q = a.q.mul(Quat::axis_angle(V3::Z, PI));
+        a.vel.y = -3.0;
+        for _ in 0..240 {
+            a.update(DT, &Input::default());
+        }
+        assert!(a.crashed && matches!(a.collision_label, "canopy" | "fin"), "inverted: {}", a.collision_label);
+        let mut a = crate::combat::spawn(v3(0.0, floor + 40.0, 0.0), 0.0, 150.0);
+        a.vel = v3(0.0, -60.0, -140.0);
+        for _ in 0..240 {
+            a.update(DT, &Input::default());
+        }
+        assert!(a.crashed, "dive");
+    }
+
+    /// Overridden, the limiters let a full pull go past the g limit and say
+    /// so; left on, they hold it there.
+    #[test]
+    fn the_override_lets_the_pull_past_the_g_limit() {
+        let fly = |off: bool| {
+            let mut a = crate::combat::spawn(v3(0.0, 4000.0, 0.0), 0.0, 260.0);
+            let mut peak: f64 = 0.0;
+            let mut danger = None;
+            for _ in 0..(1.5 / DT) as usize {
+                a.update(DT, &Input { pitch_axis: 1.0, limiters_off: off, ..Default::default() });
+                peak = peak.max(a.g_load);
+                danger = danger.or(a.flcs.danger);
+            }
+            (peak, danger)
+        };
+        let (held, none) = fly(false);
+        let (over, warned) = fly(true);
+        assert!(held < 9.6 && none.is_none(), "limited: {held:.1} g");
+        assert!(over > 10.0 && warned == Some("OVER G"), "overridden: {over:.1} g {warned:?}");
+    }
+
+    /// With a wing gone the jet rolls away and falls; nobody flies it.
+    #[test]
+    fn a_jet_without_a_wing_rolls_away_and_falls() {
+        let mut a = crate::combat::spawn(v3(0.0, 4000.0, 0.0), 0.0, 220.0);
+        a.lose(Breakup { wing: [true, false], tail: false });
+        for _ in 0..(3.0 / DT) as usize {
+            a.update(DT, &Input { pitch_axis: 1.0, ..Default::default() });
+        }
+        assert!(!a.crashed && a.vs < -20.0, "sinking at {:.0} m/s", a.vs);
+        assert!(a.omega.len() > 1.0 || a.bank.abs() > 60.0, "bank {:.0}", a.bank);
+    }
+}

@@ -51,6 +51,8 @@ pub struct Fulcrum {
     pub stabs: [Mesh; 2],
     /// Nose, left main and right main gear legs, fully down.
     pub gear: [Mesh; 3],
+    /// Upper and lower airbrake petals, closed.
+    pub brakes: [Mesh; 2],
 }
 
 /// Underwing pylons on each side, inboard to outboard.
@@ -527,10 +529,61 @@ pub fn build() -> Fulcrum {
         st
     };
     let mut stabs = [stab(1.0), stab(-1.0)];
-    for mesh in std::iter::once(&mut m).chain(stabs.iter_mut()) {
+    let mut brakes = [airbrake(true), airbrake(false)];
+    for mesh in std::iter::once(&mut m).chain(stabs.iter_mut()).chain(brakes.iter_mut()) {
         flag_camo(mesh);
     }
-    Fulcrum { body: m, canopy, stabs, gear: landing_gear() }
+    Fulcrum { body: m, canopy, stabs, gear: landing_gear(), brakes }
+}
+
+/// Airbrake petals on the tail cone between the engines, ahead of the
+/// brake-chute fairing: chordwise extent, half width.
+const BRAKE_Z: (f64, f64) = (5.10, 6.25);
+const BRAKE_HALF: f64 = 0.24;
+/// How far each petal swings open about its leading edge.
+pub const BRAKE_OPEN: f64 = 55.0 * DEG;
+
+/// Angle round the fuselage section at `z` where the skin reaches `x` from
+/// the centreline, on the upper or lower side.
+fn section_angle(z: f64, x: f64, upper: bool) -> f64 {
+    let [_, w, _, _, _, nu, nl] = spline(&FUSE, z);
+    let n = if upper { nu } else { nl };
+    (x / w).min(1.0).powf(n / 2.0).acos()
+}
+
+/// Leading edge of the upper or lower petal on the centreline: its hinge.
+pub fn brake_hinge(upper: bool) -> V3 {
+    let z = BRAKE_Z.0;
+    let p = fuselage_point(z, if upper { PI / 2.0 } else { 1.5 * PI });
+    p + V3::Y * if upper { 0.012 } else { -0.012 }
+}
+
+/// One petal, closed: a skin panel standing just off the fuselage with a
+/// dark inner face under it.
+fn airbrake(upper: bool) -> Mesh {
+    let mut m = Mesh::new();
+    let s = if upper { 1.0 } else { -1.0 };
+    let at = move |u: f64, v: f64, lift: f64| {
+        let z = mix(BRAKE_Z.0, BRAKE_Z.1, u);
+        let a = section_angle(z, BRAKE_HALF, upper);
+        let th = if upper { mix(a, PI - a, v) } else { mix(PI + a, TAU - a, v) };
+        fuselage_point(z, th) + V3::Y * (s * lift)
+    };
+    let outer = move |p: V3| p - V3::Y * s;
+    let inner = move |p: V3| p + V3::Y * s;
+    m.surface(3, 4, move |u, v| at(u, v, 0.012), move |_, _| if upper { LIGHT } else { BELLY }, Some(&outer));
+    m.surface(3, 4, move |u, v| at(u, v, -0.012), |_, _| METAL, Some(&inner));
+    // The rim, so the open petal has a thickness edge-on.
+    for (u0, v0, u1, v1) in [(0.0, 0.0, 0.0, 1.0), (1.0, 0.0, 1.0, 1.0), (0.0, 0.0, 1.0, 0.0), (0.0, 1.0, 1.0, 1.0)] {
+        for k in 0..4 {
+            let (a, b) = (k as f64 / 4.0, (k + 1) as f64 / 4.0);
+            let (ua, va, ub, vb) = (mix(u0, u1, a), mix(v0, v1, a), mix(u0, u1, b), mix(v0, v1, b));
+            let mid = at(0.5, 0.5, 0.0);
+            let out = at(mix(ua, ub, 0.5), mix(va, vb, 0.5), 0.0) - mid;
+            face(&mut m, &[at(ua, va, 0.012), at(ub, vb, 0.012), at(ub, vb, -0.012), at(ua, va, -0.012)], out, METAL);
+        }
+    }
+    m
 }
 
 /// Landing gear legs fully down: the nose leg with its twin wheels and mud
@@ -622,7 +675,7 @@ mod tests {
     #[test]
     fn geometry_is_finite_with_unit_normals() {
         let f = build();
-        for mesh in [&f.body, &f.canopy, &f.stabs[0], &f.stabs[1], &f.gear[0], &f.gear[1], &f.gear[2]] {
+        for mesh in [&f.body, &f.canopy, &f.stabs[0], &f.stabs[1], &f.gear[0], &f.gear[1], &f.gear[2], &f.brakes[0], &f.brakes[1]] {
             assert!(mesh.count() > 0 && mesh.count() % 3 == 0);
             for v in mesh.v.chunks(STRIDE) {
                 let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
