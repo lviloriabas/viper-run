@@ -1155,7 +1155,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     use crate::sim::{spec, Type};
     let mig = a.kind == Type::Mig29;
     let speed = |kt: f64| if mig { format!("{:.0} KM/H", (kt * 1.852 / 10.0).round() * 10.0) } else { format!("{kt:.0} KT") };
-    let (rotate, approach, aoa, g) = if mig { (130.0, 140.0, "11 DEG", "+8.0 / -3.0") } else { (140.0, 150.0, "13 DEG", "+9.0 / -3.0") };
+    let (rotate, approach, aoa, g) = if mig { (130.0, 140.0, "11 DEG", "+8.0 / -3.0") } else { (150.0, 150.0, "13 DEG", "+9.0 / -3.0") };
     cv.text("LANDING CARD", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
     let rows = [
         ("ROTATE", speed(rotate)),

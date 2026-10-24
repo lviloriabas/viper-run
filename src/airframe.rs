@@ -789,17 +789,17 @@ pub fn build() -> Airframe {
 
 /// Retraction pivots of the nose and main gear legs, the axis each swings
 /// about and the angle it swings through (negative: the wheel goes aft).
-/// The nose leg hangs from the forebody just ahead of the intake and folds
-/// aft; the mains hang from the sides of the intake trunk and fold forward
+/// The nose leg hangs from the floor of the intake, 0.7 m behind its lip
+/// as on the real jet, and folds aft; the mains hang from the sides of the intake trunk and fold forward
 /// and inward, tucking the wheels in under the body.
 pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
-    (v3(0.0, 0.08, -3.38), V3::X, -105.0 * DEG),
+    (v3(0.0, -0.38, -2.33), V3::X, -105.0 * DEG),
     (v3(-0.72, 0.0, 0.55), v3(0.912, 0.0, 0.410), 95.0 * DEG),
     (v3(0.72, 0.0, 0.55), v3(0.912, 0.0, -0.410), 95.0 * DEG),
 ];
 /// Nose-well door: hinged on the right edge of the well, flush with the
 /// skin when shut, and swung down beside the leg when open.
-pub const GEAR_DOORS: [(V3, V3, f64); 1] = [(v3(0.17, 0.095, -3.20), V3::Z, 88.0 * DEG)];
+pub const GEAR_DOORS: [(V3, V3, f64); 1] = [(v3(0.17, -0.42, -2.15), V3::Z, 88.0 * DEG)];
 
 /// Landing gear legs fully down: nose leg with its single wheel in a fork,
 /// main legs with the larger wheels outboard of their struts and the strut
@@ -818,7 +818,7 @@ fn landing_gear() -> ([Mesh; 3], [Mesh; 1]) {
 
     let mut nose = Mesh::new();
     let (p, _, _) = GEAR_PIVOTS[0];
-    let axle = v3(0.0, -1.33, -3.45);
+    let axle = v3(0.0, -1.33, -2.40);
     // Oleo from the forebody down to the fork crown just above the tyre.
     let crown = axle + V3::Y * 0.27;
     let l = (crown - p).len();
@@ -958,7 +958,7 @@ mod tests {
 
     /// The gear legs hang from the skin, not from thin air, and fold their
     /// wheels into the body: the mains in beside the intake trunk, the nose
-    /// wheel up behind the forebody.
+    /// wheel up into the floor of the intake.
     #[test]
     fn gear_legs_hang_from_the_skin_and_fold_into_the_body() {
         let below = |p: V3| {
@@ -970,7 +970,7 @@ mod tests {
         };
         for (i, &(p, axis, swing)) in GEAR_PIVOTS.iter().enumerate() {
             assert!(p.x.abs() < section(p.z).w && below(p) > -0.05 && p.y < 0.2, "leg {i} pivot {p:?} off the skin");
-            let wheel = [v3(0.0, -1.33, -3.45), v3(-1.18, -1.20, 0.55), v3(1.18, -1.20, 0.55)][i];
+            let wheel = [v3(0.0, -1.33, -2.40), v3(-1.18, -1.20, 0.55), v3(1.18, -1.20, 0.55)][i];
             let up = p + Quat::axis_angle(axis, swing).rotate(wheel - p);
             println!("leg {i}: wheel folds to {up:?}");
             assert!(up.x.abs() < 0.8 && up.y > -0.55 && up.y < 0.5, "leg {i} wheel folds to {up:?}");

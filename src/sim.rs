@@ -305,9 +305,10 @@ impl BattleDamage {
 
 /// A landing-gear leg: the tyre's lowest point at full extension (body
 /// axes), the oleo's spring and damping, its stroke, the load that breaks
-/// it, and whether it brakes or steers. Nose gear 3.45 m ahead of the centre
-/// of gravity, main gear 0.55 m behind it on a 2.36 m track: the jet stands
-/// 5.09 m to the fin tip with about 14 % of its weight on the nose wheel.
+/// it, and whether it brakes or steers. Nose gear under the intake, 2.40 m
+/// ahead of the centre of gravity, main gear 0.55 m behind it on a 2.36 m
+/// track: the jet stands 5.09 m to the fin tip with about 19 % of its weight
+/// on the nose wheel.
 /// The gas spring stiffens through the stroke and the tyre takes what is
 /// left at the bottom, so a firm arrival bottoms the strut without breaking
 /// it; a leg gives way at about four times its share of the weight, past a
@@ -325,7 +326,7 @@ pub struct Wheel {
 }
 
 pub const WHEELS: [Wheel; 3] = [
-    Wheel { name: "nose gear", local: v3(0.0, -1.55, -3.45), k: 1.6e5, d: 1.7e4, stroke: 0.30, limit: 2.2e5, brakes: false, steers: true },
+    Wheel { name: "nose gear", local: v3(0.0, -1.55, -2.40), k: 1.6e5, d: 1.7e4, stroke: 0.30, limit: 2.2e5, brakes: false, steers: true },
     Wheel { name: "left main gear", local: v3(-1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, limit: 3.4e5, brakes: true, steers: false },
     Wheel { name: "right main gear", local: v3(1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, limit: 3.4e5, brakes: true, steers: false },
 ];
