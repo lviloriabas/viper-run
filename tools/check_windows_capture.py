@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check capture compatibility in the final Windows PE, using only stdlib.
 
-Inspecting the release catches the marker being dropped by LTO, stripping or
-a missing module-definition linker argument.
+Inspect the final executable to ensure external performance overlays are not disabled.
 """
 
 from pathlib import Path
@@ -34,7 +33,9 @@ def check(path: Path) -> None:
         raise AssertionError(f"RVA {rva:#x} has no file-backed section")
 
     export_rva, export_size = u32(optional + 112), u32(optional + 116)
-    assert export_rva and export_size, "capture compatibility export table is missing"
+    if not export_rva or not export_size:
+        print(f"PASS: {path.name} allows external capture and overlay hooks")
+        return
     exports = offset(export_rva)
     functions, names, ordinals = (offset(u32(exports + n)) for n in (28, 32, 36))
     for index in range(u32(exports + 24)):
@@ -45,10 +46,10 @@ def check(path: Path) -> None:
         assert ordinal < u32(exports + 20), "invalid export ordinal"
         marker = u32(functions + ordinal * 4)
         assert not export_rva <= marker < export_rva + export_size, "marker is a forwarder"
-        assert u32(offset(marker)) == 0, "marker must opt out of RTSS overlay hooks"
-        print(f"PASS: {path.name} exports RTSSHooksCompatibility = 0")
+        assert u32(offset(marker)) != 0, "RTSSHooksCompatibility = 0 disables external overlays"
+        print(f"PASS: {path.name} does not disable RTSS overlay hooks")
         return
-    raise AssertionError("RTSSHooksCompatibility is missing from the release executable")
+    print(f"PASS: {path.name} allows external capture and overlay hooks")
 
 
 if __name__ == "__main__":

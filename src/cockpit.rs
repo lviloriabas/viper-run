@@ -1,4 +1,4 @@
-//! Modernised F-16 Viper cockpit: flat-shaded, low-polygon 3D geometry in body metres,
+//! F-16C cockpit: flat-shaded, low-polygon 3D geometry in body metres,
 //! live instrument pages rendered into a texture atlas, and the collimated
 //! NAV HUD clipped to the physical combiner glass.
 use crate::air::{self, AirData};
@@ -14,6 +14,7 @@ use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
 mod consoles;
+mod hud;
 mod mig;
 mod pilot;
 
@@ -38,9 +39,9 @@ fn uv(r: R) -> (f64, f64, f64, f64) {
     (r.x as f64 / AW, 1.0 - r.y as f64 / A, (r.x + r.w) as f64 / AW, 1.0 - (r.y + r.h) as f64 / A)
 }
 
-const R_MFD_L: R = r(0.0, 0.0, 256.0, 320.0);
-const R_MFD_R: R = r(256.0, 0.0, 256.0, 320.0);
-const R_CPD: R = r(512.0, 0.0, 240.0, 320.0);
+const R_MFD_L: R = r(0.0, 0.0, 256.0, 256.0);
+const R_MFD_R: R = r(256.0, 0.0, 256.0, 256.0);
+const R_HSI: R = r(512.0, 0.0, 240.0, 240.0);
 const R_DED: R = r(752.0, 0.0, 272.0, 64.0);
 const R_ICP: R = r(752.0, 64.0, 272.0, 176.0);
 const R_RWR: R = r(752.0, 448.0, 128.0, 128.0);
@@ -62,7 +63,7 @@ const R_MIRROR: R = r(1024.0, 1280.0, 512.0, 160.0);
 pub const MIRROR_SIZE: (u32, u32) = (512, 160);
 const MIRROR_FOV: f64 = 40.0 * DEG;
 const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
-const R_ARM: R = r(256.0, 448.0, 256.0, 128.0);
+const R_ARM: R = r(256.0, 448.0, 96.0, 256.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
 const R_KNEE: R = r(560.0, 448.0, 192.0, 240.0);
 /// Dials on the right auxiliary console: hydraulic pressure A and B, EPU
@@ -171,8 +172,38 @@ fn aux_face(s: f64) -> (V3, V3, V3, V3, f64, f64) {
 fn panel_point(x: f64, y: f64) -> V3 {
     let ax = x.abs();
     let u = if ax <= HINGE { ax } else { HINGE + (ax - HINGE) / CANT.cos() };
-    pp(x.signum() * u, pv(y), 0.0)
+    let p = pp(x.signum() * u, pv(y), 0.0);
+    p + panel().y * ((y - p.y) / TILT.cos())
 }
+/// Interior half-width of the sloping tub wall at a body-space point.
+fn tub_half_width(p: V3) -> f64 {
+    let sill = airframe::canopy_profile(p.z).1 - 0.03;
+    mix(consoles::WALL_X, 0.47, clamp((p.y - consoles::WALL_Y) / (sill - consoles::WALL_Y), 0.0, 1.0))
+}
+
+/// A panel-plane point just inside the side wall, found against the wall
+/// at this point's own z instead of a width from an unrelated height.
+fn panel_wall_point(side: f64, y: f64) -> V3 {
+    let (mut lo, mut hi) = (0.44, consoles::WALL_X);
+    for _ in 0..32 {
+        let x = (lo + hi) * 0.5;
+        let p = panel_point(side * x, y);
+        if x <= tub_half_width(p) - 0.003 { lo = x; } else { hi = x; }
+    }
+    panel_point(side * lo, y)
+}
+
+fn panel_shoulder(side: f64, bottom: f64) -> [V3; 4] {
+    // OUTLINE's outer upper corner is y = 0.76, not canopy-rail height.
+    let top = 0.76;
+    [
+        panel_point(side * 0.45, bottom),
+        panel_wall_point(side, bottom),
+        panel_wall_point(side, top),
+        panel_point(side * 0.45, top),
+    ]
+}
+
 /// Panel outline in face coordinates, with points at the wing hinges.
 const OUTLINE: [(f64, f64); 16] = [
     (-0.47, 0.0), (-HINGE, 0.0), (HINGE, 0.0), (0.47, 0.0), (0.47, 0.36), (0.45, 0.44), (0.40, 0.52), (0.34, 0.57),
@@ -547,22 +578,20 @@ fn build_static(m: &mut Mesh) {
         m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), shield(b.0, b.1, 0.0), shield(a.0, a.1, 0.0), GLARE.scale(1.2));
     }
 
-    // Displays: two portrait MFDs and the large centre pedestal display.
-    display(m, &panel_at(-0.232, 0.72, 0.0), 0.175, 0.215, 0.125, 0.16, R_MFD_L, true);
-    display(m, &panel_at(0.232, 0.72, 0.0), 0.175, 0.215, 0.125, 0.16, R_MFD_R, true);
-    display(m, &panel_at(0.0, 0.58, 0.0), 0.195, 0.255, 0.15, 0.20, R_CPD, true);
-
-    // Up-front control: DED over the ICP keypad, protruding under the HUD.
-    let ufc = panel_at(0.0, 0.86, 0.0);
-    m.block(&ufc.at(0.0, 0.0, 0.05), v3(0.118, 0.078, 0.05), BEZEL.scale(0.95));
-    let ufc_face = Frame { o: ufc.p(0.0, 0.0, 0.1005), ..ufc };
-    screen(m, &ufc_face.at(0.0, 0.048, 0.0), 0.20, 0.047, R_DED);
-    screen(m, &ufc_face.at(0.0, -0.022, 0.0), 0.20, 0.129 * 0.72, R_ICP);
+    // First visual pass from the user's F-16C/D reference: square MFDs
+    // flank an analogue centre stack; the ICP is directly below the HUD.
+    display(m, &panel_at(-0.232, 0.795, 0.0), 0.190, 0.190, 0.137, 0.137, R_MFD_L, true);
+    display(m, &panel_at(0.232, 0.795, 0.0), 0.190, 0.190, 0.137, 0.137, R_MFD_R, true);
+    let ufc = panel_at(0.0, 0.945, 0.0);
+    m.block(&ufc.at(0.0, 0.0, 0.060), v3(0.108, 0.083, 0.060), BEZEL.scale(0.95));
+    screen(m, &ufc.at(0.0, 0.0, 0.1205), 0.194, 0.146, R_ICP);
+    // The DED is beside the ICP, not stacked above it.
+    plate(m, &panel_at(0.24, 0.954, 0.0), 0.18, 0.054, R_DED);
 
     // HUD: body on the glare shield, side posts and the tall combiner frame.
     // The body sits forward, inside the glare shield; only the glass rises above it.
-    let hud_body = Frame { o: v3(0.0, 1.03, -4.15), x: V3::X, y: V3::Y, z: V3::Z };
-    m.block(&hud_body, v3(0.10, 0.042, 0.12), GLARE.scale(1.5));
+    let hud_body = Frame { o: v3(0.0, 1.054, -4.15), x: V3::X, y: V3::Y, z: V3::Z };
+    m.block(&hud_body, v3(0.10, 0.018, 0.12), GLARE.scale(1.5));
     m.block(&Frame { o: v3(0.0, 1.074, -4.04), ..hud_body }, v3(0.095, 0.004, 0.035), GLARE.scale(2.2));
     for &s in &[-1.0, 1.0] {
         let (b, t) = (v3(s * 0.104, 1.07, -4.02), v3(s * 0.104, 1.352, -3.958));
@@ -577,27 +606,24 @@ fn build_static(m: &mut Mesh) {
     m.block(&lamp(0.14).at(0.0, 0.0, -0.005), v3(0.024, 0.024, 0.01), GLARE.scale(1.4));
     screen(m, &lamp(0.14).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
 
-    // Standby row under the UFC, as on the F-16C: airspeed/Mach, ADI,
-    // altimeter and the accelerometer.
-    gauge(m, &panel_at(-0.105, 0.745, 0.0), 0.026, R_DIALS[0]);
-    gauge(m, &panel_at(-0.035, 0.745, 0.0), 0.026, R_DIALS[2]);
-    gauge(m, &panel_at(0.035, 0.745, 0.0), 0.026, R_DIALS[1]);
-    gauge(m, &panel_at(0.105, 0.745, 0.0), 0.026, R_GMETER);
-    // The wings end at the auxiliary console shelves: the RWR scope on the
-    // left, and RPM, FTIT, nozzle and oil on the right.
-    display(m, &panel_at(-0.40, 0.765, 0.0), 0.10, 0.10, 0.074, 0.074, R_RWR, false);
-    for (i, (u, y)) in [(0.35, 0.79), (0.412, 0.79), (0.35, 0.73), (0.412, 0.73)].iter().enumerate() {
-        gauge(m, &panel_at(*u, *y, 0.0), 0.022, R_DIALS[3 + i]);
+    // Airspeed and altimeter above the larger attitude/heading instruments.
+    gauge(m, &panel_at(-0.061, 0.785, 0.0), 0.043, R_DIALS[0]);
+    gauge(m, &panel_at(0.061, 0.785, 0.0), 0.043, R_DIALS[1]);
+    gauge(m, &panel_at(0.0, 0.655, 0.0), 0.048, R_DIALS[2]);
+    gauge(m, &panel_at(0.0, 0.515, 0.0), 0.048, R_HSI);
+    gauge(m, &panel_at(-0.092, 0.635, 0.0), 0.022, R_VVI);
+    gauge(m, &panel_at(0.091, 0.635, 0.0), 0.022, R_GMETER);
+    // RWR above the left MFD; engine gauges follow the right shoulder.
+    display(m, &panel_at(-0.245, 0.951, 0.0), 0.085, 0.080, 0.063, 0.061, R_RWR, false);
+    for (i, y) in [0.86, 0.79, 0.72, 0.65].iter().enumerate() {
+        gauge(m, &panel_at(0.392, *y, 0.0), 0.026, R_DIALS[3 + i]);
     }
-    plate(m, &panel_at(0.222, 0.88, 0.0), 0.13, 0.065, R_CAUTION);
-    plate(m, &panel_at(-0.222, 0.88, 0.0), 0.13, 0.065, R_ARM);
-    // Under the MFDs: the vertical velocity indicator on the left, the fuel
-    // quantity indicator on the right; over the wing columns, the threat
-    // warning prime lights and the fuel flow counter.
-    gauge(m, &panel_at(-0.24, 0.535, 0.0), 0.036, R_VVI);
-    gauge(m, &panel_at(0.24, 0.535, 0.0), 0.040, R_FUEL);
-    plate(m, &panel_at(-0.40, 0.85, 0.0), 0.088, 0.033, R_TWP);
-    plate(m, &panel_at(0.38, 0.86, 0.0), 0.070, 0.024, R_FFLOW);
+    plate(m, &panel_at(-0.376, 0.79, 0.0), 0.046, 0.16, R_ARM);
+    plate(m, &panel_at(0.40, 0.57, 0.0), 0.085, 0.060, R_CAUTION);
+    gauge(m, &panel_at(-0.245, 0.618, 0.0), 0.035, R_VVI);
+    gauge(m, &panel_at(0.245, 0.618, 0.0), 0.038, R_FUEL);
+    plate(m, &panel_at(-0.39, 0.91, 0.0), 0.062, 0.030, R_TWP);
+    plate(m, &panel_at(0.392, 0.93, 0.0), 0.065, 0.024, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -640,9 +666,11 @@ fn build_static(m: &mut Mesh) {
         let floor = |p: V3| v3(p.x, 0.22, p.z);
         let low = panel_point(ti.x, 0.40);
         m.polygon(&[bi, ti, panel_point(ti.x, ti.y), low, floor(low), floor(bi)], WALL.scale(0.6));
-        let b = airframe::canopy_profile(-3.9).1 - 0.03;
-        let (u0, u1) = (s * 0.47, s * (HINGE + (wx - HINGE) / CANT.cos()));
-        m.quad(pp(u0, pv(to.y), 0.0), pp(u1, pv(to.y), 0.0), pp(u1, pv(b), 0.0), pp(u0, pv(b), 0.0), PANEL.scale(0.8));
+        // Close only the shoulder below the panel's actual outer corner.
+        // Extending this rectangle up to canopy height formed the two
+        // pointed ears outside the sills.
+        let shoulder = panel_shoulder(s, to.y);
+        m.quad(shoulder[0], shoulder[1], shoulder[2], shoulder[3], PANEL.scale(0.8));
     }
     // On the walls leaning in above the consoles: the canopy jettison
     // T-handle and the map light on the left, the canopy switch box and the
@@ -680,6 +708,38 @@ fn build_static(m: &mut Mesh) {
     pilot::band(m, &bow, 0.03, 0.026, V3::Z, Rgb(0.13, 0.15, 0.16));
     let bulk: Vec<V3> = (0..=nv).map(|k| airframe::canopy_point(0.995, k as f64 / nv as f64)).collect();
     m.polygon(&bulk, Rgb(0.12, 0.13, 0.13));    m.facet();
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    #[test]
+    fn panel_shoulders_stay_below_the_outline_and_inside_the_tub() {
+        for side in [-1.0, 1.0] {
+            let (o, x, y, _, w, h) = aux_face(side);
+            let bottom = (o + x * (if side > 0.0 { w } else { 0.0 }) + y * h).y;
+            let shoulder = panel_shoulder(side, bottom);
+            for (i, p) in shoulder.iter().enumerate() {
+                assert!(p.is_finite() && p.y <= 0.760001, "shoulder corner {i}: {p:?}");
+                assert!(p.x.abs() <= tub_half_width(*p) + 1e-8, "shoulder outside wall: {p:?}");
+            }
+            for tri in [[0, 1, 2], [0, 2, 3]] {
+                let [a, b, c] = tri.map(|i| shoulder[i]);
+                assert!((b - a).cross(c - a).len() > 1e-7);
+                for i in 0..=8 {
+                    for j in 0..=8-i {
+                        let p = a + (b - a) * (i as f64 / 8.0) + (c - a) * (j as f64 / 8.0);
+                        assert!(p.x.abs() <= tub_half_width(p) + 1e-6, "shoulder surface outside wall: {p:?}");
+                    }
+                }
+            }
+        }
+        for (u, v) in OUTLINE {
+            let p = pp(u, v, 0.0);
+            assert!(p.x.abs() <= tub_half_width(p));
+        }
+    }
 }
 
 // ================================================================ pages
@@ -920,7 +980,7 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
             cv.text(&format!("AOA {:.1}", a.alpha_deg), x0 + w - 10.0, y0 + h - 32.0, 1.0, DIM, Align::Right);
         }
         Page::Fcr => {
-            cv.text("CRM  RWS  NORM", x0 + w / 2.0, y0 + 34.0, 1.0, GREEN, Align::Center);
+            cv.text(if c.mode.air_to_ground() { "GM  MAP" } else if c.radar_lock().is_some() { "CRM  STT  NORM" } else if c.acquiring.is_some() { "CRM  ACQ  NORM" } else { "CRM  RWS  NORM" }, x0 + w / 2.0, y0 + 34.0, 1.0, GREEN, Align::Center);
             let nm = symbology::fcr_scale(a, c);
             cv.text(&format!("{nm}"), x0 + 10.0, y0 + 60.0, 1.0, GREEN, Align::Left);
             let (l, rr, t, b) = (x0 + 28.0, x0 + w - 28.0, y0 + 50.0, y0 + h - 50.0);
@@ -930,14 +990,16 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
             }
             cv.line(l, t, l, b, 1.0, GREEN);
             cv.line(rr, t, rr, b, 1.0, GREEN);
-            let sweep = ((time * 0.24).fract() as f32).abs();
-            let sx = l + 4.0 + sweep * (rr - l - 8.0);
-            cv.line(sx, t + 2.0, sx, b - 2.0, 2.0, rgba(0x39, 0x79, 0x57, 1.0));
+            if c.radar_lock().is_none() {
+                let sweep = 1.0 - ((time * 0.48).fract() as f32 * 2.0 - 1.0).abs();
+                let sx = l + 4.0 + sweep * (rr - l - 8.0);
+                cv.line(sx, t + 2.0, sx, b - 2.0, 2.0, rgba(0x39, 0x79, 0x57, 1.0));
+            }
             if !symbology::fcr(cv, [l, t, rr, b], a, c, nm) {
                 cv.text("NO TRACK", x0 + w / 2.0, (t + b) / 2.0, 2.0, rgba(0x80, 0xb7, 0x91, 1.0), Align::Center);
             }
             cv.text(&format!("{} C", pad(ad.kcas, 3)), l + 4.0, b + 14.0, 1.0, GREEN, Align::Left);
-            cv.text(&format!("{} ALT", pad(ad.baro_ft / 100.0, 3)), rr - 4.0, b + 14.0, 1.0, GREEN, Align::Right);
+            cv.text(&format!("{:.0} ALT", ad.baro_ft / 100.0), rr - 4.0, b + 14.0, 1.0, GREEN, Align::Right);
         }
         Page::Air => {
             // Air-data computer: static air at the jet and what it does to the airspeeds.
@@ -983,7 +1045,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let ad = AirData::of(a);
     mfd(cv, R_MFD_L, pages[0], a, &ad, m, time, c);
     mfd(cv, R_MFD_R, pages[1], a, &ad, m, time, c);
-    mfd(cv, R_CPD, Page::Hsd, a, &ad, m, time, c);
+    hsi(cv, R_HSI, a, m);
 
     // DED.
     let r = R_DED;
@@ -1056,23 +1118,24 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         cv.text(s, x + 64.0, y + 21.0, 2.0, if *lit { rgba(0x1c, 0x14, 0x05, 1.0) } else { rgba(0x6b, 0x75, 0x69, 1.0) }, Align::Center);
     }
 
-    // Master arm / laser panel.
+    // Narrow master-arm strip, with an atlas aspect matching the physical
+    // lightplate rather than stretching the former wide placard vertically.
     let r = R_ARM;
     hardware(cv, r, "");
-    cv.text("MASTER ARM", r.x + 64.0, r.y + 22.0, 1.0, WHITE, Align::Center);
-    // The switch sits at SAFE in NAV and at ARM with a weapon selected.
+    cv.text("MASTER", r.x + 48.0, r.y + 22.0, 1.0, WHITE, Align::Center);
+    cv.text("ARM", r.x + 48.0, r.y + 36.0, 1.0, WHITE, Align::Center);
     let switch = if c.mode == Mode::Nav { 2 } else { 0 };
     for (i, s) in ["ARM", "SIM", "SAFE"].iter().enumerate() {
-        let y = r.y + 46.0 + i as f32 * 22.0;
-        cv.text(s, r.x + 80.0, y, 1.0, rgba(0xb6, 0xc6, 0xb5, 1.0), Align::Left);
-        if i == switch {
-            cv.line(r.x + 38.0, y, r.x + 64.0, y, 4.0, WHITE);
-        }
+        let y = r.y + 62.0 + i as f32 * 22.0;
+        cv.text(s, r.x + 44.0, y, 1.0, DIM, Align::Left);
+        if i == switch { cv.line(r.x + 18.0, y, r.x + 35.0, y, 4.0, WHITE); }
     }
-    cv.text("LASER ARM", r.x + 190.0, r.y + 22.0, 1.0, WHITE, Align::Center);
-    cv.text("OFF", r.x + 190.0, r.y + 90.0, 1.0, rgba(0x96, 0xa5, 0xa0, 1.0), Align::Center);
-    cv.line(r.x + 190.0, r.y + 48.0, r.x + 190.0, r.y + 76.0, 4.0, WHITE);
-    cv.text("ALT REL", r.x + 128.0, r.y + r.h - 16.0, 1.0, rgba(0x96, 0xa5, 0xa0, 1.0), Align::Center);
+    cv.line(r.x + 10.0, r.y + 128.0, r.x + 86.0, r.y + 128.0, 1.0, DIM);
+    cv.text("LASER", r.x + 48.0, r.y + 147.0, 1.0, WHITE, Align::Center);
+    cv.text("ARM", r.x + 48.0, r.y + 161.0, 1.0, WHITE, Align::Center);
+    cv.circle(r.x + 48.0, r.y + 192.0, 9.0, 2.0, DIM);
+    cv.line(r.x + 48.0, r.y + 192.0, r.x + 48.0, r.y + 209.0, 4.0, WHITE);
+    cv.text("OFF", r.x + 48.0, r.y + 229.0, 1.0, DIM, Align::Center);
 
     // AOA indexer: high, on-speed, low chevrons.
     let r = R_AOA;
@@ -1170,6 +1233,32 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     }
 }
 
+/// Analogue heading indicator in the centre stack of the reference cockpit.
+fn hsi(cv: &mut Canvas, r: R, a: &Aircraft, m: &Mission) {
+    let (x, y, rad) = gauge_face(cv, r);
+    for heading in (0..360).step_by(5) {
+        let angle = (heading as f64 - a.heading - 90.0) * DEG;
+        let major = heading % 30 == 0;
+        spoke(cv, x, y, angle, rad * if major { 0.77 } else { 0.85 }, rad * 0.94, if major { 3.0 } else { 1.5 }, WHITE);
+        if major {
+            let label = match heading { 0 => "N".to_string(), 90 => "E".to_string(), 180 => "S".to_string(), 270 => "W".to_string(), _ => (heading / 10).to_string() };
+            spoke_text(cv, x, y, angle, rad * 0.64, &label, WHITE);
+        }
+    }
+    let gate = m.current_gate();
+    let bearing = (gate.pos.x - a.pos.x).atan2(-(gate.pos.z - a.pos.z)) * RAD;
+    let course = (bearing - a.heading - 90.0) * DEG;
+    spoke(cv, x, y, course, -rad * 0.54, rad * 0.53, 3.0, WHITE);
+    let (dx, dy) = (course.cos() as f32, course.sin() as f32);
+    let (tx, ty) = (x + dx * rad * 0.54, y + dy * rad * 0.54);
+    cv.line(tx, ty, tx - dx * 12.0 - dy * 6.0, ty - dy * 12.0 + dx * 6.0, 3.0, WHITE);
+    cv.line(tx, ty, tx - dx * 12.0 + dy * 6.0, ty - dy * 12.0 - dx * 6.0, 3.0, WHITE);
+    cv.line(x - 22.0, y, x + 22.0, y, 4.0, AMBER);
+    cv.line(x, y - 13.0, x, y + 23.0, 4.0, AMBER);
+    cv.line(x - 10.0, y + 18.0, x + 10.0, y + 18.0, 3.0, AMBER);
+    cv.polyline(&[[x - 7.0, y - rad * 0.98], [x, y - rad * 0.87], [x + 7.0, y - rad * 0.98]], 3.0, false, WHITE);
+}
+
 /// Standby attitude indicator: rotating sky/ground ball with a fixed aircraft symbol.
 fn adi(cv: &mut Canvas, r: R, a: &Aircraft) {
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
@@ -1238,7 +1327,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     if glass.len() < 4 {
         return;
     }
-    cv.set_clip(Some(glass));
+    cv.set_clip(Some(glass.clone()));
     let (w, h) = (body.w, body.h);
     let focal = h * 0.5 / (cam.fov / 2.0).tan();
     let world_dir = |d: V3| -> Option<[f32; 2]> {
@@ -1294,19 +1383,29 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     ht(cv, &format!("G {:.1}", ad.g), -half, -62.0, small, Align::Left);
     boxed(cv, &pad(ad.kcas, 3), -half, 0.0, Align::Left);
     ht(cv, "C", -half, 13.0, small, Align::Left);
-    boxed(cv, &pad(alt_ft, 5), half, 0.0, Align::Right);
+    boxed(cv, &hud::altitude(alt_ft), half, 0.0, Align::Right);
     ht(cv, "B", half, 13.0, small, Align::Right);
     ht(cv, &format!("M {:.2}", ad.mach), -half, 34.0, small, Align::Left);
     ht(cv, &format!("AOA {:.1}", a.alpha_deg), -half, 46.0, small, Align::Left);
     ht(cv, &format!("GMAX {:.1}", ad.g_max), -half, 58.0, small, Align::Left);
     ht(cv, &if c.mode == crate::combat::Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) }, -half, 70.0, small, Align::Left);
-    ht(cv, &format!("R {}", pad(ad.radar_ft, 5)), half, 34.0, small, Align::Right);
+    // Radar altitude is a separately boxed repeater, resolved to ten feet.
+    if ad.radar_ft <= 5000.0 {
+        if let Some(p) = at(half, 34.0) {
+            let text = format!("R {}", hud::altitude(ad.radar_ft.max(0.0)));
+            let tw = Canvas::text_width(&text, small);
+            cv.stroke_rect(p[0] - tw - 2.0 * small, p[1] - 5.0 * small, tw + 4.0 * small, 10.0 * small, lw, col);
+            cv.text(&text, p[0], p[1], small, col, Align::Right);
+        }
+    }
     ht(cv, &format!("VV {:+}", (ad.vs_fpm / 10.0).round() as i64 * 10), half, 46.0, small, Align::Right);
     let gate = m.current_gate();
     let (dist, ttg) = steering(a, m);
     ht(cv, &format!("{:.1}>{:02}", dist / 1852.0, (m.gate_index + 1).min(m.gates.len())), half, 58.0, small, Align::Right);
     ht(cv, &clock(ttg), half, 70.0, small, Align::Right);
-    // Heading tape along the bottom of the field of view.
+    // Heading scale and steerpoint bearing caret, clamped at the edge.
+    let landing = a.gear > 0.5;
+    let tape_y = if landing { -37.0 } else { 100.0 };
     let base = (a.heading / 5.0).round() * 5.0;
     for k in -5..=5 {
         let n = wrap(base + k as f64 * 5.0, 360.0);
@@ -1315,35 +1414,61 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             continue;
         }
         let major = (n.round() as i64) % 10 == 0;
-        hl(cv, diff * 3.0, 100.0, diff * 3.0, if major { 106.0 } else { 103.0 });
+        hl(cv, diff * 3.0, tape_y, diff * 3.0, tape_y + if major { 6.0 } else { 3.0 });
         if major {
-            ht(cv, &pad((n / 10.0).round() % 36.0, 2), diff * 3.0, 93.0, small, Align::Center);
+            ht(cv, &pad((n / 10.0).round() % 36.0, 2), diff * 3.0, tape_y - 7.0, small, Align::Center);
         }
     }
-    hl(cv, 0.0, 108.0, -2.5, 112.0);
-    hl(cv, 0.0, 108.0, 2.5, 112.0);
-    ht(cv, &pad(a.heading, 3), 0.0, 119.0, small, Align::Center);
+    hl(cv, 0.0, tape_y + 8.0, -2.5, tape_y + 12.0);
+    hl(cv, 0.0, tape_y + 8.0, 2.5, tape_y + 12.0);
+    let bearing = (gate.pos.x - a.pos.x).atan2(-(gate.pos.z - a.pos.z)) * RAD;
+    let steer_x = clamp(wrap180(bearing - a.heading) * 3.0, -39.0, 39.0);
+    hl(cv, steer_x - 3.0, tape_y - 15.0, steer_x, tape_y - 11.0);
+    hl(cv, steer_x, tape_y - 11.0, steer_x + 3.0, tape_y - 15.0);
+    ht(cv, &pad(a.heading, 3), 0.0, tape_y + 19.0, small, Align::Center);
     // Speed and altitude scales flank the flight path.
-    for i in -3..=3 {
+    for i in -6..=6 {
         let speed = (ad.kcas / 10.0).round() * 10.0 + i as f64 * 10.0;
         let dy = (ad.kcas - speed) * 0.9;
-        if dy.abs() < 24.0 {
-            hl(cv, -half - 6.0, dy, -half - 2.0, dy);
+        let major = speed.round() as i64 % 50 == 0;
+        if (-51.0..28.0).contains(&dy) && dy.abs() > 9.0 && speed >= 0.0 {
+            hl(cv, -half - 6.0, dy, -half - if major { 0.0 } else { 3.0 }, dy);
+            if major && (dy - 13.0).abs() > 7.0 {
+                ht(cv, &format!("{}", speed.round() as i64), -half + 2.0, dy, small, Align::Left);
+            }
         }
         let alt = (alt_ft / 100.0).round() * 100.0 + i as f64 * 100.0;
         let ay = (alt_ft - alt) * 0.09;
-        if ay.abs() < 24.0 {
-            hl(cv, half + 6.0, ay, half + 2.0, ay);
+        let major = alt.round() as i64 % 500 == 0;
+        if (-51.0..28.0).contains(&ay) && ay.abs() > 9.0 {
+            hl(cv, half + 6.0, ay, half + if major { 0.0 } else { 3.0 }, ay);
+            if major && (ay - 13.0).abs() > 7.0 {
+                ht(cv, &format!("{}", (alt / 100.0).round() as i64), half - 2.0, ay, small, Align::Right);
+            }
         }
+    }
+    // Current-value index notches alongside the digital readouts.
+    for side in [-1.0, 1.0] {
+        hl(cv, side * 76.0, -3.0, side * 79.0, 0.0);
+        hl(cv, side * 79.0, 0.0, side * 76.0, 3.0);
     }
     // Gun cross at the top of the field.
     hl(cv, -8.0, -55.0, -3.0, -55.0);
     hl(cv, 3.0, -55.0, 8.0, -55.0);
     hl(cv, 0.0, -60.0, 0.0, -50.0);
 
-    // Inertial pitch ladder.
-    let hd = a.heading * DEG;
+    // Keep moving attitude bars out of the fixed data columns.
+    let ladder_clip: Vec<_> = [(-49.0, -79.0), (49.0, -79.0), (49.0, 134.0), (-49.0, 134.0)]
+        .into_iter().filter_map(|(x, y)| at(x, y)).collect();
+    if ladder_clip.len() == 4 {
+        cv.set_clip(Some(ladder_clip));
+    }
+    // Inertial ladder follows lateral drift and declutters above 60 degrees.
+    let hd = hud::ladder_heading(a.vel, a.heading);
     for pitch in (-85i32..=85).step_by(5) {
+        if !hud::ladder_pitch(pitch) {
+            continue;
+        }
         let e = pitch as f64 * DEG;
         let dir = |az: f64| {
             let hh = hd + az * DEG;
@@ -1353,7 +1478,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             continue;
         }
         for &s in &[-1.0, 1.0] {
-            let (i0, i1) = if pitch == 0 { (2.0, 9.0) } else { (2.0, 5.0) };
+            let (i0, i1) = if pitch == 0 { (1.5, 4.0) } else { (1.0, 3.0) };
             if let (Some(p), Some(q)) = (world_dir(dir(s * i0)), world_dir(dir(s * i1))) {
                 if pitch < 0 {
                     cv.dashed(p[0], p[1], q[0], q[1], lw, 4.0 * big, 3.0 * big, col);
@@ -1374,18 +1499,46 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             }
         }
         if pitch != 0 && (pitch as f64 - a.pitch).abs() < 18.0 {
-            if let Some(q) = world_dir(dir(6.0)) {
-                cv.text(&format!("{}", pitch.abs()), q[0] + 2.0, q[1], small, col, Align::Left);
+            for side in [-1.0, 1.0] {
+                if let Some(q) = world_dir(dir(side * 3.5)) {
+                    cv.text(&format!("{}", pitch.abs()), q[0], q[1], small, col, if side < 0.0 { Align::Right } else { Align::Left });
+                }
             }
         }
     }
-    // Flight-path marker.
-    if let Some(f) = world_dir(a.vel.norm()) {
-        let s = big * 2.6;
-        cv.circle(f[0], f[1], s, lw, col);
-        cv.line(f[0] - s * 2.4, f[1], f[0] - s, f[1], lw, col);
-        cv.line(f[0] + s, f[1], f[0] + s * 2.4, f[1], lw, col);
-        cv.line(f[0], f[1] - s, f[0], f[1] - s * 2.0, lw, col);
+    if landing {
+        // Extra -2.5 degree descent reference, inertial like the ladder.
+        let e = -2.5 * DEG;
+        for side in [-1.0, 1.0] {
+            let dir = |az: f64| v3((hd + az * DEG).sin() * e.cos(), e.sin(), -(hd + az * DEG).cos() * e.cos());
+            if let (Some(p), Some(q)) = (world_dir(dir(side * 1.0)), world_dir(dir(side * 3.0))) {
+                cv.dashed(p[0], p[1], q[0], q[1], lw, 4.0 * big, 3.0 * big, col);
+            }
+        }
+    }
+    cv.set_clip(Some(glass));
+    // An X identifies a flight-path marker limited by the combiner field.
+    let velocity_body = v3(a.vel.dot(ax.right), a.vel.dot(ax.up), -a.vel.dot(ax.forward));
+    if let Some((fx, fy, limited)) = hud::flight_path(velocity_body) {
+        if let Some(f) = at(fx, fy) {
+            let s = big * 2.6;
+            cv.circle(f[0], f[1], s, lw, col);
+            cv.line(f[0] - s * 2.4, f[1], f[0] - s, f[1], lw, col);
+            cv.line(f[0] + s, f[1], f[0] + s * 2.4, f[1], lw, col);
+            cv.line(f[0], f[1] - s, f[0], f[1] - s * 2.0, lw, col);
+            if limited {
+                cv.line(f[0] - s, f[1] - s, f[0] + s, f[1] + s, lw, col);
+                cv.line(f[0] - s, f[1] + s, f[0] + s, f[1] - s, lw, col);
+            }
+            if landing {
+                let (top, mid, bottom) = hud::aoa_bracket(a.alpha_deg, fy);
+                let x = fx - 15.0;
+                hl(cv, x, top, x, bottom);
+                hl(cv, x, top, x + 5.0, top);
+                hl(cv, x, mid, x + 3.0, mid);
+                hl(cv, x, bottom, x + 5.0, bottom);
+            }
+        }
     }
     // Steerpoint diamond on the next gate.
     if let Some(t) = world_dir((gate.pos - cam.eye).norm()) {
@@ -1600,8 +1753,19 @@ pub fn mirror_camera(a: &Aircraft) -> Camera {
 /// A rounded outline, the glass bulging forward like a car's wide-angle
 /// mirror and showing the whole rear picture left for right as a mirror
 /// does, in a shallow housing whose back closes in to a dome.
-fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb) {
-    let outline = rounded_rect(w, h, h * 0.32, 4);
+fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, rear_offset: f64) {
+    let corners = rounded_rect(w, h, h * 0.25, 4);
+    // Subdivide the long edges as well as the rounded corners: the panes
+    // follow the canopy arch, so a single chord would flatten their rims.
+    let mut outline = Vec::new();
+    for k in 0..corners.len() {
+        let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+        let steps = (((b.0 - a.0).hypot(b.1 - a.1) / 0.015).ceil() as usize).max(1);
+        for j in 0..steps {
+            let t = j as f64 / steps as f64;
+            outline.push((mix(a.0, b.0, t), mix(a.1, b.1, t)));
+        }
+    }
     let n = outline.len();
     // Rim: a lip round the glass, then the back closing in to a dome.
     let rim = 0.007;
@@ -1616,18 +1780,36 @@ fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> 
     }
     let back: Vec<V3> = rings[5].iter().rev().copied().collect();
     m.polygon(&back, housing);
-    // Glass: rings from the centre out, bulging 8 mm at the middle.
+    // Map the reflection in the pilot's view so the shoulder mirrors do
+    // not rotate the reflected horizon with their diagonal housings.
+    let project = |p: V3| {
+        let p = p - EYE;
+        (p.x / -p.z, p.y / -p.z)
+    };
+    let mut bounds = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for &(x, y) in &outline {
+        let (u, v) = project(place(x, y, 0.004));
+        bounds = (bounds.0.min(u), bounds.1.min(v), bounds.2.max(u), bounds.3.max(v));
+    }
     let rm = R_MIRROR;
-    let sh = (rm.w * (h / w) as f32).min(rm.h);
-    let (u0, v0, u1, v1) = uv(r(rm.x + rm.w, rm.y + (rm.h - sh) / 2.0, -rm.w, sh));
-    let bulge = 0.008;
+    let scale = (rm.w as f64 / (bounds.2 - bounds.0)).min(rm.h as f64 / (bounds.3 - bounds.1));
+    let centre = ((bounds.0 + bounds.2) * 0.5, (bounds.1 + bounds.3) * 0.5);
+    // The shoulder panes sample opposite sides of the rear view; the
+    // crown keeps the central panorama. All three preserve its aspect.
+    let sample_half_width = (bounds.2 - bounds.0) * scale * 0.5;
+    let tex_centre_x = rm.x as f64 + rm.w as f64 * 0.5 + rear_offset * (rm.w as f64 * 0.5 - sample_half_width);
+    // A slight convex face in a shallow dark housing.
+    let bulge = h.min(w) * 0.02;
     let e = 0.002;
     let at = |k: usize, t: f64| {
         let (x, y) = (outline[k % n].0 * t, outline[k % n].1 * t);
         let z = |x: f64, y: f64| 0.004 + bulge * (1.0 - (2.0 * x / w).powi(2).max((2.0 * y / h).powi(2)));
         let p = place(x, y, z(x, y));
         let normal = (place(x + e, y, z(x + e, y)) - place(x - e, y, z(x - e, y))).cross(place(x, y + e, z(x, y + e)) - place(x, y - e, z(x, y - e))).norm();
-        (p, normal, (u0 + (x / w + 0.5) * (u1 - u0), v0 + (0.5 - y / h) * (v1 - v0)))
+        let (u, v) = project(p);
+        let tex_x = tex_centre_x - (u - centre.0) * scale;
+        let tex_y = rm.y as f64 + rm.h as f64 * 0.5 - (v - centre.1) * scale;
+        (p, normal, (clamp(tex_x, rm.x as f64 + 0.5, (rm.x + rm.w) as f64 - 0.5) / AW, 1.0 - clamp(tex_y, rm.y as f64 + 0.5, (rm.y + rm.h) as f64 - 0.5) / A))
     };
     let white = Rgb(1.0, 1.0, 1.0);
     let steps = [0.0, 0.45, 0.8, 1.0];

@@ -28,7 +28,6 @@ const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     Start,
-    Resume,
     Restart,
     Menu,
     Mute,
@@ -42,6 +41,7 @@ pub enum Action {
     Invert,
     PadLayout,
     Fullscreen,
+    Performance,
     Reset,
     /// Choose the mission on the start screen.
     Pick(MissionKind),
@@ -340,8 +340,8 @@ impl<'a> Ui<'a> {
             (true, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{A}", "FIRE"), ("{DD}", "LOCK TARGET"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{DU}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (false, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{DD}", "LANDING GEAR"), ("{DU}", "FLAPS"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
             (false, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{X}", "LANDING GEAR"), ("{R3} HOLD", "ZOOM"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
-            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE, MENU")],
-            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE, MENU")],
+            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE")],
+            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE")],
         };
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
@@ -400,28 +400,6 @@ impl<'a> Ui<'a> {
         self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
         let keys: Vec<(&str, &str)> = actions.iter().map(|&(label, hint, _)| (hint, label)).collect();
         self.legend(&keys);
-    }
-
-    pub fn pause_screen(&mut self, a: &Aircraft, m: &Mission, muted: bool, obj: Option<&Objective>) {
-        let cleared = match obj {
-            Some(o) => ("OBJECTIVE", o.label.clone(), GREEN),
-            None => ("CLEARED", format!("{} / {}", pad(m.passed as f64, 2), pad(m.gates.len() as f64, 2)), GREEN),
-        };
-        self.status_panel(
-            "// FLIGHT SUSPENDED, FLCS HOLD",
-            DIM,
-            "PAUSED",
-            GREEN,
-            "Your flight is frozen on the clock. Take a breath, check the route, and re-engage when ready.",
-            [
-                cleared,
-                if m.timed { ("TIME LEFT", format_time(m.time_left), AMBER) } else { ("ELAPSED", format_time(m.elapsed), AMBER) },
-                ("AIRSPEED", format!("{} KT", pad(a.airspeed_kt, 3)), CREAM),
-                ("ALTITUDE", format!("{} FT", pad(AirData::of(a).baro_ft, 5)), CREAM),
-            ],
-            &[("RESUME", "P", Action::Resume), ("RESTART", if self.pad { "" } else { "R" }, Action::Restart), ("MENU", "", Action::Menu), ("CONFIG", "K", Action::Controls)],
-            if self.pad { "" } else if muted { "ESC RESUME, M AUDIO OFF" } else { "ESC RESUME, M AUDIO ON" },
-        );
     }
 
     pub fn result_screen(&mut self, r: &RunResult, best: &Best) {
@@ -821,7 +799,7 @@ impl<'a> Ui<'a> {
                 ("{DD}", "Landing gear"),
                 ("{DU}", "Flaps"),
                 ("{START}", "Freeze flight"),
-                ("{B} FROZEN", "Pause menu"),
+                ("{B} FROZEN", "Release mouse"),
                 ("{BACK}", "Controls and settings"),
             ],
             (true, PadLayout::Classic) => &[
@@ -842,10 +820,10 @@ impl<'a> Ui<'a> {
                 ("{DLR}", "Left / right MFD page"),
                 ("{DL} MIG-29", "Radar / IRST"),
                 ("{START}", "Freeze flight"),
-                ("{B} FROZEN", "Pause menu"),
+                ("{B} FROZEN", "Release mouse"),
                 ("{BACK}", "Controls and settings"),
             ],
-            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("ALT+O", "Limiters off / on"), ("P", "Freeze flight"), ("ESC", "Pause menu"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("KEYS", "Change them at right")],
+            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("ALT+O", "Limiters off / on"), ("P", "Freeze flight"), ("ESC", "Pause, release mouse"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("F12", "Save screenshot"), ("KEYS", "Change them at right")],
         };
         // The controller map is long: like the key bindings, it gets its own
         // panel beside the drawer, which then holds only the settings.
@@ -890,8 +868,16 @@ impl<'a> Ui<'a> {
         }
         self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
         y += 18.0 * s;
+        self.button(if st.performance_overlay { "[X] PERFORMANCE OVERLAY" } else { "[ ] PERFORMANCE OVERLAY" }, "", m, y, false, Action::Performance);
+        y += 18.0 * s;
+
         let note = if self.pad { "Expo softens the stick round the centre for fine aiming and keeps full travel at the rim. Invert pitch flips the controller too." } else { "Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller." };
         y += self.cv.paragraph(note, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0)) + 2.0 * s;
+        if paused_flight {
+            self.button("RESTART", "", m, y, false, Action::Restart);
+            self.button("MISSION BOARD", "", m + 75.0 * s, y, false, Action::Menu);
+            y += 18.0 * s;
+        }
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
         y += 15.0 * s + 8.0 * s;
         self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
@@ -1204,7 +1190,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     let clk = if m.timed { m.time_left } else { m.elapsed };
     cv.text(&format_time(clk), w * 0.5, 22.0 * s, s * 2.0, if m.timed && m.time_left < 20.0 { RED } else { HUD }, Align::Center);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), w - edge, 10.0 * s, s, HUD, Align::Right);
-    cv.text(&format!("ALT {} FT", pad(AirData::of(a).baro_ft, 5)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
+    cv.text(&format!("ALT {} FT", format!("{:.0}", AirData::of(a).baro_ft)), w - edge, 20.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     cv.text(&format!("AOA {:.0}  GAVL {:.1}", a.alpha_deg, a.g_avail), w - edge, 28.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
     air_panel(cv, edge, top_h + 8.0 * s, s, a);
     cv.text(&format!("SCR {}", pad(score, 5)), w - edge, 36.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
@@ -1303,7 +1289,7 @@ fn air_panel(cv: &mut Canvas, x: f32, y: f32, s: f32, a: &Aircraft) {
     let (w, line) = (158.0 * u, 9.0 * u);
     let rows = [
         format!("KCAS {}  TAS {}  GS {}", pad(ad.kcas, 3), pad(ad.ktas, 3), pad(ad.gs_kt, 3)),
-        format!("BARO {} FT  QNH {:.2}", pad(ad.baro_ft, 5), ad.qnh_inhg),
+        format!("BARO {} FT  QNH {:.2}", format!("{:.0}", ad.baro_ft), ad.qnh_inhg),
         format!("PA {}  DA {} FT", ad.pressure_alt_ft.round() as i64, ad.density_alt_ft.round() as i64),
         format!("OAT {:+.0}°C  TAT {:+.0}°C", ad.oat_c, ad.tat_c),
         format!("RHO {:.3} ({:.0}%)  Q {:.0}KPA", ad.atm.rho, ad.sigma * 100.0, ad.qbar / 1000.0),

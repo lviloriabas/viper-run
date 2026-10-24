@@ -40,8 +40,11 @@ pub mod spec {
     pub const XCG: f64 = 0.35;
     pub const G_LIMIT: f64 = 9.0;
     pub const NEG_G_LIMIT: f64 = -3.0;
-    /// The limiter starts trading g for AoA here and stops near 25.5 degrees.
+    /// Nominal AoA schedule; the wing-flow protection may lower it.
     pub const ALPHA_LIMITER: f64 = 22.5;
+    pub const ALPHA_MAX: f64 = 25.5;
+    /// Reserve below steady separation, degrees, including actuator response.
+    pub const ALPHA_RESERVE: f64 = 1.25;
     pub const ROLL_RATE_MAX: f64 = 308.0;
     /// Surface travel in degrees and actuator rates in degrees per second.
     pub const STAB_MAX: f64 = 25.0;
@@ -173,7 +176,7 @@ impl Type {
     /// the 25 degrees between its two manuals' figures.
     pub fn alpha_limits(self) -> (f64, f64) {
         match self {
-            Type::F16 => (ALPHA_LIMITER, 25.0),
+            Type::F16 => (ALPHA_LIMITER, ALPHA_MAX),
             Type::Mig29 => (22.0, 25.0),
         }
     }
@@ -606,6 +609,8 @@ pub struct Flcs {
     pub n_cmd: f64,
     /// AoA seen by the limiter, degrees.
     pub alpha_f: f64,
+    /// Previous unfiltered AoA, for the measured flow rotation rate.
+    alpha_last: Option<f64>,
     /// Load-factor error integrator, g, and the load factor a step ago.
     pub n_int: f64,
     nz_last: f64,
@@ -613,6 +618,8 @@ pub struct Flcs {
     hold: Option<f64>,
     /// Lagged roll-rate command, deg/s.
     pub p_cmd: f64,
+    /// Present protected roll-rate limit, deg/s, for recovery prediction.
+    pub roll_limit: f64,
     q_wash: f64,
     r_wash: f64,
     /// Surface positions in degrees (stabilator and flaperon trailing edge
@@ -708,6 +715,9 @@ struct Sensors {
     mass: f64,
     /// Limiter onset and hard stop (degrees), and the positive g limit.
     alpha_lim: (f64, f64),
+    /// Wing-flow budget for roll (deg/s) and pilot pedal gain (0..1).
+    roll_max: f64,
+    yaw_gain: f64,
     g_max: f64,
 }
 
@@ -747,6 +757,25 @@ impl Flcs {
         // into the stall and broken. The computer still says when it is.
         let off = input.limiters_off;
         self.limits_off = off;
+        let alpha_rate = self.alpha_last.filter(|_| dt > 0.0).map_or(0.0, |last| (alpha - last) * DEG / dt);
+        let measured_rate = self.alpha_last.is_some();
+        if dt > 0.0 {
+            self.alpha_last = Some(alpha);
+        }
+        let scheduled_roll = ROLL_RATE_MAX * clamp(1.0 - (self.alpha_f - 15.0) / 22.0, 0.3, 1.0);
+        // At low dynamic pressure, simultaneous roll and yaw can demand
+        // more nose-down moment than the stabilator can supply. Reserve half
+        // of that moment for pitch control, including the yaw of a coordinated
+        // roll (r approximately p*tan(alpha)), before committing to the roll.
+        let pitch_down = (-qsc * aero::coefficients(&Flow { el: STAB_MAX, q: 0.0, ..*f }).cm).max(0.0) * 0.5;
+        let cross_inertia = (izz - ixx).abs().max(1.0);
+        let coupled_roll = (pitch_down / (cross_inertia * (alpha * DEG).tan().abs().max(0.02))).sqrt() * RAD;
+        let yawing_roll = pitch_down / (cross_inertia * r.abs().max(0.001)) * RAD;
+        let roll_max = if off { scheduled_roll } else { scheduled_roll.min(s.roll_max).min(coupled_roll).min(yawing_roll) };
+        self.roll_limit = roll_max;
+        let pedal_roll = 1.0 - smoothstep(30.0, 90.0, p.abs() * RAD) * smoothstep(8.0, 15.0, alpha.abs());
+        let yaw_gain = if off { 1.0 } else { s.yaw_gain * pedal_roll };
+        let lateral_limited = !off && (roll_command(input.roll()).abs() > roll_max + 1.0 || input.yaw().abs() * (1.0 - yaw_gain) > 0.05);
         let stick = input.pitch();
         let gain = if off { OVERRIDE_GAIN } else { 1.0 };
         let (g_top, g_floor) = if off { (s.g_max * 1.5, NEG_G_LIMIT * 1.5) } else { (s.g_max, NEG_G_LIMIT) };
@@ -773,7 +802,7 @@ impl Flcs {
         let g_capped = !off && ((raw > s.g_max - 1.0 && s.nz > s.g_max - 1.0) || (raw < NEG_G_LIMIT - 1.0 && s.nz < NEG_G_LIMIT + 0.5));
         let now = if s.ground {
             None
-        } else if limited {
+        } else if limited || lateral_limited {
             Some("AOA LIMITER")
         } else if g_capped {
             Some("G LIMITER")
@@ -836,10 +865,14 @@ impl Flcs {
         }
         // AoA protection: near the limits, only the pitch rate that holds the
         // AoA where it is (the path turning under the present lift) is allowed.
-        let q_hold = g_v * (s.nz - s.up_y);
+        // Flow rotation includes thrust, gravity and roll/yaw coupling. The
+        // small-angle g/V approximation otherwise holds a slow jet above
+        // the nominal cap even in a steady pull.
+        let q_hold = if measured_rate { q - alpha_rate } else { g_v * (s.nz - s.up_y) };
         let a = alpha * DEG;
         if !off {
-            q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - a), q_hold + 2.0 * (s.alpha_lim.1 * DEG - a));
+            let ahead = a + 0.15 * alpha_rate;
+            q_cmd = clamp(q_cmd, q_hold + 2.0 * ((-5.5 * DEG) - ahead), q_hold + 2.0 * (s.alpha_lim.1 * DEG - ahead));
         }
         let qdot = 7.0 * (q_cmd - q);
         let m_req = iyy * qdot - (izz - ixx) * p * r + ixz * (p * p - r * r) + r * s.rotor;
@@ -849,9 +882,9 @@ impl Flcs {
         // the roll acceleration that closes the rate error in a tenth of a second.
         let lat = input.roll();
         let mut p_cmd = roll_command(lat);
-        let p_max = ROLL_RATE_MAX * clamp(1.0 - (self.alpha_f - 15.0) / 22.0, 0.3, 1.0);
-        p_cmd = clamp(p_cmd, -p_max, p_max);
+        p_cmd = clamp(p_cmd, -roll_max, roll_max);
         self.p_cmd += (p_cmd - self.p_cmd) * clamp(dt * 16.0, 0.0, 1.0);
+        self.p_cmd = clamp(self.p_cmd, -roll_max, roll_max);
         let pdot = 10.0 * (self.p_cmd * DEG - p);
         let c0 = aero::coefficients(f);
         let n_now = qsb * c0.cn;
@@ -869,7 +902,7 @@ impl Flcs {
         let r_w = washout(&mut self.r_wash, r_stab, 1.0, dt);
         let ari = self.ail * clamp(0.02 * self.alpha_f, 0.0, 0.6);
         let damper = clamp(0.5 * 28600.0 / s.qbar.max(1.0), 0.1, 2.0);
-        let rdr_cmd = -input.yaw() * authority + ari + damper * r_w - clamp(28600.0 / s.qbar.max(1.0), 0.2, 2.0) * f.beta;
+        let rdr_cmd = -input.yaw() * authority * yaw_gain + ari + damper * r_w - clamp(28600.0 / s.qbar.max(1.0), 0.2, 2.0) * f.beta;
 
         self.el = actuate(self.el, el_cmd, STAB_MAX, STAB_RATE, dt);
         self.ail = actuate(self.ail, ail_cmd, FLAPERON_MAX, FLAPERON_RATE, dt);
@@ -1252,6 +1285,23 @@ impl Aircraft {
         ALPHA_CRIT * compressibility - thin_air - ground - slip + dynamic
     }
 
+    /// Steady wing-flow budget shared by pitch, roll and pilot pedals. No
+    /// credit for dynamic-stall delay: a held pull must remain attached after
+    /// its pitch rate settles. Bound gusts rather than chasing each sample.
+    fn alpha_protection(&self, f: &Flow) -> ((f64, f64), f64, f64) {
+        let crit = self.critical_alpha(&Flow { q: f.q.min(0.0), ..*f });
+        let v = f.speed.max(30.0);
+        let roll = (f.p * PANEL_ARM / v * RAD).abs();
+        let slip = (0.25 * f.beta * clamp(f.alpha / 10.0, -1.0, 1.0)).abs();
+        let gust = self.turbulence * 3.0 / v * RAD;
+        let cap = clamp(crit - roll - slip - gust - ALPHA_RESERVE, 0.0, self.kind.alpha_limits().1);
+        let onset = self.kind.alpha_limits().0.min(cap - 2.5);
+        let margin = crit - f.alpha - slip - gust;
+        let roll_max = ((margin - ALPHA_RESERVE) * v / PANEL_ARM).max(0.0);
+        let yaw_gain = smoothstep(2.0, 6.0, margin - roll);
+        ((onset, cap), roll_max, yaw_gain)
+    }
+
     /// Wing-panel stall, applied to the table coefficients after the FLCS
     /// has set its surfaces, so the computer meets it as a disturbance. Each
     /// half-wing separates on its own local AoA: rolling raises it on the
@@ -1293,8 +1343,10 @@ impl Aircraft {
         let (speed, alpha, beta, p, q, r) = self.air_state();
         let qbar = 0.5 * atm.rho * speed * speed;
         let mach = speed / atm.sound;
+        let flow = self.flow(speed, alpha, beta, p, q, r, mach, qbar);
+        let (alpha_lim, roll_max, yaw_gain) = self.alpha_protection(&flow);
         let sensors = Sensors {
-            flow: self.flow(speed, alpha, beta, p, q, r, mach, qbar),
+            flow,
             nz: self.g_load,
             qbar,
             up_y: self.q.axes().up.y,
@@ -1305,7 +1357,9 @@ impl Aircraft {
             ground: self.on_ground,
             area: self.kind.area(),
             mass: self.mass,
-            alpha_lim: self.kind.alpha_limits(),
+            alpha_lim,
+            roll_max,
+            yaw_gain,
             g_max: self.kind.g_limit(self.mass, mach) * self.battle.strength(),
         };
         self.flcs.update(dt, input, &sensors);
@@ -1501,7 +1555,10 @@ impl Aircraft {
         self.mach = speed / atm.sound;
         self.qbar = 0.5 * atm.rho * speed * speed;
         self.vs = self.vel.y;
-        self.g_avail = (self.kind.g_limit(self.mass, self.mach) * self.battle.strength()).min(self.qbar * self.kind.area() * (aero::cl_max(self.kind) + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        let flow = self.flow(speed, alpha, beta, p, self.omega.x, r, self.mach, self.qbar);
+        let ((_, cap), _, _) = self.alpha_protection(&flow);
+        let cl_limit = aero::cl_at_alpha(self.kind, cap).min(aero::cl_max(self.kind)) * (1.0 - 0.25 * self.battle.wing);
+        self.g_avail = (self.kind.g_limit(self.mass, self.mach) * self.battle.strength()).min(self.qbar * self.kind.area() * (cl_limit + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
@@ -1572,9 +1629,16 @@ mod tests {
     const DT: f64 = 1.0 / 120.0;
 
     fn aircraft(alt: f64, speed: f64) -> Aircraft {
+        aircraft_kind(Type::F16, alt, speed)
+    }
+    fn aircraft_kind(kind: Type, alt: f64, speed: f64) -> Aircraft {
+        aircraft_at(kind, v3(0.0, alt, 0.0), speed)
+    }
+    fn aircraft_at(kind: Type, pos: V3, speed: f64) -> Aircraft {
         let mut a = Aircraft::new(&Mission::new());
-        let t = trim(alt, speed, a.mass);
-        a.pos = v3(0.0, alt, 0.0);
+        a.set_type(kind);
+        let t = trim_type(kind, pos.y, speed, a.mass);
+        a.pos = pos;
         a.vel = v3(0.0, 0.0, -speed);
         a.q = Quat::from_forward_up(v3(0.0, 0.0, -1.0), V3::Y).mul(Quat::axis_angle(V3::X, t.alpha));
         a.flcs = Flcs { alpha_f: t.alpha * RAD, el: t.el, ..Default::default() };
@@ -1649,7 +1713,8 @@ mod tests {
         let hit = run(hit, 2.0, mil);
         assert!(hit.thrust_n < sound.thrust_n * 0.6, "{} against {} N", hit.thrust_n, sound.thrust_n);
         assert!((f1 - hit.fuel) - (f0 - sound.fuel) > 5.0, "the leak drains fuel");
-        assert!(hit.g_avail < sound.g_avail * 0.8);
+        assert!(hit.g_avail < sound.g_avail, "available g: hit {:.2}, sound {:.2}", hit.g_avail, sound.g_avail);
+        assert!(hit.g_avail <= hit.kind.g_limit(hit.mass, hit.mach) * hit.battle.strength());
         assert!(hit.flcs.ail.abs() <= FLAPERON_MAX * hit.battle.authority() + 1e-9);
         assert!(roll_rate(&hit).abs() > roll_rate(&sound).abs() + 1.0, "the wing rolls the jet");
         assert_eq!(BattleDamage { engine: 1.0, ..Default::default() }.thrust(), 0.0);
@@ -1787,7 +1852,7 @@ mod tests {
     }
 
     #[test]
-    fn aoa_limiter_holds_the_slow_jet_near_25_degrees() {
+    fn aoa_limiter_holds_the_slow_jet_near_25_5_degrees() {
         let mut a = aircraft(3000.0, 120.0);
         let pull = Input { pitch_up: true, ..Default::default() };
         let mut peak: f64 = 0.0;
@@ -1795,8 +1860,9 @@ mod tests {
             a.update(DT, &pull);
             peak = peak.max(a.alpha_deg);
         }
-        assert!(peak > 24.0 && peak < 27.0, "peak AoA {peak:.1}");
-        assert!((a.alpha_deg - 25.0).abs() < 1.0, "held AoA {:.1}", a.alpha_deg);
+        assert!(peak > 25.0 && peak < ALPHA_MAX + 0.5, "peak AoA {peak:.2}");
+        assert!((a.alpha_deg - ALPHA_MAX).abs() < 0.25, "held AoA {:.2}", a.alpha_deg);
+        assert!(a.stall < 0.01);
     }
 
     #[test]
@@ -1931,30 +1997,71 @@ mod tests {
         assert!(slipping.alpha_crit < slow.alpha_crit - 1.5, "10 deg sideslip: {:.1} deg", slipping.alpha_crit);
     }
 
-    /// In smooth air a straight full pull stops just short of the stall, but
-    /// rudder at that AoA stalls the windward wing and drops it.
+    /// Sideslip still separates the windward wing asymmetrically. Exercise
+    /// the panel aerodynamics directly, without a controller unloading it.
     #[test]
-    fn rudder_at_the_aoa_limit_stalls_the_windward_wing() {
-        let pull = Input { pitch_up: true, ..Default::default() };
-        let mut a = run(aircraft(3000.0, 110.0), 3.0, pull);
-        assert!(a.stall < 0.02, "straight pull: stall {:.2} at {:.1} deg", a.stall, a.alpha_deg);
-        let g = a.g_load;
-        a = run(a, 2.0, Input { yaw_right: true, ..pull });
-        assert!(a.beta < -6.0 * DEG, "sideslip {:.1} deg", a.beta * RAD);
-        assert!(a.stall_left > 0.4 && a.stall_right < 0.1, "left {:.2}, right {:.2}", a.stall_left, a.stall_right);
-        assert!(a.g_load < g - 0.3, "lift kept: {:.2} g", a.g_load);
-        let a = run(a, 1.5, Input { yaw_right: true, ..pull });
-        assert!(a.bank < -5.0, "left wing did not drop: bank {:.1}", a.bank);
+    fn sideslip_at_high_aoa_stalls_the_windward_wing() {
+        let mut a = aircraft(3000.0, 110.0);
+        let f = Flow { kind: Type::F16, alpha: 25.0, beta: -8.0, speed: 110.0, mach: 0.33, h_over_b: 10.0, ..Default::default() };
+        let mut c = aero::coefficients(&f);
+        let initial = c;
+        for _ in 0..120 {
+            c = initial;
+            a.separation(&f, &mut c, DT);
+        }
+        assert!(a.stall_left > 0.1 && a.stall_right < 0.01, "left {:.2}, right {:.2}", a.stall_left, a.stall_right);
+        assert!(c.cz > initial.cz && c.cl < initial.cl && c.cn < initial.cn, "loss of lift, left roll and left yaw");
     }
 
-    /// High and fast the limiter's 25 degrees lies past the critical AoA: a
-    /// full pull stalls the wing into heavy buffet, and letting go recovers.
+    /// A held pull stays attached high up; overriding still produces a stall,
+    /// and a protected nose-down input unloads and reattaches the flow.
     #[test]
-    fn high_altitude_pull_stalls_and_recovers() {
-        let a = run(aircraft(11000.0, 250.0), 3.0, Input { pitch_up: true, ..Default::default() });
-        assert!(a.stall > 0.3 && a.buffet > 0.6, "stall {:.2}, buffet {:.2} at {:.1} deg", a.stall, a.buffet, a.alpha_deg);
-        let a = run(a, 4.0, Input::default());
-        assert!(a.stall < 0.05, "still stalled after release: {:.2} at {:.1} deg", a.stall, a.alpha_deg);
+    fn high_altitude_pull_is_protected_and_override_still_stalls() {
+        for kind in [Type::F16, Type::Mig29] {
+            let start = aircraft_kind(kind, 11000.0, 250.0);
+            let protected = run(start.clone(), 3.0, Input { pitch_up: true, ..Default::default() });
+            assert!(protected.stall < 0.01, "{kind:?}: protected stall {:.2}", protected.stall);
+            assert!(protected.alpha_deg < protected.alpha_crit - 1.0);
+            let stalled = run(start, 3.0, Input { pitch_up: true, limiters_off: true, ..Default::default() });
+            assert!(stalled.stall > 0.3, "{kind:?}: override stall {:.2}", stalled.stall);
+            let recovered = run(stalled, 5.0, Input { pitch_axis: -0.5, ..Default::default() });
+            assert!(recovered.stall < 0.05, "{kind:?}: recovery stall {:.2}", recovered.stall);
+        }
+    }
+
+    /// Abrupt pedals and roll after a full pull used to stall a wing. Check
+    /// both signs, both airframes, transonic thin air and low-level gusts.
+    #[test]
+    fn combined_controls_remain_attached_with_protection() {
+        for kind in [Type::F16, Type::Mig29] {
+            for (alt, speed, agl) in [(3000.0, 110.0, false), (3000.0, 150.0, false), (11000.0, 250.0, false), (300.0, 150.0, true)] {
+                for (yaw, roll) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0)] {
+                    // Place the gust case 300 m above the actual terrain,
+                    // before the initial instrument/collision evaluation.
+                    let height = if agl { terrain::floor(-2000.0, -3000.0) + alt } else { alt };
+                    let mut a = aircraft_at(kind, v3(-2000.0, height, -3000.0), speed);
+                    let mut peak: f64 = 0.0;
+                    for i in 0..(7.0 / DT) as usize {
+                        let lateral = i as f64 * DT >= 3.0;
+                        a.update(DT, &Input { pitch_up: true, yaw_axis: if lateral { yaw } else { 0.0 }, roll_axis: if lateral { roll } else { 0.0 }, ..Default::default() });
+                        peak = peak.max(a.stall);
+                    }
+                    assert!(!a.crashed && a.pos.is_finite() && a.vel.is_finite(), "{kind:?} {alt}m {speed}m/s yaw {yaw} roll {roll}: crashed");
+                    assert!(peak < 0.02, "{kind:?} {alt}m {speed}m/s yaw {yaw} roll {roll}: peak stall {peak:.3}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lateral_authority_returns_when_the_pull_is_released() {
+        for kind in [Type::F16, Type::Mig29] {
+            let a = run(aircraft_kind(kind, 3000.0, 150.0), 3.0, Input { pitch_up: true, ..Default::default() });
+            let held = run(a.clone(), 0.5, Input { pitch_up: true, yaw_right: true, roll_right: true, ..Default::default() });
+            let released = run(a, 0.5, Input { yaw_right: true, roll_right: true, ..Default::default() });
+            assert!(roll_rate(&released).abs() > roll_rate(&held).abs() + 30.0, "{kind:?}: held {:.1}, released {:.1}", roll_rate(&held), roll_rate(&released));
+            assert!(released.beta.abs() > held.beta.abs() + 0.5 * DEG, "{kind:?}: pedal authority did not return");
+        }
     }
 
     /// Heavy stores under the wings bring the flutter speed, sagging in the

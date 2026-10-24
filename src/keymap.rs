@@ -1,6 +1,6 @@
 //! Remappable flight keys. Each action holds a primary and an alternate key;
 //! the controls drawer rebinds them and settings.rs saves them by name. Menu
-//! keys (Esc, Enter, arrows in menus), P, K, M, F11 and Alt stay fixed.
+//! keys (Esc, Enter, arrows in menus), P, K, M, F11, F12 and Alt stay fixed.
 use miniquad::KeyCode;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -147,7 +147,7 @@ impl Bind {
 }
 
 /// Keys that keep their job whatever the bindings say.
-pub const RESERVED: [KeyCode; 9] = [KeyCode::Escape, KeyCode::Enter, KeyCode::KpEnter, KeyCode::P, KeyCode::K, KeyCode::M, KeyCode::F11, KeyCode::LeftAlt, KeyCode::RightAlt];
+pub const RESERVED: [KeyCode; 10] = [KeyCode::Escape, KeyCode::Enter, KeyCode::KpEnter, KeyCode::P, KeyCode::K, KeyCode::M, KeyCode::F11, KeyCode::F12, KeyCode::LeftAlt, KeyCode::RightAlt];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Keymap {
@@ -231,7 +231,7 @@ fn key_id(k: KeyCode) -> String {
 }
 
 fn parse_key(s: &str) -> Option<KeyCode> {
-    KEYS.iter().copied().find(|&k| key_id(k) == s)
+    KEYS.iter().copied().find(|&k| bindable(k) && key_id(k) == s)
 }
 
 /// Short upper-case name for the screen.
@@ -287,6 +287,14 @@ mod tests {
         // Space moved to the trigger, so the afterburner lost it.
         assert_eq!(back.get(Bind::Afterburner), [None, None]);
         assert_eq!(back.lookup(KeyCode::Space), Some(Bind::Trigger));
+    }
+
+    #[test]
+    fn screenshot_key_is_not_restored_as_a_flight_control() {
+        let mut m = Keymap::default();
+        m.load("trigger", "F12");
+        assert_eq!(m.lookup(KeyCode::F12), None);
+        assert!(!bindable(KeyCode::F12));
     }
 
     #[test]

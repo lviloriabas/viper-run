@@ -2,20 +2,22 @@
 
 Revised 23 October 2026, native Rust version. The flight base is still the
 F-16C Block 50 with the F110-GE-129 engine, ported line by line from the web
-version. The cockpit follows the user's modernised image, with two vertical
-side displays and a centre CPD, as in the F-16V upgrade, but it is now real
-3D geometry at realistic distances from the design eye. The modelling is
+version. The current visual iteration follows the user's F-16C/D reference:
+two square MFDs, an analogue centre stack, an ICP below the HUD and a DED
+to its right. It replaces the earlier modernised layout and reverts the
+rejected changes to the pilot's proportions and auxiliary ramps. This is
+a first pass for the user's screenshot review, with real 3D geometry at
+approximately realistic distances from the design eye. The modelling is
 procedural, with smooth surfaces and a retro finish through resolution,
 colour and textures. The photos are used as visual reference and are neither
 included as textures nor redistributed.
 
 ## Visual references
 
-- The four images the user supplied: the layout of the modernised cockpit
-  and top, front and side views of the jet. They are not turned into
-  textures or shipped as game files.
-- [Lockheed Martin's description of the F-16V](https://lockheedmartin.com/en-us/news/features/2016/meet-the-f-16v--the-most-technologically-advanced-4th-generation.html).
-  It confirms the 6 by 8 inch centre CPD of the upgrade.
+- The user's latest F-16C/D front view sets the panel layout and relative
+  positions of the displays, instruments and knees. Earlier exterior top,
+  front and side views still guide the jet. The images are neither turned
+  into textures nor shipped as game files.
 - [f-16.net cockpit and HUD gallery](https://www.f-16.net/g3/f-16-photos/album03/album72).
   General layout, proportions, consoles and the placement of the controls.
 - [Front view of an F-16C/D Block 40, USAF photo](https://www.f-16.net/g3/f-16-photos/album03/album72/aaa).
@@ -42,6 +44,35 @@ included as textures nor redistributed.
 - [Block 50/52 description on f-16.net](https://www.f-16.net/f-16_versions_article9.html).
   Engine variant and reference flight figures. The present panel layout is
   inspired by the later upgrade, not by that Block's basic panel.
+
+### HUD symbology
+
+Sources: the [DCS F-16C manual](https://www.digitalcombatsimulator.com/en/downloads/documentation/dcs-viper_early_access_manual_en/),
+Head-Up Display chapter, and the [Falcon BMS Dash-1](https://cdn.falcon-bms.com/docs/4.37/TO%201F-16CMAM-1%20BMS.pdf),
+section 17.14.3, page 116. The USAF HUD photograph above supplies the visual
+reference; the manuals supply the indications and units.
+
+The calibrated airspeed scale has 10-knot minor ticks and labels every
+50 knots. The barometric altitude scale has 100-foot minor ticks and labels
+every 500 feet (in hundreds). Digital barometric and radar altitudes resolve
+10 feet and suppress leading zeros at the user's request. Radar altitude
+has its own R box, displayed below 5,000 feet AGL. The game still derives
+it from terrain clearance rather than a simulated radar beam.
+
+The inertial pitch ladder follows ground-track drift, uses solid climb and
+dashed descent bars, has labels on both sides and end ticks toward the
+horizon. It steps by 5 degrees through 60 degrees and by 10 above that.
+The flight-path marker retains an X when limited by the usable combiner
+field; the X distinguishes a caged symbol from the true velocity direction.
+The heading tape has a steerpoint bearing caret; distance and time-to-go
+continue to use the mission's current gate as their navigation point.
+
+With the gear extended, the heading tape moves higher, a dashed -2.5-degree
+reference appears, and an AOA bracket follows the flight-path marker:
+11 degrees at the top, 13 at the middle and 15 at the bottom, following
+BMS Dash-1. This is a compact adaptation to the game's combiner, rather
+than a complete avionics replica; it does not add ILS, sensor failures,
+INS errors or fictional sensor returns.
 
 ### Side consoles
 
@@ -121,22 +152,30 @@ lights, ALT GEAR, hook, ALT FLAPS, brakes, landing lights, STORES CONFIG and
 emergency jettison), and the right one the A and B hydraulic pressure, EPU
 fuel, oxygen, cabin altitude and the clock under the warning lights (ENG
 FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY, OXY LOW),
-which sit at the top, clear of the stick grip. Under
-the UFC sit in a row the standby airspeed indicator, ADI, altimeter and
-accelerometer, as in the F-16C. Under the MFDs are the VVI and the fuel
-gauge, over the columns the TWP and the fuel flow, and on the walls the
-canopy jettison handle, the map light, the canopy switch and the map case.
+which sit at the top, clear of the stick grip. The centre stack has the
+airspeed indicator and altimeter above the ADI, then an analogue HSI below.
+The two MFDs are square and sit above the knees. The RWR is above the left
+MFD, the engine gauges form a column to the right, and the DED is beside
+the ICP. On the walls are the canopy jettison handle, map light, canopy
+switch and map case.
+
+The outer panel shoulders end at the panel's actual lower outer corner,
+rather than extending to canopy-rail height. Their widths are intersected
+with the sloping tub wall at each point's own height and depth. This removes
+the two pointed pieces that protruded beyond the sills. A regression test
+checks both shoulders and samples their triangle surfaces against the wall.
+The body-coordinate panel-point conversion also compensates for the wing's
+vertical component so a requested height remains the actual height.
 
 The [USAF fact sheet on the F-16C](https://www.jba.af.mil/About/Fact-Sheets/Display/Article/4282145/f-16c-fighting-falcon/)
 confirms the seat reclined 30 degrees, the force-sensing side stick, the
 canopy's visibility and the 9 g capability. The design eye is at
 (0, 1.25, -3.24) m in body axes, behind the hips because of the seat's
 recline and inside the canopy. The panel is about 0.9 m from the eye, the
-HUD combiner glass about 0.75 m, and the UFC (the DED over the ICP keypad)
-just under the HUD. The two vertical MFDs flank the centre CPD; on the left
-are the RWR, the standby airspeed indicator and altimeter, and on the right
-the standby ADI and the round RPM, FTIT, nozzle and oil gauges, each in its
-round bezel. The canopy is a single convex layer of slightly tinted glass
+HUD combiner glass about 0.75 m, and the ICP just under the HUD with the DED
+to its right. Two square MFDs flank the analogue centre stack. The RWR sits
+above the left MFD and the RPM, FTIT, nozzle and oil gauges run down the
+right shoulder, each in its round bezel. The canopy is a single convex layer of slightly tinted glass
 with Fresnel sheen and sun glints, so each pixel crosses it only once. The
 coordinates are approximate; they do not come from a scan or a dimensioned
 drawing.
@@ -155,7 +194,7 @@ about 0.3 s, rather than waiting for the jet's own response of about 1 s. A
 full pull at the start speed reaches about 6 g in 0.4 s and 9 g in under a
 second; on release it is back at 1 g in half a second. With the stick
 centred the steady state is the same flight-path hold as before, and the
-command never takes the jet past about 16 degrees of AOA on its own.
+command remains subject to the adaptive AOA protection described below.
 
 The exterior is a fuselage of superelliptic sections with an ogive radome,
 a ventral D intake with its boundary-layer splitter, LERX blended into the
@@ -225,7 +264,7 @@ The model follows the FlightGear F-16 (NikolaiVChr/f16 repository, JSBSim):
   recovery of a fixed normal-shock intake is added, which is what holds the
   F-16 near Mach 2.
 - FLCS: the same command paths as `Systems/jsb-controls.xml` (stick to G,
-  +9/-3 G limits, the AOA limiter from 22.5° with a stop near 25°, a roll
+  +9/-3 G limits, a nominal AOA onset at 22.5° and cap at 25.5°, a roll
   rate command of up to 308 °/s reduced with AOA, the aileron-rudder
   interconnect, the yaw damper) with actuators limited in travel and rate.
   The inner pitch and roll loops invert the aerodynamic tables themselves
@@ -235,6 +274,14 @@ The model follows the FlightGear F-16 (NikolaiVChr/f16 repository, JSBSim):
   50 °/s of roll at half stick: power curves with the same end points
   (8.5 g and -4.2 g about 1 g, 308 °/s) and a 3 % dead zone give authority
   from the keyboard, the mouse or a controller.
+
+The game's [adaptive wing-flow protection](FLIGHT-PROTECTION.md) lowers that
+nominal AoA cap as the model's separation boundary moves. It reserves margin
+for both panels, gusts and actuator response, coordinates pitch with roll and
+pilot pedals, and limits roll/yaw coupling to available stabilator moment.
+The AI terrain-recovery prediction uses the protected lift and roll authority.
+These additions protect the game's aerodynamic model; they are not the real
+F-16's flight-control gain network.
 
 `cargo test --release level_speed -- --nocapture` solves the level-flight
 balance in full afterburner with half fuel:

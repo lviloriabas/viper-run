@@ -185,10 +185,10 @@ const FUSE: [[f64; 7]; 15] = [
     [2.00, 0.58, 0.50, 0.37, 0.36, 2.6, 2.6],
     [3.35, 0.52, 0.48, 0.27, 0.32, 2.6, 2.6],
     [5.00, 0.42, 0.45, 0.20, 0.26, 2.5, 2.5],
-    [6.10, 0.36, 0.44, 0.13, 0.18, 2.3, 2.3],
-    [6.80, 0.30, 0.44, 0.08, 0.11, 2.2, 2.2],
+    [6.10, 0.45, 0.44, 0.21, 0.20, 2.3, 2.3],
+    [6.80, 0.42, 0.44, 0.18, 0.18, 2.2, 2.2],
 ];
-const FUSE_Z: (f64, f64) = (-7.50, 6.80);
+const FUSE_Z: (f64, f64) = (-7.50, BRAKE_FRONT);
 /// Radome joint.
 const RADOME_Z: f64 = -5.80;
 
@@ -412,12 +412,14 @@ fn tip_cap(m: &mut Mesh, upper: &[V3], lower: &[V3], out: V3, col: Rgb) {
 pub fn build() -> Fulcrum {
     let mut m = Mesh::new();
 
-    // Fuselage, nose to beaver tail, and the brake-chute fairing closing it.
+    // Fuselage up to the airbrake hinges; the open bay has no fixed skin
+    // underneath the moving panels.
     let axis = |p: V3| v3(0.0, spline(&FUSE, p.z)[2], p.z);
     let fuse_z = |u: f64| mix(FUSE_Z.0, FUSE_Z.1, 0.5 * u + 0.5 * u * u);
     m.surface(34, 28, |u, v| fuselage_point(fuse_z(u), v * TAU), |p, n| if p.z < RADOME_Z { RADOME } else { skin(p, n) }, Some(&axis));
     let tail: Vec<V3> = (0..28).map(|k| fuselage_point(FUSE_Z.1, k as f64 * TAU / 28.0)).collect();
     face(&mut m, &tail, V3::Z, SOOT);
+    brake_bay(&mut m);
     // Pitot boom on the radome tip, with its vane collar.
     m.capsule(v3(0.0, 0.27, -7.42), v3(0.0, 0.27, -8.65), 0.04, 0.018, METAL, 5);
     m.capsule(v3(0.0, 0.27, -8.12), v3(0.0, 0.27, -8.22), 0.035, 0.035, METAL, 5);
@@ -536,52 +538,91 @@ pub fn build() -> Fulcrum {
     Fulcrum { body: m, canopy, stabs, gear: landing_gear(), brakes }
 }
 
-/// Airbrake petals on the tail cone between the engines, ahead of the
-/// brake-chute fairing: chordwise extent, half width.
-const BRAKE_Z: (f64, f64) = (5.10, 6.25);
-const BRAKE_HALF: f64 = 0.24;
-/// How far each petal swings open about its leading edge.
-pub const BRAKE_OPEN: f64 = 55.0 * DEG;
+/// The 9.13S retains the split tail airbrake, surrounding the drag-chute
+/// container between the nozzles. Upper 0.75 m^2 at 56 degrees, lower
+/// 0.55 m^2 at 60 degrees (DCS MiG-29 flight manual, General Design).
+/// The photographed rear view sets the broad sides and U-shaped aft edges;
+/// their dimensions are fitted to the published areas, not factory drawings.
+const BRAKE_FRONT: f64 = 6.20;
+const BRAKE_HALF: f64 = 0.42;
+const CHUTE_NOTCH: f64 = 0.21;
+const BRAKE_NU: usize = 8;
+const BRAKE_NV: usize = 32;
+const BRAKE_THICKNESS: f64 = 0.012;
+const CHUTE_Y: f64 = 0.44;
+const CHUTE_RADIUS: f64 = 0.15;
 
-/// Angle round the fuselage section at `z` where the skin reaches `x` from
-/// the centreline, on the upper or lower side.
-fn section_angle(z: f64, x: f64, upper: bool) -> f64 {
-    let [_, w, _, _, _, nu, nl] = spline(&FUSE, z);
-    let n = if upper { nu } else { nl };
-    (x / w).min(1.0).powf(n / 2.0).acos()
+/// Signed rotation about the leading-edge hinge in the model's y-up axes.
+pub fn brake_angle(upper: bool, opening: f64) -> f64 {
+    clamp(opening, 0.0, 1.0) * if upper { -56.0 * DEG } else { 60.0 * DEG }
 }
 
-/// Leading edge of the upper or lower petal on the centreline: its hinge.
 pub fn brake_hinge(upper: bool) -> V3 {
-    let z = BRAKE_Z.0;
-    let p = fuselage_point(z, if upper { PI / 2.0 } else { 1.5 * PI });
-    p + V3::Y * if upper { 0.012 } else { -0.012 }
+    fuselage_point(BRAKE_FRONT, if upper { PI / 2.0 } else { 1.5 * PI })
 }
 
-/// One petal, closed: a skin panel standing just off the fuselage with a
-/// dark inner face under it.
+/// Closed panel. A semicircular cutout in plan view leaves the fixed chute
+/// tube exposed; the lower panel has the deeper cutout seen in rear photos.
+fn brake_point(upper: bool, u: f64, v: f64, lift: f64) -> V3 {
+    let side = if upper { 1.0 } else { -1.0 };
+    let x = mix(-BRAKE_HALF, BRAKE_HALF, v);
+    let notch = (1.0 - (x / CHUTE_NOTCH).powi(2)).max(0.0).sqrt();
+    let (aft, depth, camber) = if upper { (7.25, 0.40, 0.11) } else { (7.05, 0.50, 0.10) };
+    let z = mix(BRAKE_FRONT, aft - depth * notch, u);
+    let hinge = brake_hinge(upper);
+    let y = hinge.y - side * u * (0.015 + camber * (x / BRAKE_HALF).powi(2));
+    v3(x, y + side * lift, z)
+}
+
+/// Fixed sidewalls and the separate drag-chute container. The broad upper
+/// and lower skins belong exclusively to the moving meshes.
+fn brake_bay(m: &mut Mesh) {
+    let hinge_top = brake_hinge(true).y;
+    let hinge_bottom = brake_hinge(false).y;
+    for side in [-1.0, 1.0] {
+        let p = |x: f64, y: f64, z: f64| v3(side * x, y, z);
+        let wall = [p(BRAKE_HALF, hinge_bottom, BRAKE_FRONT), p(BRAKE_HALF, hinge_top, BRAKE_FRONT),
+            p(BRAKE_HALF, hinge_top - 0.125, 7.25), p(BRAKE_HALF, hinge_bottom + 0.115, 7.05)];
+        face(m, &wall, V3::X * side, LIGHT);
+        let inner: Vec<V3> = wall.iter().map(|&q| q - V3::X * (side * 0.018)).collect();
+        face(m, &inner, -V3::X * side, METAL);
+        for i in 0..wall.len() {
+            let j = (i + 1) % wall.len();
+            face(m, &[wall[i], wall[j], inner[j], inner[i]], (wall[i] + wall[j]) * 0.5 - v3(0.0, CHUTE_Y, 6.70), METAL);
+        }
+    }
+    let tube = v3(0.0, CHUTE_Y, BRAKE_FRONT - 0.04);
+    m.lathe(tube, V3::Z, &[(0.0, CHUTE_RADIUS), (1.20, CHUTE_RADIUS), (1.31, CHUTE_RADIUS * 0.94)], 16, LIGHT);
+    // Rounded, closed lid aft of the nozzle exits, with a narrow dark seam.
+    m.lathe(tube, V3::Z, &[(1.31, CHUTE_RADIUS * 0.95), (1.33, CHUTE_RADIUS * 0.95)], 16, SOOT);
+    m.lathe(tube, V3::Z, &[(1.33, CHUTE_RADIUS * 0.95), (1.39, CHUTE_RADIUS * 0.80), (1.43, 0.0)], 16, LIGHT);
+}
+
 fn airbrake(upper: bool) -> Mesh {
     let mut m = Mesh::new();
-    let s = if upper { 1.0 } else { -1.0 };
-    let at = move |u: f64, v: f64, lift: f64| {
-        let z = mix(BRAKE_Z.0, BRAKE_Z.1, u);
-        let a = section_angle(z, BRAKE_HALF, upper);
-        let th = if upper { mix(a, PI - a, v) } else { mix(PI + a, TAU - a, v) };
-        fuselage_point(z, th) + V3::Y * (s * lift)
-    };
-    let outer = move |p: V3| p - V3::Y * s;
-    let inner = move |p: V3| p + V3::Y * s;
-    m.surface(3, 4, move |u, v| at(u, v, 0.012), move |_, _| if upper { LIGHT } else { BELLY }, Some(&outer));
-    m.surface(3, 4, move |u, v| at(u, v, -0.012), |_, _| METAL, Some(&inner));
-    // The rim, so the open petal has a thickness edge-on.
+    let side = if upper { 1.0 } else { -1.0 };
+    let at = |u: f64, v: f64, lift: f64| brake_point(upper, u, v, lift);
+    let outer = |p: V3| p - V3::Y * side;
+    let inner = |p: V3| p + V3::Y * side;
+    m.surface(BRAKE_NU, BRAKE_NV, |u, v| at(u, v, BRAKE_THICKNESS), |_, _| if upper { LIGHT } else { BELLY }, Some(&outer));
+    m.surface(BRAKE_NU, BRAKE_NV, |u, v| at(u, v, -BRAKE_THICKNESS), |_, _| METAL, Some(&inner));
+    // Close the thin rim, including the curved cutout around the chute.
     for (u0, v0, u1, v1) in [(0.0, 0.0, 0.0, 1.0), (1.0, 0.0, 1.0, 1.0), (0.0, 0.0, 1.0, 0.0), (0.0, 1.0, 1.0, 1.0)] {
-        for k in 0..4 {
-            let (a, b) = (k as f64 / 4.0, (k + 1) as f64 / 4.0);
+        let segments = if u0 == u1 { BRAKE_NV } else { BRAKE_NU };
+        for k in 0..segments {
+            let (a, b) = (k as f64 / segments as f64, (k + 1) as f64 / segments as f64);
             let (ua, va, ub, vb) = (mix(u0, u1, a), mix(v0, v1, a), mix(u0, u1, b), mix(v0, v1, b));
-            let mid = at(0.5, 0.5, 0.0);
-            let out = at(mix(ua, ub, 0.5), mix(va, vb, 0.5), 0.0) - mid;
-            face(&mut m, &[at(ua, va, 0.012), at(ub, vb, 0.012), at(ub, vb, -0.012), at(ua, va, -0.012)], out, METAL);
+            let tangent = at(ub, vb, 0.0) - at(ua, va, 0.0);
+            let direction = if u0 == u1 { if u0 == 0.0 { -1.0 } else { 1.0 } } else if v0 == 0.0 { 1.0 } else { -1.0 };
+            let out = tangent.cross(V3::Y) * direction;
+            face(&mut m, &[at(ua, va, BRAKE_THICKNESS), at(ub, vb, BRAKE_THICKNESS), at(ub, vb, -BRAKE_THICKNESS), at(ua, va, -BRAKE_THICKNESS)], out, METAL);
         }
+    }
+    // Internal stiffeners visible with the airbrake deployed.
+    for v in [0.16, 0.84] {
+        let a = at(0.08, v, -0.023);
+        let b = at(0.88, v, -0.023);
+        m.capsule(a, b, 0.012, 0.012, BARE, 5);
     }
     m
 }
@@ -682,6 +723,56 @@ mod tests {
                 let n = v3(v[3] as f64, v[4] as f64, v[5] as f64);
                 assert!(p.is_finite() && n.is_finite(), "bad vertex at {p:?}");
                 assert!((n.len() - 1.0).abs() < 0.02 || n.len() < 1e-6, "normal {:.3} at {p:?}", n.len());
+            }
+        }
+    }
+
+    #[test]
+    fn airbrake_panels_match_published_areas_and_surround_the_chute() {
+        let f = build();
+        for (i, target) in [0.75, 0.55].into_iter().enumerate() {
+            // Only the exterior skin, excluding the inner skin, rim and ribs.
+            let skin = &f.brakes[i].v[..BRAKE_NU * BRAKE_NV * 6 * STRIDE];
+            let mut area = 0.0;
+            for tri in skin.chunks_exact(3 * STRIDE) {
+                let at = |k| v3(tri[k * STRIDE] as f64, tri[k * STRIDE + 1] as f64, tri[k * STRIDE + 2] as f64);
+                area += (at(1) - at(0)).cross(at(2) - at(0)).len() * 0.5;
+            }
+            assert!((area - target).abs() < target * 0.05, "panel {i} area {area:.3} m^2, expected {target}");
+            let (lo, hi) = extent(&[&f.brakes[i]]);
+            assert!((hi.x - lo.x - 0.84).abs() < 0.002, "panel {i} width");
+            assert!(lo.z > 6.1 && hi.z > 7.0, "panel {i} belongs at the nozzle exits");
+            let upper = i == 0;
+            assert!(brake_point(upper, 1.0, 0.5, 0.0).z + 0.35 < brake_point(upper, 1.0, 0.0, 0.0).z,
+                "panel {i} needs an aft cutout around the chute");
+        }
+    }
+
+    #[test]
+    fn airbrakes_open_clear_of_the_fixed_chute_and_keep_their_hinges() {
+        for (upper, degrees) in [(true, -56.0), (false, 60.0)] {
+            let hinge = brake_hinge(upper);
+            assert!((brake_angle(upper, 1.0) / DEG - degrees).abs() < 1e-9);
+            for opening in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let q = Quat::axis_angle(V3::X, brake_angle(upper, opening));
+                for j in 0..=32 {
+                    let v = j as f64 / 32.0;
+                    let leading = brake_point(upper, 0.0, v, 0.0);
+                    assert!((hinge + q.rotate(leading - hinge) - leading).len() < 1e-9, "hinge moves");
+                    for k in 0..=16 {
+                        // The inner face is the surface nearest the container.
+                        let p = brake_point(upper, k as f64 / 16.0, v, -BRAKE_THICKNESS);
+                        let moved = hinge + q.rotate(p - hinge);
+                        let distance = (moved.x * moved.x + (moved.y - CHUTE_Y).powi(2)).sqrt();
+                        assert!(distance > CHUTE_RADIUS + 0.005, "panel intersects chute at {moved:?}");
+                    }
+                }
+                if opening == 1.0 {
+                    let p = brake_point(upper, 1.0, 0.0, 0.0);
+                    let moved = hinge + q.rotate(p - hinge);
+                    let travel = (moved.y - p.y) * if upper { 1.0 } else { -1.0 };
+                    assert!(travel > 0.65, "panel opens in the wrong direction: {travel}");
+                }
             }
         }
     }

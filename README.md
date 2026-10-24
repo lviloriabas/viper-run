@@ -38,15 +38,16 @@ at start-up in about half a second.
 | `K` | Open / close the controls and configuration drawer |
 | `Shift` / `Ctrl` | Throttle up / down |
 | `Space` | Afterburner (at full throttle) |
-| `H` | Speedbrake out / in (toggle) |
+| `H` | Airbrake deployed / retracted (toggle) |
 | `G` | Landing gear handle up / down (it will not come up with weight on the wheels) |
 | `L` | ALT FLAPS: trailing-edge flaps down with the gear up (they droop on their own with the gear down) |
 | `B` (held) | Wheel brakes |
 | `P` | Freeze the flight; the mouse still looks around and `V`, `C`, `F1` / `F2` still work, for screenshots |
-| `Esc` | Open / close the pause menu |
-| `R` | Restart from the pause menu or a result screen |
+| `Esc` | Pause / resume without covering the view; release the mouse while paused |
+| `R` | Restart while paused or from a result screen |
 | `M` | Audio on / off |
-| `F11` | Fullscreen |
+| `F11` / `Alt+Enter` | Borderless fullscreen |
+| `F12` | Save a PNG screenshot in Pictures/viper-run, including in fullscreen |
 | Right-click (held) | Zoom the view in to 40 % of its field of view, for as long as it is held |
 | `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; `Space` engages from the mission board and launches from the setup screen; `Ctrl+Q` quits from a menu |
 
@@ -54,7 +55,7 @@ Every flight key above, from the stick to the MFD pages, can be rebound: the
 K drawer opens a KEY BINDINGS panel with a primary and an alternate key per
 action. Click a key and press the new one (Backspace clears it, Esc keeps the
 old one); a key taken from another action leaves that action. `Esc`, `Enter`,
-`P`, `K`, `M`, `F11` and `Alt` stay fixed. The bindings are saved with the
+`P`, `K`, `M`, `F11`, `F12` and `Alt` stay fixed. The bindings are saved with the
 other settings.
 
 An Xbox controller (or any XInput pad) works alongside the keyboard and
@@ -76,13 +77,13 @@ fire with `RT`.
 | `X` (held) | Rudder: the left stick's X axis works the pedals instead of the roll |
 | Left-stick click | Countermeasures: chaff and flare |
 | `A` | Cycle the weapon and master mode |
-| `B` | Speedbrake out / in |
+| `B` | Airbrake deployed / retracted |
 | `Y` | Toggle cockpit / chase view |
 | D-pad left / right | Cycle left / right MFD page |
 | D-pad down / up | Landing gear / ALT FLAPS |
 | D-pad left in the MiG-29 | Radar / IRST switch (the MiG has no MFDs) |
 | `Start` | Start, freeze / unfreeze (right stick pans and holds the view), restart from a result screen |
-| `B` while frozen | Open the pause menu |
+| `B` while frozen | Pause and release the mouse |
 | `Back` / `View` | Open / close the controls drawer |
 | Right-stick click (held) | Zoom, for as long as it is held |
 | D-pad or left stick, `A`, `B` | Menu navigation: `A` acts on the highlighted button, `B` goes back; `Start` engages and launches |
@@ -99,7 +100,7 @@ lock, `X` center view, right-stick click landing gear; the rest is as above.
 
 On Windows the pad is read through XInput; on Linux through the kernel
 joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
-flight opens the pause menu.
+flight pauses the flight and releases the mouse.
 
 Pitch comes from one input at a time, chosen in the K drawer: the mouse
 (default) or W/S. The other one does nothing, so a resting mouse offset can
@@ -111,19 +112,21 @@ rudder and springs back to centre when the mouse stops; A/D roll the jet. A
 small box at the bottom right shows the stick position, the pitch input in
 use and SPD BRK while the speedbrake is out.
 
-The flight control system works like the real F-16 FLCS: the stick commands
+The flight control system follows the F-16 command paths: the stick commands
 load factor (+9 / -3 g) and roll rate (up to 308 degrees per second), and with
 the stick centred the jet holds 1 g. Wings level that flies a straight line;
 in a bank it is still 1 g, so the nose drops unless you pull. A full pull
 reaches 8.5 g in about a second at the start speed; when the speed is not
-there, the AoA limiter trades g for AoA and holds the jet near 25 degrees.
+there, the AoA limiter trades g for AoA, up to a nominal 25.5 degrees.
+The limit adapts to each wing's margin from separation and reduces roll and
+pilot rudder authority near it; unloading restores those controls.
 
 Hold Alt to inspect the pilot, consoles, wings and tail from the seat; release
 it to return to the forward view. In chase view Alt and the mouse orbit the
 external camera. The default cockpit FOV is 58 degrees (45 to 72 in the
 drawer), mouse sensitivity starts at 2.8x (0.5x to 5x) and INVERT PITCH flips
 every pitch input at once: mouse Y, W / S and the controller's left stick.
-Opening the drawer pauses the flight. Settings and the best
+Opening the drawer pauses the flight; closing it restores the previous flying or frozen state. RESTART and MISSION BOARD are available in the drawer during a sortie. Settings and the best
 run are saved to `%APPDATA%\viper-run\settings.txt` on Windows and
 `~/.config/viper-run/settings.txt` on Linux.
 
@@ -432,7 +435,10 @@ out of margin.
   roll-rate command reduced at high AoA, aileron-rudder interconnect, yaw
   damper and sideslip feedback, driving rate- and travel-limited stabilator,
   flaperon and rudder actuators. The start is trimmed for 1 g.
-- F-16C Block 50 limits: +9 / -3 g, about 25 degrees AoA at full aft stick.
+- F-16C Block 50 limits: +9 / -3 g and a nominal 25.5 degree AoA cap.
+  Adaptive protection lowers the cap for Mach, altitude, ground proximity,
+  sideslip, roll and gusts. It also limits roll/yaw coupling to the moment
+  the stabilator can counter. See [flight protection](docs/FLIGHT-PROTECTION.md).
 - Stall: each wing panel separates on its own local AoA against a critical
   angle of about 27 degrees in slow, smooth air. Mach (shock-induced
   separation), altitude, ground effect and sideslip lower it; a quick pull
@@ -441,9 +447,10 @@ out of margin.
   factor, bank and airspeed act through the AoA the jet needs. A separated
   panel loses lift and adds drag, and the flow only reattaches a few degrees
   below the critical angle. An uneven stall drops that wing and yaws the nose
-  towards it (DEPARTURE). The limiter keeps a straight full pull just short
-  of it in smooth air, but high and fast, slow in the gusts near the ground,
-  or with rudder at full aft stick, the wing stalls.
+  towards it (DEPARTURE). With protection active, pitch, roll and pilot
+  pedals share a reserve below the separation boundary. The override still
+  allows stalls and departures; protection cannot create lift when the jet
+  has run out of speed or restore lost control authority after damage.
 - Pilot G tolerance from eye-level blood pressure: a hydrostatic column of
   about 22 mmHg per g, the anti-G suit, COMBAT EDGE pressure breathing, an
   AGSM that tires within a minute at 9 G, and the baroreflex, which after a
@@ -499,8 +506,8 @@ out of margin.
 - Collision against ten airframe points: nose, canopy, tail, both wingtips,
   intake, belly, fin and both stabilator tips.
 - Depth-buffered 3D cockpit at realistic distances from the design eye: the
-  F-16V-style panel with two portrait MFDs and a large centre display, the UFC
-  (DED over the ICP keypad) under a tall HUD combiner, RWR scope, standby ADI,
+  F-16C/D reference layout with two square MFDs and an analogue centre stack,
+  an ICP below the HUD with the DED to its right, RWR scope, standby ADI,
   airspeed and altimeter, RPM / FTIT / nozzle / oil gauges in round bezels,
   caution panel, AOA indexer, master caution, VVI, fuel quantity, fuel flow
   and threat warning prime lights, the outboard thirds of the panel folded 30
@@ -527,6 +534,7 @@ out of margin.
   flight-path marker, boxed KCAS and barometric altitude, radar altitude,
   heading tape, Mach, alpha, current and maximum G, steerpoint cue and warnings,
   with the weapon symbology of the selected master mode laid over it.
+  The F-16 adds CAS and altitude tapes, heading and steerpoint cues, a 5/10-degree pitch ladder, a drift-corrected FPM marked X when limited, and the landing AoA bracket; altitude readouts omit leading zeroes.
 - Retro presentation: the world renders at a low internal resolution (360 to
   576 lines) shown as crisp blocks, quantised to 15-bit colour with a 4x4
   ordered dither; the terrain wears pixel tiles (grass, scrub, rock strata,
@@ -556,21 +564,47 @@ and the instrument pages are redrawn into one texture at 30 Hz. On the test
 machine the game holds the 165 Hz display refresh at 1280x720 and 1920x1080
 (about 6 ms per frame, p99 7 ms).
 
-## Recording
+## Recording and screenshots
 
-The Windows executable supports OBS Game Capture. Select the `VIPER RUN` window
-in the source. The game includes a per-executable `RTSSHooksCompatibility` data
-export: RivaTuner Statistics Server skips its overlay hooks for this game, so
-they cannot collide with OBS while patching OpenGL's `SwapBuffers`. This avoids
-the native access violation and black capture caused by that hook conflict.
-It does not change OBS, RTSS profiles or other applications. The RTSS overlay
-and its frame limiter are consequently unavailable inside this executable.
+Fullscreen uses a borderless desktop window. Windows capture, recording and
+vendor-overlay shortcuts are left to the OS; opening a system overlay or
+switching to another app pauses the flight, frees the cursor and clears held
+controls. Returning to the game leaves it paused until P or Esc is pressed.
+The view stays visible and the camera orientation is preserved.
 
-The export is retained in release builds with LTO and symbol stripping. OBS
-capture was checked by reading its shared GPU texture, verifying visible,
-changing game frames. Check the export in a rebuilt release with
-`python3 tools/check_windows_capture.py dist/viper-run-windows-x86_64.exe`;
-the check uses only Python's standard library.
+F12 also saves the composed frame directly from OpenGL to
+`Pictures/viper-run/viper-run-<timestamp>.png`, without requiring an overlay.
+P freezes the scene while keeping camera controls available; Esc pauses and
+releases the mouse. K opens the configuration drawer.
+
+The executable no longer exports `RTSSHooksCompatibility = 0`, which previously
+disabled RivaTuner's overlay and frame limiter. RTSS and NVIDIA capture hooks
+are allowed. The built-in overlay works independently of these tools.
+
+For OBS, use Window Capture with **Windows 10 (1903 and up)** (Windows Graphics
+Capture), or Display Capture. BitBlt can return a black image with OpenGL.
+These capture methods also avoid competing with RTSS for the OpenGL
+`SwapBuffers` hook. Game Capture can still be used, but OBS and third-party
+OpenGL overlay hooks can conflict on some driver/tool combinations; see
+[OBS's overlay conflict guidance](https://obsproject.com/kb/known-conflicts).
+The game does not change external application profiles or Windows settings.
+
+Check a rebuilt executable with
+`python3 tools/check_windows_capture.py dist/viper-run-windows-x86_64.exe`.
+This verifies that the final PE does not disable external overlays.
+
+The PERFORMANCE panel sits below the left-side air-data block in both camera
+views. It shows the rendered frame count, FPS averaged over the last 60 frames,
+the last frame's elapsed time in milliseconds, and 180-frame FPS and frametime
+histories. These use wall time, so they continue updating while flight is
+paused and include presentation pacing rather than fixed simulation steps.
+CPU, GPU and physical RAM are system-wide usage, sampled every 750 ms on a
+separate thread. Windows uses GetSystemTimes, PDH GPU Engine counters (the
+busiest physical engine, aggregated across processes) and GlobalMemoryStatusEx.
+Linux uses /proc and the DRM gpu_busy_percent counter where exposed by the
+driver. Unavailable metrics show N/A. Disable PERFORMANCE OVERLAY in K config
+to stop both drawing and hardware sampling; the choice is saved. For automated
+captures, `--performance` and `--no-performance` override it for that run.
 
 ## Build
 

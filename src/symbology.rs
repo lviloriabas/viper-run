@@ -255,7 +255,7 @@ pub fn fcr_scale(a: &Aircraft, c: &Combat) -> f64 {
     let far = if c.mode.air_to_ground() {
         c.sites.iter().filter(|s| !s.dead).map(|s| (s.pos - a.pos).len()).reduce(f64::min).unwrap_or(0.0)
     } else {
-        c.lock.and_then(|w| c.track(w, a)).map(|(p, _)| (p - a.pos).len()).or_else(|| c.bandits.iter().filter(|b| b.alive).map(|b| (b.jet.pos - a.pos).len()).reduce(f64::min)).unwrap_or(0.0)
+        c.lock.and_then(|w| c.track(w, a)).map(|(p, _)| (p - a.pos).len()).or_else(|| c.bandits.iter().enumerate().filter(|(i, _)| c.radar_contact(a, *i)).map(|(_, b)| (b.jet.pos - a.pos).len()).reduce(f64::max)).unwrap_or(0.0)
     } / 1852.0;
     [10.0, 20.0, 40.0, 80.0].into_iter().find(|&s| far < s * 0.9).unwrap_or(80.0)
 }
@@ -265,11 +265,11 @@ pub fn fcr_scale(a: &Aircraft, c: &Combat) -> f64 {
 /// ground targets on the ground map in CCIP. Returns false when empty.
 pub fn fcr(cv: &mut Canvas, f: [f32; 4], a: &Aircraft, c: &Combat, nm: f64) -> bool {
     let [l, t, r, b] = f;
-    let hd = a.heading * DEG;
     let place = |p: V3| -> Option<[f32; 2]> {
-        let d = p - a.pos;
-        let az = wrap180((d.x.atan2(-d.z) - hd) * RAD);
-        let range = v3(d.x, 0.0, d.z).len() / 1852.0;
+        let rel = p - a.pos;
+        let d = a.q.conj().rotate(rel);
+        let az = d.x.atan2(-d.z) * RAD;
+        let range = rel.len() / 1852.0;
         (az.abs() <= 60.0 && range < nm).then(|| [l + ((az + 60.0) / 120.0) as f32 * (r - l), b - (range / nm) as f32 * (b - t)])
     };
     let mut any = false;
@@ -284,12 +284,19 @@ pub fn fcr(cv: &mut Canvas, f: [f32; 4], a: &Aircraft, c: &Combat, nm: f64) -> b
             }
         }
     } else {
-        for (i, bd) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
+        for (i, bd) in c.bandits.iter().enumerate().filter(|(i, _)| c.radar_contact(a, *i)) {
             let Some(p) = place(bd.jet.pos) else { continue };
             any = true;
             let locked = c.lock == Some(Who::Bandit(i));
             let s = if locked { 5.0 } else { 3.5 };
-            cv.rect(p[0] - s, p[1] - s, 2.0 * s, 2.0 * s, if locked { AMBER } else { GREEN });
+            if locked {
+                cv.stroke_rect(p[0] - s, p[1] - s, 2.0 * s, 2.0 * s, 2.0, AMBER);
+            } else {
+                cv.rect(p[0] - s, p[1] - 1.5, 2.0 * s, 3.0, GREEN);
+                if c.acquiring == Some(Who::Bandit(i)) {
+                    brackets(cv, p[0], p[1], 8.0, 1.0, AMBER);
+                }
+            }
             // Aspect stick: the contact's track relative to ours.
             let th = (bd.jet.heading - a.heading) * DEG;
             cv.line(p[0], p[1], p[0] + th.sin() as f32 * 10.0, p[1] - th.cos() as f32 * 10.0, 1.0, if locked { AMBER } else { GREEN });
@@ -297,7 +304,7 @@ pub fn fcr(cv: &mut Canvas, f: [f32; 4], a: &Aircraft, c: &Combat, nm: f64) -> b
                 let alt = bd.jet.pos.y * 3.28084 / 1000.0;
                 cv.text(&format!("{:.0}", alt), p[0] + 8.0, p[1] + 9.0, 1.0, AMBER, Align::Left);
                 let rng = (bd.jet.pos - a.pos).len() / 1852.0;
-                cv.text(&format!("{} {:.1}NM {}KT", bd.callsign, rng, (bd.jet.tas_kt).round() as i64), (l + r) * 0.5, t + 10.0, 1.0, AMBER, Align::Center);
+                cv.text(&format!("{:.1}NM {}KT", rng, (bd.jet.tas_kt).round() as i64), (l + r) * 0.5, t + 10.0, 1.0, AMBER, Align::Center);
             }
         }
     }
@@ -382,7 +389,7 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
     };
     for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
         if (b.jet.pos - cam.eye).len() < 40000.0 {
-            mark(b.jet.pos, Who::Bandit(i), RED, Some(b.callsign), true);
+            mark(b.jet.pos, Who::Bandit(i), RED, None, true);
         }
     }
     for (i, st) in c.sites.iter().enumerate().filter(|(_, st)| !st.dead) {

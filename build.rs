@@ -1,4 +1,4 @@
-//! Windows capture compatibility exports and the procedural icon (src/icon.rs).
+//! Procedural Windows icon (src/icon.rs).
 //!
 //! The .ico is compiled with `windres` (mingw) or `zig rc`, whichever is
 //! found; without either the exe simply keeps the default icon. A preview
@@ -23,15 +23,6 @@ fn main() {
         return;
     }
 
-    // Keep the capture compatibility marker in the executable's PE export
-    // table, including stripped/LTO builds. It is data, not a callable API.
-    let exports = out.join("capture-compat.def");
-    std::fs::write(&exports, "EXPORTS\n    RTSSHooksCompatibility DATA\n").unwrap();
-    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        println!("cargo:rustc-link-arg-bins=/DEF:{}", exports.display());
-    } else {
-        println!("cargo:rustc-link-arg-bins={}", exports.display());
-    }
     std::fs::write(out.join("icon.ico"), ico(&[16, 24, 32, 48, 64, 256])).unwrap();
     std::fs::write(out.join("icon.rc"), "1 ICON \"icon.ico\"\n").unwrap();
 

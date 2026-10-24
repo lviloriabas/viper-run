@@ -276,14 +276,19 @@ const RECOVERY_CLIMB: f64 = 45.0 * DEG;
 /// Auto-GCAS-style prediction, as on the real F-16: the lowest clearance
 /// over the terrain along the recovery the jet would fly from here, a short
 /// reaction and the roll to `bank` (degrees from wings level) at about
-/// 180 deg/s, then `n` g with the lift vector there. Wings level it pulls
+/// the protected roll rate, then the available `n` g with the lift vector there. Wings level it pulls
 /// until the path climbs 45 degrees; banked it keeps turning away from the
 /// ground. A point mass at constant speed, sampled every 0.2 s for 9 s.
 fn recovery_clearance(me: &Aircraft, bank: f64, n: f64) -> f64 {
+    // The AoA protection can reduce lift below the requested recovery g,
+    // especially while slow or rolling. Leave a response margin rather than
+    // predicting a pull-up the protected airframe cannot actually fly.
+    let n = n.min(me.g_avail * 0.9);
     let speed = me.speed.max(80.0);
     let mut p = me.pos;
     let mut v = if me.vel.len() > 1.0 { me.vel.norm() } else { me.q.axes().forward };
-    let roll_time = 0.3 + wrap180(me.bank - bank).abs() / 180.0;
+    let roll_rate = me.flcs.roll_limit.clamp(20.0, 180.0);
+    let roll_time = 0.3 + wrap180(me.bank - bank).abs() / roll_rate;
     let (dt, mut t) = (0.2, 0.0);
     let mut lowest = f64::INFINITY;
     while t < 9.0 {

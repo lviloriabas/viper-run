@@ -22,6 +22,7 @@ mod math;
 mod mesh;
 mod mig29;
 mod physio;
+mod performance;
 mod png;
 mod props;
 mod scenario;
@@ -96,6 +97,7 @@ struct Opts {
     /// Parts broken off the jet at the start, to show it coming apart.
     breakup: Option<sim::Breakup>,
     controls: bool,
+    performance_overlay: Option<bool>,
     /// Show the controller prompts, for screenshots without a pad.
     pad: bool,
     fov: Option<f64>,
@@ -196,6 +198,8 @@ fn parse_opts() -> Opts {
                 }
             }
             "--controls" => o.controls = true,
+            "--performance" => o.performance_overlay = Some(true),
+            "--no-performance" => o.performance_overlay = Some(false),
             "--pad" => o.pad = true,
             "--fov" => o.fov = next(&mut i).parse().ok(),
             "--zoom" => o.zoom = next(&mut i).parse().ok(),
@@ -207,7 +211,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
                 std::process::exit(0);
             }
             _ => {}
@@ -229,6 +233,7 @@ struct App {
     output: Option<gfx::Target>,
     audio: Audio,
     settings: Settings,
+    performance: performance::Performance,
     best: Best,
 
     state: State,
@@ -299,6 +304,7 @@ struct App {
     rebinding: Option<(usize, usize)>,
     mouse_pos: (f32, f32),
     grabbed: bool,
+    screenshot_pending: bool,
     look: (f64, f64),
     /// Chase camera orbit: yaw (positive swings the camera to the jet's
     /// right, so the view turns left; the controls feed it negated, so
@@ -306,6 +312,8 @@ struct App {
     chase_look: (f64, f64),
     controls_open: bool,
     controls_was_flying: bool,
+    controls_was_frozen: bool,
+    paused_was_frozen: bool,
     pages: [Page; 2],
     hands: Hands,
     buttons: Vec<Button>,
@@ -358,7 +366,8 @@ impl App {
         let (rw, rh) = render_size(w, h);
         let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Nearest);
         let mirror = gfx::Target::new(&mut *ctx, cockpit::MIRROR_SIZE.0, cockpit::MIRROR_SIZE.1, FilterMode::Nearest);
-        let (settings, best) = settings::load();
+        let (mut settings, best) = settings::load();
+        if let Some(enabled) = opts.performance_overlay { settings.performance_overlay = enabled; }
         let audio = Audio::start();
         let preview = Mission::new();
         let mut mission = preview.clone();
@@ -378,6 +387,7 @@ impl App {
             output: None,
             audio,
             settings,
+            performance: performance::Performance::new(),
             best,
             state: State::Attract,
             view: if opts.chase { View::Chase } else { View::Cockpit },
@@ -427,10 +437,13 @@ impl App {
             rebinding: None,
             mouse_pos: (0.0, 0.0),
             grabbed: false,
+            screenshot_pending: false,
             look: (0.0, LOOK_PITCH),
             chase_look: (0.0, 0.0),
             controls_open: false,
             controls_was_flying: false,
+            controls_was_frozen: false,
+            paused_was_frozen: false,
             pages: [Page::Fcr, Page::Eng],
             hands: Hands { throttle: 0.82, ..Default::default() },
             buttons: Vec::new(),
@@ -440,6 +453,7 @@ impl App {
             frame: 0,
             bench_frames: Vec::new(),
         };
+        app.performance.set_enabled(app.settings.performance_overlay);
         app.apply_test_options();
         app
     }
@@ -478,7 +492,7 @@ impl App {
                 match self.state {
                     State::Flying => {
                         // --input lock: lock up the nearest target once one is in view.
-                        if self.opts.lock && self.combat.lock.is_none() && (self.time * 2.0).fract() < FIXED_DT * 2.0 {
+                        if self.opts.lock && self.combat.lock.is_none() && self.combat.acquiring.is_none() && (self.time * 2.0).fract() < FIXED_DT * 2.0 {
                             if let Some(a) = &self.aircraft {
                                 self.combat.designate(a);
                             }
@@ -622,10 +636,13 @@ impl App {
         if !matches!(self.state, State::Flying | State::Frozen) {
             return;
         }
+        self.paused_was_frozen = self.state == State::Frozen;
         self.state = State::Paused;
         self.trigger_mouse = false;
+        self.zoom_mouse = false;
         self.keys.clear();
-        self.center_stick();
+        self.mouse = (0.0, 0.0);
+        self.toast_timer = 0.0;
         self.grab(false);
         self.selected = 0;
     }
@@ -634,11 +651,10 @@ impl App {
         if self.controls_open || self.state != State::Paused {
             return;
         }
-        self.state = State::Flying;
+        self.state = if self.paused_was_frozen { State::Frozen } else { State::Flying };
         self.keys.clear();
-        self.center_stick();
+        self.mouse = (0.0, 0.0);
         self.grab(true);
-        self.flash_toast(if self.pad_active { "{Y} CHASE // {RS} LOOK" } else { "V CHASE // C CENTER" }, 1.8);
         self.last_frame = date::now();
         self.accumulator = 0.0;
     }
@@ -650,7 +666,7 @@ impl App {
             State::Flying => {
                 self.state = State::Frozen;
                 self.keys.clear();
-                self.flash_toast(if self.pad_active { "PAUSED // {START} RESUME // {B} MENU" } else { "PAUSED // P RESUME // ESC MENU" }, 1.6);
+                self.toast_timer = 0.0;
             }
             State::Frozen => {
                 self.state = State::Flying;
@@ -681,15 +697,18 @@ impl App {
         self.selected = 0;
         if open {
             self.controls_was_flying = matches!(self.state, State::Flying | State::Frozen);
+            self.controls_was_frozen = self.state == State::Frozen;
             if self.controls_was_flying {
                 self.state = State::Paused;
                 self.keys.clear();
+                self.trigger_mouse = false;
+                self.zoom_mouse = false;
                 self.mouse = (0.0, 0.0);
                 self.grab(false);
             }
         } else {
             if self.controls_was_flying {
-                self.state = State::Flying;
+                self.state = if self.controls_was_frozen { State::Frozen } else { State::Flying };
                 self.accumulator = 0.0;
                 self.last_frame = date::now();
                 self.grab(true);
@@ -717,7 +736,7 @@ impl App {
     }
 
     fn act(&mut self, a: Action) {
-        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
+        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Performance | Action::Restart | Action::Menu | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
         }
         match a {
@@ -727,11 +746,18 @@ impl App {
                 self.state = State::Loadout;
                 self.selected = 0;
             }
-            Action::Start | Action::Restart | Action::Launch => self.start_mission(),
+            Action::Start | Action::Restart | Action::Launch => {
+                self.controls_open = false;
+                self.controls_was_flying = false;
+                self.start_mission();
+            },
             Action::Station(i) => self.config.cycle(i),
             Action::Fuel => self.config.cycle_fuel(),
-            Action::Resume => self.resume(),
-            Action::Menu => self.go_menu(),
+            Action::Menu => {
+                self.controls_open = false;
+                self.controls_was_flying = false;
+                self.go_menu();
+            },
             Action::Quit => window::order_quit(),
             Action::Mute => self.toggle_mute(),
             Action::SensDown | Action::SensUp if self.pad_active => {
@@ -754,6 +780,11 @@ impl App {
                 self.settings.pad_layout = if self.settings.pad_layout == PadLayout::Combat { PadLayout::Classic } else { PadLayout::Combat };
             }
             Action::Fullscreen => self.toggle_fullscreen(),
+            Action::Performance => {
+                self.settings.performance_overlay = !self.settings.performance_overlay;
+                self.performance.set_enabled(self.settings.performance_overlay);
+                self.save();
+            },
             Action::Pick(k) => {
                 self.kind = k;
                 let (jet, aggressor, mixed, refill) = (self.config.jet, self.config.aggressor, self.config.threats.mixed, self.config.refill);
@@ -784,6 +815,7 @@ impl App {
                 let keys = self.settings.keys;
                 let clock = self.settings.clock;
                 self.settings = Settings { fullscreen: fs, muted, clock, keys, ..Settings::default() };
+                self.performance.set_enabled(self.settings.performance_overlay);
             }
             Action::Rebind(i, slot) => {
                 self.rebinding = Some((i as usize, slot as usize));
@@ -1390,7 +1422,8 @@ impl App {
             let shake = self.shake(a);
             let sx = (t * 31.1).sin() * 0.6 + (t * 18.3 + 0.4).sin() * 0.4;
             let sy = (t * 26.3 + 1.7).sin() * 0.6 + (t * 41.7 + 0.3).sin() * 0.4;
-            eye = eye + r * (sx * shake * 210.0) + u * (sy * shake * 210.0);
+            // Keep external-camera vibration subtle at this short follow distance.
+            eye = eye + r * (sx * shake * 50.0) + u * (sy * shake * 50.0);
         }
         let floor = terrain::floor(eye.x, eye.z) + 2.4;
         if eye.y < floor {
@@ -1511,7 +1544,7 @@ impl App {
             }
             Bind::Airbrake if flying => {
                 self.airbrake = !self.airbrake;
-                self.flash_toast(if self.airbrake { "AIRBRAKE OUT" } else { "AIRBRAKE IN" }, 1.4);
+                self.flash_toast(if self.airbrake { "AIRBRAKE DEPLOYED" } else { "AIRBRAKE RETRACTED" }, 1.4);
             }
             Bind::Gear if flying => self.toggle_gear(),
             Bind::Flaps if flying => {
@@ -1555,6 +1588,15 @@ impl App {
 
 impl EventHandler for App {
     fn update(&mut self) {
+        // Some system overlays take foreground focus without minimising us.
+        // Release capture and clear held controls before processing more input.
+        if self.opts.shot.is_none() && self.opts.bench.is_none() && !capture::is_foreground() {
+            self.pause();
+            self.grab(false);
+            self.keys.clear();
+            self.trigger_mouse = false;
+            self.zoom_mouse = false;
+        }
         let now = date::now();
         let raw_dt = now - self.last_frame;
         let mut dt = raw_dt.clamp(0.0, 0.05);
@@ -1577,9 +1619,13 @@ impl EventHandler for App {
         if self.opts.shot.is_some() {
             dt = 0.0;
         }
-        self.time += dt;
+        if !matches!(self.state, State::Paused | State::Frozen) {
+            self.time += dt;
+        }
         if let Some(on) = self.pad.poll(now) {
-            self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
+            if !matches!(self.state, State::Paused | State::Frozen) {
+                self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
+            }
             if !on {
                 self.pause();
             }
@@ -1593,7 +1639,9 @@ impl EventHandler for App {
         }
         self.toast_timer = (self.toast_timer - dt).max(0.0);
         let zoomed = (self.zoom_mouse || self.zoom_pad) && matches!(self.state, State::Flying | State::Frozen);
-        self.zoom += (zoomed as i32 as f64 - self.zoom) * (1.0 - (-dt * 9.0).exp());
+        if matches!(self.state, State::Flying | State::Frozen) {
+            self.zoom += (zoomed as i32 as f64 - self.zoom) * (1.0 - (-dt * 9.0).exp());
+        }
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
             State::Attract | State::Loadout => self.attract_time += dt,
@@ -1653,10 +1701,12 @@ impl EventHandler for App {
         if !matches!(self.state, State::Paused | State::Frozen) {
             self.advance_effects(dt);
         }
-        if self.opts.shot.is_none() && self.state != State::Frozen {
+        if self.opts.shot.is_none() && !matches!(self.state, State::Paused | State::Frozen) {
             self.update_hands(dt, None);
         }
-        self.camera = self.current_camera();
+        if self.state != State::Paused || self.controls_open || self.frame == 0 {
+            self.camera = self.current_camera();
+        }
         // The boom is heard where the Mach cone sweeps over the camera: from
         // outside the jet only; the pilot rides ahead of it.
         if let Some(a) = &self.aircraft {
@@ -1755,6 +1805,12 @@ impl EventHandler for App {
                     symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, true);
                 }
             }
+            if flying_view && self.settings.performance_overlay {
+                let s = ui::ui_scale(w, h);
+                let u = (s - 1.0).max(1.0);
+                let (x, y) = if cockpit_view { (w * 0.026, h * 0.058 + 34.0 * s) } else { (12.0 * s, 52.0 * s) };
+                self.performance.draw(cv, x, y + 97.0 * u, u);
+            }
             if self.flash > 0.005 {
                 let c = self.flash_color;
                 cv.rect(0.0, 0.0, w, h, rgba(c[0], c[1], c[2], (self.flash * 0.34) as f32));
@@ -1765,10 +1821,7 @@ impl EventHandler for App {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
                     State::Loadout => u.loadout_screen(self.kind, &self.config, self.settings.clock),
-                    State::Paused => {
-                        u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.45));
-                        u.pause_screen(self.aircraft.as_ref().unwrap(), &self.mission, self.settings.muted, obj.as_ref());
-                    }
+                    State::Paused => {}
                     State::Result => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.5));
                         if let Some(r) = &self.result {
@@ -1778,11 +1831,24 @@ impl EventHandler for App {
                     _ => {}
                 }
             } else {
-                u.controls_drawer(&self.settings, self.controls_was_flying, self.rebinding);
+                u.controls_drawer(&self.settings, matches!(self.state, State::Paused | State::Frozen), self.rebinding);
             }
             buttons.append(&mut u.buttons);
         }
         self.overlay.flush(&mut *self.ctx, w, h);
+        if self.screenshot_pending && self.output.is_none() {
+            self.screenshot_pending = false;
+            match capture::screenshot(w as u32, h as u32) {
+                Ok(path) => {
+                    println!("saved {}", path.display());
+                    self.flash_toast("SCREENSHOT SAVED // PICTURES / VIPER-RUN", 2.0);
+                }
+                Err(e) => {
+                    eprintln!("screenshot failed: {e}");
+                    self.flash_toast("SCREENSHOT FAILED", 2.0);
+                }
+            }
+        }
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
         self.buttons = buttons;
@@ -1790,6 +1856,7 @@ impl EventHandler for App {
             self.selected = 0;
         }
 
+        self.performance.presented();
         self.frame += 1;
         if let (Some(path), Some(out)) = (self.opts.shot.clone(), self.output.as_ref()) {
             if self.frame >= self.opts.frames {
@@ -1883,6 +1950,22 @@ impl EventHandler for App {
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
         self.pad_active = false;
+        if key == KeyCode::F12 && !repeat {
+            self.screenshot_pending = true;
+            return;
+        }
+        // Leave desktop capture, recording and overlay chords to Windows.
+        if key == KeyCode::PrintScreen || mods.logo || matches!(key, KeyCode::LeftSuper | KeyCode::RightSuper) {
+            self.pause();
+            self.grab(false);
+            return;
+        }
+        if mods.alt && !matches!(key, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::O) {
+            if key == KeyCode::Enter && !repeat {
+                self.toggle_fullscreen();
+            }
+            return;
+        }
         if key == KeyCode::F11 && !repeat {
             self.toggle_fullscreen();
             return;
@@ -2024,8 +2107,12 @@ impl EventHandler for App {
     }
 
     fn window_minimized_event(&mut self) {
+        if self.opts.shot.is_some() || self.opts.bench.is_some() { return; }
         self.keys.clear();
         self.pause();
+        self.grab(false);
+        self.trigger_mouse = false;
+        self.zoom_mouse = false;
     }
 }
 

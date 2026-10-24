@@ -1165,7 +1165,7 @@ impl World {
         }
         // The petals swing apart about their leading edges, up and down.
         for (i, upper) in [true, false].into_iter().enumerate() {
-            let angle = a.brake * crate::mig29::BRAKE_OPEN * if upper { -1.0 } else { 1.0 };
+            let angle = crate::mig29::brake_angle(upper, a.brake);
             let local = rotate_about(crate::mig29::brake_hinge(upper), Quat::axis_angle(V3::X, angle));
             self.draw_part(ctx, &self.mig_brakes[i], base, &mat_mul(model, &local));
         }

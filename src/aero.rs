@@ -271,13 +271,21 @@ pub(crate) fn lateral(f: &Flow, span: f64) -> (f64, f64, f64) {
     (cy, cl, cn)
 }
 
-/// Lift coefficient available at the 25 degree AoA limit.
+/// Reference lift coefficient at the airframe's nominal AoA cap.
 pub fn cl_max(kind: Type) -> f64 {
     if kind == Type::Mig29 {
         return aero_mig29::cl_max();
     }
-    let a = 25.0f64.to_radians();
-    -lerp1(&CZ, -10.0, 5.0, 25.0) * a.cos() + lerp2(&CX, -24.0, 12.0, 0.0, 25.0) * a.sin()
+    cl_at_alpha(kind, kind.alpha_limits().1)
+}
+
+/// Reference lift at an adaptive cap, for the available-g estimate. As with
+/// cl_max, this is the rigid, steady, low-Mach wing without flap increments.
+pub fn cl_at_alpha(kind: Type, alpha: f64) -> f64 {
+    let f = Flow { kind, alpha, speed: 200.0, xcg: XCG_REF, h_over_b: 10.0, ..Default::default() };
+    let c = coefficients(&f);
+    let (sa, ca) = alpha.to_radians().sin_cos();
+    -c.cz * ca + c.cx * sa
 }
 
 // ------------------------------------------------------------------ engine

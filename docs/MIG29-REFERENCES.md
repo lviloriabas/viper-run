@@ -38,14 +38,31 @@ are shared. From the seat the exterior cuts the skin away in
 `mig29::CUTOUT` and leaves the canopy out, so nothing blocks the view ahead
 but the nose and the IRST ball.
 
-- Panel tilted 12 degrees, with wings folded 22 degrees toward the pilot.
-  Centre: KPP over PNP; on the left the airspeed indicator in km/h with a
-  Mach window, the altimeter in metres (long needle per kilometre, short per
-  ten, and a counter) and the UUAP (angle of attack above, load factor
-  below); on the right the variometer in m/s, the twin tachometer and the
-  twin exhaust gas temperature. Right wing: fuel in kg, hydraulics and the
-  clock. Left wing: gear and flap lights and the autopilot and navigation
-  panel (SAU, RSBN, ARK).
+- Panel tilted 12 degrees. Its broad flat flight/engine face ends at
+  x = +/-0.29 m; only the outer shoulders fold 22 degrees toward the pilot.
+  KPP above PNP sits left of the HUD axis, with IAS and barometric altitude
+  further left. The UUAP and caution lamp stand on the raised left cheek
+  beside the HUD. VVI, radio altitude and twin-pointer RPM occupy the upper
+  right row; a separate airspeed/Mach instrument and two individual EGT
+  gauges sit below. Clock below VVI, rectangular hydraulic/oxygen block
+  below the engines, vertical fuel tape at the right edge, SPO-15 below it.
+  The gear/flap panel sits below the left flight instruments; SAU/navigation
+  controls are on the left console.
+- Console inboard edges are parallel at x = +/-0.262 m, clearing the seat
+  bucket. The panel is 15 cm farther forward to clear the unchanged pilot's
+  knees through full rudder travel, preserving the HUD/canopy datums.
+  Switch panels lie on the console's actual surface with an
+  orthonormal frame, and short joining panels close the gap to the main
+  panel. The floor is below the boot soles and pedal blocks. Warning lamps
+  sit beside the panel under the right rail, rather than below the knees.
+- Layout checked against the real photographs above and Figure 15, printed
+  page 21, of the [Eagle Dynamics MiG-29 manual](https://www.digitalcombatsimulator.com/upload/iblock/463/DCS%20MIG-29%20Flight%20Manual%20EN.pdf).
+  Dimensions and angles remain visual estimates. The supplied modernized
+  cockpit photograph guides tub proportions and console orientation; the
+  instruments retain the game's analogue 9.13S configuration. Both EGT
+  gauges and RPM pointers share the flight model's single engine readout.
+  Regression tests check instrument mounting clearances, console frames,
+  boot/floor clearance and separation of atlas regions from the mirrors.
 - Black coaming with the ILS-31 HUD (a big body and a heavy frame round the
   combiner glass) and the IT-23 display with a B-scope radar picture.
 - A column of ten warning lights by the right rail; the legends are
@@ -54,8 +71,35 @@ but the nose and the IRST ball.
   quadrant on the left console; gear handle on the left wall, ahead of the
   throttle.
 - Canopy frames on the exterior shape (`mig29::canopy_point`): windscreen
-  posts, the arch over the knees with its three mirrors and the rails; a
-  bulkhead behind the seat and the decking under the rear of the canopy.
+  posts, the arch over the knees and the rails. Three separate mirrors sit
+  on the arch: a broad rounded pane across the crown and two elongated
+  panes following its shoulders down to the sills, matching the supplied
+  cockpit photograph. Shallow dark housings and paired brackets attach
+  them to the arch; the reflected horizon stays level in the side panes.
+  A bulkhead sits behind the seat, with decking under the rear canopy.
+
+## Tail airbrake
+
+The 9.13S keeps two airbrake panels, opening above and below the fixed
+braking-parachute container between the engines. The broad panels have
+U-shaped aft cutouts around the container. The upper panel is larger;
+this is the split arrangement of the 9.12/9.13 family.
+
+- [DCS MiG-29 flight manual, General Design, page 10](https://www.digitalcombatsimulator.com/upload/iblock/463/DCS%20MIG-29%20Flight%20Manual%20EN.pdf):
+  upper panel 0.75 m2 and 56 degrees, lower panel 0.55 m2 and 60 degrees.
+- [Gabor Toth's MiG-29 walkaround, photo 27](https://www.arcair.com/awa01/101-200/awa144-MiG-29-Toth/27.shtm):
+  original rear photograph of the open panels, their curved aft cutouts,
+  stiffeners and the fixed chute container. Used as a shape reference;
+  the photograph is not bundled or redistributed with the game.
+
+`mig29.rs` fits the panel dimensions to these areas, with a 0.84 m span,
+curved inner and outer skins, edge thickness and internal ribs. The shape
+is an approximation from the photograph and published areas, not a factory
+measurement. The fixed fuselage ends at the hinges; sidewalls and a
+separate chute tube remain when the panels open, so there is no duplicate
+fixed panel underneath. Geometry tests check panel areas, hinge stability,
+opening direction and clearance from the container throughout deployment.
+The toggle messages are `AIRBRAKE DEPLOYED` and `AIRBRAKE RETRACTED`.
 
 ## MiG-29S 9.13S stores
 

@@ -115,6 +115,40 @@ The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
   its outer radius and a blast inside its lethal radius, so bigger
   warheads (the R-27s' 39 kg against the AIM-9M's 9.4 kg) kill from further.
 
+## Simplified radar controls and presentation
+
+T designates the return nearest the nose or helmet cue; pressing T again
+cycles the available returns. Air weapons select aircraft, while CCIP
+selects ground targets. Changing between air and ground modes drops the
+previous designation. Undesignate also cancels acquisition.
+
+An air designation takes 0.6 seconds of uninterrupted visibility before it
+becomes a track. This delay is a gameplay choice. Until then the display
+shows ACQ and the target cannot supply radar missile guidance. Search
+(RWS) shows visible returns; a completed radar lock changes to single-target
+track (STT), stops the search sweep and displays only the tracked aircraft.
+Target range, speed and altitude replace invented callsigns. The upper
+notification and aircraft overlay no longer identify targets as BANDIT 1/2.
+
+Detection, designation and tracking share terrain visibility and antenna
+limits in aircraft axes. The chosen search field is 60 degrees each side
+and 30 degrees above/below; tracking allows 60 degrees in elevation.
+Search/track ranges remain the game's 74/80 km. These are simplified game
+limits, not a reproduction of classified radar performance. Losing line of
+sight, range or antenna coverage drops the track before weapon firing and
+missile guidance are evaluated. The infrared seeker also needs terrain
+visibility, but can track independently without a radar lock.
+
+The MiG radar uses the same visibility rules and marks acquisition and
+tracking on its B-scope. Its IRST stays passive and cannot guide radar
+missiles. Semi-active missiles still require radar support to impact;
+active missiles retain their own terminal seekers.
+
+The search-to-STT presentation follows the radar workflow described in
+[Eagle Dynamics' F-16C manual](https://shared.steamstatic.com/store_item_assets/steam/apps/1090850/manuals/DCS_F-16C_Early_Access_Guide_EN.pdf).
+The implementation deliberately omits radar cursor/elevation controls,
+Doppler/notch filtering, TWS, jamming and detailed scan-bar timing.
+
 ## Sources
 
 - [Lock-on after launch (Wikipedia)](https://en.wikipedia.org/wiki/Lock-on_after_launch)

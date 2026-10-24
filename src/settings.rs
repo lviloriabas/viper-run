@@ -44,6 +44,8 @@ pub struct Settings {
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
+    /// Native frame graphs and hardware utilisation.
+    pub performance_overlay: bool,
     /// Mission clocks on; off, no mission times out.
     pub clock: bool,
     pub keys: Keymap,
@@ -51,7 +53,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, clock: true, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, keys: Keymap::default() }
     }
 }
 
@@ -76,9 +78,13 @@ fn read() -> Vec<(String, String)> {
 }
 
 pub fn load() -> (Settings, Best) {
+    parse(read())
+}
+
+fn parse(entries: Vec<(String, String)>) -> (Settings, Best) {
     let mut s = Settings::default();
     let mut b = Best::default();
-    for (k, v) in read() {
+    for (k, v) in entries {
         let num = v.parse::<f64>().ok().filter(|n| n.is_finite());
         match (k.as_str(), num) {
             ("sensitivity", Some(n)) => s.sensitivity = clamp(n, 0.5, 5.0),
@@ -90,6 +96,7 @@ pub fn load() -> (Settings, Best) {
             ("pad_layout", _) => s.pad_layout = if v == "classic" { PadLayout::Classic } else { PadLayout::Combat },
             ("muted", _) => s.muted = v == "true",
             ("fullscreen", _) => s.fullscreen = v == "true",
+            ("performance_overlay", _) => s.performance_overlay = v != "false",
             ("clock", _) => s.clock = v != "false",
             ("best_score", Some(n)) => b.score = n.max(0.0),
             ("best_time", Some(n)) => b.time = n.max(0.0),
@@ -105,10 +112,30 @@ pub fn save(s: &Settings, b: &Best) {
     if std::fs::create_dir_all(&d).is_err() {
         return;
     }
+    let _ = std::fs::write(d.join("settings.txt"), encode(s, b));
+}
+
+fn encode(s: &Settings, b: &Best) -> String {
     let text = format!(
-        "sensitivity={:.1}\nexpo={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
-        s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.clock, b.score.round(), b.time
+        "sensitivity={:.1}\nexpo={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nperformance_overlay={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
+        s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.performance_overlay, s.clock, b.score.round(), b.time
     );
-    let text = text + &s.keys.save();
-    let _ = std::fs::write(d.join("settings.txt"), text);
+    text + &s.keys.save()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn performance_switch_survives_save_and_older_settings() {
+        let old = parse(vec![("fov".into(), "72".into())]).0;
+        assert!(old.performance_overlay);
+        for enabled in [false, true] {
+            let s = Settings { performance_overlay: enabled, ..Settings::default() };
+            let entries = encode(&s, &Best::default()).lines()
+                .filter_map(|l| l.split_once('='))
+                .map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+            assert_eq!(parse(entries).0.performance_overlay, enabled);
+        }
+    }
 }

@@ -859,6 +859,9 @@ pub struct Combat {
     pub sight: GunSight,
     /// Radar (or ground designation) lock, or the IRST's track.
     pub lock: Option<Who>,
+    /// Pending sensor designation, not yet usable for radar missile guidance.
+    pub acquiring: Option<Who>,
+    acquire_clock: f64,
     /// The MiG-29's OEPS-29 optronic sight tracks in place of the radar:
     /// the IRST finds and tracks passively, so the target's RWR stays
     /// quiet, and the laser rangefinder measures range inside 6.5 km.
@@ -1073,6 +1076,8 @@ impl Combat {
             trails: Vec::new(),
             sight: GunSight::default(),
             lock: None,
+            acquiring: None,
+            acquire_clock: 0.0,
             irst: false,
             seeker: None,
             ccip: None,
@@ -1340,7 +1345,8 @@ impl Combat {
         let choices = self.choices();
         let now = (self.mode, if self.mode == Mode::Gun { None } else { self.store() });
         let i = choices.iter().position(|&c| c == now).map(|i| (i + 1) % choices.len()).unwrap_or(0);
-        (self.mode, self.pick) = choices[i];
+        self.select(choices[i].0);
+        self.pick = choices[i].1;
         self.seeker = None;
         self.shoot = false;
     }
@@ -1371,6 +1377,9 @@ impl Combat {
     /// Selects a master mode by name, for the test switches.
     pub fn select(&mut self, mode: Mode) {
         if mode == Mode::Nav || self.modes().contains(&mode) {
+            if mode.air_to_ground() != self.mode.air_to_ground() { self.drop_lock(); }
+            self.seeker = None;
+            self.shoot = false;
             self.mode = mode;
             self.pick = None;
         }
@@ -1394,6 +1403,24 @@ impl Combat {
         }
     }
 
+    /// Simplified antenna field in body axes, range and terrain masking.
+    pub fn radar_sees(&self, a: &Aircraft, p: V3, tracking: bool) -> bool {
+        let rel = p - a.pos;
+        let d = a.q.conj().rotate(rel.norm());
+        !self.irst && d.x.atan2(-d.z).abs() < 60.0 * DEG
+            && d.y.clamp(-1.0, 1.0).asin().abs() < (if tracking { 60.0 } else { 30.0 }) * DEG
+            && rel.len() < (if tracking { 80000.0 } else { 74000.0 })
+            && line_of_sight(a.pos, p)
+    }
+
+    /// STT stops searching other aircraft. Display and lock share returns.
+    pub fn radar_contact(&self, a: &Aircraft, i: usize) -> bool {
+        let who = Who::Bandit(i);
+        self.bandits.get(i).is_some_and(|b| b.alive
+            && self.radar_sees(a, b.jet.pos, self.lock == Some(who))
+            && self.radar_lock().is_none_or(|l| l == who))
+    }
+
     /// Lock candidates the radar can see: within 60 degrees of the nose, in
     /// range and not behind terrain, nearest the boresight first; with the
     /// IRST, the fighters inside its field and heat-detection range.
@@ -1414,7 +1441,7 @@ impl Combat {
         let mut consider = |who: Who, p: V3, max: f64| {
             let r = p - a.pos;
             let off = fwd.dot(r.norm()).clamp(-1.0, 1.0).acos();
-            if off < 60.0 * DEG && r.len() < max && line_of_sight(a.pos, p + V3::Y * 3.0) {
+            if (!ground || off < 60.0 * DEG) && r.len() < max && line_of_sight(a.pos, p + V3::Y * 3.0) {
                 v.push((who, look.dot(r.norm()).clamp(-1.0, 1.0).acos() + r.len() / 400000.0));
             }
         };
@@ -1424,7 +1451,7 @@ impl Combat {
             }
         } else {
             for (i, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
-                consider(Who::Bandit(i), b.jet.pos, 74000.0);
+                if self.radar_sees(a, b.jet.pos, false) { consider(Who::Bandit(i), b.jet.pos, 74000.0); }
             }
         }
         v.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1434,17 +1461,18 @@ impl Combat {
     /// T: lock the target nearest the boresight, or step to the next one.
     pub fn designate(&mut self, a: &Aircraft) {
         let ground = self.mode.air_to_ground();
-        let mut list = self.candidates(a, ground);
-        if list.is_empty() {
-            list = self.candidates(a, !ground);
-        }
-        let next = match self.lock.and_then(|l| list.iter().position(|(w, _)| *w == l)) {
+        let list = self.candidates(a, ground);
+        let next = match self.acquiring.or(self.lock).and_then(|l| list.iter().position(|(w, _)| *w == l)) {
             Some(i) => list.get(i + 1).or(list.first()).map(|x| x.0),
             None => list.first().map(|x| x.0),
         };
-        self.lock = next;
+        self.lock = next.filter(|_| ground);
+        self.acquiring = next.filter(|_| !ground);
+        self.acquire_clock = 0.0;
+        self.zone_clock = 0.0;
+        self.shoot = false;
         let text = match next {
-            Some(Who::Bandit(i)) => format!("LOCK {}", self.bandits[i].callsign),
+            Some(Who::Bandit(_)) => "ACQUIRING".to_string(),
             Some(Who::Ground(i)) => format!("DESIGNATED {}", self.sites[i].kind.name()),
             _ => "NO TARGET".to_string(),
         };
@@ -1454,7 +1482,7 @@ impl Combat {
     /// The lock if the radar holds it: what the semi-active and active
     /// missiles need, which an IRST track cannot give them.
     pub fn radar_lock(&self) -> Option<Who> {
-        self.lock.filter(|_| !self.irst)
+        self.lock.filter(|w| !self.irst && matches!(w, Who::Bandit(_)))
     }
 
     /// The MiG's sensor switch, radar or IRST; the F-16C has no IRST. The
@@ -1465,6 +1493,8 @@ impl Combat {
         } else {
             self.irst = !self.irst;
             self.lock = None;
+            self.acquiring = None;
+            self.shoot = false;
             if self.irst { "IRST // OEPS-29 SEARCH" } else { "RADAR // N019M SEARCH" }
         };
         self.events.push(Event::Lock { text: text.to_string() });
@@ -1478,7 +1508,10 @@ impl Combat {
 
     /// Drops the lock or designation, if there is one.
     pub fn drop_lock(&mut self) {
-        if self.lock.take().is_some() {
+        let held = self.lock.take().is_some();
+        let pending = self.acquiring.take().is_some();
+        self.shoot = false;
+        if held || pending {
             self.events.push(Event::Lock { text: "LOCK DROPPED".to_string() });
         }
     }
@@ -1529,6 +1562,7 @@ impl Combat {
         self.warn = (self.warn - dt).max(0.0);
         let pressed = trigger && !self.trigger_was;
         self.trigger_was = trigger;
+        self.sensors(dt, a);
         let alive = !a.crashed && !self.player_dead;
         self.firing = false;
         if alive {
@@ -1545,7 +1579,7 @@ impl Combat {
             }
             _ => None,
         };
-        self.sensors(dt, a);
+
         self.bandit_hulls(dt);
         self.step_bandits(dt, a);
         self.step_wrecks(dt);
@@ -1710,13 +1744,34 @@ impl Combat {
     fn sensors(&mut self, dt: f64, a: &Aircraft) {
         let fwd = a.q.axes().forward;
         let off = |p: V3| fwd.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
+        if let Some(w) = self.acquiring {
+            let seen = match w {
+                Who::Bandit(i) => self.bandits.get(i).is_some_and(|b| b.alive && if self.irst {
+                    irst_sees(a, &b.jet, 1.0)
+                } else { self.radar_sees(a, b.jet.pos, false) }),
+                _ => false,
+            };
+            if seen {
+                self.acquire_clock += dt;
+                if self.acquire_clock >= 0.6 {
+                    self.lock = Some(w);
+                    self.acquiring = None;
+                    self.events.push(Event::Lock { text: if self.irst { "IRST TRACK" } else { "RADAR STT" }.to_string() });
+                }
+            } else {
+                self.acquiring = None;
+                self.events.push(Event::Lock { text: "NO TRACK".to_string() });
+            }
+        }
         if let Some(l) = self.lock {
             let keep = match (self.irst, l) {
                 (true, Who::Bandit(i)) => self.bandits.get(i).is_some_and(|b| b.alive && irst_sees(a, &b.jet, 1.15)),
-                _ => self.track(l, a).is_some_and(|(p, _)| off(p) < 70.0 * DEG && (p - a.pos).len() < 80000.0),
+                (_, Who::Bandit(_)) => self.track(l, a).is_some_and(|(p, _)| self.radar_sees(a, p, true)),
+                _ => self.track(l, a).is_some_and(|(p, _)| off(p) < 70.0 * DEG && (p - a.pos).len() < 15000.0 && line_of_sight(a.pos, p + V3::Y * 3.0)),
             };
             if !keep {
                 self.lock = None;
+                self.shoot = false;
                 self.events.push(Event::Lock { text: "LOCK LOST".to_string() });
             }
         }
@@ -1728,7 +1783,7 @@ impl Combat {
             // An infrared seeker sees a fighter a little past the missile's
             // own reach: some 17 km for the AIM-9M, 30 for the R-27T.
             let reach = spec.max_range * 1.2;
-            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < reach && matches!(w, Who::Bandit(_)));
+            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < reach && matches!(w, Who::Bandit(_)) && line_of_sight(a.pos, p));
             let look = self.helmet.unwrap_or(fwd);
             let near_look = |p: V3| look.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
             let seeker = if let Some(l) = self.lock.filter(|&l| usable(l, gimbal)) {
@@ -2657,6 +2712,7 @@ mod tests {
         c.toggle_irst(&a);
         assert!(c.irst);
         c.designate(&a);
+        c.sensors(0.6, &a);
         assert_eq!(c.lock, Some(Who::Bandit(0)));
         assert_eq!((c.radar_lock(), c.laser_range(&a)), (None, None), "angle only past the laser");
         c.select(Mode::Mrm);
@@ -2864,15 +2920,78 @@ mod tests {
         c.bandits[0].jet = spawn(a.pos + fwd * 8000.0 + right * 2500.0, PI, 230.0);
         c.bandits[1].jet = spawn(a.pos + fwd * 12000.0 + right * 300.0, PI, 230.0);
         c.designate(&a);
+        c.sensors(0.6, &a);
         assert_eq!(c.lock, Some(Who::Bandit(1)));
         c.designate(&a);
+        c.sensors(0.6, &a);
         assert_eq!(c.lock, Some(Who::Bandit(0)));
         // A bandit behind the jet cannot be locked.
         c.bandits[0].jet.pos = a.pos - fwd * 3000.0;
         c.bandits[1].jet.pos = a.pos - fwd * 5000.0;
         c.lock = None;
         c.designate(&a);
+        c.sensors(0.6, &a);
         assert_eq!(c.lock, None);
+    }
+
+    #[test]
+    fn radar_acquisition_and_stt_follow_visible_returns() {
+        terrain::init();
+        let mut c = Combat::new(MissionKind::Dogfight, &mut Mission::new());
+        let a = spawn(v3(0.0, 6000.0, 0.0), 0.0, 230.0);
+        let ax = a.q.axes();
+        c.bandits[0].jet = spawn(a.pos + ax.forward * 10000.0, PI, 230.0);
+        c.bandits[1].jet = spawn(a.pos + ax.forward * 11000.0 + ax.right * 2000.0, PI, 230.0);
+        assert!(c.radar_contact(&a, 0) && c.radar_contact(&a, 1));
+        c.designate(&a);
+        c.sensors(0.3, &a);
+        assert_eq!((c.lock, c.radar_lock(), c.acquiring), (None, None, Some(Who::Bandit(0))));
+        c.sensors(0.3, &a);
+        assert_eq!(c.radar_lock(), Some(Who::Bandit(0)));
+        assert!(c.radar_contact(&a, 0) && !c.radar_contact(&a, 1), "STT stops searching other returns");
+        assert!(c.events.iter().filter_map(|e| if let Event::Lock { text } = e { Some(text) } else { None }).all(|t| !t.contains("BANDIT")));
+        c.bandits[0].jet.pos = a.pos - ax.forward * 1000.0;
+        c.sensors(0.01, &a);
+        assert!(c.radar_lock().is_none() && c.radar_contact(&a, 1));
+        c.designate(&a);
+        c.drop_lock();
+        c.sensors(1.0, &a);
+        assert_eq!((c.lock, c.acquiring), (None, None), "undesignate also cancels acquisition");
+    }
+
+    #[test]
+    fn radar_respects_elevation_range_and_terrain() {
+        terrain::init();
+        let c = Combat::new(MissionKind::Dogfight, &mut Mission::new());
+        let a = spawn(v3(0.0, 6000.0, 0.0), 0.0, 230.0);
+        let ax = a.q.axes();
+        assert!(c.radar_sees(&a, a.pos + ax.forward * 10000.0, false));
+        assert!(!c.radar_sees(&a, a.pos + ax.forward * 81000.0, true));
+        let high = a.pos + (ax.forward + ax.up) * 5000.0;
+        assert!(!c.radar_sees(&a, high, false));
+        assert!(c.radar_sees(&a, high, true), "track can follow above search volume");
+        let buried = a.pos + ax.forward * 10000.0 - V3::Y * 8000.0;
+        assert!(!c.radar_sees(&a, buried, true), "terrain masks a previously tracked target");
+    }
+
+    #[test]
+    fn interrupted_acquisition_and_air_modes_do_not_lock_ground() {
+        terrain::init();
+        let mut c = Combat::new(MissionKind::Free, &mut Mission::new());
+        let a = spawn(v3(0.0, 6000.0, 0.0), 0.0, 230.0);
+        let fwd = a.q.axes().forward;
+        c.bandits.truncate(1);
+        c.bandits[0].jet = spawn(a.pos + fwd * 5000.0, PI, 230.0);
+        c.designate(&a);
+        c.sensors(0.2, &a);
+        c.bandits[0].jet.pos = a.pos - fwd * 5000.0;
+        c.sensors(0.6, &a);
+        assert_eq!((c.lock, c.acquiring), (None, None));
+        c.sites[0].pos = a.pos + fwd * 2000.0;
+        c.designate(&a);
+        assert_eq!((c.lock, c.acquiring), (None, None), "air weapons never fall back to a ground designation");
+        c.lock = Some(Who::Ground(0));
+        assert!(c.radar_lock().is_none(), "ground designation cannot guide a radar missile");
     }
 
     /// Rounds through a bandit's wing hole it without killing it; a
