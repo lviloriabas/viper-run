@@ -303,7 +303,7 @@ pub fn present(c: &mut Combat, fx: &mut Fx, audio: &Audio, ear: V3, muted: bool)
         match e {
             Event::Launch { pos, from, name } => {
                 if !muted {
-                    audio.burst(1.4, 1.6 * volume(pos).max(0.15), 3200.0, 400.0, 0.0);
+                    audio.burst(1.4, 0.9 * volume(pos).max(0.1), 3200.0, 400.0, 0.0);
                 }
                 if from == Who::Player {
                     out.toast = Some(name.to_string());

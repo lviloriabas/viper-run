@@ -265,9 +265,9 @@ struct App {
     flash: f64,
     flash_color: [u8; 3],
     warn_clock: f64,
+    /// Seconds the countermeasure button has been held since the last program.
+    cm_hold: f64,
     result: Option<RunResult>,
-    /// Afterburner lit at the last check, to catch the light-off.
-    ab_lit: bool,
     /// The external camera sits inside the jet's Mach cone, where its boom
     /// has already passed.
     in_cone: bool,
@@ -332,10 +332,8 @@ fn stick_curve(v: f64) -> f64 {
     v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
 }
 
-/// Afterburner alight, for the light-off thump and torch.
-fn burner_lit(a: &Aircraft) -> bool {
-    a.ab_level > 0.05
-}
+/// Seconds between countermeasure programs while the button is held.
+const CM_REPEAT: f64 = 1.0;
 
 /// Low internal resolution, shown as crisp blocks: about 1.9 window pixels
 /// per scene pixel, between 360 and 576 lines.
@@ -414,8 +412,8 @@ impl App {
             flash: 0.0,
             flash_color: [180, 255, 190],
             warn_clock: 0.0,
+            cm_hold: 0.0,
             result: None,
-            ab_lit: false,
             in_cone: false,
             breaths: 0,
             kick: 0.0,
@@ -514,8 +512,6 @@ impl App {
                 self.update_hands(FIXED_DT, Some(self.opts.input));
             }
         }
-        // A burner lit during the scripted run is not a fresh light-off.
-        self.ab_lit = self.aircraft.as_ref().is_some_and(burner_lit);
         if let Some([retina, red, gloc]) = self.opts.vision {
             self.pilot.retina = retina;
             self.pilot.red = red;
@@ -607,7 +603,6 @@ impl App {
         self.transition_timer = 0.0;
         self.flash = 0.0;
         self.world.fx.clear();
-        self.ab_lit = false;
         self.kick = 0.0;
         self.hands = Hands { throttle: self.mission.start_throttle, ..Default::default() };
         self.airbrake = false;
@@ -1214,11 +1209,28 @@ impl App {
         self.settings.keys.held(Bind::Trigger, &self.keys) || self.trigger_mouse || pad || self.opts.fire
     }
 
+    /// One chaff and flare program, with the cartridges left.
+    fn dispense(&mut self) {
+        if let Some(a) = &self.aircraft {
+            self.combat.countermeasures(a);
+            let l = &self.combat.loadout;
+            self.flash_toast(&format!("CHAFF + FLARES  //  CHAFF {}  FLARES {}", l.chaff, l.flares), 1.2);
+        }
+    }
+
     /// The combat step after the jet has moved: weapons, bandits, targets
     /// and their effects. Returns true when it ended the run.
     fn fight(&mut self, dt: f64) -> bool {
         // A pilot out cold, or still coming round, cannot squeeze the trigger.
         let trigger = self.trigger() && self.pilot.authority() > 0.5;
+        // Held down, the countermeasure button runs another program every
+        // CM_REPEAT seconds; both sticks clicked together is the limiter override.
+        let cm = self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.held(gamepad::LS) && !self.pad.held(gamepad::RS);
+        self.cm_hold = if cm { self.cm_hold + dt } else { 0.0 };
+        if self.cm_hold >= CM_REPEAT {
+            self.cm_hold -= CM_REPEAT;
+            self.dispense();
+        }
         let a = self.aircraft.as_mut().unwrap();
         self.combat.step(dt, a, trigger, &mut self.mission);
         let fb = props::present(&mut self.combat, &mut self.world.fx, &self.audio, self.camera.eye, self.settings.muted);
@@ -1536,11 +1548,8 @@ impl App {
                 }
             }
             Bind::Countermeasures if flying => {
-                if let Some(a) = &self.aircraft {
-                    self.combat.countermeasures(a);
-                    let l = &self.combat.loadout;
-                    self.flash_toast(&format!("CHAFF + FLARES  //  CHAFF {}  FLARES {}", l.chaff, l.flares), 1.2);
-                }
+                self.cm_hold = 0.0;
+                self.dispense();
             }
             Bind::Airbrake if flying => {
                 self.airbrake = !self.airbrake;
@@ -1549,7 +1558,7 @@ impl App {
             Bind::Gear if flying => self.toggle_gear(),
             Bind::Flaps if flying => {
                 self.flaps_switch = !self.flaps_switch;
-                self.flash_toast(if self.flaps_switch { "ALT FLAPS EXTEND" } else { "ALT FLAPS NORM" }, 1.4);
+                self.flash_toast(if self.flaps_switch { "FLAPS DOWN" } else { "FLAPS UP" }, 1.4);
             }
             Bind::PitchUp | Bind::PitchDown | Bind::RollLeft | Bind::RollRight | Bind::YawLeft | Bind::YawRight | Bind::ThrottleUp | Bind::ThrottleDown | Bind::Afterburner | Bind::Trigger | Bind::WheelBrake => return false,
             _ => {}
@@ -1665,13 +1674,6 @@ impl EventHandler for App {
                     props::rwr_tones(&self.combat, a, &self.audio, &mut self.rwr_voice, dt);
                 }
                 if let Some(a) = &self.aircraft {
-                    let lit = burner_lit(a);
-                    if lit && !self.ab_lit {
-                        self.audio.afterburner();
-                        self.world.fx.ab_light(a);
-                        self.kick = self.kick.max(0.14);
-                    }
-                    self.ab_lit = lit;
                     if self.pilot.breaths != self.breaths {
                         self.breaths = self.pilot.breaths;
                         self.audio.breath();

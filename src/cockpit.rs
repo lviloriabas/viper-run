@@ -1150,9 +1150,26 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let r = R_KNEE;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0xb7, 0xbc, 0xa0, 1.0));
     let ink = rgba(0x28, 0x3c, 0x30, 1.0);
-    cv.text("COLD RIVER", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
-    for (i, s) in ["CHECK FUEL", "H AIRBRAKE  G GEAR", "L FLAPS  B BRAKES", "K CONFIG, KEYS", "ALT + MOUSE LOOK", "C CENTER VIEW", "V CHASE VIEW"].iter().enumerate() {
-        cv.text(s, r.x + 10.0, r.y + 46.0 + i as f32 * 24.0, 1.0, ink, Align::Left);
+    // Landing card: the limits and speeds the model flies to, in knots on
+    // the F-16 and km/h on the MiG-29.
+    use crate::sim::{spec, Type};
+    let mig = a.kind == Type::Mig29;
+    let speed = |kt: f64| if mig { format!("{:.0} KM/H", (kt * 1.852 / 10.0).round() * 10.0) } else { format!("{kt:.0} KT") };
+    let (rotate, approach, aoa, g) = if mig { (130.0, 140.0, "11 DEG", "+8.0 / -3.0") } else { (140.0, 150.0, "13 DEG", "+9.0 / -3.0") };
+    cv.text("LANDING CARD", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
+    let rows = [
+        ("ROTATE", speed(rotate)),
+        ("GEAR LIMIT", speed(spec::GEAR_LIMIT_KT)),
+        ("FLAP BLOWUP", speed(spec::FLAP_BLOWBACK_KT)),
+        ("FINAL", speed(approach)),
+        ("FINAL AOA", aoa.to_string()),
+        ("FLAPS", format!("{:.0} DEG DOWN", spec::FLAP_MAX)),
+        ("G LIMIT", g.to_string()),
+    ];
+    for (i, (label, value)) in rows.iter().enumerate() {
+        let y = r.y + 46.0 + i as f32 * 24.0;
+        cv.text(label, r.x + 10.0, y, 1.0, ink, Align::Left);
+        cv.text(value, r.x + r.w - 10.0, y, 1.0, ink, Align::Right);
     }
 
     // Vertical velocity: thousands of feet a minute, 0 at nine o'clock.
@@ -1355,18 +1372,20 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             cv.line(p[0], p[1], q[0], q[1], lw, col);
         }
     };
+    // Speed and altitude figures, a step smaller than the big lettering.
+    let mid = (big * 0.75).max(1.0);
     // Boxed readout: text anchored at a HUD point, frame drawn in pixels around it.
     let boxed = |cv: &mut Canvas, s: &str, x: f64, y: f64, align: Align| {
         if let Some(p) = at(x, y) {
-            let tw = Canvas::text_width(s, big);
+            let tw = Canvas::text_width(s, mid);
             let x0 = match align {
                 Align::Left => p[0],
                 Align::Center => p[0] - tw * 0.5,
                 Align::Right => p[0] - tw,
             };
-            cv.text(s, p[0], p[1], big, col, align);
-            let pad = 2.0 * big;
-            cv.stroke_rect(x0 - pad - 1.0, p[1] - 3.5 * big - pad, tw + 2.0 * pad + 2.0, 7.0 * big + 2.0 * pad, lw, col);
+            cv.text(s, p[0], p[1], mid, col, align);
+            let pad = 2.0 * mid;
+            cv.stroke_rect(x0 - pad - 1.0, p[1] - 3.5 * mid - pad, tw + 2.0 * pad + 2.0, 7.0 * mid + 2.0 * pad, lw, col);
         }
     };
     if a.kind == crate::sim::Type::Mig29 {
@@ -1596,9 +1615,9 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
     let half = 70.0;
     let ad = AirData::of(a);
     let radio_m = ad.radar_ft * 0.3048;
-    ht(cv, &format!("{:.0}", (ad.kcas * 1.852 / 5.0).round() * 5.0), -half, -40.0, big, Align::Left);
+    ht(cv, &format!("{:.0}", (ad.kcas * 1.852 / 5.0).round() * 5.0), -half, -40.0, (big * 0.75).max(1.0), Align::Left);
     ht(cv, &format!("М{:.2}", ad.mach), -half, -28.0, small, Align::Left);
-    ht(cv, &format!("{:.0}", (ad.baro_ft * 0.3048 / 10.0).round() * 10.0), half, -40.0, big, Align::Right);
+    ht(cv, &format!("{:.0}", (ad.baro_ft * 0.3048 / 10.0).round() * 10.0), half, -40.0, (big * 0.75).max(1.0), Align::Right);
     if radio_m < 1500.0 {
         ht(cv, &format!("{:.0}Р", radio_m), half, -28.0, small, Align::Right);
     }

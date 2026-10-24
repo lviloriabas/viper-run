@@ -271,7 +271,12 @@ out vec2 v_uv;
 out float v_alpha;
 out vec3 v_rel;
 void main() {
-    vec3 rel = center - u_eye + u_right * corner.x * size + u_up * corner.y * size * 0.5;
+    // Turned about the vertical only, so a puff stays upright when the view
+    // rolls or pitches instead of swinging round with the camera.
+    vec3 to = center - u_eye;
+    vec3 side = vec3(-to.z, 0.0, to.x);
+    side = dot(side, side) > 1.0 ? normalize(side) : u_right;
+    vec3 rel = to + side * corner.x * size + vec3(0.0, 1.0, 0.0) * corner.y * size * 0.5;
     v_rel = rel;
     v_uv = vec2(corner.x * 0.5 + 0.5, 0.5 - corner.y * 0.5);
     v_alpha = alpha;
@@ -621,6 +626,9 @@ pub const MESH_ATTRS: [VertexAttribute; 4] = [
     VertexAttribute::new("uv", VertexFormat::Float2),
 ];
 
+/// How far a cloud wanders from its spot on the breeze, metres.
+const DRIFT: f64 = 450.0;
+
 struct Cloud {
     pos: V3,
     size: f64,
@@ -775,14 +783,15 @@ impl World {
                 let ground = terrain::terrain_at(x, z);
                 let y = (ground + 420.0).max(1250.0) + rnd.next() * 1600.0;
                 let size = 1000.0 + rnd.next() * 2100.0;
-                // The billboard turns to face the camera, so the puff (reaching about
-                // 0.45 size below centre) must clear every peak within one size of
-                // it, or a ridge would slice it along a line that moves as you turn.
+                // The billboard turns to face the camera and drifts up to DRIFT
+                // metres from its spot, so the puff (reaching about 0.45 size below
+                // centre) must clear every peak within that reach, or a ridge would
+                // slice it along a line that moves as you turn.
                 let mut peak = ground;
                 for k in 0..32 {
                     let a = k as f64 * TAU / 32.0;
                     for r in [0.35, 0.7, 1.0] {
-                        peak = peak.max(terrain::terrain_at(x + a.cos() * size * r, z + a.sin() * size * r));
+                        peak = peak.max(terrain::terrain_at(x + a.cos() * (size + DRIFT) * r, z + a.sin() * (size + DRIFT) * r));
                     }
                 }
                 let y = y.max(peak + 0.45 * size + 150.0);
@@ -979,7 +988,7 @@ impl World {
         // Clouds are screen-door cutouts that write depth, so they go in with the
         // opaque geometry: plume, flame and particles drawn later without depth
         // writes would otherwise be painted over by a cloud behind them.
-        self.update_clouds(ctx, cam);
+        self.update_clouds(ctx, cam, time);
         ctx.apply_pipeline(&self.cloud);
         ctx.apply_bindings(&self.cloud_bind);
         ctx.apply_uniforms(UniformsSource::table(&CloudU { vp, eye, right: cam.right.f32(), up: cam.up.f32(), fog: FOG }));
@@ -1242,14 +1251,21 @@ impl World {
         self.exterior.bind.images[0]
     }
 
-    fn update_clouds(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera) {
-        let mut order: Vec<(f64, usize)> = self.clouds.iter().enumerate().map(|(i, c)| ((c.pos - cam.eye).dot(c.pos - cam.eye), i)).collect();
+    fn update_clouds(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera, time: f64) {
+        // Each cloud wanders a slow loop of its own round its spot, about ten
+        // minutes a lap, out of step with its neighbours.
+        let at = |i: usize, c: &Cloud| {
+            let (phase, w) = (i as f64 * 2.39, TAU / (480.0 + (i % 7) as f64 * 40.0));
+            c.pos + v3((time * w + phase).sin(), 0.0, (time * w * 0.73 + phase * 1.7).cos()) * DRIFT
+        };
+        let mut order: Vec<(f64, usize)> = self.clouds.iter().enumerate().map(|(i, c)| ((at(i, c) - cam.eye).dot(at(i, c) - cam.eye), i)).collect();
         order.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         self.cloud_data.clear();
         for &(_, i) in &order {
             let c = &self.clouds[i];
+            let p = at(i, c);
             for (cx, cy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)] {
-                self.cloud_data.extend_from_slice(&[c.pos.x as f32, c.pos.y as f32, c.pos.z as f32, cx, cy, c.size as f32, c.alpha as f32]);
+                self.cloud_data.extend_from_slice(&[p.x as f32, p.y as f32, p.z as f32, cx, cy, c.size as f32, c.alpha as f32]);
             }
         }
         ctx.buffer_update(self.cloud_bind.vertex_buffers[0], BufferSource::slice(&self.cloud_data));

@@ -87,17 +87,16 @@ impl Performance {
     pub fn draw(&self, cv: &mut Canvas, x: f32, y: f32, u: f32) {
         use crate::ui::{ACID, AMBER, CREAM, DIM, GREEN, LINE};
         let width = 158.0 * u;
-        cv.rect(x - 4.0 * u, y - 5.0 * u, width + 8.0 * u, 113.0 * u, rgba(4, 10, 6, 0.66));
+        cv.rect(x - 4.0 * u, y - 5.0 * u, width + 8.0 * u, 103.0 * u, rgba(4, 10, 6, 0.66));
         cv.text("PERFORMANCE", x, y, u, ACID, Align::Left);
-        cv.text(&format!("FRAME {}", self.frame), x, y + 10.0 * u, u, DIM, Align::Left);
         let ms = self.history.back().copied().unwrap_or(0.0);
         let avg = self.history.iter().rev().take(60).copied().sum::<f32>() / self.history.len().min(60).max(1) as f32;
         let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
-        cv.text(&format!("{fps:.0} FPS   {ms:.2} MS"), x, y + 20.0 * u, u, CREAM, Align::Left);
+        cv.text(&format!("{fps:.0} FPS   {ms:.2} MS"), x, y + 10.0 * u, u, CREAM, Align::Left);
         let peak_ms = self.history.iter().copied().fold(33.3f32, f32::max);
         let peak_fps = self.history.iter().map(|v| 1000.0 / v).fold(60.0f32, f32::max);
         for (row, label, peak, color) in [(0, "FPS", peak_fps, GREEN), (1, "MS", peak_ms, AMBER)] {
-            let gy = y + (31.0 + row as f32 * 23.0) * u;
+            let gy = y + (21.0 + row as f32 * 23.0) * u;
             let gh = 18.0 * u;
             cv.rect(x, gy, width, gh, rgba(2, 6, 4, 0.6));
             cv.line(x, gy + gh, x + width, gy + gh, 1.0, LINE);
@@ -113,10 +112,10 @@ impl Performance {
             }
         }
         let percent = |v: Option<f64>| v.map(|n| format!("{n:.0}%")).unwrap_or_else(|| "N/A".into());
-        cv.text(&format!("CPU {}  GPU {}", percent(self.hardware.cpu), percent(self.hardware.gpu)), x, y + 82.0 * u, u, CREAM, Align::Left);
+        cv.text(&format!("CPU {}  GPU {}", percent(self.hardware.cpu), percent(self.hardware.gpu)), x, y + 72.0 * u, u, CREAM, Align::Left);
         let ram = self.hardware.ram.map(|(used, total)| format!("RAM {:.0}% {used:.1}/{total:.1} GIB", 100.0 * used / total.max(0.001))).unwrap_or_else(|| "RAM N/A".into());
-        cv.text(&ram, x, y + 92.0 * u, u, CREAM, Align::Left);
-        cv.text("SYSTEM USAGE", x, y + 102.0 * u, u, DIM, Align::Left);
+        cv.text(&ram, x, y + 82.0 * u, u, CREAM, Align::Left);
+        cv.text("SYSTEM USAGE", x, y + 92.0 * u, u, DIM, Align::Left);
     }
 }
 

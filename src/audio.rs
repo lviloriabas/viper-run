@@ -304,12 +304,6 @@ impl Audio {
         self.burst(1.1, 2.0, 900.0, 70.0, 0.95);
     }
 
-    /// Afterburner light-off: a low thump and a short crackle.
-    pub fn afterburner(&self) {
-        self.burst(0.55, 3.2, 230.0, 48.0, 0.0);
-        self.burst(0.35, 0.7, 2600.0, 380.0, 0.02);
-    }
-
     /// Sonic boom: the N-wave's two pressure jumps, bow shock then tail
     /// shock a tenth of a second apart, over a rolling low rumble.
     pub fn sonic_boom(&self) {

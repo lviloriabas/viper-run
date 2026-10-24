@@ -323,28 +323,6 @@ impl Fx {
         }
     }
 
-    /// Torching puff at the nozzle as the afterburner lights.
-    pub fn ab_light(&mut self, a: &Aircraft) {
-        let ax = a.q.axes();
-        let all = nozzles(a);
-        for i in 0..8 {
-            let n = all[i % all.len()];
-            let nozzle = a.pos + ax.right * n.x + ax.up * n.y + ax.back * n.z;
-            let d = self.dir();
-            let p = Particle {
-                kind: Kind::Fire,
-                pos: nozzle + ax.back * self.r(0.5, 2.5),
-                vel: a.vel + ax.back * self.r(8.0, 26.0) + d * 3.0,
-                life: self.r(0.22, 0.42),
-                size: (0.5, self.r(1.6, 2.4)),
-                color: ([1.0, 0.78, 0.45], [1.0, 0.38, 0.1]),
-                spin: self.r(-3.0, 3.0),
-                ..BASE
-            };
-            self.push(p);
-        }
-    }
-
     fn sparks(&mut self, pos: V3, carry: V3, count: usize, speed: f64) {
         for _ in 0..count {
             let d = self.dir();
