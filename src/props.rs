@@ -32,7 +32,7 @@ pub struct Models {
     seat: [Part; 2],
     pilot: [[Part; 2]; 2],
     seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 2],
-    handle: [Part; crate::eject::HANDLE_FRAMES],
+    handle: [[Part; crate::eject::HANDLE_FRAMES]; 2],
     chute: [Part; 2],
     canopy: [Part; 2],
 }
@@ -88,7 +88,8 @@ impl Models {
         let seated = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
             part(&eject::pilot_mesh(if k == 0 { Type::F16 } else { Type::Mig29 }, false, fp != 0,
                 frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)))));
-        let handle = std::array::from_fn(|frame| part(&eject::handle_mesh(frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)));
+        let handle = std::array::from_fn(|k| std::array::from_fn(|frame| part(&eject::handle_mesh(
+            if k == 0 { Type::F16 } else { Type::Mig29 }, frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
         let chute = [part(&eject::chute_mesh(&eject::ACES2)), part(&eject::chute_mesh(&eject::K36DM))];
         let canopy = [part(&frame.canopy), part(&mig.canopy)];
         Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, seated, handle, chute, canopy }
@@ -156,10 +157,6 @@ impl Props for Scene<'_> {
             let d = if a.kind == Type::Mig29 { crate::mig29::store_shift(at) } else { V3::ZERO };
             d + V3::Y * a.flex_lift(at + d)
         };
-        let tip_at = |i: usize| {
-            let t = crate::airframe::AIM9_TIP;
-            v3(if i == 0 { -t.x } else { t.x }, t.y, t.z)
-        };
         // What hung under a wing that broke off went with it.
         let kept = |a: &Aircraft, at: V3| !a.lost.wing[(at.x > 0.0) as usize] || at.x.abs() < a.kind.break_station();
         if let Some(a) = self.player {
@@ -181,8 +178,9 @@ impl Props for Scene<'_> {
             }
             // Aggressor paint: the F-16s take the 64th's schemes in turn.
             w.draw_jet(ctx, vp, cam, &b.jet, [i as f32, 0.0, 0.0, 1.0]);
-            for (i, tip) in m.tips.iter().enumerate().take(b.missiles as usize) {
-                w.draw_prop(ctx, vp, tip, jet_model(&b.jet, shift(&b.jet, tip_at(i)), eye), NONE);
+            for st in b.stores.stations.iter().filter(|s| s.loaded && kept(&b.jet, s.at)) {
+                let (part, across, along) = store_shape(m, st.store);
+                w.draw_prop(ctx, vp, part, stretch(jet_model(&b.jet, st.at + shift(&b.jet, st.at), eye), across, along), NONE);
             }
         }
         for wr in &c.wrecks {
@@ -205,11 +203,11 @@ impl Props for Scene<'_> {
             match &e.seat {
                 Some(seat) => {
                     w.draw_prop(ctx, vp, &m.seat[k], at(seat), NONE);
-                    w.draw_prop(ctx, vp, &m.handle[crate::eject::HANDLE_FRAMES - 1], at(seat), NONE);
+                    w.draw_prop(ctx, vp, &m.handle[k][crate::eject::HANDLE_FRAMES - 1], at(seat), NONE);
                 }
                 None if e.phase != Phase::Canopy || !self.first_person => {
                     w.draw_prop(ctx, vp, &m.seat[k], at(&e.pilot), NONE);
-                    w.draw_prop(ctx, vp, &m.handle[frame], at(&e.pilot), NONE);
+                    w.draw_prop(ctx, vp, &m.handle[k][frame], at(&e.pilot), NONE);
                 }
                 None => {}
             }

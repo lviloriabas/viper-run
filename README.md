@@ -6,7 +6,7 @@ clock, and a mountain range that does not move. Or you fly the same gorge armed:
 a dogfight against three AI-flown aggressors, a strike on a bridge, an SA-6
 battery and a convoy, or free flight with all of it and no clock.
 
-The game is a single native executable of about 1 MB, written in Rust:
+The game is a single native executable, written in Rust:
 
 | Platform | File | Needs at run time |
 | --- | --- | --- |
@@ -14,8 +14,8 @@ The game is a single native executable of about 1 MB, written in Rust:
 | Linux x86_64 | `dist/viper-run-linux-x86_64` | X11 or XWayland, `libGL`, glibc 2.17+; PulseAudio, PipeWire or ALSA for sound |
 
 No installer, runtime, game engine or asset files. Everything, including the
-terrain, models, instrument pages, font and sounds, is generated procedurally
-at start-up in about half a second.
+terrain, models, instrument pages, font and engine sounds, is generated procedurally
+at start-up. Original synthesised warning clips are embedded in the executable.
 
 ## Fly
 
@@ -50,7 +50,7 @@ at start-up in about half a second.
 | `F11` / `Alt+Enter` | Borderless fullscreen |
 | `F12` | Save a PNG screenshot in Pictures/viper-run, including in fullscreen |
 | Right-click (held) | Zoom the view in to 40 % of its field of view, for as long as it is held |
-| `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; `Space` engages from the mission board and launches from the setup screen; `Ctrl+Q` quits from a menu |
+| `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; `Space` engages from the Main Menu and launches from the setup screen; `Ctrl+Q` quits from a menu |
 
 Every flight key above, from the stick to the MFD pages, can be rebound: the
 K drawer opens a KEY BINDINGS panel with a primary and an alternate key per
@@ -96,9 +96,14 @@ pad button only when that one works from anywhere on the screen (`Start` or
 legend along the foot of the screen names the rest: move, select (`A` or
 `Enter`, always on the highlighted button) and the screen's shortcuts.
 
+Menu movement follows the visible rows and columns. Holding the stick or
+d-pad repeats after a short delay, with hysteresis around its activation point.
+Button widths and settings positions stay the same when the active input changes;
+a resting controller does not keep overriding keyboard prompts.
+
 CLASSIC is the earlier layout: `RT` / `LT` throttle (`RT` to the stop for
 afterburner), `LB` / `RB` rudder, `A` fire, d-pad up / down cycle weapon and
-lock, `X` center view, right-stick click landing gear; the rest is as above.
+lock, `X` landing gear; the rest is as above.
 
 On Windows the pad is read through XInput; on Linux through the kernel
 joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
@@ -128,7 +133,7 @@ it to return to the forward view. In chase view Alt and the mouse orbit the
 external camera. The default cockpit FOV is 58 degrees (45 to 72 in the
 drawer), mouse sensitivity starts at 2.8x (0.5x to 5x) and INVERT PITCH flips
 every pitch input at once: mouse Y, W / S and the controller's left stick.
-Opening the drawer pauses the flight; closing it restores the previous flying or frozen state. RESTART and MISSION BOARD are available in the drawer during a sortie. Settings and the best
+Opening the drawer pauses the flight; closing it restores the previous flying or frozen state. RESTART and MAIN MENU are available in the drawer during a sortie. Settings and the best
 run are saved to `%APPDATA%\viper-run\settings.txt` on Windows and
 `~/.config/viper-run/settings.txt` on Linux.
 
@@ -264,15 +269,24 @@ ground. The result screen shows the kills or targets, the time and a rating.
 
 Bandits fly the same six-degree-of-freedom model and FLCS as the player:
 MiG-29S Fulcrums by default, or F-16s in the 64th Aggressor Squadron's splinter schemes, taken in turn: Flanker blues, Desert, Ghost and Arctic, with Nellis's WA tail code (TYPE in the
-threat setup); the RWR calls them 29 or 16. Their AI pilot only moves the stick and throttle: lead
-pursuit to track with the gun, pure pursuit to close, lag pursuit to avoid an
-overshoot, a max-g break when the player is at its six, beaming and then
-breaking into missiles, unloading to regain speed, extending past 2 km
-after a close pass so the fight keeps room to turn, and an Auto-GCAS-style
-recovery that predicts the pull-up and overrides everything near the terrain.
-They shoot the gun inside 900 m on a lead solution and fire AIM-9s (R-73s
-from a MiG) from inside the launch zone. A damaged jet trails smoke, and a kill
-leaves a burning wreck tumbling to the ground.
+threat setup); the RWR calls them 29 or 16. Their pilots coordinate an attacker
+and supporting flankers, relieve slow or threatened wingmen, preserve energy,
+avoid friendly firing lanes and stagger missile launches. Each jet carries six
+missiles: short-range IR plus active radar on leads, with semi-active radar on
+cover jets. They select a weapon by range, geometry, radar support and a real
+fly-out, then remove its station's mass and drag on release. Guns fire bounded
+bursts on a continuously checked ballistic and angular tracking solution.
+
+Missile defence combines beam, drag and crossing manoeuvres, finite chaff/flare
+programs, a cooler tail against IR and safe terrain masking. Radar illumination
+and datalink require real tracks; losing the whole flight's view leaves only a
+last-known contact. Seekers cannot see through ridges, radar seekers can lose a
+sustained look-down notch, and missiles can run out of energy or miss a hard
+crossing target. Close high-energy shots remain dangerous. An Auto-GCAS-style
+recovery overrides tactics near terrain, and free-flight patrols hold fire and
+countermeasures. See [Enemy AI and missile defence](docs/ENEMY-AI.md) for the
+behaviour and simulation checks. A damaged jet trails smoke, and a kill leaves
+a burning wreck tumbling to the ground.
 
 Damage goes where the hits land (`damage.rs`), for the player and the
 bandits alike, in a simplified version of module damage. Each jet is a set
@@ -374,11 +388,18 @@ is the Fulcrum's own (docs/MIG29-REFERENCES.md).
 ### Ejection views
 
 While the ejection key or both controller bumpers are held, steering, throttle,
-weapons and other flight bindings are suspended. The pilot looks down over his
-chest as both hands reach for and lift the handle. The cockpit remains visible
+weapons and other flight bindings are suspended. Both hands reach forward clear
+of the vest, close around the raised seat handle
+and pull upward; the pilot briefly checks the grip, then looks forward again.
+The F-16 uses one ring, the MiG-29 two linked grips. The hands hold until
+seat separation; the K-36DM adds arm protectors, leg lift and delayed rocket
+ignition after its catapult stroke. The cockpit remains visible
 until the seat fires, then V switches between the pilot's eyes and the external
 seat/parachute view. The close view omits the helmet and neck cap. On touchdown
 the parachute falls to the side and settles on the ground, retaining its fabric.
+Thin suspension cords meet wider fabric risers connected to the shoulder harness.
+Research, timing approximations and visual checks are in
+[COCKPIT-REFINEMENT.md](docs/COCKPIT-REFINEMENT.md).
 
 The MiG-29 mirrors refresh on every rendered cockpit frame, independently of the
 30 Hz instruments, including at a 165 Hz display refresh. Actual frame rate
@@ -401,7 +422,8 @@ roll on what you see.
   degrees at a taxi, a few at speed). A sink rate that bottoms a strut breaks
   the leg; a touchdown with the gear up is a belly landing and ends the run.
 - The gear takes 5 s to cycle, the nose leg leading, and adds drag; above 300
-  KCAS the HUD shows GEAR SPEED. GEAR UP flashes when the jet sinks toward the
+  KCAS the HUD shows GEAR SPEED. Continued air loads first jam the mechanism
+  and then break individual legs; retracting the handle cannot repair them. GEAR UP flashes when the jet sinks toward the
   ground below 220 KCAS with the gear still up.
 - Trailing-edge flaps droop 20 degrees with the gear handle down, or with ALT
   FLAPS, adding lift (lower stall and approach speeds), drag and a nose-down
@@ -560,7 +582,12 @@ out of margin.
 - Procedural audio synthesised on its own thread: engine, wind, rumble and
   turbine whine follow throttle, speed and afterburner, plus warning tones,
   the gun's buzz, the Sidewinder's growl and lock tone, launches, blasts and
-  the RWR.
+  the RWR. Engine pitch follows spool RPM; independently filtered noise and
+  drifting turbine partials avoid a repeating engine loop. The MiG uses two
+  independent sources. Airframe-specific voice warnings have priorities,
+  repeat delays and engine ducking; F-16 low-speed and gear warnings use tones.
+  Voice assets are original speech synthesis, not recordings from an aircraft
+  or another game. See [assets/voices/README.md](assets/voices/README.md).
 
 The aerodynamic data is the reduced TP-1538 set (no leading-edge flap
 schedule or post-stall tables beyond 45 degrees), and the avionics are a game
@@ -646,6 +673,7 @@ viper-run --autostart                      # skip the menu
 viper-run --shot out.png --sim 3 --chase   # simulate 3 s, save a screenshot, exit
 viper-run --shot out.png --look 120,-20    # cockpit free look (yaw, pitch degrees)
 viper-run --shot out.png --screen pause    # pause | freeze | win | crash | timeout
+viper-run --audio-demo engine.wav --jet mig29 # render the runtime mixer without a window
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
 viper-run --shot out.png --mach 0.98       # start at a Mach number (vapor cone, shocks)
 viper-run --shot out.png --vision 0.5,0,0  # pilot state: retinal oxygen, redout, G-LOC s

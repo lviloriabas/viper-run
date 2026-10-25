@@ -10,6 +10,14 @@
 - [ ] Agregar más tipos de aviones.
 
 ## Completadas
+- [x] Afinar los hilos del paracaídas en primera persona y distinguirlos de las bandas y arneses.
+- [x] Refinar las asas y la postura de eyección de F-16 y MiG-29 con referencias de ACES II y K-36DM; corregir el salto de cámara al salir el asiento.
+- [x] Corregir los instrumentos cortados, la visera y los montajes señalados de ambas cabinas, con capturas de Windows y pruebas de visibilidad.
+- [x] Reducir otro 30% los espejos del MiG-29 y acercarlos al arco, manteniendo su forma.
+- [x] Mejorar el sonido continuo de motores y añadir avisos por avión con voces sintetizadas originales; documentar las diferencias respecto a grabaciones reales.
+- [x] Simular el tren atascado y la rotura progresiva por exceso de velocidad como fallos distintos.
+- [x] Investigar la resolución del HUD del MiG-29: altura por fuente (1 m/10 m), eliminar el redondeo forzado a 5 km/h y documentar la incertidumbre de velocidad.
+- [x] Renombrar Mission Board a Main Menu, mejorar la navegación con joystick y mantener estables los ajustes y botones entre teclado y mando; revisar textos de menús y overlay.
 - [x] El panel de luces derecho del MIG-29 está mal colocado y choca con el borde, busca referencia y corrige la geometría de la cabina.
 - [x] Los pedales en el F-16 son un poco más inclinados hacia arriba, un poco más verticales, el modelo.
 - [x] Los espejos del MIG-29 son más pequeños y haz que su framerate sea más alto, 165 fps. No cambies su forma, solo hazlos más pequeños, acorde a la cabina real.

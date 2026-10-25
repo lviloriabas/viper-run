@@ -60,7 +60,7 @@ but the nose and the IRST ball.
   The warning column's mount is inset from the right rail and lowered just
   enough to clear it; a ray test checks the whole illuminated face against the
   cockpit mesh. The three mirrors retain their existing curved geometry under
-  a uniform 0.78 scale about each pane's centre. This is a visual fit to the
+  a uniform 0.78 * 0.70 scale about each pane's centre, close to the bow. This is a visual fit to the
   reference photographs, not a surveyed mirror dimension.
   Dimensions and angles remain visual estimates. The supplied modernized
   cockpit photograph guides tub proportions and console orientation; the
@@ -69,9 +69,9 @@ but the nose and the IRST ball.
   Regression tests check instrument mounting clearances, console frames,
   boot/floor clearance and separation of atlas regions from the mirrors.
 - Black coaming with the ILS-31 HUD (a big body and a heavy frame round the
-  combiner glass) and the IT-23 display with a B-scope radar picture.
+  combiner glass) and the IT-23 display with a simplified flight/sight repeater.
 - A column of ten warning lights by the right rail; the legends are
-  transliterated because the game font only has Latin characters.
+  transliterated for compact labels.
 - Centre stick on the floor, with a boot, and a two-lever throttle in a
   quadrant on the left console; gear handle on the left wall, ahead of the
   throttle.
@@ -82,6 +82,9 @@ but the nose and the IRST ball.
   cockpit photograph. Shallow dark housings and paired brackets attach
   them to the arch; the reflected horizon stays level in the side panes.
   A bulkhead sits behind the seat, with decking under the rear canopy.
+
+Further small mounting fixes, HUD resolution research, the countermeasure panel
+and ejection/audio references are in [COCKPIT-REFINEMENT.md](COCKPIT-REFINEMENT.md).
 
 ## Tail airbrake
 

@@ -1,80 +1,165 @@
-//! AI pilot for the bandits. It flies its own sim::Aircraft through the same
-//! stick, FLCS and engine as the player, so it meets the same 9 g, AoA and
-//! energy limits; all it decides is where the lift vector goes, how hard to
-//! pull and where the throttle sits, like a pilot. The tactics are classic
-//! one-versus-one BFM: lead pursuit to track for the gun, pure pursuit to
-//! close, lag pursuit to avoid an overshoot, a max-g break when the player is
-//! at its six with his nose on, a beam-then-break against a missile, and
-//! unloading to rebuild speed. Terrain avoidance overrides everything.
+//! Pilots share the player's aircraft, FLCS and engine. Flight assignments
+//! coordinate an attacker and flankers; local decisions manage energy,
+//! weapon solutions, missile defence, separation and terrain clearance.
 use crate::math::*;
 use crate::sim::{stick_for_g, stick_for_roll, Aircraft, Input, G0};
 use crate::terrain;
 use crate::weapons::{fly_out, gun_bore, gun_of, muzzle, Spec};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tactic {
-    /// Gun tracking: the gun line on the lead point.
-    Lead,
-    /// Nose on the bandit, to close the range.
-    Pure,
-    /// Nose behind the bandit, to keep from overshooting.
-    Lag,
-    /// Max-g turn into an attacker at the six.
-    Break,
-    /// Missile inbound: put it on the beam, then turn into it.
-    Evade,
-    /// Unload and accelerate in burner.
-    Extend,
-    /// Terrain ahead: climb away from it.
-    Recover,
+pub enum Tactic { Lead, Pure, Lag, Break, Evade, Extend, Recover, Flank, Support, Reposition, Disengage }
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum Role { #[default] Attack, Cover, Drag, Disengage }
+
+#[derive(Clone, Copy, Debug)]
+pub struct Tactical {
+    pub role: Role,
+    pub waypoint: Option<V3>,
+    pub separation: V3,
+    pub clear_fire: bool,
+    pub shot_available: bool,
+    pub radar_support: bool,
+    pub radar_lock: bool,
+    pub missile_ir: bool,
+    pub combat: bool,
+}
+impl Default for Tactical {
+    fn default() -> Self {
+        Self { role: Role::Attack, waypoint: None, separation: V3::ZERO,
+            clear_fire: true, shot_available: true, radar_support: false,
+            radar_lock: false, missile_ir: false, combat: true }
+    }
+}
+pub struct Member<'a> { pub id: usize, pub jet: &'a Aircraft, pub armed: bool, pub defensive: bool }
+
+/// Stable assignments with immediate relief for a threatened or slow attacker.
+#[derive(Default)]
+pub struct Flight { attacker: Option<usize>, hold: f64 }
+impl Flight {
+    pub fn assign(&mut self, members: &[Member<'_>], foe: &Aircraft, dt: f64) -> Vec<Tactical> {
+        self.hold -= dt;
+        let fit = |m: &Member<'_>| m.armed && !m.defensive && m.jet.speed > corner_speed(m.jet) * 0.68 && m.jet.battle.engine < 0.55 && m.jet.fuel > m.jet.kind.fuel_min() * 0.15;
+        let score = |m: &Member<'_>| {
+            let r = foe.pos - m.jet.pos;
+            2.5 * m.jet.q.axes().forward.dot(r.norm()) + (m.jet.speed / corner_speed(m.jet)).clamp(0.0, 1.4)
+                - r.len() / 14000.0 - m.jet.battle.wing * 2.0
+        };
+        let current = members.iter().find(|m| Some(m.id) == self.attacker && fit(m));
+        if current.is_none() || self.hold <= 0.0 {
+            let best = members.iter().filter(|m| fit(m)).max_by(|a, b| score(a).total_cmp(&score(b)));
+            if current.is_none() || best.zip(current).is_some_and(|(b, c)| score(b) > score(c) + 0.65) {
+                self.attacker = best.map(|m| m.id);
+            }
+            self.hold = 7.0;
+        }
+        let axis = flat(foe.vel);
+        let side = axis.cross(V3::Y);
+        members.iter().enumerate().map(|(slot, m)| {
+            let mut t = Tactical::default();
+            t.role = if !m.armed || m.jet.battle.engine > 0.65 || m.jet.fuel <= m.jet.kind.fuel_min() * 0.15 { Role::Disengage }
+                else if !fit(m) { Role::Drag }
+                else if Some(m.id) == self.attacker { Role::Attack } else { Role::Cover };
+            if t.role != Role::Attack {
+                let sign = if m.id % 2 == 0 { 1.0 } else { -1.0 };
+                let distance = (foe.pos - m.jet.pos).len();
+                let width = (distance * 0.32).clamp(1100.0, 4200.0) + (slot / 2) as f64 * 500.0;
+                let mut p = foe.pos + axis * 1500.0 + side * (sign * width);
+                p.y = (foe.pos.y + 450.0 + (slot / 2) as f64 * 250.0).max(terrain::floor(p.x, p.z) + 650.0);
+                if t.role == Role::Drag {
+                    if let Some(cover) = members.iter().find(|other| Some(other.id) == self.attacker) {
+                        p = cover.jet.pos + flat(m.jet.pos - foe.pos) * 1500.0;
+                    }
+                }
+                t.waypoint = Some(p);
+            }
+            for other in members.iter().filter(|other| other.id != m.id) {
+                let r = other.jet.pos - m.jet.pos;
+                let v = other.jet.vel - m.jet.vel;
+                let time = (-r.dot(v) / v.dot(v).max(1.0)).clamp(0.0, 3.0);
+                let near = r + v * time;
+                if near.len() < 350.0 && r.len() < 1800.0 {
+                    let away = if near.len() > 1.0 { -near.norm() } else { side * if m.id < other.id { 1.0 } else { -1.0 } };
+                    t.separation += away * (1.0 - near.len() / 350.0);
+                }
+            }
+            t
+        }).collect()
+    }
+}
+/// Friendly crossing the current or predicted firing lane blocks release.
+pub fn clear_lane(me: &Aircraft, foe: &Aircraft, friend: &Aircraft) -> bool {
+    let r = foe.pos - me.pos;
+    let length = r.len().max(1.0);
+    let axis = r / length;
+    let along = (friend.pos - me.pos).dot(axis);
+    if along < -100.0 || along > length + 100.0 { return true; }
+    let tof = along.max(0.0) / (gun_of(me.kind).velocity * 0.78);
+    let near = friend.pos + (friend.vel - me.vel) * tof;
+    let segment = r * ((near - me.pos).dot(axis) / length).clamp(0.0, 1.0);
+    (near - me.pos - segment).len() > 140.0
 }
 
-/// What the AI sees of the fight this step.
+fn corner_speed(me: &Aircraft) -> f64 {
+    let density = crate::sim::atmosphere_at(me.pos.y).rho;
+    let reference = me.kind.empty_mass() + me.kind.fuel_max() * 0.65;
+    (205.0 * (me.mass / reference * 1.225 / density).sqrt()).clamp(195.0, 330.0)
+}
+
+#[derive(Clone, Copy)]
+pub struct Weapon { pub station: usize, pub spec: &'static Spec }
+
+/// Prefer IR in the merge and radar weapons further out, using actual fly-outs.
+pub fn select_weapon(me: &Aircraft, foe: &Aircraft, weapons: &[Weapon], radar_lock: bool, skill: f64) -> Option<usize> {
+    let r = foe.pos - me.pos;
+    let range = r.len();
+    let ata = me.q.axes().forward.dot(r.norm()).clamp(-1.0, 1.0).acos();
+    let mut best: Option<(f64, usize)> = None;
+    for (n, w) in weapons.iter().enumerate() {
+        if weapons[..n].iter().any(|old| std::ptr::eq(old.spec, w.spec)) { continue; }
+        let s = w.spec;
+        let glare = (1.0 + 5.0 * (1.0 - s.ccm)) * DEG;
+        if s.infrared() && r.norm().dot(crate::world::sun_dir()) > glare.cos() { continue; }
+        let cone = if s.infrared() { s.gimbal.min(35.0 * DEG) } else { 50.0 * DEG };
+        if ata > cone || range < s.min_range.max(450.0) || !s.infrared() && !radar_lock { continue; }
+        let Some(tof) = fly_out(s, me.pos, me.vel, foe.pos, foe.vel, &terrain::floor) else { continue };
+        if tof > s.life * mix(0.5, 0.7, skill) { continue; }
+        let preference = if range < 4500.0 { if s.infrared() { 4.0 } else { 0.0 } }
+            else if s.active() { 4.0 } else if s.semi_active() { 2.8 } else { 1.0 };
+        let score = preference + s.ccm - tof * 0.035 - ata * 0.5;
+        if best.is_none_or(|(old, _)| score > old) { best = Some((score, w.station)); }
+    }
+    best.map(|(_, station)| station)
+}
 pub struct Picture<'a> {
     pub foe: &'a Aircraft,
-    /// Position and velocity of the nearest missile guiding on this jet.
     pub missile: Option<(V3, V3)>,
     pub missiles: u32,
     pub missile_spec: &'static Spec,
     pub rounds: u32,
+    pub tactical: Tactical,
 }
-
-pub struct Orders {
-    pub input: Input,
-    pub gun: bool,
-    pub missile: bool,
-}
-
+pub struct Orders { pub input: Input, pub gun: bool, pub missile: bool, pub countermeasures: bool }
 pub struct Pilot {
-    /// 0 a novice, 1 an ace: g tolerance, reaction time, aim and shot discipline.
     pub skill: f64,
     pub tactic: Tactic,
-    think: f64,
-    burst: f64,
-    since_shot: f64,
-    zone_clock: f64,
-    in_zone: bool,
-    /// Recovery bank chosen when terrain threatens, degrees, and how long
-    /// the way ahead has been clear since.
-    escape: f64,
-    escape_clock: f64,
-    clear: f64,
+    think: f64, burst: f64, gun_pause: f64, since_shot: f64,
+    zone_clock: f64, in_zone: bool,
+    escape: f64, escape_clock: f64, clear: f64,
+    low_energy: bool, manoeuvre_time: f64, cm_clock: f64, defence_side: f64,
 }
-
-/// Clearance the AI keeps over the terrain along its predicted path, m.
 const FLOOR: f64 = 180.0;
-
 impl Pilot {
     pub fn new(skill: f64) -> Pilot {
-        Pilot { skill, tactic: Tactic::Pure, think: 0.0, burst: 0.0, since_shot: 6.0, zone_clock: 0.0, in_zone: false, escape: 0.0, escape_clock: 0.0, clear: 0.0 }
+        Pilot { skill: skill.clamp(0.0, 1.0), tactic: Tactic::Pure, think: 0.0,
+            burst: 0.0, gun_pause: 0.0, since_shot: 6.0, zone_clock: 0.0,
+            in_zone: false, escape: 0.0, escape_clock: 0.0, clear: 0.0,
+            low_energy: false, manoeuvre_time: 0.0, cm_clock: 0.0, defence_side: 1.0 }
     }
-
-    fn g_limit(&self) -> f64 {
-        mix(7.0, 9.0, self.skill)
-    }
-
+    fn g_limit(&self) -> f64 { mix(7.0, 9.0, self.skill) }
     pub fn fly(&mut self, me: &Aircraft, pic: &Picture, dt: f64) -> Orders {
         let foe = pic.foe;
+        let team = pic.tactical;
         let ax = me.q.axes();
         let rel = foe.pos - me.pos;
         let range = rel.len().max(1.0);
@@ -82,58 +167,54 @@ impl Pilot {
         let ata = ax.forward.dot(los).clamp(-1.0, 1.0).acos();
         let foe_ata = foe.q.axes().forward.dot(-los).clamp(-1.0, 1.0).acos();
         let closure = -(foe.vel - me.vel).dot(los);
-        self.since_shot += dt;
-        self.think -= dt;
-
-        // Terrain first: an Auto-GCAS check every step, never delayed by
-        // reaction time. The recovery holds until the predicted pull-up
-        // clears comfortably for a second.
-        let n_max = self.g_limit();
+        let corner = corner_speed(me);
+        self.since_shot += dt; self.think -= dt; self.cm_clock -= dt;
+        self.gun_pause -= dt; self.manoeuvre_time += dt;
+        self.low_energy = if self.low_energy { me.speed < corner * 0.94 }
+            else { me.speed < corner * 0.68 || me.departure > 0.15 };
+        let threat = pic.missile.filter(|(p, v)| {
+            let r = me.pos - *p;
+            let close = (*v - me.vel).dot(r.norm());
+            close > 15.0 && r.len() / close < 24.0
+        });
+        let n_max = self.g_limit().min(me.g_avail.max(1.2));
         let gcas = recovery_clearance(me, 0.0, 6.0);
         if gcas < FLOOR {
-            // The way out is re-chosen twice a second as the ground unfolds.
             self.escape_clock -= dt;
             if self.tactic != Tactic::Recover || self.escape_clock <= 0.0 {
-                self.escape_clock = 0.5;
-                self.escape = escape_bank(me, n_max);
+                self.escape_clock = 0.5; self.escape = escape_bank(me, n_max);
             }
-            self.tactic = Tactic::Recover;
-            self.clear = 0.0;
+            self.tactic = Tactic::Recover; self.clear = 0.0;
         } else if self.tactic == Tactic::Recover {
             self.clear = if gcas > FLOOR + 250.0 { self.clear + dt } else { 0.0 };
-            if self.clear > 1.0 {
-                self.think = 0.0;
-                self.tactic = Tactic::Pure;
-            }
+            if self.clear > 1.0 { self.think = 0.0; self.tactic = Tactic::Pure; }
         }
-        if self.tactic != Tactic::Recover && self.think <= 0.0 {
+        if self.tactic != Tactic::Recover && (self.think <= 0.0 || threat.is_some() && self.tactic != Tactic::Evade) {
             self.think = mix(0.55, 0.15, self.skill);
-            self.tactic = if pic.missile.is_some_and(|(p, v)| {
-                let r = me.pos - p;
-                r.len() < 6000.0 && (v - me.vel).dot(r) > 0.0
-            }) {
-                Tactic::Evade
-            } else if foe_ata < 40.0 * DEG && range < 3500.0 && ata > 100.0 * DEG {
-                Tactic::Break
-            } else if (me.speed < 135.0 && ata > 60.0 * DEG) || (range < 800.0 && ata > 70.0 * DEG && foe_ata > 70.0 * DEG)
-                || (self.tactic == Tactic::Extend && range < 2200.0 && foe_ata > 60.0 * DEG && me.speed > 135.0)
-            {
-                // Slow and out of position, or a neutral pass close aboard:
-                // extend out past 2 km and come back with room to turn.
-                Tactic::Extend
-            } else if range < 1600.0 && ata < 60.0 * DEG {
-                if closure > 70.0 && range < 900.0 && foe_ata > 90.0 * DEG {
-                    Tactic::Lag
-                } else {
-                    Tactic::Lead
+            let next = if threat.is_some() { Tactic::Evade }
+                else if team.combat && team.role == Role::Disengage { Tactic::Disengage }
+                else if team.combat && foe_ata < 35.0 * DEG && range < 3000.0 && ata > 95.0 * DEG && !self.low_energy { Tactic::Break }
+                else if team.combat && self.low_energy { Tactic::Extend }
+                else if team.radar_support && range > 3500.0 { Tactic::Support }
+                else if team.role == Role::Drag { Tactic::Extend }
+                else if team.role == Role::Cover && (range > 2300.0 || ata > 45.0 * DEG) { Tactic::Flank }
+                else if range < 800.0 && ata > 70.0 * DEG && foe_ata > 70.0 * DEG
+                    || self.tactic == Tactic::Reposition && self.manoeuvre_time < 4.0 { Tactic::Reposition }
+                else if range < 1700.0 && ata < 60.0 * DEG {
+                    if closure > 55.0 && range < 1100.0 && foe_ata > 90.0 * DEG { Tactic::Lag } else { Tactic::Lead }
+                } else { Tactic::Pure };
+            if next != self.tactic {
+                if next == Tactic::Evade {
+                    let beam = (threat.unwrap().0 - me.pos).norm().cross(V3::Y).norm();
+                    self.defence_side = if beam.dot(me.vel) >= 0.0 { 1.0 } else { -1.0 };
                 }
-            } else {
-                Tactic::Pure
-            };
+                self.manoeuvre_time = 0.0;
+            }
+            self.tactic = next;
         }
-
         let bore = me.q.rotate(gun_bore());
         let lead = gun_lead(me, foe);
+        let mut airbrake = false;
         let (mut dir, mut pull, mut burner) = match self.tactic {
             Tactic::Recover => {
                 let v = me.vel.norm();
@@ -146,84 +227,121 @@ impl Pilot {
                 }
             }
             Tactic::Break => (los, n_max, true),
-            Tactic::Extend => ((flat(me.vel) - V3::Y * 0.08).norm(), 1.5, true),
+            Tactic::Extend | Tactic::Disengage => {
+                let horizontal = team.waypoint.map(|p| flat(p - me.pos)).unwrap_or_else(|| flat(me.vel));
+                let direction = if self.tactic == Tactic::Disengage { flat(me.pos - foe.pos) } else { horizontal };
+                ((direction - V3::Y * 0.10).norm(), if self.low_energy { 1.4 } else { 2.5 }, true)
+            }
+            Tactic::Reposition => ((flat(me.vel) + V3::Y * if me.speed > corner { 0.20 } else { -0.08 }).norm(), 2.0, me.speed < corner),
             Tactic::Evade => {
-                let (mp, _) = pic.missile.unwrap_or((foe.pos, foe.vel));
-                let to_missile = (mp - me.pos).norm();
-                if (mp - me.pos).len() < 1300.0 {
-                    (to_missile, n_max, true)
-                } else {
-                    let beam = to_missile.cross(V3::Y).norm();
-                    let beam = if beam.dot(me.vel) >= 0.0 { beam } else { -beam };
-                    (beam, n_max * 0.8, false)
-                }
+                let (mp, mv) = threat.unwrap_or((foe.pos, foe.vel));
+                let r = mp - me.pos;
+                let time = r.len() / (mv - me.vel).dot(-r.norm()).max(1.0);
+                let beam = flat(r).cross(V3::Y) * self.defence_side;
+                let horizontal = if time < 3.0 && !self.low_energy { (beam * 0.65 + r.norm() * 0.35).norm() }
+                    else if time > 11.0 { (beam * 0.65 - flat(r) * 0.75).norm() } else { beam };
+                let agl = me.pos.y - terrain::floor(me.pos.x, me.pos.z);
+                let mask = masked_escape(me, mp, horizontal);
+                ((mask + V3::Y * if agl > 700.0 { -0.18 } else { 0.02 }).norm(),
+                    if self.low_energy { 2.0 } else if time < 3.0 { n_max } else { 4.5_f64.min(n_max) },
+                    !team.missile_ir && me.speed < corner * 1.08)
             }
-            Tactic::Lag => (((foe.pos - foe.q.axes().forward * 900.0) - me.pos).norm(), n_max, false),
+            Tactic::Lag => {
+                airbrake = closure > 90.0 && range < 650.0 && me.speed > corner * 0.95;
+                (((foe.pos - foe.q.axes().forward * 850.0) - me.pos).norm(), n_max * 0.75, false)
+            }
             Tactic::Lead => {
-                // Point the gun line, not the flight path, at the lead point.
+                // Keep enough dynamic pressure for precise gun tracking.
+                // Match closure with throttle once inside the firing window.
                 let off = bore - me.vel.norm();
-                ((lead - off).norm(), n_max, me.speed < 190.0)
+                ((lead - off).norm(), n_max, me.speed < corner)
+            },
+            Tactic::Flank => ((team.waypoint.unwrap_or(foe.pos) - me.pos).norm(), 4.5_f64.min(n_max), me.speed < corner),
+            Tactic::Support => {
+                let side = flat(los).cross(V3::Y) * self.defence_side;
+                ((los * (40.0 * DEG).cos() + side * (40.0 * DEG).sin()).norm(), 3.5, false)
             }
-            // Far out there is no hurry: a moderate pull keeps the energy.
-            Tactic::Pure => (los, if range > 4000.0 { 5.0 } else { n_max * 0.9 }, me.speed < 240.0),
+            Tactic::Pure => {
+                let intercept = (rel + foe.vel * (range / (me.speed + 250.0)).min(12.0)).norm();
+                (if team.combat && range > 2500.0 { intercept } else { los }, if range > 4000.0 { 4.0 } else { n_max * 0.9 }, me.speed < corner * 1.1)
+            }
         };
-        // Energy: below corner speed (about 230 m/s) every extra g bleeds speed
-        // the jet cannot afford, so offensive turns ease off as it slows.
-        if matches!(self.tactic, Tactic::Pure | Tactic::Lead | Tactic::Lag) {
-            pull = pull.min(mix(2.0, n_max, clamp((me.speed - 120.0) / 110.0, 0.0, 1.0)));
-            burner |= me.speed < 230.0;
+        if !matches!(self.tactic, Tactic::Recover | Tactic::Break | Tactic::Evade) {
+            pull = pull.min(mix(1.6, n_max, ((me.speed / corner - 0.5) / 0.5).clamp(0.0, 1.0))).min((me.g_avail * 0.85).max(1.2));
+            if self.low_energy && dir.y > 0.05 { dir = (flat(dir) - V3::Y * 0.06).norm(); }
+            burner |= me.speed < corner * 0.9;
+            if team.separation.len() > 0.01 { dir = (dir + team.separation * 1.6).norm(); pull = pull.max(3.0).min(n_max); }
         }
-        // A soft deck: no dive steeper than the height above the ground allows.
         if self.tactic != Tactic::Recover {
             let agl = me.pos.y - terrain::floor(me.pos.x, me.pos.z);
             let steepest = -clamp((agl - 350.0) / 1800.0, 0.0, 1.0) * 55.0 * DEG;
-            if dir.y < steepest.sin() {
-                let h = flat(dir);
-                dir = (h * steepest.cos() + V3::Y * steepest.sin()).norm();
-            }
-            if me.speed > 300.0 {
-                burner = false;
-                pull = pull.min(n_max);
-            }
+            if dir.y < steepest.sin() { dir = (flat(dir) * steepest.cos() + V3::Y * steepest.sin()).norm(); }
+            if me.speed > corner * 1.25 { burner = false; }
         }
-        let (pitch, roll) = steer(me, dir, pull);
+        if threat.is_some() && team.missile_ir && self.tactic != Tactic::Recover { burner = false; }
+        if me.fuel < me.kind.fuel_min() * 0.6 && !matches!(self.tactic, Tactic::Recover | Tactic::Break | Tactic::Evade | Tactic::Extend) { burner = false; }
+        let (pitch, roll) = if self.tactic == Tactic::Lead && ata < 18.0 * DEG
+            && team.separation.len() < 0.01 && gcas > FLOOR + 300.0 {
+            gun_steer(me, foe, lead, pull)
+        } else { steer(me, dir, pull) };
+        let want = if threat.is_some() && team.missile_ir && self.tactic != Tactic::Recover { 0.82 }
+            else if burner { 1.0 } else if airbrake { 0.55 } else if me.speed > corner * 1.15 { 0.78 } else { 0.99 };
+        let mut input = Input { pitch_axis: pitch, roll_axis: roll, airbrake, ..Default::default() };
+        if burner { input.afterburner = true; }
+        else if me.throttle > want + 0.005 { input.throttle_down = true; }
+        else if me.throttle < want - 0.005 { input.throttle_up = true; }
 
-        // Throttle: burner when asked, else hold a corner-speed band in military power.
-        let want = if burner { 1.0 } else if me.speed > 270.0 { 0.75 } else { 0.99 };
-        let mut input = Input { pitch_axis: pitch, roll_axis: roll, ..Default::default() };
-        if want >= 1.0 {
-            input.afterburner = true;
-        } else if me.throttle > want + 0.01 {
-            input.throttle_down = true;
-        } else if me.throttle < want - 0.01 {
-            input.throttle_up = true;
-        }
-
-        // Guns: a burst when the gun line sits on the lead point inside 900 m.
         let error = bore.dot(lead).clamp(-1.0, 1.0).acos();
-        let tolerance = mix(2.2, 0.9, self.skill) * DEG;
-        if pic.rounds > 0 && range < 900.0 && range > 120.0 && error < tolerance {
-            self.burst = self.burst.max(mix(0.5, 0.8, self.skill));
+        let offensive = matches!(self.tactic, Tactic::Lead | Tactic::Pure | Tactic::Lag | Tactic::Flank);
+        let solution = team.combat && offensive && team.clear_fire && pic.rounds > 0
+            && range > 150.0 && range < 900.0 && error < mix(2.0, 0.9, self.skill) * DEG;
+        if !solution { self.burst = 0.0; }
+        if solution && self.burst <= 0.0 && self.gun_pause <= 0.0 {
+            self.burst = mix(0.25, 0.45, self.skill);
+            self.gun_pause = self.burst + mix(0.65, 0.3, self.skill);
         }
-        let gun = self.burst > 0.0 && pic.rounds > 0;
+        let gun = solution && self.burst > 0.0;
         self.burst = (self.burst - dt).max(0.0);
-
-        // Missiles: inside the launch zone (a fly-out against the present
-        // track), with the target near the nose. Novices only take shots from
-        // behind; aces trust the all-aspect seeker.
         self.zone_clock -= dt;
         if self.zone_clock <= 0.0 {
-            self.zone_clock = 0.5;
-                self.in_zone = pic.missiles > 0 && ata < 25.0 * DEG && fly_out(pic.missile_spec, me.pos, me.vel, foe.pos, foe.vel, &terrain::floor).is_some();
+            self.zone_clock = 0.6;
+            self.in_zone = pic.missiles > 0 && fly_out(pic.missile_spec, me.pos, me.vel, foe.pos, foe.vel, &terrain::floor).is_some();
         }
-        let aspect_ok = foe_ata > 70.0 * DEG || self.skill > 0.7;
-        let missile = self.in_zone && aspect_ok && self.since_shot > mix(14.0, 8.0, self.skill) && self.tactic != Tactic::Recover;
-        if missile {
-            self.since_shot = 0.0;
-            self.in_zone = false;
-        }
-        Orders { input, gun, missile }
+        let spec = pic.missile_spec;
+        let cone = if spec.infrared() { spec.gimbal.min(35.0 * DEG) } else { 50.0 * DEG };
+        let aspect_ok = !spec.infrared() || foe_ata > 55.0 * DEG || self.skill > 0.7 || range < 4000.0;
+        let missile = team.combat && team.clear_fire && team.shot_available && offensive
+            && pic.missiles > 0 && self.in_zone && ata < cone && range > spec.min_range.max(450.0)
+            && (spec.infrared() || team.radar_lock) && aspect_ok && self.since_shot > mix(15.0, 9.0, self.skill);
+        if missile { self.since_shot = 0.0; self.in_zone = false; self.zone_clock = 0.0; }
+        let countermeasures = team.combat && self.cm_clock <= 0.0 && threat.is_some_and(|(p, v)| {
+            let r = me.pos - p;
+            r.len() < 5500.0 && r.len() / (v - me.vel).dot(r.norm()).max(1.0) < 10.0
+        });
+        if countermeasures { self.cm_clock = mix(1.25, 0.65, self.skill); }
+        Orders { input, gun, missile, countermeasures }
     }
+}
+
+/// Choose a safe descending corridor with terrain between it and the missile.
+/// The predictive terrain recovery always overrides this escape direction.
+fn masked_escape(me: &Aircraft, missile: V3, beam: V3) -> V3 {
+    let mut best = (0.0, beam);
+    for angle in [-30.0_f64, 0.0, 30.0] {
+        let d = Quat::axis_angle(V3::Y, angle * DEG).rotate(beam);
+        if (1..=4).any(|k| {
+            let p = me.pos + d * (k as f64 * 400.0) - V3::Y * (k as f64 * 60.0);
+            p.y <= terrain::floor(p.x, p.z) + 280.0
+        }) { continue; }
+        let end = me.pos + d * 1600.0 - V3::Y * 240.0;
+        let hidden = (1..12).filter(|k| {
+            let p = end.lerp(missile, *k as f64 / 12.0);
+            p.y < terrain::floor(p.x, p.z) + 15.0
+        }).count() as f64;
+        let score = hidden * 2.0 + d.dot(beam);
+        if score > best.0 { best = (score, d); }
+    }
+    best.1
 }
 
 fn flat(v: V3) -> V3 {
@@ -244,6 +362,21 @@ pub fn gun_lead(me: &Aircraft, foe: &Aircraft) -> V3 {
     // Average speed of a round over the first 900 m.
     let tof = r.len() / (gun_of(me.kind).velocity * 0.78);
     (r + (foe.vel - me.vel) * tof + V3::Y * (0.5 * G0 * tof * tof)).norm()
+}
+
+/// Fine tracking commands the gun's angular rate, including the target's
+/// line-of-sight rate. Pointing only the velocity vector leaves a persistent
+/// gun error while AoA and bank change during a close pursuit.
+fn gun_steer(me: &Aircraft, foe: &Aircraft, lead: V3, max_g: f64) -> (f64, f64) {
+    let ax = me.q.axes();
+    let bore = me.q.rotate(gun_bore());
+    let r = foe.pos - me.pos;
+    let los_rate = r.cross(foe.vel - me.vel) / r.dot(r).max(1.0);
+    let angular = bore.cross(lead) * 1.5 + los_rate;
+    let bank = (-angular.y * me.speed / G0).atan().clamp(-65.0 * DEG, 65.0 * DEG);
+    let roll = stick_for_roll(((bank * RAD - me.bank) * 2.8).clamp(-120.0, 120.0));
+    let n = (ax.up.y + angular.dot(ax.right) * me.speed / G0).clamp(-1.0, max_g);
+    (stick_for_g(n), roll)
 }
 
 /// Stick that turns the flight path toward `dir` with at most `n_max` g:
@@ -346,7 +479,7 @@ mod tests {
     }
 
     fn picture(foe: &Aircraft) -> Picture<'_> {
-        Picture { foe, missile: None, missiles: 0, missile_spec: &AIM9M, rounds: 0 }
+        Picture { foe, missile: None, missiles: 0, missile_spec: &AIM9M, rounds: 0, tactical: Tactical::default() }
     }
 
     /// The steering law turns the jet to a heading behind it and levels out.
@@ -419,13 +552,191 @@ mod tests {
         let mut foe = foe;
         let mut pilot = Pilot::new(1.0);
         let mut fired = 0;
+        let mut best_error = 180.0_f64;
         for _ in 0..(10.0 / FIXED_DT) as usize {
-            let pic = Picture { foe: &foe, missile: None, missiles: 0, missile_spec: &AIM9M, rounds: 500 };
+            let pic = Picture { foe: &foe, missile: None, missiles: 0, missile_spec: &AIM9M, rounds: 500, tactical: Tactical::default() };
             let o = pilot.fly(&me, &pic, FIXED_DT);
             fired += o.gun as usize;
+            best_error = best_error.min(me.q.rotate(gun_bore()).dot(gun_lead(&me, &foe)).clamp(-1.0, 1.0).acos() * RAD);
             me.update(FIXED_DT, &o.input);
             foe.update(FIXED_DT, &Input::default());
         }
-        assert!(fired > 60, "fired for {fired} steps");
+        assert!(fired > 60, "fired for {fired} steps, best error {best_error:.2}, tactic {:?}, range {:.0}", pilot.tactic, (me.pos - foe.pos).len());
     }
+    #[test]
+    fn flight_relies_on_cover_when_attacker_is_slow_or_threatened() {
+        let foe = spawn(v3(0.0, 5000.0, -8000.0), PI, 240.0);
+        let mut a = spawn(v3(0.0, 5000.0, 0.0), 0.0, 240.0);
+        let b = spawn(v3(2600.0, 5400.0, 1800.0), 0.0, 240.0);
+        let mut flight = Flight::default();
+        let assign = flight.assign(&[
+            Member { id: 0, jet: &a, armed: true, defensive: false },
+            Member { id: 1, jet: &b, armed: true, defensive: false },
+        ], &foe, 0.1);
+        assert_eq!(assign[0].role, Role::Attack);
+        assert_eq!(assign[1].role, Role::Cover);
+        assert!((assign[1].waypoint.unwrap() - foe.pos).len() > 1500.0);
+        a.speed = 120.0;
+        let assign = flight.assign(&[
+            Member { id: 0, jet: &a, armed: true, defensive: true },
+            Member { id: 1, jet: &b, armed: true, defensive: false },
+        ], &foe, 0.1);
+        assert_eq!(assign[0].role, Role::Drag);
+        assert_eq!(assign[1].role, Role::Attack);
+        let assign = flight.assign(&[Member { id: 1, jet: &b, armed: false, defensive: false }], &foe, 0.1);
+        assert_eq!(assign[0].role, Role::Disengage);
+    }
+
+    #[test]
+    fn friendly_crossing_a_firing_lane_blocks_release() {
+        let me = spawn(v3(0.0, 5000.0, 0.0), 0.0, 240.0);
+        let foe = spawn(v3(0.0, 5000.0, -2000.0), 0.0, 240.0);
+        let mut friend = spawn(v3(0.0, 5000.0, -800.0), 0.0, 240.0);
+        assert!(!clear_lane(&me, &foe, &friend));
+        friend.pos.x = 500.0;
+        assert!(clear_lane(&me, &foe, &friend));
+        friend.pos = v3(0.0, 5000.0, -2600.0);
+        assert!(clear_lane(&me, &foe, &friend));
+    }
+
+    #[test]
+    fn weapon_choice_uses_range_lock_and_remaining_stations() {
+        use crate::weapons::{AIM120C, R27R};
+        let me = spawn(v3(0.0, 5000.0, 0.0), 0.0, 250.0);
+        let mut foe = spawn(v3(0.0, 5000.0, -2500.0), PI, 240.0);
+        let weapons = [Weapon { station: 0, spec: &AIM9M }, Weapon { station: 2, spec: &AIM120C }];
+        assert_eq!(select_weapon(&me, &foe, &weapons, true, 0.8), Some(0));
+        foe.pos.z = -16000.0;
+        assert_eq!(select_weapon(&me, &foe, &weapons, true, 0.8), Some(2));
+        assert_eq!(select_weapon(&me, &foe, &weapons[1..], false, 0.8), None);
+        let semi = [Weapon { station: 4, spec: &R27R }];
+        assert_eq!(select_weapon(&me, &foe, &semi, true, 0.8), Some(4));
+        assert_eq!(select_weapon(&me, &foe, &[], true, 0.8), None);
+    }
+
+    #[test]
+    fn slow_pilots_unload_and_regain_energy_on_both_airframes() {
+        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+            let mut me = crate::combat::spawn_type(kind, v3(0.0, 6000.0, 0.0), 0.0, 125.0);
+            let foe = spawn(v3(1000.0, 6800.0, 3500.0), PI, 230.0);
+            let mut pilot = Pilot::new(0.8);
+            let mut extends = 0;
+            for _ in 0..(20.0 / FIXED_DT) as usize {
+                let o = pilot.fly(&me, &picture(&foe), FIXED_DT);
+                extends += usize::from(pilot.tactic == Tactic::Extend);
+                me.update(FIXED_DT, &o.input);
+                assert!(!me.crashed && !me.lost.any());
+            }
+            assert!(extends > 300 && me.speed > 170.0, "{kind:?}: {:.0} m/s, extends {extends}", me.speed);
+        }
+    }
+
+    #[test]
+    fn defence_cools_ir_tail_and_saves_countermeasures_for_closing_threats() {
+        let mut me = spawn(v3(0.0, 5000.0, 0.0), 0.0, 240.0);
+        me.throttle = 1.0; me.power = 100.0;
+        let foe = spawn(v3(0.0, 5000.0, 5000.0), 0.0, 240.0);
+        let mut pic = picture(&foe);
+        pic.missile = Some((v3(0.0, 5000.0, 3000.0), v3(0.0, 0.0, -750.0)));
+        pic.tactical.missile_ir = true;
+        let mut pilot = Pilot::new(0.9);
+        let o = pilot.fly(&me, &pic, FIXED_DT);
+        assert_eq!(pilot.tactic, Tactic::Evade);
+        assert!(o.countermeasures && !o.input.afterburner && o.input.throttle_down);
+        assert!(!pilot.fly(&me, &pic, FIXED_DT).countermeasures);
+        let mut pilot = Pilot::new(0.9);
+        pic.missile = Some((v3(0.0, 5000.0, 3000.0), v3(0.0, 0.0, 750.0)));
+        let o = pilot.fly(&me, &pic, FIXED_DT);
+        assert!(!o.countermeasures && pilot.tactic != Tactic::Evade);
+    }
+
+    #[test]
+    fn gun_burst_stops_immediately_when_the_solution_is_lost() {
+        let mut me = spawn(v3(0.0, 5000.0, 0.0), 0.0, 220.0);
+        let mut foe = spawn(v3(0.0, 5000.0, -650.0), 0.0, 220.0);
+        let mut pilot = Pilot::new(1.0);
+        let mut acquired = false;
+        for _ in 0..(12.0 / FIXED_DT) as usize {
+            let mut pic = picture(&foe); pic.rounds = 500;
+            let o = pilot.fly(&me, &pic, FIXED_DT);
+            if o.gun { acquired = true; break; }
+            me.update(FIXED_DT, &o.input);
+            foe.update(FIXED_DT, &Input::default());
+        }
+        assert!(acquired);
+        foe.pos = me.pos + V3::X * 600.0;
+        let mut pic = picture(&foe); pic.rounds = 500;
+        assert!(!pilot.fly(&me, &pic, FIXED_DT).gun);
+    }
+
+    /// Use the protected flight model, without flares or artificial immunity.
+    /// There must be an escapable shot which would hit a non-defending pilot.
+    #[test]
+    fn protected_airframes_can_defeat_a_missile_by_manoeuvring() {
+        use crate::weapons::{Fate, Missile, Who};
+        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+            let mut escaped = 0;
+            for range in [10000.0, 14000.0, 18000.0] {
+                let run = |defend: bool| {
+                    let mut me = crate::combat::spawn_type(kind, v3(0.0, 6000.0, -range), PI, 250.0);
+                    let foe = spawn(v3(0.0, 6000.0, 0.0), 0.0, 250.0);
+                    let mut missile = Missile::launch(&AIM9M, foe.pos, foe.vel, Who::Player, Some(Who::Bandit(0)));
+                    let mut pilot = Pilot::new(0.9);
+                    for _ in 0..(45.0 / FIXED_DT) as usize {
+                        let input = if defend {
+                            let mut pic = picture(&foe);
+                            pic.missile = missile.tracking.then_some((missile.pos, missile.vel));
+                            pic.tactical.missile_ir = true;
+                            pilot.fly(&me, &pic, FIXED_DT).input
+                        } else { Input::default() };
+                        me.update(FIXED_DT, &input);
+                        assert!(!me.crashed && !me.lost.any(), "{kind:?} defence hit the ground or broke up");
+                        let fate = missile.step(FIXED_DT, Some((me.pos, me.vel)), &|_, _| 0.0);
+                        if fate != Fate::Flying { return fate; }
+                    }
+                    panic!("missile exceeded its lifetime");
+                };
+                let baseline = run(false);
+                let defence = run(true);
+                if matches!(baseline, Fate::Burst(_, _)) && !matches!(defence, Fate::Burst(_, _)) { escaped += 1; }
+            }
+            assert!(escaped > 0, "{kind:?} could not defeat any otherwise lethal shot");
+        }
+    }
+
+    #[test]
+    fn gun_tracking_hits_with_both_airframes_ballistics() {
+        use crate::weapons::{hits_airframe, Round, Who};
+        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+            let mut me = crate::combat::spawn_type(kind, v3(30.0, 4980.0, 0.0), 0.0, 210.0);
+            let mut foe = spawn(v3(0.0, 5000.0, -700.0), 0.0, 200.0);
+            let mut pilot = Pilot::new(1.0);
+            let gun = gun_of(kind);
+            let mut acc = 0.0;
+            let mut rounds: Vec<Round> = Vec::new();
+            let (mut fired, mut hits) = (0, 0);
+            for _ in 0..(12.0 / FIXED_DT) as usize {
+                let mut pic = picture(&foe); pic.rounds = gun.rounds - fired;
+                let o = pilot.fly(&me, &pic, FIXED_DT);
+                me.update(FIXED_DT, &o.input); foe.update(FIXED_DT, &Input::default());
+                if o.gun {
+                    acc += gun.rate * FIXED_DT;
+                    while acc >= 1.0 && fired < gun.rounds {
+                        acc -= 1.0; fired += 1;
+                        let (p, v) = muzzle(&me);
+                        rounds.push(Round::of(gun, p, v, false, Who::Bandit(0)));
+                    }
+                } else { acc = 0.0; }
+                rounds.retain_mut(|r| {
+                    r.step(FIXED_DT);
+                    if hits_airframe(&foe, r.prev - foe.last_pos, r.pos - foe.pos).is_some() {
+                        hits += 1; return false;
+                    }
+                    r.age < crate::weapons::ROUND_LIFE
+                });
+            }
+            assert!(hits > 0, "{kind:?}: fired {fired}, hit {hits}");
+        }
+    }
+
 }

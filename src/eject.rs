@@ -63,13 +63,13 @@ pub const ACES2: SeatSpec = SeatSpec {
     gores: &[ORANGE, WHITE, OLIVE, WHITE],
 };
 
-/// K-36DM: the canopy jettisoned, the seat 0.2 s later with its two
+/// K-36DM: canopy clearance delay of 0.5 s, then the seat with its two
 /// telescopic booms and their small chutes steadying it at any speed;
 /// separation and the main canopy after about 1.6 s, held above 5,000 m.
 /// Main canopy of about 60 m^2 in white and orange-red.
 pub const K36DM: SeatSpec = SeatSpec {
     name: "K-36DM",
-    canopy_lead: 0.20,
+    canopy_lead: 0.50,
     catapult: 13.0,
     rocket: (0.35, 10.0),
     rails: 14.0 * DEG,
@@ -166,7 +166,7 @@ fn seat_point(a: &Aircraft) -> V3 {
 }
 
 /// Harness point above the seat pan.
-const HARNESS: f64 = 0.55;
+const HARNESS: f64 = 0.28;
 
 impl Ejection {
     pub fn new(a: &Aircraft) -> Ejection {
@@ -208,9 +208,13 @@ impl Ejection {
             back * mix(spread, 0.65, settle), self.pilot.pos.lerp(target, settle))
     }
 
-    /// The rocket burning, for its flame.
+    fn rocket_start(&self) -> f64 {
+        if self.kind == Type::Mig29 { 1.06 / self.spec.catapult } else { 0.0 }
+    }
+
+    /// Rocket burning after the catapult stroke, for thrust and flame alike.
     pub fn rocket(&self) -> bool {
-        self.away().is_some_and(|t| t < self.spec.rocket.0)
+        self.away().is_some_and(|t| t >= self.rocket_start() && t < self.rocket_start() + self.spec.rocket.0)
     }
 
     /// One step. `a` is the jet the seat rides out of until it fires.
@@ -240,7 +244,7 @@ impl Ejection {
             }
             Phase::Seat => {
                 let t = self.away().unwrap_or(0.0);
-                if t < s.rocket.0 {
+                if self.rocket() {
                     self.pilot.vel = self.pilot.vel + self.rail * (s.rocket.1 * G0 * dt);
                 }
                 let (ms, mp) = s.mass;
@@ -270,7 +274,7 @@ impl Ejection {
                 }
                 self.chute = (self.chute + dt / s.inflate).min(1.0);
                 let fill = self.chute * self.chute;
-                self.pilot.fly(dt, s.mass.1, s.cda.0 + fill * s.cda.2, 1.45);
+                self.pilot.fly(dt, s.mass.1, s.cda.0 + fill * s.cda.2, HARNESS + 0.90);
                 // The pilot hangs upright under the risers, facing where he
                 // drifts, swinging a little as the canopy takes him.
                 self.sway += dt;
@@ -325,6 +329,10 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
     m.lathe(v3(0.0, pan - 0.16, 0.05), V3::Y * -1.0, &[(0.0, 0.0), (0.0, 0.05), (0.06, 0.07), (0.07, 0.0)], 6, Rgb(0.12, 0.12, 0.12));
     if kind == Type::Mig29 && booms {
         for s in [-1.0, 1.0] {
+            // Deployed arm protectors and leg lift retain the limbs in the bucket.
+            let guard = Frame { o: v3(s * 0.245, pan + 0.51, -0.17), ..f(V3::ZERO) };
+            m.block(&guard, v3(0.014, 0.025, 0.24), shell.scale(1.1));
+            m.block(&f(v3(s * 0.12, pan + 0.04, -0.32)), v3(0.038, 0.015, 0.10), shell.scale(0.8));
             let root = v3(s * 0.14, pan + 1.12, 0.22);
             let tip = root + v3(s * 0.20, 0.45, 1.10);
             m.capsule(root, tip, 0.02, 0.015, Rgb(0.55, 0.56, 0.55), 5);
@@ -336,17 +344,20 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
 
 pub const HANDLE_FRAMES: usize = 12;
 
-pub fn handle_point(pull: f64) -> V3 {
-    v3(0.0, -HARNESS + 0.085 + pull * 0.10, -0.36)
+pub fn handle_point(kind: Type, pull: f64) -> V3 {
+    v3(0.0, -HARNESS + (if kind == Type::Mig29 { 0.158 } else { 0.198 }) + pull * 0.10, -0.48)
 }
 
-pub fn handle_mesh(pull: f64) -> Mesh {
+pub fn handle_mesh(kind: Type, pull: f64) -> Mesh {
     let mut m = Mesh::new();
-    let centre = handle_point(pull);
-    for i in 0..12 {
-        let point = |t: f64| centre + v3(0.065 * t.cos(), 0.035 * t.sin() - 0.035, 0.0);
-        let col = if i % 2 == 0 { Rgb(0.95, 0.80, 0.10) } else { Rgb(0.05, 0.05, 0.05) };
-        m.capsule(point(i as f64 * TAU / 12.0), point((i + 1) as f64 * TAU / 12.0), 0.009, 0.009, col, 5);
+    let centre = handle_point(kind, pull);
+    let loops: &[f64] = if kind == Type::Mig29 { &[-0.034, 0.034] } else { &[0.0] };
+    for &offset in loops {
+        for i in 0..12 {
+            let point = |t: f64| centre + v3(offset + (if kind == Type::Mig29 { 0.029 } else { 0.060 }) * t.cos(), 0.032 * t.sin(), 0.0);
+            let col = if i % 2 == 0 { Rgb(0.95, 0.80, 0.10) } else { Rgb(0.05, 0.05, 0.05) };
+            m.capsule(point(i as f64 * TAU / 12.0), point((i + 1) as f64 * TAU / 12.0), 0.007, 0.007, col, 5);
+        }
     }
     m
 }
@@ -357,25 +368,43 @@ pub fn pilot_mesh(kind: Type, hanging: bool, first_person: bool, pull: f64) -> M
     let mut m = Mesh::new();
     let (suit, helmet) = if kind == Type::Mig29 { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) } else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
     let gsuit = suit.scale(0.8);
-    let hip = v3(0.0, -HARNESS + 0.10, 0.0);
+    let hip = v3(0.0, -HARNESS + 0.10, if hanging { 0.0 } else { -0.26 });
     // The close view omits the rounded neck cap as well as the helmet;
     // that cap otherwise crosses the eye when looking down at the handle.
-    m.capsule(hip, v3(0.0, if first_person { 0.24 } else { 0.30 }, 0.04), 0.17,
+    m.capsule(hip, v3(0.0, if first_person { 0.18 } else { 0.30 }, 0.04), 0.17,
         if first_person { 0.17 } else { 0.19 }, suit, 8);
     if !first_person {
         m.capsule(v3(0.0, 0.42, 0.04), v3(0.0, 0.58, 0.02), 0.13, 0.13, helmet, 8);
         m.block(&Frame { o: v3(0.0, 0.48, -0.08), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.09, 0.04, 0.03), Rgb(0.12, 0.12, 0.10));
     }
+    let web = Rgb(0.52, 0.49, 0.36);
+    let belt = |m: &mut Mesh, a: V3, b: V3, width: f64| {
+        let y = (b - a).norm();
+        let x = y.cross(V3::Z).norm();
+        m.block(&Frame { o: (a + b) * 0.5, x, y, z: x.cross(y) }, v3(width * 0.5, (b - a).len() * 0.5, 0.003), web);
+    };
+    for s in [-1.0, 1.0] {
+        belt(&mut m, v3(s * 0.13, 0.30, -0.14), v3(s * 0.10, -0.36, -0.155), 0.035);
+        belt(&mut m, v3(s * 0.10, -0.36, -0.155), v3(s * 0.16, -0.52, -0.10), 0.030);
+        m.ring(&Frame { o: v3(s * 0.13, 0.29, -0.155), x: V3::X, y: V3::Y, z: V3::Z },
+            0.012, 0.019, 0.004, Rgb(0.55, 0.56, 0.53), 8);
+    }
+    belt(&mut m, v3(-0.16, -0.35, -0.15), v3(0.16, -0.35, -0.15), 0.040);
+    m.block(&Frame { o: v3(0.0, -0.35, -0.16), x: V3::X, y: V3::Y, z: V3::Z },
+        v3(0.026, 0.026, 0.008), Rgb(0.60, 0.61, 0.57));
     for s in [-1.0, 1.0] {
         let hp = hip + V3::X * (s * 0.10);
-        let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, 0.10, -0.45), hp + v3(0.0, -0.32, -0.55)) };
+        let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, if kind == Type::Mig29 { 0.17 } else { 0.10 }, -0.45),
+            hp + v3(0.0, if kind == Type::Mig29 { -0.18 } else { -0.32 }, -0.55)) };
         m.capsule(hp, knee, 0.085, 0.07, gsuit, 6);
         m.capsule(knee, foot, 0.065, 0.055, gsuit, 6);
         m.capsule(foot, foot + v3(0.0, -0.03, -0.12), 0.05, 0.05, Rgb(0.08, 0.07, 0.06), 5);
         let shoulder = v3(s * 0.20, 0.24, 0.04);
-        let hand = if hanging { v3(s * 0.22, 0.62, 0.0) } else { handle_point(pull) + V3::X * (s * 0.035) };
-        m.capsule(shoulder, shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06), 0.06, 0.055, suit, 6);
-        m.capsule(shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06), hand, 0.055, 0.035, suit, 6);
+        let hand = if hanging { v3(s * 0.22, 0.62, 0.0) } else { handle_point(kind, pull) + V3::X * (s * 0.035) };
+        let elbow = if hanging { shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06) }
+            else { v3(s * 0.22, mix(shoulder.y, hand.y, 0.60), -0.30) };
+        m.capsule(shoulder, elbow, 0.06, 0.055, suit, 6);
+        m.capsule(elbow, hand, 0.055, 0.035, suit, 6);
         let glove = Rgb(0.24, 0.26, 0.20);
         m.capsule(hand - V3::X * 0.022, hand + V3::X * 0.022, 0.023, 0.023, glove, 6);
         m.capsule(hand + v3(s * 0.01, 0.018, 0.015), hand + v3(-s * 0.01, -0.01, -0.01), 0.012, 0.010, glove.scale(0.9), 5);
@@ -406,8 +435,16 @@ pub fn chute_mesh(spec: &SeatSpec) -> Mesh {
             // causes z-fighting and alternates the lighting as the camera moves.
         }
         let skirt_pt = ring(k, 1.0);
-        let riser = v3(if skirt_pt.x > 0.0 { 0.16 } else { -0.16 }, 0.45, 0.0);
-        m.capsule(skirt_pt, riser, 0.012, 0.012, Rgb(0.82, 0.80, 0.74), 3);
+        let riser = v3(if skirt_pt.x > 0.0 { 0.22 } else { -0.22 }, 1.35, 0.0);
+        // Suspension cord is about 3.6 mm across, separate from the broad riser webbing.
+        m.capsule(skirt_pt, riser, 0.0018, 0.0018, Rgb(0.82, 0.80, 0.74), 4);
+    }
+    for s in [-1.0, 1.0] {
+        let (a, b) = (v3(s * 0.13, 0.29, -0.155), v3(s * 0.22, 1.35, 0.0));
+        let y = (b - a).norm();
+        let x = y.cross(V3::Z).norm();
+        m.block(&Frame { o: (a + b) * 0.5, x, y, z: x.cross(y) },
+            v3(0.016, (b - a).len() * 0.5, 0.0018), Rgb(0.52, 0.49, 0.36));
     }
     m
 }
@@ -416,6 +453,20 @@ pub fn chute_mesh(spec: &SeatSpec) -> Mesh {
 mod tests {
     use super::*;
     use crate::sim::{Mission, FIXED_DT};
+
+    #[test]
+    fn first_person_eye_and_handle_match_the_cockpit_at_seat_firing() {
+        for kind in [Type::F16, Type::Mig29] {
+            let mut a = Aircraft::new(&Mission::new()); a.set_type(kind);
+            let e = Ejection::new(&a);
+            let eye = e.pilot.pos + a.q.rotate(v3(0.0, 0.52, 0.0));
+            assert!((eye - crate::cockpit::eye_world(&a)).len() < 1e-8);
+            let local = seat_point(&a) + V3::Y * HARNESS + handle_point(kind, 1.0);
+            let offset = if kind == Type::Mig29 { (crate::airframe::EYE - crate::mig29::EYE) } else { V3::ZERO };
+            let cockpit_handle = v3(0.0, if kind == Type::Mig29 { 0.725 } else { 0.760 }, -3.720) - offset;
+            assert!((local - cockpit_handle).len() < 0.022);
+        }
+    }
 
     #[test]
     fn both_seats_clear_the_jet_separate_and_leave_the_chute_on_the_ground() {
@@ -471,7 +522,7 @@ mod tests {
 
     #[test]
     fn the_handle_moves_with_both_gloves_and_the_helmet_is_out_of_first_person() {
-        assert!((handle_point(1.0).y - handle_point(0.0).y - 0.10).abs() < 1e-10);
+        assert!((handle_point(Type::F16, 1.0).y - handle_point(Type::F16, 0.0).y - 0.10).abs() < 1e-10);
         for kind in [Type::F16, Type::Mig29] {
             for frame in 0..HANDLE_FRAMES {
                 let pull = frame as f64 / (HANDLE_FRAMES - 1) as f64;
@@ -480,11 +531,11 @@ mod tests {
                 assert!(body.count() < head.count());
                 for v in body.v.chunks(crate::mesh::STRIDE) {
                     let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
-                    assert!((p - v3(0.0, 0.52, -0.16)).len() > 0.15);
+                    assert!((p - v3(0.0, 0.52, 0.0)).len() > 0.15);
                     assert!(v.iter().all(|x| x.is_finite()));
                 }
                 for side in [-1.0, 1.0] {
-                    let grip = handle_point(pull) + V3::X * (side * 0.035);
+                    let grip = handle_point(kind, pull) + V3::X * (side * 0.035);
                     assert!(body.v.chunks(crate::mesh::STRIDE).any(|v|
                         (v3(v[0] as f64, v[1] as f64, v[2] as f64) - grip).len() < 0.025));
                 }

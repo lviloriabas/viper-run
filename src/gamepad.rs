@@ -38,6 +38,9 @@ pub struct Gamepad {
     down_at: [f64; 16],
     then: f64,
     now: f64,
+    nav_held: u16,
+    nav_next: f64,
+    nav_event: u16,
 }
 
 /// Radial dead zone, rescaled so the output rises linearly from zero at its
@@ -72,7 +75,7 @@ fn dirs(s: &State) -> u16 {
 
 impl Gamepad {
     pub fn new() -> Gamepad {
-        Gamepad { device: backend::Device::new(), state: State::default(), prev: State::default(), down_at: [0.0; 16], then: 0.0, now: 0.0 }
+        Gamepad { device: backend::Device::new(), state: State::default(), prev: State::default(), down_at: [0.0; 16], then: 0.0, now: 0.0, nav_held: 0, nav_next: 0.0, nav_event: 0 }
     }
 
     /// Reads the controller; call once per frame. Returns the new connection
@@ -86,6 +89,7 @@ impl Gamepad {
                 self.down_at[i] = now;
             }
         }
+        self.update_navigation(now);
         (self.state.connected != self.prev.connected).then_some(self.state.connected)
     }
 
@@ -114,12 +118,32 @@ impl Gamepad {
     pub fn active(&self) -> bool {
         let s = &self.state;
         let m = |(x, y): (f64, f64)| x.abs().max(y.abs());
-        s.connected && (s.buttons & !self.prev.buttons != 0 || m(s.left) > 0.3 || m(s.right) > 0.3 || s.lt > 0.3 || s.rt > 0.3)
+        s.connected && (s.buttons & !self.prev.buttons != 0
+            || m((s.left.0 - self.prev.left.0, s.left.1 - self.prev.left.1)) > 0.18
+            || m((s.right.0 - self.prev.right.0, s.right.1 - self.prev.right.1)) > 0.18
+            || s.lt > 0.3 && self.prev.lt <= 0.3 || s.rt > 0.3 && self.prev.rt <= 0.3)
     }
 
     /// Menu directions newly pushed this frame.
-    pub fn nav(&self) -> u16 {
-        dirs(&self.state) & !dirs(&self.prev)
+    pub fn nav(&self) -> u16 { self.nav_event }
+
+    fn update_navigation(&mut self, now: f64) {
+        let mut held = if self.state.connected { dirs(&self.state) } else { 0 };
+        let (x, y) = self.state.left;
+        if held == 0 && self.nav_held != 0 {
+            let keep = match self.nav_held { UP => y > 0.35, DOWN => y < -0.35,
+                LEFT => x < -0.35, RIGHT => x > 0.35, _ => false };
+            if keep { held = self.nav_held; }
+        }
+        self.nav_event = 0;
+        if held != self.nav_held {
+            self.nav_event = held;
+            self.nav_next = now + 0.34;
+        } else if held != 0 && now >= self.nav_next {
+            self.nav_event = held;
+            self.nav_next = now + 0.12;
+        }
+        self.nav_held = held;
     }
 }
 
@@ -313,5 +337,29 @@ mod backend {
         pub fn read(&mut self, _now: f64) -> Option<State> {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+    #[test]
+    fn joystick_repeats_with_hysteresis_and_stops_at_rest() {
+        let mut p = Gamepad::new(); p.state.connected = true;
+        p.state.left = (0.0, 0.75); p.update_navigation(0.0); assert_eq!(p.nav(), UP);
+        p.state.left = (0.0, 0.50); p.update_navigation(0.1); assert_eq!(p.nav(), 0);
+        p.update_navigation(0.35); assert_eq!(p.nav(), UP);
+        p.update_navigation(0.40); assert_eq!(p.nav(), 0);
+        p.update_navigation(0.48); assert_eq!(p.nav(), UP);
+        p.state.left = (0.9, 0.1); p.update_navigation(0.49); assert_eq!(p.nav(), RIGHT);
+        p.state.left = (0.0, 0.0); p.update_navigation(0.5); assert_eq!(p.nav(), 0);
+        p.update_navigation(2.0); assert_eq!(p.nav(), 0);
+    }
+    #[test]
+    fn held_stick_does_not_steal_keyboard_prompts() {
+        let mut p = Gamepad::new();
+        p.state = State { connected: true, left: (0.0, 0.8), ..Default::default() };
+        assert!(p.active()); p.prev = p.state; assert!(!p.active());
+        p.state.buttons = A; assert!(p.active());
     }
 }

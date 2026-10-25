@@ -37,10 +37,23 @@ pub(super) fn aoa_bracket(alpha: f64, fpm_y: f64) -> (f64, f64, f64) {
     (y(11.0), y(13.0), y(15.0))
 }
 
+/// ILS-31: radio altitude below 1,000 m (1 m), barometric above (10 m).
+pub(super) fn mig_altitude(radio_m: f64, baro_m: f64) -> (i64, bool) {
+    if radio_m < 1000.0 { (radio_m.max(0.0).round() as i64, true) }
+    else { ((baro_m / 10.0).round() as i64 * 10, false) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn mig_height_uses_radio_units_low_and_barometric_tens_high() {
+        assert_eq!(mig_altitude(123.4, 2493.0), (123, true));
+        assert_eq!(mig_altitude(999.0, 2493.0), (999, true));
+        assert_eq!(mig_altitude(1000.0, 2493.0), (2490, false));
+        assert_eq!(mig_altitude(1001.0, 2498.0), (2500, false));
+    }
     #[test]
     fn altitude_has_ten_foot_resolution_and_preserves_sign() {
         for (input, expected) in [(0.0, "0"), (8.0, "10"), (1234.0, "1230"), (1236.0, "1240"), (9996.0, "10000"), (-124.0, "-120")] {

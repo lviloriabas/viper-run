@@ -66,6 +66,7 @@ const R_EKRAN: R = r(1248.0, 1664.0, 160.0, 160.0);
 const R_SPO: R = r(1408.0, 1664.0, 160.0, 160.0);
 const R_RADALT: R = r(1568.0, 1664.0, 160.0, 160.0);
 const R_ASIMACH: R = r(1728.0, 1664.0, 160.0, 160.0);
+const R_COUNTER: R = r(1888.0, 1664.0, 160.0, 96.0);
 
 // ================================================================ panel
 /// Main panel: tilted back 12 degrees, its foot 0.66 m above the datum just
@@ -152,6 +153,12 @@ fn sill(s: f64, z: f64) -> V3 {
     cp(z, if s > 0.0 { 0.0 } else { PI })
 }
 
+fn raised_at(u: f64, y: f64) -> Frame {
+    let mut f = panel_at(u, y);
+    f.o.z += PANEL_FORWARD + 0.060;
+    f
+}
+
 fn warning_frame() -> Frame {
     let n = v3(-0.85, 0.15, 0.50).norm();
     let y = (V3::Y - n * n.y).norm();
@@ -200,7 +207,11 @@ pub fn build_static(m: &mut Mesh) {
 
     // Primary flight group to port; systems and engines to starboard.
     for d in DIALS {
-        gauge(m, &panel_at(d.u, d.y), d.radius, d.face);
+        if d.face.x == R_SPO.x && d.face.y == R_SPO.y {
+            plate(m, &panel_at(d.u, d.y), 0.060, 0.062, d.face);
+        } else {
+            gauge(m, &panel_at(d.u, d.y), d.radius, d.face);
+        }
     }
     plate(m, &panel_at(-0.235, 0.696), 0.090, 0.045, R_GEAR);
     plate(m, &panel_at(0.178, 0.695), 0.150, 0.040, R_HYD);
@@ -208,18 +219,24 @@ pub fn build_static(m: &mut Mesh) {
 
     // Raised left cheek beside the HUD: UUAP, caution lamp and weapons
     // controls, supported by a blue-grey backing rather than floating.
-    let cheek = panel_at(-0.205, 1.052);
+    let cheek = raised_at(-0.205, 1.052);
     m.block(&cheek.at(0.0, 0.0, -0.015), v3(0.052, 0.058, 0.015), PANEL);
     gauge(m, &cheek, 0.031, R_UUAP);
     m.capsule(cheek.p(0.0, 0.047, 0.002), cheek.p(0.0, 0.047, 0.012), 0.009, 0.009, Rgb(0.6, 0.12, 0.08), 10);
-    let weapons = panel_at(-0.320, 1.018);
+    let weapons = raised_at(-0.320, 1.060);
     m.block(&weapons.at(0.0, 0.0, -0.012), v3(0.057, 0.043, 0.012), PANEL);
     plate(m, &weapons, 0.100, 0.065, R_WEAPON);
 
     // Ekran beside the engine group and the warning column under the rail.
     let warning = warning_frame();
     plate(m, &warning, 0.052, 0.225, R_WARN);
-    plate(m, &panel_at(0.330, 1.025), 0.064, 0.065, R_EKRAN);
+    let ekran = raised_at(0.350, 1.025);
+    m.block(&ekran.at(0.0, -0.010, -0.018), v3(0.032, 0.032, 0.018), PANEL);
+    plate(m, &ekran, 0.050, 0.045, R_EKRAN);
+    // Countermeasure panel below the ILS-31 housing, as on the reference.
+    let counter = raised_at(0.0, 1.035);
+    m.block(&counter.at(0.0, 0.0, -0.020), v3(0.100, 0.032, 0.020), PANEL);
+    plate(m, &counter, 0.180, 0.048, R_COUNTER);
 
     // Tub: floor, walls up to the sills, the canopy rails and the consoles.
     m.quad(v3(-WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, BULKHEAD_Z), v3(-WALL_X, FLOOR, BULKHEAD_Z), WALL.scale(0.5));
@@ -327,7 +344,10 @@ pub fn build_static(m: &mut Mesh) {
             p - inward(p, 0.018) + up * (y + h * 0.35) + n * d
         };
         let centre = place(0.0, 0.0, 0.0);
-        let smaller = |x: f64, y: f64, d: f64| centre + (place(x, y, d) - centre) * 0.78;
+        let anchor = cp(za, mid) - inward(cp(za, mid), 0.025);
+        let up = (centre - anchor).norm();
+        let mount = anchor + up * 0.024;
+        let smaller = |x: f64, y: f64, d: f64| mount + (place(x, y, d) - centre) * (0.78 * 0.70);
         super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), (mid - PI / 2.0).sin());
         for t in [-0.28, 0.28] {
             let x = t * (hi - lo) * radius;
@@ -631,6 +651,13 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
     }
     cv.line(x, y - rad * 0.40, x, y + rad * 0.40, 2.0, rgba(0xf0, 0x90, 0x30, 1.0));
 
+    let r = R_COUNTER;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x18, 0x1c, 0x1c, 1.0));
+    cv.text("ЛТЦ / ДО", r.x + r.w * 0.5, r.y + 16.0, 1.0, INK, Align::Center);
+    cv.rect(r.x + 14.0, r.y + 30.0, r.w - 28.0, 38.0, rgba(0x06, 0x08, 0x08, 1.0));
+    cv.text(&format!("{:02} {:02}", c.loadout.flares, c.loadout.chaff), r.x + r.w * 0.5, r.y + 49.0, 2.0, INK, Align::Center);
+    for x in [r.x + 30.0, r.x + r.w - 30.0] { cv.disc(x, r.y + 80.0, 6.0, INK); }
+
     // Warning lamp column, its legends transliterated.
     let lamps = [
         ("OSTATOK 800", a.fuel < 800.0, false),
@@ -666,59 +693,36 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
     cv.text("SHASSI", r.x + r.w / 2.0, r.y + 12.0, 1.0, rgba(0x10, 0x10, 0x10, 1.0), Align::Center);
     cv.text("ZAKR", r.x + r.w * 0.5, r.y + r.h - 14.0, 1.0, if a.flaps > 0.05 { GEAR_GREEN } else { rgba(0x10, 0x10, 0x10, 1.0) }, Align::Center);
 
-    // IT-23: the radar picture as a B-scope, azimuth across and range up.
+    // IT-23 repeats the ILS-31 flight/sight picture, rather than an F-16 B-scope.
     let r = R_TV;
-    cv.rect(r.x, r.y, r.w, r.h, rgba(0x04, 0x0c, 0x08, 1.0));
-    let green = rgba(0x7c, 0xf0, 0x9c, 1.0);
-    let dim = rgba(0x1e, 0x50, 0x34, 1.0);
-    let (x0, y0, w, hh) = (r.x + 16.0, r.y + 12.0, r.w - 32.0, r.h - 28.0);
-    for k in 0..=4 {
-        let y = y0 + hh * k as f32 / 4.0;
-        cv.line(x0, y, x0 + w, y, 1.0, dim);
-        let x = x0 + w * k as f32 / 4.0;
-        cv.line(x, y0, x, y0 + hh, 1.0, dim);
+    let green = rgba(0x9c, 0xf0, 0x68, 1.0);
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x03, 0x09, 0x04, 1.0));
+    let (cx, cy) = (r.x + r.w * 0.5, r.y + r.h * 0.52);
+    cv.set_clip(Some(vec![[r.x + 5.0, r.y + 5.0], [r.x + r.w - 5.0, r.y + 5.0],
+        [r.x + r.w - 5.0, r.y + r.h - 5.0], [r.x + 5.0, r.y + r.h - 5.0]]));
+    let (height, radio) = super::hud::mig_altitude(ad.radar_ft * 0.3048, ad.baro_ft * 0.3048);
+    cv.text(&format!("{:.0}", ad.kcas * 1.852), r.x + 12.0, r.y + 20.0, 1.0, green, Align::Left);
+    cv.text(&format!("{height}{}", if radio { "Р" } else { "" }), r.x + r.w - 12.0, r.y + 20.0, 1.0, green, Align::Right);
+    cv.text(&format!("{:03.0}", a.heading), cx, r.y + 17.0, 1.0, green, Align::Center);
+    cv.set_transform(cx, cy, (-a.bank * DEG) as f32);
+    for pitch in (-30_i32..=30).step_by(10) {
+        let y = ((a.pitch - pitch as f64) * 1.8) as f32;
+        let span = if pitch == 0 { 65.0 } else { 24.0 };
+        cv.line(-span, y, -8.0, y, 1.0, green);
+        cv.line(8.0, y, span, y, 1.0, green);
+        if pitch != 0 { cv.text(&format!("{}", pitch.abs()), span + 4.0, y, 1.0, green, Align::Left); }
     }
-    if c.irst {
-        // IRST (TP) picture: azimuth across its 60 degrees, elevation up from
-        // -15 to +30, the heat sources it sees, the track boxed, and the
-        // laser range once inside 6.5 km.
-        for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive && crate::combat::irst_sees(a, &b.jet, 1.0)) {
-            let d = a.q.conj().rotate((b.jet.pos - a.pos).norm());
-            let (az, el) = (d.x.atan2(-d.z) / DEG, d.y.asin() / DEG);
-            let (x, y) = (x0 + w * ((az + 30.0) / 60.0) as f32, y0 + hh * (1.0 - ((el + 15.0) / 45.0) as f32));
-            cv.disc(x, y, 3.0, green);
-            if c.lock == Some(crate::weapons::Who::Bandit(i)) {
-                cv.stroke_rect(x - 8.0, y - 8.0, 16.0, 16.0, 2.0, green);
-            }
-        }
-        cv.text("TP", r.x + 3.0, y0 + 4.0, 1.0, green, Align::Left);
-        let laser = c.laser_range(a).map_or("D ---".to_string(), |d| format!("D {:.1}", d / 1000.0));
-        cv.text(&laser, r.x + r.w - 3.0, y0 + 4.0, 1.0, green, Align::Right);
-    } else {
-        let far = c.bandits.iter().enumerate().filter(|(i, _)| c.radar_contact(a, *i)).map(|(_, b)| (b.jet.pos - a.pos).len()).reduce(f64::max).unwrap_or(0.0);
-        let range = if far > 36000.0 { 80000.0 } else { 40000.0 };
-        for (i, b) in c.bandits.iter().enumerate().filter(|(i, _)| c.radar_contact(a, *i)) {
-            let rel = b.jet.pos - a.pos;
-            let body = a.q.conj().rotate(rel);
-            let az = body.x.atan2(-body.z) / DEG;
-            let d = rel.len();
-            if az.abs() < 60.0 && d < range {
-                let (x, y) = (x0 + w * ((az + 60.0) / 120.0) as f32, y0 + hh * (1.0 - (d / range) as f32));
-                if c.lock == Some(crate::weapons::Who::Bandit(i)) {
-                    cv.stroke_rect(x - 8.0, y - 8.0, 16.0, 16.0, 2.0, green);
-                } else {
-                    cv.rect(x - 6.0, y - 2.0, 12.0, 4.0, green);
-                    if c.acquiring == Some(crate::weapons::Who::Bandit(i)) {
-                        cv.stroke_rect(x - 10.0, y - 10.0, 20.0, 20.0, 1.0, green);
-                    }
-                }
-            }
-        }
-        cv.text(if range > 40000.0 { "80" } else { "40" }, r.x + 3.0, y0 + 4.0, 1.0, green, Align::Left);
-        cv.text(if c.radar_lock().is_some() { "RL TRACK" } else if c.acquiring.is_some() { "RL ACQ" } else { "RL SEARCH" }, r.x + r.w - 3.0, y0 + 4.0, 1.0, green, Align::Right);
-        cv.text("0", r.x + 3.0, y0 + hh - 4.0, 1.0, green, Align::Left);
-    }
-    cv.polyline(&[[x0 + w / 2.0 - 6.0, y0 + hh + 10.0], [x0 + w / 2.0, y0 + hh + 4.0], [x0 + w / 2.0 + 6.0, y0 + hh + 10.0]], 2.0, false, green);
+    cv.reset_transform();
+    cv.circle(cx, cy, 5.0, 1.0, green);
+    cv.line(cx - 28.0, cy, cx - 7.0, cy, 1.0, green);
+    cv.line(cx + 7.0, cy, cx + 28.0, cy, 1.0, green);
+    cv.line(cx, cy - 16.0, cx, cy - 7.0, 1.0, green);
+    cv.text(&format!("М{:.2}  n{:.1}", ad.mach, a.g_smooth), r.x + 12.0, r.y + r.h - 31.0, 1.0, green, Align::Left);
+    cv.text(if c.irst { "ТП" } else { "РЛ" }, r.x + 12.0, r.y + r.h - 14.0, 1.0, green, Align::Left);
+    let mode = match c.mode { crate::combat::Mode::Nav => "МАРШ", crate::combat::Mode::Ccip | crate::combat::Mode::Strf => "ЗЕМЛЯ", _ => "АТК" };
+    cv.text(mode, cx, r.y + r.h - 14.0, 1.0, green, Align::Center);
+    if c.lock.is_some() { cv.stroke_rect(cx - 18.0, cy - 18.0, 36.0, 36.0, 1.0, green); }
+    cv.set_clip(None);
 
     // Left switch panel: autopilot (SAU), navigation (RSBN, ARK) and the
     // altimeter setting.
@@ -808,6 +812,23 @@ mod tests {
     }
 
     #[test]
+    fn raised_controls_and_counter_clear_the_coaming() {
+        let mut mesh = Mesh::new();
+        build_static(&mut mesh);
+        for (u, y, w, h) in [(-0.320, 1.060, 0.100, 0.065),
+            (0.350, 1.025, 0.050, 0.045), (0.0, 1.035, 0.180, 0.048)] {
+            let f = raised_at(u, y);
+            for x in [-0.9, 0.0, 0.9] {
+                for y in [-0.9, 0.0, 0.9] {
+                    let target = f.p(x*w*0.5, y*h*0.5, 0.0085);
+                    assert!(!mesh.v.chunks(crate::mesh::STRIDE * 3).any(|tri| blocked(crate::airframe::EYE, target, tri)),
+                        "raised control {u} hidden at {x},{y}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn primary_flight_instruments_clear_the_pilot_through_rudder_travel() {
         let eye = crate::airframe::EYE;
         for step in -8..=8 {
@@ -845,7 +866,7 @@ mod tests {
     fn instrument_atlas_regions_do_not_overlap_each_other_or_the_mirrors() {
         let rects = [R_ADI, R_HSI, R_ASI, R_ALT, R_VVI, R_UUAP, R_RPM, R_EGT, R_EGT_R,
             R_FUEL, R_HYD, R_CLOCK, R_WARN, R_GEAR, R_TV, R_LEFT, R_COMPASS,
-            R_WEAPON, R_EKRAN, R_SPO, R_RADALT, R_ASIMACH, crate::cockpit::R_MIRROR];
+            R_WEAPON, R_EKRAN, R_SPO, R_RADALT, R_ASIMACH, R_COUNTER, crate::cockpit::R_MIRROR];
         for (i, a) in rects.iter().enumerate() {
             assert!(a.x >= 0.0 && a.y >= 1280.0 && a.x + a.w <= 2048.0 && a.y + a.h <= 2048.0);
             for b in rects.iter().skip(i + 1) {

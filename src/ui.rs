@@ -83,6 +83,19 @@ impl Button {
     }
 }
 
+/// Choose the closest button in a direction, favouring the same row/column.
+pub fn navigation(buttons: &[Button], selected: usize, dx: f32, dy: f32) -> Option<usize> {
+    let a = buttons.get(selected)?;
+    let centre = |b: &Button| (b.x + b.w * 0.5, b.y + b.h * 0.5);
+    let (x, y) = centre(a);
+    buttons.iter().enumerate().filter(|(i, _)| *i != selected).filter_map(|(i, b)| {
+        let (bx, by) = centre(b);
+        let along = (bx - x) * dx + (by - y) * dy;
+        let across = ((bx - x) * dy - (by - y) * dx).abs();
+        (along > 1.0).then_some((i, along + across * 3.0))
+    }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|x| x.0)
+}
+
 pub struct Ui<'a> {
     pub cv: &'a mut Canvas,
     pub w: f32,
@@ -135,7 +148,9 @@ pub fn format_time(sec: f64) -> String {
 }
 
 pub fn ui_scale(w: f32, h: f32) -> f32 {
-    (w / 640.0).min(h / 360.0).floor().clamp(1.0, 4.0)
+    // A title bar can remove a few pixels from a nominal 720p/1080p window.
+    // Keep that from shrinking every overlay by an entire pixel-font step.
+    ((w / 640.0).min(h / 360.0) + 0.08).floor().clamp(1.0, 4.0)
 }
 
 impl<'a> Ui<'a> {
@@ -177,9 +192,10 @@ impl<'a> Ui<'a> {
 
     /// Width `button` gives a label and its shortcut.
     fn button_width(&self, label: &str, hint: &str) -> f32 {
-        let hint = self.hint(hint);
         let s = self.s;
-        Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, s.max(2.0) - 1.0) + 8.0 * s } + 16.0 * s
+        let pad_hint = match hint { "SPACE" | "P" | "R" => "{START}", "ESC" => "{B}", "K" => "{BACK}", _ => hint };
+        let reserve = Canvas::text_width(hint, s.max(2.0) - 1.0).max(Canvas::text_width(pad_hint, s.max(2.0) - 1.0));
+        Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { reserve + 8.0 * s } + 16.0 * s
     }
 
     fn button(&mut self, label: &str, hint: &str, x: f32, y: f32, primary: bool, action: Action) -> f32 {
@@ -208,7 +224,7 @@ impl<'a> Ui<'a> {
     /// A fixed-width key cap in the small font, for the bindings table.
     fn key_cap(&mut self, label: &str, x: f32, y: f32, w: f32, hot: bool, action: Action) {
         let sm = self.s.max(2.0) - 1.0;
-        let h = 11.0 * sm;
+        let h = 9.0 * sm;
         let i = self.buttons.len();
         let focus = hot || i == self.selected || Button { x, y, w, h, action }.hit(self.mouse.0, self.mouse.1);
         let (bg, fg, border) = if focus { (rgba(0x1a, 0x2a, 0x20, 0.95), ACID, ACID) } else { (rgba(0x0a, 0x11, 0x0e, 0.6), GREEN, LINE_HOT) };
@@ -418,7 +434,7 @@ impl<'a> Ui<'a> {
                     ACID,
                     &format!("All ten gates cleared. You brought the jet and the terrain back in one piece. The evaluator has logged the run as {rank}."),
                     [("RUN TIME", format_time(r.time), GREEN), ("GATES", format!("{} / 10", r.gates), CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)],
-                    &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                    &[("FLY AGAIN", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)],
                     &best_line(best),
                 );
             }
@@ -429,7 +445,7 @@ impl<'a> Ui<'a> {
                 RED,
                 &format!("The gorge is unforgiving. The flight recorder shows {} gates cleared before impact.", pad(r.gates as f64, 2)),
                 [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), RED), ("ELAPSED", format_time(r.time), CREAM), ("IMPACT", format!("{} KT", pad(r.impact * 1.94384, 3)), RED), ("BEST", best_str, CREAM)],
-                &[("REARM & RETRY", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                &[("REARM & RETRY", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)],
                 "TIP: EASE OFF THE PULL AT HIGH SPEED. LET THE GORGE OPEN BEFORE YOU ROLL IN.",
             ),
             Outcome::Timeout => self.status_panel(
@@ -439,7 +455,7 @@ impl<'a> Ui<'a> {
                 AMBER,
                 &format!("The coast is still out there. You cleared {} gates before the clock ran dry.", pad(r.gates as f64, 2)),
                 [("GATE", format!("{} / 10", pad(r.gates as f64, 2)), AMBER), ("ELAPSED", format_time(r.time), CREAM), ("SCORE", pad(r.score, 5), CREAM), ("BEST", best_str, CREAM)],
-                &[("TRY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                &[("TRY AGAIN", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)],
                 "THE CLOCK IS A HARD CEILING. GATES ADD 8 SECONDS EACH.",
             ),
         }
@@ -454,7 +470,8 @@ impl<'a> Ui<'a> {
         // The fighting missions add the threat setup and its map on the right.
         let threats = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
         let armed = threats;
-        let left = if threats { 240.0 * s } else { 300.0 * s };
+        let store_w = Store::ALL.iter().map(|st| Canvas::text_width(st.pair(), s) + 16.0 * s).fold(0.0, f32::max);
+        let left = if threats { (30.0 * s + 120.0 * sm + store_w).max(280.0 * s) } else { 300.0 * s };
         // Without the stores and the threat map the panel fits its few rows.
         let tall = if armed { 280.0 } else { 172.0 };
         let (pw, ph) = ((self.w - 24.0 * s).min(if threats { 800.0 * s } else { left }), (self.h - 26.0 * s).min(tall * s));
@@ -462,7 +479,7 @@ impl<'a> Ui<'a> {
         self.frame(x, y, pw, ph);
         let m = 14.0 * s;
         let mut yy = y + m;
-        self.cv.text(&format!("// {}, {}", cfg.jet.full_name(), mission.name()), x + m, yy, sm, DIM, Align::Left);
+        self.cv.text(&format!("// {}, {}", cfg.jet.name(), mission.name()), x + m, yy, sm, DIM, Align::Left);
         yy += 20.0 * s;
         self.cv.text(if armed { "LOADOUT" } else { "SETUP" }, x + m, yy, s * 3.0, GREEN, Align::Left);
         yy += 18.0 * s;
@@ -499,7 +516,7 @@ impl<'a> Ui<'a> {
         // first and Enter takes off.
         let launch_y = yy + rows.len() as f32 * 17.0 * s + 14.0 * s;
         let w1 = self.button("LAUNCH", "SPACE", x + m, launch_y, true, Action::Launch);
-        self.button("MISSION BOARD", "ESC", x + m + w1 + 6.0 * s, launch_y, false, Action::Menu);
+        self.button("MAIN MENU", "ESC", x + m + w1 + 6.0 * s, launch_y, false, Action::Menu);
         let col2 = x + m + 120.0 * sm;
         for (label, value, act) in rows {
             self.cv.text(label, x + m, yy + 7.0 * s, sm, DIM, Align::Left);
@@ -522,7 +539,7 @@ impl<'a> Ui<'a> {
         if threats && pw > left + 200.0 * s {
             self.threat_setup(x + left, y + m, pw - left - m, ph - 2.0 * m, mission, cfg);
         }
-        self.legend(&[("SPACE", "LAUNCH"), ("ESC", "MISSION BOARD")]);
+        self.legend(&[("SPACE", "LAUNCH"), ("ESC", "MAIN MENU")]);
     }
 
     /// Threat setup beside the loadout: the prepared layout, the number and
@@ -615,12 +632,18 @@ impl<'a> Ui<'a> {
                 _ => {}
             }
         }
+        let mut sam_labels: Vec<(f32, f32)> = Vec::new();
         for site in &d.sites {
             let p = to(site.pos);
             match site.kind {
                 targets::Kind::Launcher => {
                     self.cv.tri([p[0], p[1] - 4.0 * s], [p[0] - 3.5 * s, p[1] + 3.0 * s], [p[0] + 3.5 * s, p[1] + 3.0 * s], RED);
-                    self.cv.text("SA-6", p[0] + 5.0 * s, p[1], sm, RED, Align::Left);
+                    let lx = (p[0] + 5.0 * s).min(x + w - Canvas::text_width("SA-6", sm) - 2.0 * s).max(x + 2.0 * s);
+                    let ly = p[1].clamp(y + 5.0 * s, y + h - 5.0 * s);
+                    if !sam_labels.iter().any(|&(sx, sy)| (sx-lx).abs() < 32.0 * sm && (sy-ly).abs() < 10.0 * sm) {
+                        self.cv.text("SA-6", lx, ly, sm, RED, Align::Left);
+                        sam_labels.push((lx, ly));
+                    }
                 }
                 targets::Kind::Zsu => self.cv.disc(p[0], p[1], 2.0 * s, AMBER),
                 targets::Kind::Radar => {}
@@ -666,7 +689,7 @@ impl<'a> Ui<'a> {
     /// Result of a DOGFIGHT or STRIKE sortie.
     fn combat_result(&mut self, r: &RunResult) {
         if r.mission == MissionKind::Airfield && r.kind == Outcome::Win {
-            let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)];
+            let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)];
             self.status_panel(
                 "// FULL STOP, RUNWAY A",
                 DIM,
@@ -688,7 +711,7 @@ impl<'a> Ui<'a> {
                 RED,
                 &format!("The gorge is unforgiving. You flew {} and took down {} bandits and {} ground targets.", format_time(r.time), r.done, r.total),
                 [("FLOWN", format_time(r.time), CREAM), ("KILLS", r.done.to_string(), GREEN), ("TARGETS", r.total.to_string(), GREEN), ("SCORE", pad(r.score, 5), AMBER)],
-                &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)],
+                &[("FLY AGAIN", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)],
                 "",
             );
             return;
@@ -696,7 +719,7 @@ impl<'a> Ui<'a> {
         let fight = r.mission == MissionKind::Dogfight;
         let (what, unit) = if fight { ("KILLS", "bandits") } else { ("TARGETS", "primary targets") };
         let tally = format!("{} / {}", r.done, r.total);
-        let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MISSION BOARD", "ESC", Action::Menu)];
+        let again: &[(&str, &str, Action)] = &[("FLY AGAIN", "R", Action::Restart), ("MAIN MENU", "ESC", Action::Menu)];
         match r.kind {
             Outcome::Win => {
                 let rank = match (fight, r.time) {
@@ -761,7 +784,7 @@ impl<'a> Ui<'a> {
         self.cv.rect(w - 1.0, 0.0, 1.0, self.h, rgba(0x78, 0x8e, 0x7b, 1.0));
         let m = 10.0 * s;
         let mut y = m + 4.0 * s;
-        self.cv.text("CONTROLS / CONFIG", m, y, s, CREAM, Align::Left);
+        self.cv.text("CONTROLS", m, y, s, CREAM, Align::Left);
         let cw = self.button_width("CLOSE", "K");
         self.button("CLOSE", "K", w - m - cw, y - 7.5 * s, false, Action::Controls);
         y += 16.0 * s;
@@ -834,14 +857,7 @@ impl<'a> Ui<'a> {
         // The controller map is long: like the key bindings, it gets its own
         // panel beside the drawer, which then holds only the settings.
         let rows: Vec<(&str, &str)> = pitch_rows.iter().chain(rest.iter()).copied().collect();
-        if !(self.pad && self.pad_map(&rows, w)) {
-            for &(k, v) in &rows {
-                self.cv.text(k, m, y, sm, ACID, Align::Left);
-                self.cv.text(v, m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
-                y += 11.0 * sm;
-                self.cv.rect(m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
-            }
-        }
+        if self.pad { self.pad_map(&rows, w); }
         y += 6.0 * s;
         let slider = |ui: &mut Ui, y: f32, label: &str, value: String, t: f64, down: Action, up: Action| {
             ui.cv.text(label, m, y, sm, CREAM, Align::Left);
@@ -862,13 +878,13 @@ impl<'a> Ui<'a> {
         y += 30.0 * s;
         slider(self, y, "COCKPIT FIELD OF VIEW", format!("{}°", st.fov.round()), (st.fov - FOV_MIN) / (FOV_MAX - FOV_MIN), Action::FovDown, Action::FovUp);
         y += 30.0 * s;
-        if !self.pad {
+        {
             self.button(if st.pitch == PitchSource::Mouse { "PITCH INPUT: MOUSE" } else { "PITCH INPUT: W / S" }, "", m, y, false, Action::Pitch);
             y += 18.0 * s;
         }
         self.button(if st.invert_pitch { "[X] INVERT PITCH" } else { "[ ] INVERT PITCH" }, "", m, y, false, Action::Invert);
         y += 18.0 * s;
-        if self.pad {
+        {
             self.button(if st.pad_layout == PadLayout::Combat { "PAD LAYOUT: COMBAT" } else { "PAD LAYOUT: CLASSIC" }, "", m, y, false, Action::PadLayout);
             y += 18.0 * s;
         }
@@ -877,11 +893,11 @@ impl<'a> Ui<'a> {
         self.button(if st.performance_overlay { "[X] PERFORMANCE OVERLAY" } else { "[ ] PERFORMANCE OVERLAY" }, "", m, y, false, Action::Performance);
         y += 18.0 * s;
 
-        let note = if self.pad { "Expo softens the stick round the centre for fine aiming and keeps full travel at the rim. Invert pitch flips the controller too." } else { "Only the selected input pitches the jet. Invert pitch flips the mouse, W / S and the controller." };
+        let note = "Mouse and controller work together. Invert pitch applies to both. Use the input map on the right.";
         y += self.cv.paragraph(note, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0)) + 2.0 * s;
         if paused_flight {
             self.button("RESTART", "", m, y, false, Action::Restart);
-            self.button("MISSION BOARD", "", m + 75.0 * s, y, false, Action::Menu);
+            self.button("MAIN MENU", "", m + 75.0 * s, y, false, Action::Menu);
             y += 18.0 * s;
         }
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
@@ -898,24 +914,19 @@ impl<'a> Ui<'a> {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         let m = 8.0 * s;
-        let row = 11.0 * sm;
-        let need = rows.iter().map(|&(_, v)| Canvas::text_width(v, sm)).fold(0.0, f32::max) + 72.0 * sm + 2.0 * m;
-        let w = (240.0 * s).max(need);
-        if w > self.w - x0 - 4.0 {
-            return false;
-        }
-        let h = (rows.len() as f32 + 1.0) * row + 12.0 * s + 2.0 * m;
-        let (x, y0) = (x0 + 4.0, (12.0 * s).min((self.h - h).max(0.0)));
+        let w = (340.0 * s).min(self.w - x0 - 4.0);
+        if w < 120.0 * s { return false; }
+        let (x, y0, h) = (x0 + 4.0, 12.0 * s, self.h - 24.0 * s);
         self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
         self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
+        let key_w = rows.iter().map(|&(k, _)| Canvas::text_width(k, sm)).fold(72.0 * sm, f32::max) + 8.0 * sm;
         let mut y = y0 + m + 4.0 * s;
-        self.cv.text("XBOX CONTROLLER", x + m, y, s, CREAM, Align::Left);
-        y += 12.0 * s;
+        self.cv.text("INPUT MAP: CONTROLLER", x + m, y, sm, CREAM, Align::Left);
+        y += 16.0 * sm;
         for &(k, v) in rows {
             self.cv.text(k, x + m, y, sm, ACID, Align::Left);
-            self.cv.text(v, x + m + 72.0 * sm, y, sm, rgba(0xb3, 0xc3, 0xb7, 1.0), Align::Left);
-            y += row;
-            self.cv.rect(x + m, y - 5.5 * sm, w - 2.0 * m, 1.0, rgba(0x25, 0x35, 0x2e, 1.0));
+            let used = self.cv.paragraph(v, x + m + key_w, y, w - 2.0 * m - key_w, sm, 1.25, rgba(0xb3, 0xc3, 0xb7, 1.0));
+            y += used.max(11.0 * sm);
         }
         true
     }
@@ -926,17 +937,17 @@ impl<'a> Ui<'a> {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         let m = 8.0 * s;
-        let row = 13.0 * sm;
-        let w = (240.0 * s).min(self.w - x0 - 4.0);
+        let row = (13.0 * sm).min(((self.h - 68.0 * s - 35.0 * sm) / BINDS.len() as f32).max(10.0 * sm));
+        let w = (340.0 * s).min(self.w - x0 - 4.0);
         if w < 120.0 * s {
             return;
         }
-        let h = (BINDS.len() as f32 + 3.6) * row + 2.0 * m;
-        let (x, y0) = (x0 + 4.0, (12.0 * s).min((self.h - h).max(0.0)));
+        let h = self.h - 24.0 * s;
+        let (x, y0) = (x0 + 4.0, 12.0 * s);
         self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
         self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
         let mut y = y0 + m + 4.0 * s;
-        self.cv.text("KEY BINDINGS", x + m, y, s, CREAM, Align::Left);
+        self.cv.text("INPUT MAP: KEYBOARD", x + m, y, sm, CREAM, Align::Left);
         y += 12.0 * s;
         let c1 = x + m + 108.0 * sm;
         let cw = (w - 2.0 * m - 108.0 * sm - 4.0 * sm) * 0.5;
@@ -954,7 +965,7 @@ impl<'a> Ui<'a> {
         }
         y += 4.0 * s;
         self.button("RESET KEYS", "", x + m, y, false, Action::ResetKeys);
-        self.cv.text("BACKSPACE CLEARS, ESC CANCELS", x + w - m, y + 7.0 * s, sm, DIM, Align::Right);
+        self.cv.text("BACKSPACE CLEARS, ESC CANCELS", x + m, y + 23.0 * s, sm, DIM, Align::Left);
     }
 }
 
@@ -995,7 +1006,9 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if a.gear > 0.0 && a.airspeed_kt > crate::sim::spec::GEAR_LIMIT_KT {
         w.push(Warn { text: "GEAR SPEED", color: AMBER });
     }
-    if a.gear_damage >= crate::sim::spec::GEAR_JAM {
+    if a.gear_broken.iter().any(|&b| b) {
+        w.push(Warn { text: "GEAR BROKEN", color: RED });
+    } else if a.gear_damage >= crate::sim::spec::GEAR_JAM {
         w.push(Warn { text: "GEAR JAMMED", color: RED });
     } else if a.gear_damage > 0.1 {
         w.push(Warn { text: "GEAR DAMAGED", color: AMBER });
@@ -1080,6 +1093,7 @@ pub struct StickCue {
     pub yaw: f64,
     pub roll: f64,
     pub source: PitchSource,
+    pub layout: PadLayout,
     pub pad: bool,
     pub brake: bool,
 }
@@ -1258,7 +1272,7 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
             cv.text(w2.text, w * 0.5, y + 16.0 * s, s, w2.color, Align::Center);
         }
     }
-    cv.text(if cue.pad { "{X} CENTER  //  {RS} ORBIT" } else { "C CENTER  //  ALT + MOUSE ORBIT" }, edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
+    cv.text(if cue.pad { "{RS} ORBIT" } else { "C CENTER  //  ALT + MOUSE ORBIT" }, edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
     cv.text(&format!("FUEL {} LB", pad(a.fuel * 2.20462, 4)), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
     if a.gear > 0.0 || a.flaps > 0.0 {
         let gear = if a.gear >= 1.0 { "GEAR DN" } else if a.gear > 0.0 { "GEAR TRANSIT" } else { "GEAR UP" };
@@ -1266,11 +1280,11 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
         cv.text(&text, edge, h - 44.0 * s, sm, if a.gear > 0.0 && a.gear < 1.0 { AMBER } else { with_alpha(HUD, 0.6) }, Align::Left);
     }
     cv.text(if cue.pad { "{Y} COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
-    let hint = match (cue.pad, cue.source) {
-        (true, _) => "{LS} PITCH / ROLL  ,  {LB} {RB} RUDDER",
-        (false, PitchSource::Mouse) => "A / D  ROLL  ,  MOUSE PITCH / YAW",
-        (false, PitchSource::Keys) => "A / D  ROLL  ,  W / S  PITCH  ,  MOUSE YAW",
-    };
+    let hint = if cue.pad {
+        if cue.layout == PadLayout::Combat { "{LS} PITCH / ROLL  ,  {X} + {LS} RUDDER" }
+        else { "{LS} PITCH / ROLL  ,  {LB} {RB} RUDDER" }
+    } else if cue.source == PitchSource::Mouse { "A / D  ROLL  ,  MOUSE PITCH / YAW" }
+    else { "A / D  ROLL  ,  W / S  PITCH  ,  MOUSE YAW" };
     cv.text(hint, w - edge, h - 14.0 * s, sm, with_alpha(HUD, 0.48), Align::Right);
     stick_cue(cv, w - edge - 22.0 * s, h - bottom_h - 34.0 * s, s, cue);
 }
@@ -1324,5 +1338,32 @@ fn air_panel(cv: &mut Canvas, x: f32, y: f32, s: f32, a: &Aircraft) {
     bar_meter(cv, bx, y2, bw, bh, 0.0, 2.2, 0.0, ad.mach, m_col, &[(1.0, with_alpha(HUD, 0.8)), (ad.vmax_mach, RED)], &[]);
     for (i, r) in rows.iter().enumerate() {
         cv.text(r, x, rows_y + i as f32 * line, u, with_alpha(HUD, 0.7), Align::Left);
+    }
+}
+
+#[cfg(test)]
+mod menu_geometry_tests {
+    use super::*;
+    #[test]
+    fn window_borders_do_not_halve_the_overlay_font() {
+        assert_eq!(ui_scale(1280.0, 701.0), 2.0);
+        assert_eq!(ui_scale(1920.0, 1061.0), 3.0);
+        assert_eq!(ui_scale(800.0, 600.0), 1.0);
+        assert_eq!(ui_scale(960.0, 540.0), 1.0);
+    }
+
+    #[test]
+    fn directional_navigation_keeps_rows_and_columns() {
+        let buttons = [
+            Button { x: 10.0, y: 10.0, w: 100.0, h: 20.0, action: Action::Start },
+            Button { x: 120.0, y: 10.0, w: 80.0, h: 20.0, action: Action::Mute },
+            Button { x: 10.0, y: 40.0, w: 100.0, h: 20.0, action: Action::Controls },
+            Button { x: 120.0, y: 40.0, w: 80.0, h: 20.0, action: Action::Quit },
+        ];
+        assert_eq!(navigation(&buttons, 0, 1.0, 0.0), Some(1));
+        assert_eq!(navigation(&buttons, 0, 0.0, 1.0), Some(2));
+        assert_eq!(navigation(&buttons, 3, 0.0, -1.0), Some(1));
+        assert_eq!(navigation(&buttons, 3, -1.0, 0.0), Some(2));
+        assert_eq!(navigation(&buttons, 0, 0.0, -1.0), None);
     }
 }

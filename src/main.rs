@@ -38,6 +38,7 @@ mod texture;
 mod ui;
 mod vapor;
 mod weapons;
+mod warnings;
 mod world;
 
 use audio::{Audio, Params, Wave};
@@ -84,6 +85,7 @@ enum View {
 #[derive(Default)]
 struct Opts {
     autostart: bool,
+    audio_demo: Option<String>,
     chase: bool,
     shot: Option<String>,
     frames: u32,
@@ -133,6 +135,7 @@ fn parse_opts() -> Opts {
         };
         match args[i].as_str() {
             "--autostart" => o.autostart = true,
+            "--audio-demo" => o.audio_demo = Some(next(&mut i)),
             "--chase" => o.chase = true,
             "--shot" => o.shot = Some(next(&mut i)),
             "--frames" => o.frames = next(&mut i).parse().unwrap_or(3),
@@ -269,7 +272,7 @@ struct App {
     transition_kind: Outcome,
     flash: f64,
     flash_color: [u8; 3],
-    warn_clock: f64,
+    warnings: warnings::Warnings,
     /// Seconds the countermeasure button has been held since the last program.
     cm_hold: f64,
     /// The pilot's ejection once the handle is pulled, and how long it has
@@ -427,7 +430,7 @@ impl App {
             transition_kind: Outcome::Win,
             flash: 0.0,
             flash_color: [180, 255, 190],
-            warn_clock: 0.0,
+            warnings: warnings::Warnings::default(),
             cm_hold: 0.0,
             ejection: None,
             eject_hold: 0.0,
@@ -617,6 +620,7 @@ impl App {
         self.aircraft = Some(a);
         self.trigger_mouse = false;
         self.pilot = Pilot::default();
+        self.warnings = warnings::Warnings::default();
         self.breaths = 0;
         self.state = State::Flying;
         self.accumulator = 0.0;
@@ -735,20 +739,6 @@ impl App {
 
     fn save(&self) {
         settings::save(&self.settings, &self.best);
-    }
-
-    /// The menu button nearest the highlighted one to its right (`dir` 1)
-    /// or left (-1), favouring the same row over the same column.
-    fn beside(&self, dir: f32) -> Option<usize> {
-        let cur = self.buttons.get(self.selected)?;
-        let (cx, cy) = (cur.x + cur.w * 0.5, cur.y + cur.h * 0.5);
-        self.buttons
-            .iter()
-            .enumerate()
-            .filter(|&(i, b)| i != self.selected && (if dir > 0.0 { b.x >= cur.x + cur.w } else { b.x + b.w <= cur.x }))
-            .map(|(i, b)| (i, ((b.x + b.w * 0.5 - cx) * dir).abs() + 3.0 * (b.y + b.h * 0.5 - cy).abs()))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| i)
     }
 
     fn act(&mut self, a: Action) {
@@ -943,7 +933,7 @@ impl App {
                 self.flash_color = [255, 170, 70];
                 self.flash = 0.45;
                 self.flash_toast("TIME EXPIRED", 2.0);
-                self.audio.warn_stall();
+                self.audio.warning(self.config.jet, warnings::Cue::LowSpeed);
             }
         }
     }
@@ -1085,9 +1075,11 @@ impl App {
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
         keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
+        let pad_navigation = !keys.is_empty();
         for k in keys {
             self.key_down_event(k, KeyMods::default(), false);
         }
+        if pad_navigation { self.pad_active = true; }
         if !menu {
             let airbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Airbrake)) };
             let actions: &[(u16, Bind)] = match self.settings.pad_layout {
@@ -1420,7 +1412,7 @@ impl App {
         let mut mark = a.clone();
         mark.pos = self.mission.current_gate().pos + V3::Y * 250.0;
         mark.vel = V3::ZERO;
-        let pic = ai::Picture { foe: &mark, missile: None, missiles: 0, missile_spec: &weapons::AIM9M, rounds: 0 };
+        let pic = ai::Picture { foe: &mark, missile: None, missiles: 0, missile_spec: &weapons::AIM9M, rounds: 0, tactical: ai::Tactical { combat: false, ..Default::default() } };
         let pilot = self.auto_pilot.get_or_insert_with(|| ai::Pilot::new(0.6));
         pilot.fly(a, &pic, FIXED_DT).input
     }
@@ -1561,12 +1553,13 @@ impl App {
             q = q.mul(Quat::axis_angle(V3::Z, sr * shake * 1.1));
         }
         q = q.mul(Quat::axis_angle(V3::Y, -self.look.0));
-        let reach = smoothstep(0.0, 0.55, self.hands.eject);
-        let pitch = mix(self.look.1, self.look.1.min(-65.0 * DEG), reach);
+        let reach = smoothstep(0.0, 0.20, self.hands.eject) * (1.0 - smoothstep(0.60, 0.95, self.hands.eject));
+        let pitch = mix(self.look.1, self.look.1.min(-55.0 * DEG), reach);
         q = q.mul(Quat::axis_angle(V3::X, pitch));
         let ax = q.axes();
-        // Bow forward over the chest to see both hands at the seat handle.
-        let eye = cockpit::eye_world(a) + a.q.axes().forward * (0.18 * reach);
+        // Head remains against the seat; the raised handle and clear arm path
+        // make the grip visible without leaning into the ejection rails.
+        let eye = cockpit::eye_world(a);
         Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() }
     }
 
@@ -1585,7 +1578,7 @@ impl App {
                 + if hanging { -25.0 * DEG } else { 0.0 };
             let q = p.q.mul(Quat::axis_angle(V3::Y, -self.look.0)).mul(Quat::axis_angle(V3::X, pitch));
             let ax = q.axes();
-            let eye = p.pos + p.q.rotate(v3(0.0, 0.52, -0.16));
+            let eye = p.pos + p.q.rotate(v3(0.0, 0.52, 0.0));
             return Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() };
         }
         let course = v3(p.vel.x, 0.0, p.vel.z);
@@ -1681,15 +1674,18 @@ impl App {
         if let (Some(a), true) = (&self.aircraft, active) {
             let (thr, speed, ab) = (a.throttle as f32, a.speed as f32, a.afterburner_visual as f32);
             p.eng_gain = (0.025 + thr * 0.07 + ab * 0.075).clamp(0.0, 0.2);
-            p.eng_freq = 280.0 + speed * 5.0 + thr * 600.0 + ab * 800.0;
+            let rpm = ((a.rpm as f32 - 45.0) / 55.0).clamp(0.0, 1.05);
+            p.eng_freq = 450.0 + rpm * 1900.0;
+            p.engines = if a.kind == sim::Type::Mig29 { 2.0 } else { 1.0 };
+            p.burner = ab;
             // Separated flow roars and shudders through the airframe.
             let buffet = a.buffet as f32;
             p.wind_gain = (speed / 330.0 * 0.055).clamp(0.0, 0.07) + buffet * 0.03;
             p.wind_freq = 500.0 + speed * 14.0;
             p.rumble_gain = 0.008 + thr * 0.012 + ab * 0.015 + buffet * 0.035;
             p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0 - buffet * 12.0;
-            p.whine_gain = 0.0015 + thr * 0.003;
-            p.whine_freq = 620.0 + thr * 560.0 + ab * 250.0;
+            p.whine_gain = 0.002 + rpm * 0.006;
+            p.whine_freq = 750.0 + rpm * 2250.0;
             p.gun = if self.combat.firing { 0.34 } else { 0.0 };
             p.gun_rate = self.combat.loadout.gun.rate as f32;
             // Sidewinder tone: a low growl while the seeker searches, a high
@@ -1885,16 +1881,10 @@ impl EventHandler for App {
                         self.breaths = self.pilot.breaths;
                         self.audio.breath();
                     }
-                    let (pu, st) = (ui::pull_up(a), ui::stall(a));
-                    self.warn_clock -= dt;
-                    if self.warn_clock <= 0.0 && (pu || st) {
-                        if pu {
-                            self.audio.warn_pull_up();
-                        } else {
-                            self.audio.warn_stall();
-                        }
-                        self.warn_clock = if pu || a.departure > 0.4 { 0.8 } else { 1.5 };
+                    if !self.settings.muted {
+                        if let Some(cue) = self.warnings.update(dt, a) { self.audio.warning(a.kind, cue); }
                     }
+
                 }
             }
             State::Transition => {
@@ -1995,7 +1985,7 @@ impl EventHandler for App {
         let i = if self.state == State::Flying { self.read_control_positions() } else { Input { airbrake: self.airbrake, ..Default::default() } };
         let pad = self.pad_active;
         let obj = self.objective();
-        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, pad, brake: self.airbrake };
+        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, layout: self.settings.pad_layout, pad, brake: self.airbrake };
         {
             let cv = &mut self.overlay;
             if flying_view {
@@ -2037,7 +2027,7 @@ impl EventHandler for App {
                 cv.rect(0.0, 0.0, w, h, rgba(c[0], c[1], c[2], (self.flash * 0.34) as f32));
             }
             let s = ui::ui_scale(w, h);
-            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: self.mouse_pos, pad, layout: self.settings.pad_layout };
+            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout };
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
@@ -2233,24 +2223,17 @@ impl EventHandler for App {
             return;
         }
         if in_menu && !self.buttons.is_empty() {
-            // Left and right jump to the nearest button that way, across
-            // columns; with none there they step through the order.
-            if matches!(key, KeyCode::Left | KeyCode::Right) && !self.controls_open {
-                if let Some(i) = self.beside(if key == KeyCode::Right { 1.0 } else { -1.0 }) {
-                    self.selected = i;
-                    return;
-                }
+            let direction = match key {
+                KeyCode::Left => Some((-1.0, 0.0)), KeyCode::Right => Some((1.0, 0.0)),
+                KeyCode::Up => Some((0.0, -1.0)), KeyCode::Down => Some((0.0, 1.0)), _ => None,
+            };
+            if let Some((dx, dy)) = direction {
+                if let Some(i) = ui::navigation(&self.buttons, self.selected, dx, dy) { self.selected = i; }
+                return;
             }
-            match key {
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right if !(self.controls_open && matches!(key, KeyCode::Right)) => {
-                    self.selected = (self.selected + 1) % self.buttons.len();
-                    return;
-                }
-                KeyCode::Up | KeyCode::Left if !(self.controls_open && matches!(key, KeyCode::Left)) => {
-                    self.selected = (self.selected + self.buttons.len() - 1) % self.buttons.len();
-                    return;
-                }
-                _ => {}
+            if key == KeyCode::Tab {
+                self.selected = (self.selected + 1) % self.buttons.len();
+                return;
             }
         }
         if self.controls_open {
@@ -2261,8 +2244,6 @@ impl EventHandler for App {
                         self.act(b.action);
                     }
                 }
-                KeyCode::Left => self.act(Action::SensDown),
-                KeyCode::Right => self.act(Action::SensUp),
                 _ => {}
             }
             return;
@@ -2346,6 +2327,10 @@ impl EventHandler for App {
 
 fn main() {
     let opts = parse_opts();
+    if let Some(path) = &opts.audio_demo {
+        audio::demo(path, opts.jet.unwrap_or_default()).expect("write audio demo");
+        return;
+    }
     let shot = opts.shot.is_some();
     let bench = opts.bench.is_some();
     let (win_w, win_h) = opts.size.unwrap_or((1280, 720));

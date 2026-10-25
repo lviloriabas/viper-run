@@ -75,6 +75,8 @@ pub mod spec {
     pub const FLAP_BLOWBACK_KT: f64 = 370.0;
     /// Gear damage that jams the legs where they are.
     pub const GEAR_JAM: f64 = 0.5;
+    /// Continued air loading can fracture a strut after the mechanism jams.
+    pub const GEAR_BREAK: f64 = 0.90;
 }
 use spec::*;
 
@@ -1408,7 +1410,7 @@ impl Aircraft {
         // moment the FLCS trims out.
         let fl = self.flaps;
         // Torn doors and bent legs or flaperons drag more than whole ones.
-        let parasite = GEAR_DRAG * self.gear * (1.0 + 1.5 * self.gear_damage) + FLAP_CD * (fl + 0.4 * self.flap_damage);
+        let parasite = GEAR_DRAG * self.gear * (1.0 + 1.5 * self.gear_damage + self.gear_broken.iter().filter(|&&b| b).count() as f64 * 0.25) + FLAP_CD * (fl + 0.4 * self.flap_damage);
         c.cx -= parasite * alpha.cos();
         c.cz -= parasite * alpha.sin() + FLAP_CL * fl * alpha.cos();
         c.cm -= 0.025 * fl;
@@ -1519,6 +1521,12 @@ impl Aircraft {
         let over = self.airspeed_kt - GEAR_LIMIT_KT;
         if self.gear > 0.05 && over > 0.0 {
             self.gear_damage = (self.gear_damage + dt * self.gear * 0.6 * (over / 80.0).powi(2)).min(1.0);
+            if self.gear_damage >= GEAR_BREAK {
+                // Nose leg first; still stronger loads can break either main leg.
+                for (i, threshold) in [GEAR_BREAK, 0.96, 0.99].iter().enumerate() {
+                    if self.gear_damage >= *threshold { self.gear_broken[i] = true; }
+                }
+            }
         }
         let over = self.airspeed_kt - FLAP_BLOWBACK_KT - 20.0;
         if self.flaps > 0.05 && over > 0.0 {
@@ -2338,5 +2346,28 @@ mod ground_tests {
         }
         assert!(!a.crashed && a.vs < -20.0, "sinking at {:.0} m/s", a.vs);
         assert!(a.omega.len() > 1.0 || a.bank.abs() > 60.0, "bank {:.0}", a.bank);
+    }
+}
+
+#[cfg(test)]
+mod overspeed_gear_tests {
+    use super::*;
+    #[test]
+    fn air_load_jams_then_breaks_the_gear_and_retraction_does_not_repair_it() {
+        for kind in [Type::F16, Type::Mig29] {
+            let mut a = crate::combat::spawn(v3(0.0, 6000.0, 0.0), 0.0, 340.0);
+            a.set_type(kind); a.gear = 1.0;
+            let mut saw_jam = false;
+            for _ in 0..1200 {
+                a.update(FIXED_DT, &Input { gear_down: true, ..Default::default() });
+                saw_jam |= a.gear_damage >= spec::GEAR_JAM && !a.gear_broken.iter().any(|&b| b);
+                if a.gear_broken.iter().all(|&b| b) { break; }
+            }
+            assert!(saw_jam && a.gear_broken.iter().any(|&b| b), "{kind:?} {}", a.gear_damage);
+            let damaged = a.gear;
+            for _ in 0..120 { a.update(FIXED_DT, &Input::default()); }
+            assert_eq!(a.gear, damaged);
+            assert!(a.gear_broken.iter().any(|&b| b));
+        }
     }
 }

@@ -555,13 +555,17 @@ fn display(m: &mut Mesh, f: &Frame, bw: f64, bh: f64, sw: f64, sh: f64, rect: R,
 }
 
 fn gauge(m: &mut Mesh, f: &Frame, radius: f64, rect: R) {
+    gauge_mount(m, f, radius, rect, 0.013);
+}
+
+fn gauge_mount(m: &mut Mesh, f: &Frame, radius: f64, rect: R, margin: f64) {
     m.ring(&f.at(0.0, 0.0, 0.014), radius, radius + 0.008, 0.014, BEZEL.scale(1.1), GAUGE_SIDES);
-    m.disc_uv(&f.at(0.0, 0.0, 0.004), radius, uv(rect), GAUGE_SIDES);
+    m.disc_uv(&f.at(0.0, 0.0, 0.025), radius, uv(rect), GAUGE_SIDES);
     // Square mounting flange with four screws, as on the real gauges.
     let flange = f.at(0.0, 0.0, 0.002);
-    m.bezel(&flange, &rounded_rect(radius * 2.0 + 0.026, radius * 2.0 + 0.026, 0.006, 1), &rounded_rect(radius * 2.0 + 0.012, radius * 2.0 + 0.012, 0.004, 1), 0.002, 0.0, BEZEL.scale(0.8));
+    m.bezel(&flange, &rounded_rect((radius + margin) * 2.0, (radius + margin) * 2.0, 0.006, 1), &rounded_rect(radius * 2.0 + 0.012, radius * 2.0 + 0.012, 0.004, 1), 0.002, 0.0, BEZEL.scale(0.8));
     for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-        let c = radius + 0.007;
+        let c = radius + margin * 0.55;
         m.block(&f.at(sx * c, sy * c, 0.004), v3(0.0025, 0.0025, 0.002), METALC.scale(0.6));
     }
 }
@@ -623,7 +627,10 @@ fn build_static(m: &mut Mesh) {
     }
     // Glare shield: a hood from the panel top edge up toward the windscreen.
     let top = &OUTLINE[4..];
-    let shield = |u: f64, v: f64, t: f64| pp(u * (1.0 - 0.06 * t), v + 0.012 + 0.05 * t, 0.045 - 0.42 * t);
+    let shield = |u: f64, v: f64, t: f64| {
+        let depth = mix(0.42, 0.16, smoothstep(0.30, 0.47, u.abs()));
+        pp(u * (1.0 - 0.06 * t), v + 0.012 + 0.05 * t, 0.045 - depth * t)
+    };
     for k in 0..top.len() - 1 {
         let (a, b) = (top[k], top[k + 1]);
         for s in 0..4 {
@@ -676,15 +683,15 @@ fn build_static(m: &mut Mesh) {
     gauge(m, &panel_at(0.091, 0.635, 0.0), 0.022, R_VVI);
     // RWR above the left MFD; engine gauges follow the right shoulder.
     display(m, &panel_at(-0.245, 0.951, 0.0), 0.085, 0.080, 0.063, 0.061, R_RWR, false);
-    for (i, y) in [0.84, 0.77, 0.70, 0.63].iter().enumerate() {
-        gauge(m, &panel_at(0.392, *y, 0.0), 0.026, R_DIALS[3 + i]);
+    for (i, y) in [0.895, 0.834, 0.773, 0.712].iter().enumerate() {
+        gauge_mount(m, &panel_at(0.372, *y, 0.0), 0.022, R_DIALS[3 + i], 0.008);
     }
-    plate(m, &panel_at(-0.376, 0.834, 0.0), 0.046, 0.14, R_ARM);
+    plate(m, &panel_at(-0.376, 0.831, 0.0), 0.046, 0.110, R_ARM);
     // Accelerometer low on the left wing, clear of the leg well; the fuel
     // quantity is on the right auxiliary console.
-    gauge(m, &panel_at(-0.385, 0.714, 0.0), 0.032, R_ACCEL);
-    plate(m, &panel_at(-0.39, 0.91, 0.0), 0.062, 0.030, R_TWP);
-    plate(m, &panel_at(0.356, 0.90, 0.0), 0.065, 0.024, R_FFLOW);
+    gauge(m, &panel_at(-0.385, 0.730, 0.0), 0.026, R_ACCEL);
+    plate(m, &panel_at(-0.39, 0.911, 0.0), 0.062, 0.024, R_TWP);
+    plate(m, &panel_at(0.232, 0.907, 0.0), 0.130, 0.016, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -772,8 +779,41 @@ fn build_static(m: &mut Mesh) {
 }
 
 #[cfg(test)]
+pub(super) fn blocked(eye: V3, target: V3, tri: &[f32]) -> bool {
+        let pos = |i: usize| v3(tri[i] as f64, tri[i + 1] as f64, tri[i + 2] as f64);
+        let (a, b, c) = (pos(0), pos(crate::mesh::STRIDE), pos(crate::mesh::STRIDE * 2));
+        let (ab, ac, ray) = (b - a, c - a, target - eye);
+        let h = ray.cross(ac);
+        let det = ab.dot(h);
+        if det.abs() < 1e-10 { return false; }
+        let s = eye - a;
+        let u = s.dot(h) / det;
+        let q = s.cross(ab);
+        let v = ray.dot(q) / det;
+        let t = ac.dot(q) / det;
+        u >= 0.0 && v >= 0.0 && u + v <= 1.0 && t > 0.001 && t < 0.995
+    }
+
+
+#[cfg(test)]
 mod geometry_tests {
     use super::*;
+
+    #[test]
+    fn outer_gauges_are_visible_past_coaming_and_auxiliary_shelves() {
+        let mut mesh = Mesh::new();
+        build_static(&mut mesh);
+        for (u, y, r) in [(0.372, 0.895, 0.022), (0.372, 0.834, 0.022),
+            (0.372, 0.773, 0.022), (0.372, 0.712, 0.022), (-0.385, 0.730, 0.026)] {
+            let f = panel_at(u, y, 0.0);
+            for k in 0..16 {
+                let a = k as f64 * TAU / 16.0;
+                let target = f.p(a.cos() * r * 0.90, a.sin() * r * 0.90, 0.025);
+                assert!(!mesh.v.chunks(crate::mesh::STRIDE * 3).any(|tri| blocked(airframe::EYE, target, tri)),
+                    "gauge at {u},{y} is obscured at sample {k}");
+            }
+        }
+    }
 
     #[test]
     fn panel_shoulders_stay_below_the_outline_and_inside_the_tub() {
@@ -1700,9 +1740,10 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
     let half = 70.0;
     let ad = AirData::of(a);
     let radio_m = ad.radar_ft * 0.3048;
-    ht(cv, &format!("{:.0}", (ad.kcas * 1.852 / 5.0).round() * 5.0), -half, -40.0, (big * 0.75).max(1.0), Align::Left);
+    ht(cv, &format!("{:.0}", (ad.kcas * 1.852).round()), -half, -40.0, (big * 0.75).max(1.0), Align::Left);
     ht(cv, &format!("М{:.2}", ad.mach), -half, -28.0, small, Align::Left);
-    ht(cv, &format!("{:.0}", (ad.baro_ft * 0.3048 / 10.0).round() * 10.0), half, -40.0, (big * 0.75).max(1.0), Align::Right);
+    let (height, radio) = hud::mig_altitude(radio_m, ad.baro_ft * 0.3048);
+    ht(cv, &format!("{height}{}", if radio { "Р" } else { "" }), half, -40.0, (big * 0.75).max(1.0), Align::Right);
     if radio_m < 1500.0 {
         ht(cv, &format!("{:.0}Р", radio_m), half, -28.0, small, Align::Right);
     }

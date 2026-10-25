@@ -1,6 +1,6 @@
 # F-16 cockpit and flight model
 
-Revised 23 October 2026, native Rust version. The flight base is still the
+Revised 25 October 2026, native Rust version. The flight base is still the
 F-16C Block 50 with the F110-GE-129 engine, ported line by line from the web
 version. The current visual iteration follows the user's F-16C/D reference:
 two square MFDs, an analogue centre stack, an ICP below the HUD and a DED
@@ -11,6 +11,10 @@ approximately realistic distances from the design eye. The modelling is
 procedural, with smooth surfaces and a retro finish through resolution,
 colour and textures. The photos are used as visual reference and are neither
 included as textures nor redistributed.
+
+The follow-up makes small coaming and instrument-clearance corrections and
+refines the handle reach, with visibility tests and Windows screenshots. See
+[COCKPIT-REFINEMENT.md](COCKPIT-REFINEMENT.md) for this pass and its limits.
 
 ## Visual references
 

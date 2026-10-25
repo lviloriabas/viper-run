@@ -11,6 +11,8 @@ pub struct Params {
     pub master: f32,
     pub eng_gain: f32,
     pub eng_freq: f32,
+    pub engines: f32,
+    pub burner: f32,
     pub wind_gain: f32,
     pub wind_freq: f32,
     pub rumble_gain: f32,
@@ -29,7 +31,6 @@ pub struct Params {
 #[derive(Clone, Copy)]
 pub enum Wave {
     Square,
-    Saw,
 }
 
 struct Voice {
@@ -94,12 +95,46 @@ struct Burst {
     lp: Biquad,
 }
 
+struct Speech { pcm: &'static [u8], rate: u32, at: f64, priority: u8 }
+impl Speech {
+    fn new(wav: &'static [u8], priority: u8) -> Option<Self> {
+        if wav.get(..4)? != b"RIFF" || wav.get(8..12)? != b"WAVE" { return None; }
+        let mut pos = 12;
+        let mut rate = 0;
+        while pos + 8 <= wav.len() {
+            let len = u32::from_le_bytes(wav[pos+4..pos+8].try_into().ok()?) as usize;
+            let data = wav.get(pos+8..pos+8+len)?;
+            if &wav[pos..pos+4] == b"fmt " {
+                if data.len() < 16 || data[..2] != [1, 0] || data[2..4] != [1, 0] || data[14..16] != [16, 0] { return None; }
+                rate = u32::from_le_bytes(data[4..8].try_into().ok()?);
+            }
+            if &wav[pos..pos+4] == b"data" && rate > 0 {
+                return Some(Self { pcm: data, rate, at: 0.0, priority });
+            }
+            pos += 8 + len + len % 2;
+        }
+        None
+    }
+    fn next(&mut self) -> Option<f32> {
+        let i = self.at as usize;
+        if i * 2 + 1 >= self.pcm.len() { return None; }
+        let read = |i: usize| i16::from_le_bytes([self.pcm[i*2], self.pcm[i*2+1]]) as f32 / 32768.0;
+        let a = read(i);
+        let b = if (i+1)*2+1 < self.pcm.len() { read(i+1) } else { a };
+        let value = a + (b-a) * self.at.fract() as f32;
+        self.at += self.rate as f64 / RATE as f64;
+        Some(value)
+    }
+}
+
 struct Synth {
     target: Params,
     cur: Params,
     seed: u32,
     brown: [f32; 2],
-    eng: Biquad,
+    eng: [Biquad; 2],
+    engine_phase: [f32; 2],
+    engine_drift: [f32; 2],
     wind: Biquad,
     rumble_lp: Biquad,
     tone_lp: Biquad,
@@ -108,8 +143,7 @@ struct Synth {
     gun_phase: f32,
     gun_env: f32,
     seeker_phase: f32,
-    rumble_phase: f32,
-    whine_phase: f32,
+    speech: Option<Speech>,
     voices: Vec<Voice>,
     crash: Option<u32>,
     bursts: Vec<Burst>,
@@ -122,7 +156,9 @@ impl Synth {
             cur: Params::default(),
             seed: 0x1234567,
             brown: [0.0; 2],
-            eng: Biquad::default(),
+            eng: [Biquad::default(); 2],
+            engine_phase: [0.0, 0.37],
+            engine_drift: [0.0; 2],
             wind: Biquad::default(),
             rumble_lp: Biquad::default(),
             tone_lp: Biquad::default(),
@@ -131,8 +167,7 @@ impl Synth {
             gun_phase: 0.0,
             gun_env: 0.0,
             seeker_phase: 0.0,
-            rumble_phase: 0.0,
-            whine_phase: 0.0,
+            speech: None,
             voices: Vec::new(),
             crash: None,
             bursts: Vec::new(),
@@ -156,6 +191,8 @@ impl Synth {
         glide(&mut c.master, t.master, km);
         glide(&mut c.eng_gain, t.eng_gain, k);
         glide(&mut c.eng_freq, t.eng_freq, k);
+        glide(&mut c.burner, t.burner, k);
+        c.engines = t.engines;
         glide(&mut c.wind_gain, t.wind_gain, k);
         glide(&mut c.wind_freq, t.wind_freq, k);
         glide(&mut c.rumble_gain, t.rumble_gain, k);
@@ -167,9 +204,11 @@ impl Synth {
         glide(&mut c.seeker_gain, t.seeker_gain, km);
         c.seeker_freq = t.seeker_freq;
         let p = self.cur;
-        self.eng.set(true, p.eng_freq.max(40.0), 0.6);
+        for (i, eng) in self.eng.iter_mut().enumerate() {
+            eng.set(true, (p.eng_freq * (1.0 + i as f32 * 0.06)).max(40.0), 0.6);
+        }
         self.wind.set(false, p.wind_freq.max(60.0), 0.35);
-        self.rumble_lp.set(true, 120.0, 0.7);
+        self.rumble_lp.set(true, (p.rumble_freq * 2.5).max(50.0), 0.7);
         // The 30 mm's slower, heavier reports sit lower than the 20 mm's.
         self.gun_lp.set(true, if p.gun_rate < 50.0 { 900.0 } else { 1600.0 }, 0.9);
         for s in out.iter_mut() {
@@ -177,12 +216,22 @@ impl Synth {
             let w1 = self.white();
             self.brown[0] = self.brown[0] * 0.965 + w0 * 0.035;
             self.brown[1] = self.brown[1] * 0.955 + w1 * 0.045;
-            let mut v = self.eng.run(self.brown[0] * 5.5) * p.eng_gain;
+            let noise = [w0, w1];
+            let engines = if p.engines > 1.5 { 2 } else { 1 };
+            let mut v = 0.0;
+            for (i, &n) in noise.iter().enumerate().take(engines) {
+                self.engine_drift[i] = self.engine_drift[i] * 0.99997 + n * 0.00003;
+                let drift = self.engine_drift[i] * 8.0;
+                let turbine = p.whine_freq * (1.0 + i as f32 * 0.017 + drift * 0.006);
+                self.engine_phase[i] = (self.engine_phase[i] + turbine / RATE as f32).fract();
+                let phase = self.engine_phase[i] * TAU;
+                let air = self.eng[i].run(n * 0.55 + self.brown[i] * 3.0);
+                let whine = phase.sin() * 0.7 + (phase * 2.01 + drift).sin() * 0.12;
+                v += (air * p.eng_gain * (1.0 + drift * 0.08)
+                    + whine * p.whine_gain + n * p.burner * p.eng_gain * 0.18) / (engines as f32).sqrt();
+            }
             v += self.wind.run(self.brown[1] * 5.5) * p.wind_gain;
-            self.rumble_phase = (self.rumble_phase + p.rumble_freq / RATE as f32).fract();
-            v += self.rumble_lp.run(self.rumble_phase * 2.0 - 1.0) * p.rumble_gain;
-            self.whine_phase = (self.whine_phase + p.whine_freq / RATE as f32).fract();
-            v += (self.whine_phase * TAU).sin() * p.whine_gain;
+            v += self.rumble_lp.run((self.brown[0] + self.brown[1]) * 5.0) * p.rumble_gain;
             // The gun: a crack of noise for each round, which at 100 a second
             // the ear hears as one tearing buzz, and a thump of the breech
             // under it.
@@ -213,7 +262,6 @@ impl Synth {
                 voice.phase = (voice.phase + voice.freq / RATE as f32).fract();
                 let osc = match voice.wave {
                     Wave::Square => if voice.phase < 0.5 { 1.0 } else { -1.0 },
-                    Wave::Saw => voice.phase * 2.0 - 1.0,
                 };
                 tones += osc * env * voice.vol;
                 voice.t += 1;
@@ -247,6 +295,10 @@ impl Synth {
                 let w = self.white();
                 v += self.crash_lp.run(w * (1.0 - t).powf(2.2) * 0.8) * 0.5;
                 self.crash = if n + 1 < total { Some(n + 1) } else { None };
+            }
+            if let Some(voice) = &mut self.speech {
+                if let Some(sample) = voice.next() { v = v * 0.48 + sample * 0.48; }
+                else { self.speech = None; }
             }
             *s = ((v * p.master).clamp(-1.0, 1.0) * 32000.0) as i16;
         }
@@ -324,14 +376,33 @@ impl Audio {
         self.tone(990.0, 0.17, 0.04, Wave::Square, 0.09);
     }
 
-    pub fn warn_pull_up(&self) {
-        self.tone(640.0, 0.12, 0.05, Wave::Saw, 0.0);
-        self.tone(520.0, 0.12, 0.045, Wave::Saw, 0.15);
+    pub fn warning(&self, kind: crate::sim::Type, cue: crate::warnings::Cue) {
+        use crate::warnings::Cue;
+        if kind == crate::sim::Type::F16 && matches!(cue, Cue::LowSpeed | Cue::HighAoa | Cue::Gear) {
+            let frequency = if cue == Cue::Gear { 800.0 } else { 300.0 };
+            self.tone(frequency, 0.25, 0.10, Wave::Square, 0.0);
+            self.tone(frequency, 0.25, 0.10, Wave::Square, 0.38);
+            return;
+        }
+        let wav: &'static [u8] = match (kind == crate::sim::Type::Mig29, cue) {
+            (false, Cue::PullUp) => include_bytes!("../assets/voices/f16-pullup.wav"),
+            (false, Cue::Altitude) => include_bytes!("../assets/voices/f16-altitude.wav"),
+            (false, Cue::Fire) => include_bytes!("../assets/voices/f16-warning.wav"),
+            (false, _) => include_bytes!("../assets/voices/f16-caution.wav"),
+            (true, Cue::PullUp | Cue::Altitude) => include_bytes!("../assets/voices/mig-altitude.wav"),
+            (true, Cue::HighAoa) => include_bytes!("../assets/voices/mig-aoa.wav"),
+            (true, Cue::LowSpeed | Cue::OverSpeed) => include_bytes!("../assets/voices/mig-speed.wav"),
+            (true, Cue::OverG) => include_bytes!("../assets/voices/mig-g.wav"),
+            (true, Cue::Gear) => include_bytes!("../assets/voices/mig-gear.wav"),
+            (true, Cue::Fire) => include_bytes!("../assets/voices/mig-fire.wav"),
+        };
+        if let Ok(mut s) = self.synth.lock() {
+            if s.speech.as_ref().is_none_or(|v| cue.priority() > v.priority) {
+                s.speech = Speech::new(wav, cue.priority());
+            }
+        }
     }
 
-    pub fn warn_stall(&self) {
-        self.tone(410.0, 0.15, 0.035, Wave::Square, 0.0);
-    }
 }
 
 fn fill(synth: &Arc<Mutex<Synth>>, buf: &mut [i16]) {
@@ -533,5 +604,71 @@ mod backend {
     use super::*;
     pub fn spawn(_synth: Arc<Mutex<Synth>>) -> bool {
         false
+    }
+}
+
+/// A reproducible demonstration: idle, spool up, dry power, afterburner, then VMS.
+pub fn demo(path: &str, kind: crate::sim::Type) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut synth = Synth::new();
+    synth.tone_lp.set(true, 6000.0, 0.7);
+    let mut samples = Vec::new();
+    let blocks = (RATE as usize * 12) / 512;
+    for block in 0..blocks {
+        let time = block as f32 * 512.0 / RATE as f32;
+        let rpm = ((time - 2.0) / 4.0).clamp(0.0, 1.0);
+        let burner = if (7.0..10.0).contains(&time) { 1.0 } else { 0.0 };
+        synth.target = Params { master: 0.65, engines: if kind == crate::sim::Type::Mig29 { 2.0 } else { 1.0 },
+            eng_gain: 0.06 + rpm * 0.06 + burner * 0.06, eng_freq: 450.0 + rpm * 1900.0,
+            whine_gain: 0.002 + rpm * 0.006, whine_freq: 750.0 + rpm * 2250.0,
+            rumble_gain: 0.02 + burner * 0.02, rumble_freq: 40.0 + rpm * 30.0, burner,
+            ..Default::default() };
+        if block == (RATE as usize * 10) / 512 {
+            let wav: &'static [u8] = if kind == crate::sim::Type::Mig29 {
+                include_bytes!("../assets/voices/mig-altitude.wav")
+            } else { include_bytes!("../assets/voices/f16-pullup.wav") };
+            synth.speech = Speech::new(wav, 8);
+        }
+        let mut buf = [0i16; 512];
+        synth.render(&mut buf);
+        samples.extend_from_slice(&buf);
+    }
+    let bytes = samples.len() as u32 * 2;
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(b"RIFF")?; f.write_all(&(36 + bytes).to_le_bytes())?; f.write_all(b"WAVEfmt ")?;
+    f.write_all(&16u32.to_le_bytes())?; f.write_all(&1u16.to_le_bytes())?; f.write_all(&1u16.to_le_bytes())?;
+    f.write_all(&RATE.to_le_bytes())?; f.write_all(&(RATE*2).to_le_bytes())?;
+    f.write_all(&2u16.to_le_bytes())?; f.write_all(&16u16.to_le_bytes())?;
+    f.write_all(b"data")?; f.write_all(&bytes.to_le_bytes())?;
+    for s in samples { f.write_all(&s.to_le_bytes())?; }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn embedded_voice_is_decoded_and_resampled_without_a_loop() {
+        let mut speech = Speech::new(include_bytes!("../assets/voices/f16-pullup.wav"), 8).unwrap();
+        let mut count = 0; let mut energy = 0.0;
+        while let Some(x) = speech.next() { count += 1; energy += x*x; assert!(x.is_finite() && x.abs() <= 1.0); }
+        assert!(count > RATE && count < RATE*3 && energy > 10.0);
+        assert!(speech.next().is_none());
+    }
+    #[test]
+    fn engine_output_is_continuous_nonrepeating_and_not_clipped_for_both_airframes() {
+        for engines in [1.0, 2.0] {
+            let mut s = Synth::new();
+            s.target = Params { master: 0.7, eng_gain: 0.18, eng_freq: 2200.0, engines, burner: 1.0,
+                whine_freq: 2800.0, whine_gain: 0.008, rumble_gain: 0.04, rumble_freq: 70.0, ..Default::default() };
+            let mut previous = [0i16; 512];
+            for i in 0..300 {
+                let mut next = [0i16; 512]; s.render(&mut next);
+                assert!(next.iter().any(|&x| x.abs() > 10));
+                assert!(next.iter().all(|x| x.abs() < 31000));
+                if i > 0 { assert_ne!(next, previous, "audio buffer repeated"); }
+                previous = next;
+            }
+        }
     }
 }

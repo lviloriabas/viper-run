@@ -447,23 +447,33 @@ fn gear_handle(m: &mut Mesh, h: &Hands) {
     loft(m, &[St(tip + f.z * 0.012, 0.010, 0.010, lamp), St(tip + f.z * 0.016, 0.008, 0.008, lamp)], f.x, &OCT);
 }
 
-fn ejection_handle(m: &mut Mesh, pull: f64) {
+fn handle_base(mig: bool) -> V3 { v3(0.0, if mig { 0.580 } else { 0.615 }, -3.720) }
+
+fn ejection_handle(m: &mut Mesh, pull: f64, mig: bool) {
     let lift = smoothstep(0.55, 1.0, pull) * 0.10;
-    for i in 0..8 {
-        let (t0, t1) = (i as f64 * PI / 8.0, (i + 1) as f64 * PI / 8.0);
-        let p = |t: f64| v3(0.06 * t.cos(), 0.535 + lift + 0.045 * t.sin(), -3.655);
-        let col = if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
-        bar(m, p(t0), p(t1), 0.0085, 0.0085, V3::Z, col);
+    let loops: &[f64] = if mig { &[-0.034, 0.034] } else { &[0.0] };
+    for &offset in loops {
+        for i in 0..12 {
+            let (t0, t1) = (i as f64 * TAU / 12.0, (i + 1) as f64 * TAU / 12.0);
+            let p = |t: f64| handle_base(mig) + v3(offset + (if mig { 0.029 } else { 0.060 }) * t.cos(),
+                lift + 0.045 + 0.032 * t.sin(), 0.0);
+            let col = if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
+            bar(m, p(t0), p(t1), 0.007, 0.007, V3::Z, col);
+        }
     }
 }
 
-fn handle_hand(m: &mut Mesh, side: f64, from: V3, pull: f64) {
+fn handle_hand(m: &mut Mesh, side: f64, from: V3, pull: f64, mig: bool) {
     let lift = smoothstep(0.55, 1.0, pull) * 0.10;
-    let target = v3(side * 0.035, 0.568 + lift, -3.655);
+    let target = handle_base(mig) + v3(side * 0.035, 0.033 + lift, 0.0);
+    let reach = smoothstep(0.0, 0.55, pull);
+    // Reach forward before bringing the hands together, clear of the vest.
+    let from = from + V3::Z * (-0.065 * (reach * PI).sin());
     let k = Grip::new(from.lerp(target, smoothstep(0.0, 0.55, pull)), V3::X * side, side);
     let wrist = fist(m, &k, 0.009, 0.009,
         [k.p(-0.02, 0.0, 0.02), k.p(0.0, 0.015, 0.02), k.p(0.016, 0.020, 0.0), k.p(0.015, 0.006, -0.008)]);
-    arm(m, v3(side * SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(side), (0.026, 0.036));
+    arm(m, v3(side * SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist,
+        v3(side * 0.35, -0.45, -1.0), (0.026, 0.036));
 }
 
 /// Legs on the pedals, both arms and the two controls under the hands.
@@ -474,12 +484,12 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     }
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
-    ejection_handle(m, h.eject);
+    ejection_handle(m, h.eject, false);
     if h.eject > 0.0 {
         // Keep the controls visible after the hands leave them.
         throttle(m, h);
-        handle_hand(m, 1.0, k.o, h.eject);
-        handle_hand(m, -1.0, palm(&throttle_grip(h)), h.eject);
+        handle_hand(m, 1.0, k.o, h.eject, false);
+        handle_hand(m, -1.0, palm(&throttle_grip(h)), h.eject, false);
         m.facet();
         return;
     }
@@ -579,11 +589,11 @@ pub fn build_dynamic_mig(m: &mut Mesh, h: &Hands) {
     }
     let k = mig_stick_grip(h);
     mig_stick(m, &k);
-    ejection_handle(m, h.eject);
+    ejection_handle(m, h.eject, true);
     if h.eject > 0.0 {
         mig_throttle(m, h);
-        handle_hand(m, 1.0, k.o, h.eject);
-        handle_hand(m, -1.0, mig_throttle_grip(h), h.eject);
+        handle_hand(m, 1.0, k.o, h.eject, true);
+        handle_hand(m, -1.0, mig_throttle_grip(h), h.eject, true);
         m.facet();
         return;
     }

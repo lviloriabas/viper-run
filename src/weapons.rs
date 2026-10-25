@@ -737,11 +737,13 @@ pub struct Missile {
     pub accel: f64,
     /// Closest the missile has been to its target, m.
     pub best: f64,
+    visibility_clock: f64,
+    notch_time: f64,
 }
 
 impl Missile {
     pub fn launch(spec: &'static Spec, pos: V3, vel: V3, from: Who, target: Option<Who>) -> Missile {
-        Missile { spec, pos, vel, mass: spec.mass, age: 0.0, from, target, tracking: target.is_some(), accel: 0.0, best: f64::INFINITY }
+        Missile { spec, pos, vel, mass: spec.mass, age: 0.0, from, target, tracking: target.is_some(), accel: 0.0, best: f64::INFINITY, visibility_clock: 0.0, notch_time: 0.0 }
     }
 
     /// Motor burning (for the smoke trail and the seeker's heat).
@@ -772,6 +774,15 @@ impl Missile {
 
         let mut lateral = V3::ZERO;
         let guided = burn >= 0.0 && self.age > 0.15;
+        // A seeker cannot see through a ridge. Sample at 10 Hz, including
+        // midcourse, rather than continuing to use an occluded target's truth.
+        self.visibility_clock -= dt;
+        if self.tracking && self.visibility_clock <= 0.0 {
+            self.visibility_clock = 0.1;
+            if target.is_some_and(|(tp, _)| terrain_masked(self.pos, tp, floor)) {
+                self.tracking = false;
+            }
+        }
         let seen = if self.tracking { target } else { None };
         if let (Some((tp, tv)), true) = (seen, guided) {
             let r = tp - self.pos;
@@ -780,12 +791,21 @@ impl Missile {
             // a datalink still steers it there early in its flight (a shot
             // over the shoulder, or at a target off the nose).
             let midcourse = s.datalink && self.age < 8.0;
-            if r.dot(dir) / range < s.gimbal.cos() && !midcourse {
+            // Simplified look-down Doppler rejection: a sustained beam at
+            // low altitude merges with clutter. Better ECCM requires a longer,
+            // tighter notch; there is no instant guaranteed dodge.
+            let radial = tv.dot(r / range).abs();
+            let clutter = tp.y < self.pos.y + 100.0 && tp.y - floor(tp.x, tp.z) < 2500.0;
+            let notching = !s.infrared() && clutter && radial < mix(45.0, 22.0, s.ccm)
+                && (!s.active() || range < 15000.0);
+            self.notch_time = if notching { self.notch_time + dt } else { (self.notch_time - dt * 2.0).max(0.0) };
+            if r.dot(dir) / range < s.gimbal.cos() && !midcourse
+                || self.notch_time > mix(0.9, 2.4, s.ccm) {
                 self.tracking = false;
             } else {
                 let vr = tv - self.vel;
                 let omega = r.cross(vr) / (range * range);
-                let closing = (-r.dot(vr) / range).max(50.0);
+                let closing = (-r.dot(vr) / range).max(0.0);
                 lateral = omega.cross(r / range) * (s.nav * closing);
             }
         }
@@ -826,6 +846,16 @@ impl Missile {
         }
         Fate::Flying
     }
+}
+
+/// Terrain between seeker and target, sampled separately from the missile's
+/// own ground collision. Both radar and infrared require line of sight.
+fn terrain_masked(a: V3, b: V3, floor: &dyn Fn(f64, f64) -> f64) -> bool {
+    let n = (((b - a).len() / 180.0).ceil() as usize).clamp(4, 96);
+    (1..n).any(|k| {
+        let p = a.lerp(b, k as f64 / n as f64);
+        p.y <= floor(p.x, p.z) + 3.0
+    })
 }
 
 /// Below this Mach number after burnout a missile can no longer pull the
@@ -1292,4 +1322,52 @@ mod tests {
         }
         assert_eq!(hits, 20);
     }
+    #[test]
+    fn ridge_masks_radar_and_ir_seekers() {
+        let ridge = |_x: f64, z: f64| if z.abs() < 450.0 { 2000.0 } else { 0.0 };
+        for spec in [&AIM9M, &AIM120C, &R27R] {
+            let mut m = Missile::launch(spec, v3(0.0, 1200.0, 4000.0), v3(0.0, 0.0, -450.0), Who::Player, Some(Who::Bandit(0)));
+            let tp = v3(0.0, 1100.0, -4000.0);
+            m.step(FIXED_DT, Some((tp, v3(0.0, 0.0, -230.0))), &ridge);
+            assert!(!m.tracking, "{} saw through a ridge", spec.name);
+        }
+    }
+
+    #[test]
+    fn sustained_look_down_notch_breaks_radar_but_not_heat_seeker() {
+        for spec in [&R27R, &AIM120C, &AIM9M] {
+            let mut m = Missile::launch(spec, v3(0.0, 1800.0, 10000.0), v3(0.0, 0.0, -250.0), Who::Player, Some(Who::Bandit(0)));
+            let tv = v3(240.0, 0.0, 0.0);
+            for k in 0..(3.0 / FIXED_DT) as usize {
+                let tp = v3(0.0, 1200.0, 0.0) + tv * (k as f64 * FIXED_DT);
+                m.step(FIXED_DT, Some((tp, tv)), &flat);
+            }
+            assert_eq!(m.tracking, spec.infrared(), "{} tracking={}", spec.name, m.tracking);
+        }
+    }
+
+    /// Same launch, different target decisions: near the edge of the envelope
+    /// a turn away defeats a missile which reaches an undefended target.
+    #[test]
+    fn turning_away_can_exhaust_a_missile_that_would_hit_head_on() {
+        for spec in [&AIM9M, &AIM120C, &R73, &R77] {
+            let range = if spec.infrared() { 10000.0 } else if spec.name == R77.name { 14000.0 } else { 18000.0 };
+            let run = |defend: bool| {
+                let mut m = Missile::launch(spec, v3(0.0, 1500.0, 0.0), v3(0.0, 0.0, -250.0), Who::Player, Some(Who::Bandit(0)));
+                let mut tp = v3(0.0, 1500.0, -range);
+                let mut elapsed = 0.0;
+                loop {
+                    let angle = if defend { (elapsed / 7.0_f64).min(1.0) * PI } else { 0.0 };
+                    let tv = v3(angle.sin(), 0.0, angle.cos()) * 250.0;
+                    elapsed += FIXED_DT; tp += tv * FIXED_DT;
+                    let fate = m.step(FIXED_DT, Some((tp, tv)), &flat);
+                    if fate != Fate::Flying { break fate; }
+                    assert!(elapsed < 90.0);
+                }
+            };
+            assert!(matches!(run(false), Fate::Burst(_, _)), "{} baseline missed", spec.name);
+            assert!(!matches!(run(true), Fate::Burst(_, _)), "{} defence failed", spec.name);
+        }
+    }
+
 }
