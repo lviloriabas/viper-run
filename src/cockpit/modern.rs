@@ -1,4 +1,4 @@
-//! Reference-led single-seat F/A-18C and Su-27SK cockpits.
+//! Reference-led single-seat F/A-18C with UFCD and baseline Su-27SK cockpits.
 //! Geometry is in the shared design-eye space. All instrument faces use
 //! their board's orthonormal frame; consoles clear the common pilot envelope.
 use super::*;
@@ -12,13 +12,13 @@ const HUD_CONTROL: R = r(704.0, 1872.0, 320.0, 96.0);
 fn instrument(kind: Type, x: f64, y: f64) -> Frame {
     let tilt = if kind == Type::Su27 { 12.0 } else { 8.5 } * DEG;
     let p = Frame {
-        o: v3(0.0, 0.64, -4.28),
+        o: v3(0.0, 0.64, -4.40),
         x: V3::X,
         y: v3(0.0, tilt.cos(), -tilt.sin()),
         z: v3(0.0, tilt.sin(), tilt.cos()),
     };
     let cant = if kind == Type::Su27 { 18.0 } else { 10.0 } * DEG;
-    let hinge = if kind == Type::Su27 { 0.27 } else { 0.46 };
+    let hinge = if kind == Type::Su27 { 0.29 } else { 0.40 };
     let side = x.signum();
     if x.abs() <= hinge {
         return p.at(x, (y - 0.64) / tilt.cos(), 0.0);
@@ -76,54 +76,151 @@ fn label(x: f64, y: f64, w: f64, h: f64, rect: R) -> Instrument {
         shape: Shape::Label,
     }
 }
+// Dense groups and proportions reconstructed from the supplied cockpit photos.
 fn layout(kind: Type) -> Vec<Instrument> {
     if kind == Type::Su27 {
         vec![
-            dial(-0.12, 0.84, 0.070, mig::R_ADI),
-            dial(-0.12, 0.65, 0.070, mig::R_HSI),
-            dial(-0.31, 0.85, 0.058, mig::R_ASI),
-            dial(-0.31, 0.66, 0.058, mig::R_ALT),
-            dial(-0.44, 0.99, 0.037, mig::R_UUAP),
-            dial(0.065, 0.84, 0.052, mig::R_VVI),
-            dial(0.215, 0.84, 0.049, mig::R_RPM),
-            dial(0.065, 0.65, 0.049, mig::R_EGT),
-            dial(0.215, 0.65, 0.049, mig::R_EGT_R),
-            dial(-0.31, 0.49, 0.045, mig::R_RADALT),
-            dial(0.065, 0.49, 0.043, mig::R_CLOCK),
-            display_face(0.365, 0.99, 0.185, 0.170, mig::R_TV, false),
-            dial(0.39, 0.65, 0.060, mig::R_SPO),
-            label(0.365, 0.49, 0.170, 0.065, mig::R_HYD),
-            label(0.49, 0.82, 0.036, 0.25, mig::R_FUEL),
-            label(-0.44, 0.59, 0.065, 0.07, mig::R_GEAR),
-            label(0.04, 1.02, 0.195, 0.045, mig::R_WEAPON),
+            dial(-0.085, 0.805, 0.058, mig::R_ADI),
+            dial(-0.085, 0.650, 0.058, mig::R_HSI),
+            dial(-0.235, 0.805, 0.048, mig::R_ASI),
+            dial(-0.235, 0.650, 0.048, mig::R_ALT),
+            dial(-0.370, 0.805, 0.046, mig::R_UUAP),
+            dial(-0.370, 0.650, 0.046, mig::R_RADALT),
+            dial(0.060, 0.805, 0.044, mig::R_VVI),
+            dial(0.195, 0.805, 0.048, mig::R_RPM),
+            dial(0.080, 0.650, 0.035, mig::R_EGT),
+            dial(0.195, 0.650, 0.035, mig::R_EGT_R),
+            dial(-0.370, 0.505, 0.037, mig::R_CLOCK),
+            display_face(0.355, 0.980, 0.185, 0.165, mig::R_TV, false),
+            dial(0.390, 0.650, 0.047, mig::R_SPO),
+            label(0.335, 0.505, 0.180, 0.055, mig::R_HYD),
+            label(0.292, 0.725, 0.030, 0.235, mig::R_FUEL),
+            label(-0.250, 0.505, 0.065, 0.070, mig::R_GEAR),
+            label(-0.080, 0.915, 0.300, 0.045, mig::R_WEAPON),
+            label(-0.025, 1.035, 0.235, 0.090, HUD_CONTROL),
+            label(-0.305, 0.950, 0.100, 0.050, mig::R_LEFT),
         ]
     } else {
-        // NATOPS FO-5: IFEI beneath the left DDI; standby group beneath
-        // the right one; UFC/HUD controls over the low centre AMPCD.
+        // The first supplied photo has the upgraded UFCD, not a keypad UFC.
         vec![
-            display_face(-0.27, 0.86, 0.240, 0.245, R_MFD_L, true),
-            display_face(0.27, 0.86, 0.240, 0.245, R_MFD_R, true),
-            display_face(0.0, 0.97, 0.220, 0.205, UFC, false),
-            label(0.0, 0.795, 0.215, 0.093, HUD_CONTROL),
-            display_face(0.0, 0.54, 0.235, 0.245, R_HSI, true),
-            label(-0.285, 0.56, 0.225, 0.150, IFEI),
-            dial(0.205, 0.61, 0.050, R_DIALS[2]),
-            dial(0.37, 0.61, 0.050, R_DIALS[0]),
-            dial(0.19, 0.46, 0.037, R_DIALS[1]),
-            dial(0.305, 0.46, 0.037, R_DIALS[3]),
-            dial(0.42, 0.46, 0.037, R_VVI),
-            label(-0.47, 0.86, 0.044, 0.170, R_ARM),
-            label(-0.42, 1.07, 0.040, 0.085, R_AOA),
-            label(-0.29, 1.06, 0.155, 0.065, R_CAUTION),
-            label(0.30, 1.06, 0.155, 0.065, R_CAUTION),
+            display_face(-0.250, 0.885, 0.245, 0.245, R_MFD_L, true),
+            display_face(0.250, 0.885, 0.245, 0.245, R_MFD_R, true),
+            display_face(0.0, 1.005, 0.215, 0.240, UFC, true),
+            label(0.0, 0.812, 0.210, 0.080, HUD_CONTROL),
+            display_face(0.0, 0.590, 0.225, 0.225, R_HSI, true),
+            label(-0.265, 0.595, 0.215, 0.150, IFEI),
+            dial(0.200, 0.650, 0.041, R_DIALS[2]),
+            dial(0.335, 0.650, 0.041, R_DIALS[0]),
+            dial(0.190, 0.515, 0.031, R_DIALS[1]),
+            dial(0.300, 0.515, 0.031, R_DIALS[3]),
+            dial(0.410, 0.515, 0.031, R_VVI),
+            label(-0.432, 0.880, 0.040, 0.170, R_ARM),
+            label(-0.420, 1.035, 0.034, 0.075, R_AOA),
+            label(-0.270, 1.065, 0.150, 0.050, R_CAUTION),
+            label(0.270, 1.065, 0.150, 0.050, R_CAUTION),
         ]
+    }
+}
+/// Physical aperture used both by the mesh and HUD clipping.
+pub(super) fn hud_glass(kind: Type) -> [V3; 4] {
+    if kind == Type::Su27 {
+        [
+            v3(-0.150, 1.115, -4.36),
+            v3(0.150, 1.115, -4.36),
+            v3(0.175, 1.445, -4.43),
+            v3(-0.175, 1.445, -4.43),
+        ]
+    } else {
+        [
+            v3(-0.145, 1.180, -4.42),
+            v3(0.145, 1.180, -4.42),
+            v3(0.155, 1.445, -4.47),
+            v3(-0.155, 1.445, -4.47),
+        ]
+    }
+}
+// Projector controls are on the front of its housing, above the main board.
+fn mount(kind: Type, item: &Instrument) -> Frame {
+    let mut f = instrument(kind, item.x, item.y);
+    if kind == Type::Su27 && item.rect.x == HUD_CONTROL.x && item.rect.y == HUD_CONTROL.y {
+        f.o.z += 0.17;
+    }
+    f
+}
+// The console atlas occupies the F-16 console area only for these aircraft;
+// the active type draws its own legends after the common atlas pass.
+fn console_rect(side:f64,row:usize)->R {
+    let i=row+if side>0.0 {6} else {0};
+    r(1024.0+(i%4) as f32*256.0,(i/4) as f32*192.0,if side<0.0 && (1..=3).contains(&row) {128.0} else {256.0},192.0)
+}
+fn console_labels(russian:bool,side:f64,row:usize)->[&'static str;9] {
+    if russian {
+        if side<0.0 {
+            [
+                ["SHASSI / ZAKRYLKI","SHASSI","ZAKR","NOS","TORM","VYP","UBR","AVAR","TEST"],
+                ["DVIGATELI","LEV","PRAV","ZAP","STOP","TOPL","NASOS","REZH","OTKL"],
+                ["SAU","KREN","TANG","VYS","KURS","STAB","MARSH","POS","TEST"],
+                ["VOORUZHENIE","PUSK","SBROS","SER","PUSH","BORT","ZALP","AVAR","OTKL"],
+                ["RADIO","VHF","UHF","VOL","KAN","RSBN","ARK","SAU","SVYAZ"],
+                ["TOPLIVO","LEV","PRAV","NASOS","BAKI","PODV","OSN","AVAR","TEST"],
+            ][row]
+        } else {
+            [
+                ["ELEKTRO","AKK","GEN L","GEN R","AC","SET","PIT","AVAR","TEST"],
+                ["KONDITSIONER","TEMP","DAVL","KAB","VENT","OBDUV","OTOP","STEK","TEST"],
+                ["NAVIGATSIYA","RSBN","ARK","KURS","REZH","KAN","MARSH","POS","TEST"],
+                ["OSVESHCHENIE","PRIB","PULT","FARA","BORT","DEN","NOCH","YARK","TEST"],
+                ["KISLOROD","PIT","DAVL","REZH","AVAR","SMES","OBDUV","MASKA","TEST"],
+                ["AVTOMATY","RLS","OEPS","SAU","SVYAZ","PIT","PRIB","NAV","REZ"],
+            ][row]
+        }
+    } else if side<0.0 {
+        [
+            ["FLIGHT CONTROL","FLAPS","TRIM","FCS","T/O","LAUNCH","BAR","FOLD","RESET"],
+            ["ENGINES","L ENG","R ENG","START","CRANK","FUEL","BOOST","IGN","STOP"],
+            ["THROTTLE","IDLE","MIL","AB","CUT","L ENG","R ENG","FUEL","TEST"],
+            ["COMMUNICATION","COMM1","COMM2","VOL","ICS","IFF","TCN","ILS","TEST"],
+            ["FUEL","PROBE","DUMP","EXT","BINGO","WING","CTR","FEED","TEST"],
+            ["EXTERIOR LIGHTS","POS","FORM","STROBE","TAXI","NAV","BRT","DIM","TEST"],
+        ][row]
+    } else {
+        [
+            ["ELECTRICAL","BATT","L GEN","R GEN","AC","RESET","DC","EXT","TEST"],
+            ["ENVIRONMENT","TEMP","CABIN","BLEED","DEFOG","RAM","ANTI-I","VENT","TEST"],
+            ["NAVIGATION","INS","RADAR","ALT","MAP","ALIGN","NAV","ATT","TEST"],
+            ["INTERIOR LIGHTS","INST","CONSL","FLOOD","CHART","DAY","NIGHT","BRT","TEST"],
+            ["OXYGEN","SUPPLY","FLOW","MASK","EMERG","NORMAL","100%","PRESS","TEST"],
+            ["CIRCUIT BREAKERS","AVION","COMM","NAV","HUD","DDI L","DDI R","FCS","AUX"],
+        ][row]
+    }
+}
+fn draw_consoles(cv:&mut Canvas,russian:bool) {
+    for side in [-1.0,1.0] {
+        for row in 0..6 {
+            let r=console_rect(side,row);
+            let names=console_labels(russian,side,row);
+            let ink=rgba(0xc9,0xd1,0xcb,1.0);
+            cv.rect(r.x,r.y,r.w,r.h,if russian {rgba(0x28,0x39,0x3c,1.0)} else {rgba(0x20,0x24,0x25,1.0)});
+            cv.text(names[0],r.x+r.w*0.5,r.y+16.0,1.0,ink,Align::Center);
+            cv.line(r.x+10.0,r.y+29.0,r.x+r.w-10.0,r.y+29.0,1.0,DIM);
+            let cols=if r.w<200.0 {2} else {4};
+            for k in 0..2 {
+                for j in 0..cols {
+                    let x=r.x+if cols==2 {28.8+j as f32*70.4} else {34.0+j as f32*61.4};
+                    let y=r.y+if k==0 {64.4} else {140.7};
+                    cv.text(names[1+k*cols+j],x,y-20.0,1.0,ink,Align::Center);
+                    cv.circle(x,y,9.0,1.0,DIM);
+                    cv.text(if k==0 {"ON"} else {"OFF"},x,y+22.0,1.0,ink,Align::Center);
+                }
+            }
+        }
     }
 }
 pub fn build(kind: Type) -> Mesh {
     let mut m = Mesh::new();
     let russian = kind == Type::Su27;
     let panel = if russian {
-        Rgb(0.32, 0.43, 0.46)
+        Rgb(0.37, 0.62, 0.66)
     } else {
         Rgb(0.19, 0.21, 0.22)
     };
@@ -140,7 +237,7 @@ pub fn build(kind: Type) -> Mesh {
     for side in [-1.0, 1.0] {
         m.block(
             &plain(v3(side * 0.515, 0.52, -3.42)),
-            v3(0.018, 0.38, 0.91),
+            v3(0.018, 0.38, 1.09),
             wall,
         );
         let c = |x: f64, z: f64| v3(side * x, 0.62 + (x - 0.262) * 0.14, z);
@@ -173,10 +270,8 @@ pub fn build(kind: Type) -> Mesh {
             .enumerate()
         {
             // Leave the whole throttle slot and hand travel clear.
-            if side < 0.0 && z > -3.74 && z < -3.23 {
-                continue;
-            }
-            let x = side * 0.375;
+            let narrow=side<0.0 && z>-3.74 && z< -3.23;
+            let x = side * if narrow {0.445} else {0.375};
             let across = v3(1.0, side * 0.14, 0.0).norm();
             let cf = Frame {
                 o: c(x.abs(), z) + V3::Y * 0.005,
@@ -184,23 +279,22 @@ pub fn build(kind: Type) -> Mesh {
                 y: -V3::Z,
                 z: across.cross(-V3::Z),
             };
-            m.block(&cf, v3(0.098, 0.073, 0.004), DARK.scale(1.7));
-            for j in 0..4 {
-                let at = cf.p(-0.072 + j as f64 * 0.047, 0.0, 0.006);
-                if (row + j) % 3 == 0 {
-                    m.capsule(at, at + cf.z * 0.017, 0.009, 0.009, DARK, 8);
-                } else {
-                    m.capsule(
-                        at,
-                        at + cf.z * 0.020 - cf.y * 0.006,
-                        0.003,
-                        0.002,
-                        METALC,
-                        5,
-                    );
+            m.block(&cf, v3(if narrow {0.040} else {0.098}, 0.073, 0.004), DARK.scale(1.7));
+            screen(&mut m,&cf.at(0.0,0.0,0.0045),if narrow {0.080} else {0.196},0.146,console_rect(side,row));
+            for k in 0..2 {
+                for j in 0..if narrow {2} else {4} {
+                    let at=cf.p(if narrow {-0.022+j as f64*0.044} else {-0.072+j as f64*0.047},if k==0 {0.024} else {-0.034},0.006);
+                    if (row+j+k)%4==0 {
+                        m.capsule(at,at+cf.z*0.015,0.008,0.007,DARK,10);
+                        m.capsule(at+cf.z*0.016,at+cf.z*0.016+cf.y*0.005,0.001,0.001,METALC,4);
+                    } else if russian && side>0.0 && row==5 || row==4 && j==0 {
+                        m.block(&Frame{o:at+cf.z*0.008,..cf},v3(0.006,0.012,0.009),Rgb(0.65,0.10,0.06));
+                    } else {
+                        m.capsule(at,at+cf.z*0.017-cf.y*0.005,0.0028,0.0018,METALC,6);
+                    }
                 }
             }
-            for x in [-0.087, 0.087] {
+            for x in if narrow {[-0.033,0.033]} else {[-0.087, 0.087]} {
                 m.block(&cf.at(x, 0.058, 0.006), v3(0.002, 0.002, 0.001), METALC);
             }
         }
@@ -219,13 +313,13 @@ pub fn build(kind: Type) -> Mesh {
     // Board assembled around two open knee wells and a narrow centre pedestal.
     // A piecewise board avoids fanning triangles over the concave knee recess.
     for (x0, x1, y0, y1) in [
-        (-0.51, 0.51, 0.63, 0.97),
-        (-0.51, -0.145, 0.43, 0.63),
-        (0.145, 0.51, 0.43, 0.63),
+        (-0.47, 0.47, 0.63, if russian { 0.90 } else { 0.97 }),
+        (-0.47, -0.145, 0.43, 0.63),
+        (0.145, 0.47, 0.43, 0.63),
         (-0.145, 0.145, 0.36, 0.63),
     ] {
         let mut xs = vec![x0];
-        let hinge = if kind == Type::Su27 { 0.27 } else { 0.46 };
+        let hinge = if kind == Type::Su27 { 0.29 } else { 0.40 };
         for fold in [-hinge, hinge] {
             if fold > x0 && fold < x1 {
                 xs.push(fold);
@@ -244,14 +338,25 @@ pub fn build(kind: Type) -> Mesh {
         }
     }
     let top = |x: f64| {
-        if x.abs() <= 0.40 {
-            mix(1.12, 1.10, ((x.abs() - 0.15) / 0.25).max(0.0))
+        let x = x.abs();
+        if russian {
+            if x <= 0.16 {
+                1.10
+            } else if x <= 0.29 {
+                mix(1.10, 1.00, (x - 0.16) / 0.13)
+            } else {
+                mix(1.00, 0.90, (x - 0.29) / 0.18)
+            }
+        } else if x < 0.13 {
+            1.15
+        } else if x < 0.37 {
+            1.11
         } else {
-            mix(1.10, 0.97, (x.abs() - 0.40) / 0.11)
+            mix(1.11, 0.97, (x - 0.37) / 0.10)
         }
     };
     let xs = [
-        -0.51, -0.46, -0.40, -0.27, -0.15, 0.15, 0.27, 0.40, 0.46, 0.51,
+        -0.47, -0.40, -0.37, -0.29, -0.16, -0.13, 0.0, 0.13, 0.16, 0.29, 0.37, 0.40, 0.47,
     ];
     for pair in xs.windows(2) {
         let (l, r) = (pair[0], pair[1]);
@@ -260,8 +365,8 @@ pub fn build(kind: Type) -> Mesh {
             instrument(kind, r, top(r)).p(0.0, 0.0, -0.018),
         );
         m.quad(
-            instrument(kind, l, 0.97).p(0.0, 0.0, -0.018),
-            instrument(kind, r, 0.97).p(0.0, 0.0, -0.018),
+            instrument(kind, l, if russian { 0.90 } else { 0.97 }).p(0.0, 0.0, -0.018),
+            instrument(kind, r, if russian { 0.90 } else { 0.97 }).p(0.0, 0.0, -0.018),
             b,
             a,
             panel,
@@ -274,10 +379,21 @@ pub fn build(kind: Type) -> Mesh {
             DARK,
         );
     }
+    // Close the tub to the panel sides; the forward board must not float
+    // above the external fuselage visible through an open side triangle.
+    for side in [-1.0, 1.0] {
+        m.quad(
+            instrument(kind, side * 0.47, 0.43).p(0.0, 0.0, -0.02),
+            instrument(kind, side * 0.47, top(0.47)).p(0.0, 0.0, -0.02),
+            v3(side * 0.515, 0.90, -3.94),
+            v3(side * 0.515, 0.43, -3.94),
+            wall,
+        );
+    }
     for item in layout(kind) {
-        let f = instrument(kind, item.x, item.y);
+        let f = mount(kind, &item);
         match item.shape {
-            Shape::Dial => gauge(&mut m, &f, item.w * 0.5, item.rect),
+            Shape::Dial => gauge_mount(&mut m, &f, item.w * 0.5, item.rect, 0.008),
             Shape::Display(buttons) => display(
                 &mut m,
                 &f,
@@ -291,17 +407,63 @@ pub fn build(kind: Type) -> Mesh {
             Shape::Label => plate(&mut m, &f, item.w, item.h, item.rect),
         }
     }
-    // HUD projector and supports around the shared collimated combiner.
-    m.block(&plain(v3(0.0, 1.12, -4.46)), v3(0.11, 0.035, 0.12), DARK);
-    for side in [-1.0, 1.0] {
-        m.capsule(
-            v3(side * 0.113, 1.07, -4.015),
-            v3(side * 0.113, 1.36, -3.957),
-            0.006,
-            0.006,
-            DARK,
-            6,
-        );
+    // Recessed radar hood and deep projector housing reproduce their silhouettes.
+    if russian {
+        let f = instrument(kind, 0.355, 0.980);
+        for side in [-1.0, 1.0] {
+            m.block(
+                &f.at(side * 0.100, 0.010, 0.016),
+                v3(0.008, 0.096, 0.030),
+                DARK,
+            );
+        }
+        m.block(&f.at(0.0, 0.103, 0.016), v3(0.108, 0.008, 0.030), DARK);
+    }
+    let glass = hud_glass(kind);
+    let foot = (glass[0] + glass[1]) * 0.5;
+    m.block(
+        &plain(foot - v3(0.0, 0.038, 0.075)),
+        v3(0.130, 0.033, 0.105),
+        DARK,
+    );
+    for (a, b) in [(glass[0], glass[3]), (glass[1], glass[2])] {
+        m.capsule(a, b, if russian { 0.014 } else { 0.008 }, 0.011, DARK, 8);
+    }
+    if russian {
+        m.capsule(glass[3], glass[2], 0.018, 0.018, DARK, 8);
+        for k in 0..12 {
+            let p = |t: f64| {
+                v3(
+                    -0.16 - 0.09 * t,
+                    1.08 + 0.08 * (PI * t).sin(),
+                    -4.45 + 0.04 * t,
+                )
+            };
+            m.capsule(
+                p(k as f64 / 12.0),
+                p((k + 1) as f64 / 12.0),
+                0.015,
+                0.015,
+                DARK,
+                6,
+            );
+        }
+    } else {
+        for side in [-1.0, 1.0] {
+            let f = instrument(kind, side * 0.466, 0.78);
+            m.capsule(
+                f.p(0.0, -0.075, 0.03),
+                f.p(0.0, 0.075, 0.03),
+                0.009,
+                0.009,
+                Rgb(0.92, 0.68, 0.10),
+                8,
+            );
+            for j in 0..5 {
+                let at = f.p(0.0, -0.06 + j as f64 * 0.03, 0.031);
+                m.capsule(at - f.y * 0.004, at + f.y * 0.004, 0.0095, 0.0095, DARK, 8);
+            }
+        }
     }
     // Native canopy geometry carried into the common eye frame. Sills,
     // windscreen bow, mirrors and rear bulkhead all meet the exterior.
@@ -314,7 +476,7 @@ pub fn build(kind: Type) -> Mesh {
             native(bow, k as f64 * PI / 24.0),
             native(bow, (k + 1) as f64 * PI / 24.0),
         );
-        m.capsule(a, b, 0.018, 0.018, DARK, 6);
+        m.capsule(a, b, 0.024, 0.024, if russian { panel } else { DARK }, 8);
     }
     for edge in [0.0, PI] {
         for k in 0..16 {
@@ -325,13 +487,15 @@ pub fn build(kind: Type) -> Mesh {
             m.capsule(native(z0, edge), native(z1, edge), 0.025, 0.025, DARK, 6);
         }
     }
-    for phi in [0.55, PI / 2.0, PI - 0.55] {
+    for phi in [0.88, PI / 2.0, PI - 0.88] {
         let at = native(bow, phi);
+        let tangent = v3(phi.sin(), -phi.cos(), 0.0);
+        let radial = v3(phi.cos(), phi.sin(), 0.0);
         curved_mirror(
             &mut m,
-            if phi == PI / 2.0 { 0.092 } else { 0.075 },
-            0.034,
-            &|x, y, d| at + v3(x, y - 0.045, 0.045 + d),
+            if phi == PI / 2.0 { 0.095 } else { 0.086 },
+            0.035,
+            &|x, y, d| at + tangent * x + radial * (y - 0.038) + V3::Z * (0.045 + d),
             DARK,
             -0.01,
         );
@@ -349,58 +513,63 @@ pub fn hornet_instruments(
     time: f64,
     c: &Combat,
 ) {
+    draw_consoles(cv,false);
     mfd(cv, R_HSI, Page::Hsd, a, ad, m, time, c);
     let r = UFC;
-    cv.rect(r.x, r.y, r.w, r.h, rgba(0x23, 0x28, 0x29, 1.0));
-    cv.rect(
-        r.x + 10.0,
-        r.y + 7.0,
-        166.0,
-        22.0,
-        rgba(0x02, 0x09, 0x05, 1.0),
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x02, 0x0d, 0x08, 1.0));
+    cv.text(
+        "COM 1     COM 2",
+        r.x + r.w * 0.5,
+        r.y + 18.0,
+        1.0,
+        GREEN,
+        Align::Center,
     );
-    cv.text("  305.000", r.x + 18.0, r.y + 18.0, 1.2, GREEN, Align::Left);
-    let keys = [
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "CLR", "0", "ENT",
-    ];
-    for row in 0..4 {
-        for col in 0..3 {
-            let (x, y) = (
-                r.x + 17.0 + col as f32 * 48.0,
-                r.y + 38.0 + row as f32 * 28.0,
-            );
-            cv.rect(x, y, 37.0, 23.0, rgba(0x43, 0x49, 0x49, 1.0));
-            cv.text(
-                keys[row * 3 + col],
-                x + 18.5,
-                y + 11.5,
-                1.0,
-                WHITE,
-                Align::Center,
-            );
-        }
-    }
-    for (i, name) in ["COM1", "COM2", "IFF", "TCN", "ILS"]
-        .into_iter()
-        .enumerate()
-    {
-        let y = r.y + 20.0 + i as f32 * 28.0;
-        cv.rect(
-            r.x + 201.0,
-            y - 8.0,
-            92.0,
-            18.0,
-            rgba(0x02, 0x09, 0x05, 1.0),
-        );
-        cv.text(name, r.x + 245.0, y + 1.0, 1.0, GREEN, Align::Center);
-        cv.rect(
-            r.x + 183.0,
-            y - 7.0,
-            11.0,
-            16.0,
-            rgba(0x5c, 0x61, 0x60, 1.0),
+    cv.text(
+        "305.000   127.500",
+        r.x + r.w * 0.5,
+        r.y + 39.0,
+        1.2,
+        GREEN,
+        Align::Center,
+    );
+    for (i, name) in ["IFF", "TCN", "ILS", "D/L"].into_iter().enumerate() {
+        cv.text(
+            name,
+            r.x + 12.0,
+            r.y + 65.0 + i as f32 * 22.0,
+            1.0,
+            GREEN,
+            Align::Left,
         );
     }
+    for (i, name) in ["A/P", "WPT", "TIME", "MENU"].into_iter().enumerate() {
+        cv.text(
+            name,
+            r.x + r.w - 12.0,
+            r.y + 65.0 + i as f32 * 22.0,
+            1.0,
+            GREEN,
+            Align::Right,
+        );
+    }
+    cv.text(
+        &format!("HDG {:03.0}", a.heading),
+        r.x + r.w * 0.5,
+        r.y + 92.0,
+        1.2,
+        GREEN,
+        Align::Center,
+    );
+    cv.text(
+        "NAV",
+        r.x + r.w * 0.5,
+        r.y + 119.0,
+        1.0,
+        GREEN,
+        Align::Center,
+    );
+    cv.stroke_rect(r.x + 49.0, r.y + 145.0, r.w - 98.0, 24.0, 1.0, GREEN);
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x2a, 0x2a, 1.0));
     for (i, name) in ["HUD", "BRT", "DAY", "ATT", "ALT"].into_iter().enumerate() {
@@ -447,9 +616,44 @@ pub fn hornet_instruments(
     cv.text("BINGO", r.x + 295.0, r.y + 91.0, 1.0, DIM, Align::Center);
     cv.text("2000", r.x + 295.0, r.y + 116.0, 1.4, GREEN, Align::Center);
 }
+pub fn flanker_instruments(cv: &mut Canvas) {
+    draw_consoles(cv,true);
+    let r = HUD_CONTROL;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x1b, 0x22, 0x22, 1.0));
+    for (i, name) in ["СЕТКА", "ЯРК", "НОЧЬ", "ДЕНЬ"].into_iter().enumerate() {
+        let x = r.x + 38.0 + i as f32 * 79.0;
+        cv.text(name, x, r.y + 18.0, 1.0, WHITE, Align::Center);
+        cv.circle(x, r.y + 56.0, 12.0, 2.0, DIM);
+        cv.line(x, r.y + 56.0, x + 4.0, r.y + 45.0, 2.0, WHITE);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixed_readouts_fit_inside_the_model_specific_hud_glass() {
+        for (kind, ys) in [
+            (Type::F18, [-62.0, 0.0, 119.0]),
+            (Type::Su27, [-84.0, 0.0, 81.0]),
+        ] {
+            let g = hud_glass(kind);
+            let normal = (g[1] - g[0]).cross(g[3] - g[0]).norm();
+            for y in ys {
+                for x in [-79.0, 0.0, 79.0] {
+                    let (x, y) = fixed_hud_coords(kind, x, y);
+                    let ray = v3(x / 650.0, -y / 650.0, -1.0);
+                    let eye = crate::airframe::EYE;
+                    let p = eye + ray * ((g[0] - eye).dot(normal) / ray.dot(normal));
+                    let t = (p.y - g[0].y) / (g[3].y - g[0].y);
+                    let half = mix(g[1].x, g[2].x, t);
+                    assert!(
+                        t > 0.015 && t < 0.985 && p.x.abs() < half - 0.005,
+                        "clipped HUD readout {kind:?}: {p:?}"
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn instrument_faces_are_visible_and_do_not_overlap() {
         for kind in [Type::F18, Type::Su27] {
@@ -457,7 +661,7 @@ mod tests {
             assert!(m.count() > 1000 && m.v.iter().all(|x| x.is_finite()));
             let items = layout(kind);
             for (i, item) in items.iter().enumerate() {
-                let f = instrument(kind, item.x, item.y);
+                let f = mount(kind, &item);
                 assert!(f.x.dot(f.y).abs() < 1e-8 && (f.z.len() - 1.0).abs() < 1e-8);
                 let (w, h, depth) = match item.shape {
                     Shape::Dial => (item.w, item.h, 0.0135),

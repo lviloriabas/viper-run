@@ -227,6 +227,21 @@ const WELL_DEPTH: f64 = 0.32;
 
 /// Combiner glass corners in body coordinates: bottom-left, bottom-right, top-right, top-left.
 pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012), v3(0.10, 1.35, -3.958), v3(-0.10, 1.35, -3.958)];
+/// Fixed readout positions adapt to the aperture; aiming directions do not.
+fn fixed_hud_coords(kind:crate::sim::Type,x:f64,y:f64)->(f64,f64) {
+    (if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {x*0.90} else {x},match kind {
+        crate::sim::Type::F18=>y*0.68-50.0,
+        crate::sim::Type::Su27=>y*0.72,
+        _=>y,
+    })
+}
+fn glass_points(kind: crate::sim::Type) -> [V3; 4] {
+    match kind {
+        crate::sim::Type::F18 | crate::sim::Type::Su27 => modern::hud_glass(kind),
+        _ => HUD_GLASS,
+    }
+}
+
 
 #[derive(Clone, Copy, Default)]
 pub struct Hands {
@@ -386,7 +401,7 @@ pub struct Cockpit {
     /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
     mig: [Part; 3],
     extra: [[Part;3];2],
-    hud_glass: Part,
+    hud_glass: [Part; 4],
     pub atlas: gfx::Target,
     atlas_pass: RenderPass,
     pub atlas_clock: f64,
@@ -447,10 +462,14 @@ impl Cockpit {
             for v in shifted.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
             [world::part(ctx,&m),world::part(ctx,&self::faces(&m)),world::part(ctx,&shifted)].map(|mut p|{p.bind.images=vec![atlas_tex];p})
         });
-        let mut glass = Mesh::new();
-        glass.quad(HUD_GLASS[0], HUD_GLASS[1], HUD_GLASS[2], HUD_GLASS[3], Rgb(0.4, 0.6, 0.5));
-        let mut hud_glass = world::part(ctx, &glass);
-        hud_glass.bind.images = vec![atlas_tex];
+        let hud_glass = [crate::sim::Type::F16,crate::sim::Type::Mig29,crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind| {
+            let g = glass_points(kind);
+            let mut glass=Mesh::new();
+            glass.quad(g[0],g[1],g[2],g[3],Rgb(0.4,0.6,0.5));
+            let mut part=world::part(ctx,&glass);
+            part.bind.images=vec![atlas_tex];
+            part
+        });
         Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
@@ -514,9 +533,10 @@ impl Cockpit {
         }
 
         ctx.apply_pipeline(&self.glass_pip);
-        ctx.apply_bindings(&self.hud_glass.bind);
+        let glass=&self.hud_glass[match kind {crate::sim::Type::F16=>0,crate::sim::Type::Mig29=>1,crate::sim::Type::F18=>2,crate::sim::Type::Su27=>3}];
+        ctx.apply_bindings(&glass.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.05, tint: [0.10, 0.16, 0.13], ..u }));
-        ctx.draw(0, self.hud_glass.count, 1);
+        ctx.draw(0, glass.count, 1);
         if !canopy_on { return; }
         ctx.apply_bindings(&canopy.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.035, tint: if mig { [0.08, 0.12, 0.12] } else { [0.16, 0.13, 0.05] }, ..u }));
@@ -1457,6 +1477,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         mig::draw(cv, a, &ad, m, c);
     }
     if a.kind==crate::sim::Type::F18{modern::hornet_instruments(cv,a,&ad,m,time,c);}
+    if a.kind==crate::sim::Type::Su27{modern::flanker_instruments(cv);}
 }
 
 /// Analogue heading indicator in the centre stack of the reference cockpit.
@@ -1549,7 +1570,7 @@ impl BodyProjector {
 /// same camera as the scene, so the ladder and flight-path marker stay on the
 /// real horizon, and the whole display is clipped to the combiner glass.
 pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: &BodyProjector, c: &Combat) {
-    let glass: Vec<[f32; 2]> = HUD_GLASS.iter().filter_map(|&p| body.project(p)).collect();
+    let glass: Vec<[f32; 2]> = glass_points(a.kind).iter().filter_map(|&p| body.project(p)).collect();
     if glass.len() < 4 {
         return;
     }
@@ -1567,17 +1588,21 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     // HUD layout units are 1/650 rad, measured from the aircraft boresight.
     let unit = 1.0 / 650.0;
     let at = |x: f64, y: f64| world_dir((ax.forward + ax.right * (x * unit) - ax.up * (y * unit)).norm());
+    let fixed_at = |x:f64,y:f64| {
+        let (x,y)=fixed_hud_coords(a.kind,x,y);
+        at(x,y)
+    };
     let big = ((h / 540.0).round() as f32).max(1.0);
     let small = (big - 1.0).max(1.0);
     let col = HUD;
     let ht = |cv: &mut Canvas, s: &str, x: f64, y: f64, scale: f32, align: Align| {
-        if let Some(p) = at(x, y) {
+        if let Some(p) = fixed_at(x, y) {
             cv.text(s, p[0], p[1], scale, col, align);
         }
     };
     let lw = (big * 0.6).max(1.0);
     let hl = |cv: &mut Canvas, x: f64, y: f64, x2: f64, y2: f64| {
-        if let (Some(p), Some(q)) = (at(x, y), at(x2, y2)) {
+        if let (Some(p), Some(q)) = (fixed_at(x, y), fixed_at(x2, y2)) {
             cv.line(p[0], p[1], q[0], q[1], lw, col);
         }
     };
@@ -1585,7 +1610,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     let mid = (big * 0.75).max(1.0);
     // Boxed readout: text anchored at a HUD point, frame drawn in pixels around it.
     let boxed = |cv: &mut Canvas, s: &str, x: f64, y: f64, align: Align| {
-        if let Some(p) = at(x, y) {
+        if let Some(p) = fixed_at(x, y) {
             let tw = Canvas::text_width(s, mid);
             let x0 = match align {
                 Align::Left => p[0],
@@ -1598,7 +1623,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
         }
     };
     if a.kind.russian() {
-        ils31(cv, a, c, cam, &world_dir, &at, big, small, lw);
+        ils31(cv, a, c, cam, &world_dir, &fixed_at, &at, big, small, lw);
         cv.set_clip(None);
         return;
     }
@@ -1618,7 +1643,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     ht(cv, &if c.mode == crate::combat::Mode::Nav { "NAV".to_string() } else { format!("{} ARM", c.mode.label()) }, -half, 58.0, small, Align::Left);
     // Radar altitude is a separately boxed repeater, resolved to ten feet.
     if ad.radar_ft <= 5000.0 {
-        if let Some(p) = at(half, 34.0) {
+        if let Some(p) = fixed_at(half, 34.0) {
             let text = format!("R {}", hud::altitude(ad.radar_ft.max(0.0)));
             let tw = Canvas::text_width(&text, small);
             cv.stroke_rect(p[0] - tw - 2.0 * small, p[1] - 5.0 * small, tw + 4.0 * small, 10.0 * small, lw, col);
@@ -1687,7 +1712,11 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     // Keep moving attitude bars out of the fixed data columns.
     let ladder_clip: Vec<_> = [(-49.0, -79.0), (49.0, -79.0), (49.0, 134.0), (-49.0, 134.0)]
         .into_iter().filter_map(|(x, y)| at(x, y)).collect();
-    if ladder_clip.len() == 4 {
+    if a.kind == crate::sim::Type::F18 {
+        // Keep the horizon ladder inside the glass and between data columns.
+        let centre=glass.iter().map(|p|p[0]).sum::<f32>()/4.0;
+        cv.set_clip(Some(glass.iter().map(|p|[centre+(p[0]-centre)*0.40,p[1]]).collect()));
+    } else if ladder_clip.len() == 4 {
         cv.set_clip(Some(ladder_clip));
     }
     // Inertial ladder follows lateral drift and declutters above 60 degrees.
@@ -1808,7 +1837,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
 /// (РЛ radar, ТП infrared); warnings in the middle, as the voice warner
 /// calls them.
 #[allow(clippy::too_many_arguments)]
-fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dyn Fn(V3) -> Option<[f32; 2]>, at: &dyn Fn(f64, f64) -> Option<[f32; 2]>, big: f32, small: f32, lw: f32) {
+fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dyn Fn(V3) -> Option<[f32; 2]>, at: &dyn Fn(f64, f64) -> Option<[f32; 2]>, aim_at: &dyn Fn(f64, f64) -> Option<[f32; 2]>, big: f32, small: f32, lw: f32) {
     use crate::combat::Mode;
     let col = ILS_GREEN;
     let ht = |cv: &mut Canvas, s: &str, x: f64, y: f64, scale: f32, align: Align| {
@@ -1923,7 +1952,7 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
     }
 
     // Fixed aircraft symbol on the boresight: wings, a fin and a centre ring.
-    if let Some(p) = at(0.0, 0.0) {
+    if let Some(p) = aim_at(0.0, 0.0) {
         let s = big * 2.2;
         cv.circle(p[0], p[1], s, lw, col);
         cv.line(p[0] - s * 4.0, p[1], p[0] - s, p[1], lw, col);
@@ -1958,7 +1987,7 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
     if let Some(wn) = warning {
         ht(cv, wn, 0.0, 22.0, small, Align::Center);
     }
-    let pen = symbology::Pen { dir: world_dir, at, eye: cam.eye, big, small, lw, col, russian: true };
+    let pen = symbology::Pen { dir: world_dir, at: aim_at, eye: cam.eye, big, small, lw, col, russian: true };
     symbology::hud(cv, &pen, a, c, c.clock);
 }
 

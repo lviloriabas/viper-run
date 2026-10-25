@@ -98,7 +98,8 @@ pub(crate) fn canopy_point(flanker: bool, z: f64, phi: f64) -> V3 {
     let table: &[[f64; 4]] = if flanker {
         &[
             [-6.22, 0.24, 0.98, 1.15],
-            [-5.80, 0.41, 1.03, 1.54],
+            [-5.85, 0.42, 1.03, 1.78],
+            [-5.65, 0.48, 1.04, 1.89],
             [-5.28, 0.49, 1.04, 1.90],
             [-4.60, 0.52, 1.02, 2.03],
             [-3.85, 0.51, 1.00, 2.00],
@@ -108,7 +109,8 @@ pub(crate) fn canopy_point(flanker: bool, z: f64, phi: f64) -> V3 {
     } else {
         &[
             [-5.42, 0.20, 0.87, 1.02],
-            [-5.00, 0.37, 0.91, 1.39],
+            [-5.10, 0.38, 0.91, 1.47],
+            [-4.82, 0.46, 0.93, 1.77],
             [-4.52, 0.48, 0.93, 1.75],
             [-3.80, 0.52, 0.92, 1.88],
             [-3.10, 0.50, 0.90, 1.83],
@@ -125,9 +127,9 @@ pub(crate) fn canopy_point(flanker: bool, z: f64, phi: f64) -> V3 {
 }
 pub(crate) fn canopy_bow(flanker: bool) -> f64 {
     if flanker {
-        -5.28
+        -5.65
     } else {
-        -4.52
+        -4.82
     }
 }
 pub(crate) fn brake_hinge(flanker: bool) -> V3 {
@@ -175,6 +177,12 @@ pub(crate) fn rudder_hinge(flanker: bool, side: f64) -> (V3, V3) {
 /// Thin NACA section, cosine spaced in chord. There is real thickness at
 /// the root, a closed leading edge, and a separate moving trailing edge.
 fn wing_panel(m: &mut Mesh, a: V3, b: V3, c: V3, d: V3, depth: f64, col: Rgb) {
+    wing_segment(m, a, b, c, d, [depth, depth * 0.45], col, 0);
+}
+// segment 0: whole chord, 1: fixed skin up to flap, 2: moving flap skin.
+// All segments sample the same chord and thickness law, so no ledge or gap
+// appears at the hinge when the flap is stowed.
+fn wing_segment(m: &mut Mesh, a: V3, b: V3, c: V3, d: V3, depth: [f64; 2], col: Rgb, segment: u8) {
     for upper in [true, false] {
         m.surface(
             5,
@@ -182,12 +190,18 @@ fn wing_panel(m: &mut Mesh, a: V3, b: V3, c: V3, d: V3, depth: f64, col: Rgb) {
             |u, v| {
                 let le = a.lerp(b, u);
                 let te = d.lerp(c, u);
-                let t = 0.5 * (1.0 - (PI * v).cos());
+                let fraction = 0.5 * (1.0 - (PI * v).cos());
+                let hinge = 1.0 - 0.65 / (te.z - le.z);
+                let t = match segment {
+                    1 => fraction * hinge,
+                    2 => mix(hinge, 1.0, fraction),
+                    _ => fraction,
+                };
                 let h = 5.0
                     * (0.2969 * t.sqrt() - 0.1260 * t - 0.3516 * t * t + 0.2843 * t.powi(3)
                         - 0.1036 * t.powi(4));
                 le.lerp(te, t)
-                    + V3::Y * (if upper { 1.0 } else { -1.0 }) * h * depth * mix(1.0, 0.45, u)
+                    + V3::Y * (if upper { 1.0 } else { -1.0 }) * h * mix(depth[0], depth[1], u)
             },
             |_, _| if upper { col } else { BELLY },
             Some(&|p: V3| {
@@ -197,8 +211,29 @@ fn wing_panel(m: &mut Mesh, a: V3, b: V3, c: V3, d: V3, depth: f64, col: Rgb) {
             }),
         );
     }
-    for (le, te) in [(a, d), (b, c)] {
-        face(m, &[le, te, te - V3::Y * 0.008], V3::X * le.x.signum(), col);
+    // Close root and tip with the same profile, including the moving piece.
+    for (i, (le, te)) in [(a, d), (b, c)].into_iter().enumerate() {
+        let hinge = 1.0 - 0.65 / (te.z - le.z);
+        let at = |v: f64, sign: f64| {
+            let t = match segment {
+                1 => v * hinge,
+                2 => mix(hinge, 1.0, v),
+                _ => v,
+            };
+            let h = 5.0
+                * (0.2969 * t.sqrt() - 0.1260 * t - 0.3516 * t * t + 0.2843 * t.powi(3)
+                    - 0.1036 * t.powi(4));
+            le.lerp(te, t) + V3::Y * (sign * h * depth[i])
+        };
+        for j in 0..12 {
+            let (u, v) = (j as f64 / 12.0, (j + 1) as f64 / 12.0);
+            face(
+                m,
+                &[at(u, 1.0), at(v, 1.0), at(v, -1.0), at(u, -1.0)],
+                V3::X * le.x.signum() * if i == 0 { -1.0 } else { 1.0 },
+                col,
+            );
+        }
     }
 }
 
@@ -518,6 +553,8 @@ pub(crate) fn build_twin(flanker: bool) -> Airframe {
         let (flap_x0, flap_x1) = if flanker { (2.3, 5.1) } else { (1.5, 4.8) };
         let leading = |x: f64| wing[0].lerp(wing[1], (x - root_x) / (tip_x - root_x));
         let trailing = |x: f64| wing[3].lerp(wing[2], (x - root_x) / (tip_x - root_x));
+        let thickness = |x:f64| if flanker {0.20} else {0.16}
+            * mix(1.0,0.45,(x-root_x)/(tip_x-root_x));
         // Three solid panels leave the moving trailing-edge flap's actual
         // footprint empty, rather than drawing another wing through it.
         for (x0, x1, notch) in [
@@ -525,15 +562,15 @@ pub(crate) fn build_twin(flanker: bool) -> Airframe {
             (flap_x0, flap_x1, true),
             (flap_x1, tip_x, false),
         ] {
-            let recess = if notch { V3::Z * 0.65 } else { V3::ZERO };
-            wing_panel(
+            wing_segment(
                 &mut body,
                 leading(x0),
                 leading(x1),
-                trailing(x1) - recess,
-                trailing(x0) - recess,
-                if flanker { 0.20 } else { 0.16 },
+                trailing(x1),
+                trailing(x0),
+                [thickness(x0), thickness(x1)],
                 if flanker { Rgb(0.48, 0.61, 0.69) } else { SKIN },
+                if notch { 1 } else { 0 },
             );
         }
         let lex: &[[f64; 4]] = if flanker {
@@ -541,9 +578,9 @@ pub(crate) fn build_twin(flanker: bool) -> Airframe {
                 [-6.15, 0.39, 0.40, 0.90],
                 [-5.40, 0.53, 0.68, 0.92],
                 [-4.60, 0.59, 1.00, 0.90],
-                [-3.40, 0.67, 1.50, 0.77],
-                [-2.10, 0.91, 2.05, 0.58],
-                [-0.60, 1.18, 2.48, 0.40],
+                [-3.40, 0.67, 1.22, 0.77],
+                [-2.10, 0.91, 1.65, 0.58],
+                [-0.60, 1.18, 2.00, 0.40],
                 [1.80, 1.53, 2.0, 0.32],
             ]
         } else {
@@ -646,17 +683,15 @@ pub(crate) fn build_twin(flanker: bool) -> Airframe {
                 SKIN,
             );
         }
-        plate(
+        wing_segment(
             &mut flaps[i],
-            &[
-                trailing(flap_x0) - V3::Z * 0.65,
-                trailing(flap_x1) - V3::Z * 0.65,
-                trailing(flap_x1),
-                trailing(flap_x0),
-            ],
-            V3::Y,
-            0.035,
-            SKIN.scale(0.95),
+            leading(flap_x0),
+            leading(flap_x1),
+            trailing(flap_x1),
+            trailing(flap_x0),
+            [thickness(flap_x0), thickness(flap_x1)],
+            if flanker { Rgb(0.48, 0.61, 0.69) } else { SKIN },
+            2,
         );
         // Pylons and wingtip rails.
         let pylons: &[f64] = if flanker {
@@ -976,8 +1011,55 @@ mod fit_tests {
         for v in m.v.chunks(crate::mesh::STRIDE) {
             let centre = mix(0.3, 0.2, (v[0] as f64 - 1.0) / 4.0);
             let height = v[1] as f64 - centre;
-            if height.abs() > 0.01 {
+            if v[3].abs() > 0.999 {
+                let expected = if (v[0] - 1.0).abs() < 1e-5 { -1.0 } else { 1.0 };
+                assert!(v[3] * expected > 0.999, "inverted wing end cap: {v:?}");
+            } else if height.abs() > 0.01 {
                 assert!(height * v[4] as f64 > 0.0, "inverted wing normal at {v:?}");
+            }
+        }
+    }
+    #[test]
+    fn stowed_flap_skin_meets_the_fixed_wing_without_steps() {
+        for flanker in [false, true] {
+            let a = build_twin(flanker);
+            for (i, side) in [-1.0, 1.0].into_iter().enumerate() {
+                let (hinge, axis) = flap_hinge(flanker, side);
+                let hinge_z = |x: f64| hinge.z + (x - hinge.x) * axis.z / axis.x;
+                let body: Vec<_> = a
+                    .body
+                    .v
+                    .chunks(crate::mesh::STRIDE)
+                    .map(|v| v3(v[0] as f64, v[1] as f64, v[2] as f64))
+                    .collect();
+                let mut checked = 0;
+                for v in a.flaps[i].v.chunks(crate::mesh::STRIDE) {
+                    let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
+                    assert!(
+                        p.z >= hinge_z(p.x) - 1e-5,
+                        "flap projects ahead of hinge: {p:?}"
+                    );
+                    if (p.z - hinge_z(p.x)).abs() < 1e-5 {
+                        assert!(
+                            body.iter().any(|q| (*q - p).len() < 1e-5),
+                            "gap at flap/wing join: {flanker} {p:?}"
+                        );
+                        checked += 1;
+                    }
+                }
+                assert!(checked >= 12);
+            }
+        }
+    }
+    #[test]
+    fn baseline_flanker_has_no_outboard_foreplanes() {
+        let a = build_twin(true);
+        // The supplied baseline Su-27 has only integrated narrow strakes
+        // ahead of the main wing, never a separate broad canard planform.
+        for v in a.body.v.chunks(crate::mesh::STRIDE) {
+            if v[2] < -0.75 {
+                // Include the intake envelope (1.4 m offset plus 0.67 m half-width).
+                assert!(v[0].abs() < 2.15, "outboard foreplane ahead of wing: {v:?}");
             }
         }
     }

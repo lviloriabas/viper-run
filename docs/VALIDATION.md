@@ -73,3 +73,13 @@ views, exact gear release poses for all four aircraft and replicated missing-leg
 flags. See [model references and limits](HORNET-FLANKER-MODELS.md) and
 [pilot harness checks](PILOT-HARNESS.md). The menu review checked 960 Windows
 captures and eight navigation runs across the four aircraft.
+
+## Supplied Hornet and Flanker references (25 October 2026)
+
+The cockpit correction uses the supplied Hornet UFCD photograph and the baseline
+analogue Su-27 photographs, with a canardless Flanker exterior. Final release
+validation passed 261 game tests and 6 server tests. The expanded airframe matrix
+produced 28 reviewed Linux captures; both Windows cockpit captures also completed
+successfully with the final distribution executable. Checks include panel and
+console sightlines, leg/throttle clearance, distinct HUD apertures, fixed HUD
+readout fit, continuous wing/flap skin and the Su-27 forebody envelope.

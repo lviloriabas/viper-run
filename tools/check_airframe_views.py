@@ -22,6 +22,9 @@ def main():
     for jet, zoom in [("f18", "1.1"), ("su27", "1.3")]:
         for view, options in [
             ("forward", []),
+            ("canopy", ["--look", "0,0"]),
+            ("profile", ["--chase", "--look", "90,0", "--zoom", zoom]),
+            ("head-on", ["--chase", "--look", "180,0", "--zoom", zoom]),
             ("panel", ["--look", "0,-32"]),
             ("left-console", ["--look", "-60,-40"]),
             ("right-console", ["--look", "60,-40"]),
