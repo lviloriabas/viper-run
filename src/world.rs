@@ -34,6 +34,17 @@ impl Camera {
     }
 }
 
+/// An F-16 flaperon about its hinge: drooped with the flaps, 20 degrees
+/// full down, and moving against its twin for roll, 21.5 degrees either
+/// way, within its 23 up and 20 down; bent further down when the air load
+/// has damaged it.
+fn flaperon_local(a: &Aircraft, side: f64) -> M4 {
+    let (hz, hy, _, _) = airframe::FLAPERON_HINGE;
+    let roll = clamp(a.surf_roll, -1.0, 1.0);
+    let angle = clamp(a.flaps * 20.0 * DEG - side * roll * 21.5 * DEG, -23.0 * DEG, 20.0 * DEG) + a.flap_damage * 8.0 * DEG;
+    rotate_about(v3(0.0, hy, hz), Quat::axis_angle(V3::X, angle))
+}
+
 pub fn sun_dir() -> V3 {
     SUN.norm()
 }
@@ -663,6 +674,7 @@ pub struct World {
     crew: Part,
     flame: Part,
     stab: [Part; 2],
+    flaperons: [Part; 2],
     rudder: Part,
     brakes: [Part; 4],
     gear: [Part; 3],
@@ -845,6 +857,7 @@ impl World {
         let (exterior, canopy, crew, flame) = (skinned(&airframe.exterior), skinned(&airframe.canopy), skinned(&airframe.crew), skinned(&airframe.flame));
         let stab = [skinned(&airframe.stab[0]), skinned(&airframe.stab[1])];
         let rudder = skinned(&airframe.rudder);
+        let flaperons = [skinned(&airframe.flaperons[0]), skinned(&airframe.flaperons[1])];
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
         let gear_doors = [skinned(&airframe.gear_doors[0])];
@@ -883,6 +896,7 @@ impl World {
             crew,
             flame,
             stab,
+            flaperons,
             rudder,
             brakes,
             gear,
@@ -1028,6 +1042,9 @@ impl World {
                 if !a.lost.tail {
                     self.draw_part(ctx, &self.stab[i], &base, &mat_mul(&model, &local));
                 }
+                if !a.lost.wing[i] {
+                    self.draw_part(ctx, &self.flaperons[i], &base, &mat_mul(&model, &flaperon_local(a, *side)));
+                }
             }
             let (hinge, axis) = airframe::rudder_axis();
             let local = rotate_about(hinge, Quat::axis_angle(axis, clamp(a.surf_yaw, -1.0, 1.0) * 30.0 * DEG));
@@ -1145,6 +1162,9 @@ impl World {
             let local = rotate_about(pivot, Quat::axis_angle(airframe::stab_axis(*side), angle));
             if !a.lost.tail {
                 self.draw_part_in(ctx, &self.stab[i], camo, &base, &mat_mul(&model, &local));
+            }
+            if !a.lost.wing[i] {
+                self.draw_part_in(ctx, &self.flaperons[i], camo, &base, &mat_mul(&model, &flaperon_local(a, *side)));
             }
         }
         let (hinge, axis) = airframe::rudder_axis();

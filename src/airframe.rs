@@ -193,6 +193,9 @@ fn cosine_spacing(s: f64) -> f64 {
 
 const WING_Y: f64 = 0.33;
 const WING_TE: f64 = 3.26;
+/// Flaperon hinge line: its station (z), height, and the span it runs from
+/// the fuselage side out to (x), 0.55 m ahead of the straight trailing edge.
+pub const FLAPERON_HINGE: (f64, f64, f64, f64) = (WING_TE - 0.55, WING_Y, 1.02, 3.5);
 const WING_TIP: f64 = 4.65;
 const WING_NU: usize = 8;
 const WING_NV: usize = 6;
@@ -282,6 +285,8 @@ pub struct Airframe {
     pub brakes: [Mesh; 4],
     /// Left and right wingtip AIM-9s.
     pub tips: [Mesh; 2],
+    /// Left and right flaperons, hinged at `FLAPERON_HINGE`.
+    pub flaperons: [Mesh; 2],
     /// Nose, left main and right main landing gear legs, extended.
     pub gear: [Mesh; 3],
     /// Gear well doors that hinge on the airframe (see `GEAR_DOORS`).
@@ -764,6 +769,33 @@ pub fn build() -> Airframe {
         }
         wrap_skin(&mut stab[i], 0);
     }
+    // Flaperons: the wing's own surface aft of the hinge, a hair proud of
+    // it so the panel covers the skin it lies on when faired.
+    let mut flaperons = [Mesh::new(), Mesh::new()];
+    for (i, &side) in [-1.0, 1.0].iter().enumerate() {
+        let (hz, _, x0, x1) = FLAPERON_HINGE;
+        let point = move |u: f64, v: f64, upper: bool| {
+            let x = mix(x0, x1, u);
+            let uw = (x - 0.40) / (WING_TIP - 0.40);
+            let (le, chord) = (wing_le(x), WING_TE - wing_le(x));
+            let w0 = (hz - le) / chord;
+            let s0 = (1.0 - 2.0 * w0).acos() / PI;
+            let p = wing_point(side, uw, mix(s0, 1.0, v), upper);
+            p + V3::Y * if upper { 0.006 } else { -0.006 }
+        };
+        for &upper in &[true, false] {
+            let out = move |p: V3| v3(p.x, if upper { p.y + 1.0 } else { p.y - 1.0 }, p.z);
+            flaperons[i].surface(3, 2, move |u, v| point(u, v, upper), |_, _| WHITE, Some(&out));
+        }
+        for &u in &[0.0, 1.0] {
+            for k in 0..2 {
+                let (v0, v1) = (k as f64 / 2.0, (k + 1) as f64 / 2.0);
+                flaperons[i].quad(point(u, v0, true), point(u, v1, true), point(u, v1, false), point(u, v0, false), WHITE);
+            }
+        }
+        flaperons[i].quad(point(0.0, 0.0, true), point(1.0, 0.0, true), point(1.0, 0.0, false), point(0.0, 0.0, false), WHITE);
+        wrap_skin(&mut flaperons[i], 0);
+    }
     let mut rudder = Mesh::new();
     for &side in &[-1.0, 1.0] {
         let out = move |p: V3| v3(p.x - side, p.y, p.z);
@@ -780,11 +812,11 @@ pub fn build() -> Airframe {
         }
     }
 
-    for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(brakes.iter_mut()).chain(tips.iter_mut()) {
+    for m in [&mut ext, &mut canopy, &mut crew, &mut flame, &mut rudder].into_iter().chain(stab.iter_mut()).chain(flaperons.iter_mut()).chain(brakes.iter_mut()).chain(tips.iter_mut()) {
         mend_normals(m);
     }
     let (gear, gear_doors) = landing_gear();
-    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, gear, gear_doors, skin: paint_skin(None) }
+    Airframe { exterior: ext, canopy, crew, flame, stab, rudder, brakes, tips, flaperons, gear, gear_doors, skin: paint_skin(None) }
 }
 
 /// Retraction pivots of the nose and main gear legs, the axis each swings
