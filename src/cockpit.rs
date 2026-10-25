@@ -210,10 +210,13 @@ const OUTLINE: [(f64, f64); 16] = [
     (HINGE, 0.579), (0.28, 0.60), (-0.28, 0.60), (-HINGE, 0.579), (-0.34, 0.57), (-0.40, 0.52), (-0.45, 0.44), (-0.47, 0.36),
 ];
 
-/// Knee wells under the centre panel: inner and outer edge (m from the
-/// centreline) and the height of their tops up the panel face, clear of the
-/// HSI and the gauges over them.
-const KNEE_WELL: (f64, f64, f64) = (0.072, 0.232, 0.167);
+/// Leg well under the centre panel: the HSI's half-width and the well's
+/// outer edge (m from the centreline), the height up the panel face of the
+/// knee wells' tops, under the gauges over them, and of the HSI's foot,
+/// below which the well is open right across.
+const KNEE_WELL: (f64, f64, f64, f64) = (0.066, 0.300, 0.167, 0.054);
+/// How far the leg well reaches forward of the panel face, m.
+const WELL_DEPTH: f64 = 0.32;
 
 /// Combiner glass corners in body coordinates: bottom-left, bottom-right, top-right, top-left.
 pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012), v3(0.10, 1.35, -3.958), v3(-0.10, 1.35, -3.958)];
@@ -563,25 +566,40 @@ fn build_static(m: &mut Mesh) {
     // Panel face in three parts, the centre and the two folded wings, and
     // its shoulder rim.
     let face = |pts: &[(f64, f64)]| -> Vec<V3> { pts.iter().map(|&(u, v)| pp(u, v, 0.0)).collect() };
-    // The centre part stops short of the floor either side of the pedestal
-    // under the HSI: two knee wells, boxed in behind, that the shins pass
-    // through to the pedals as in the real cockpit.
-    let (k0, k1, kv) = KNEE_WELL;
+    // As in the real cockpit the centre part ends at the foot of the HSI,
+    // with the leg well open under it: wide knee wells either side of the
+    // HSI up to the gauges over them, open right across below it, boxed in
+    // behind, so the shins pass under the panel to the pedals.
+    let (k0, k1, kv, hv) = KNEE_WELL;
     m.polygon(&face(&[(-HINGE, kv), (HINGE, kv), OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
-    for (a, b) in [(-HINGE, -k1), (-k0, k0), (k1, HINGE)] {
+    m.polygon(&face(&[(-k0, hv), (k0, hv), (k0, kv), (-k0, kv)]), PANEL);
+    for (a, b) in [(-HINGE, -k1), (k1, HINGE)] {
         m.polygon(&face(&[(a, 0.0), (b, 0.0), (b, kv), (a, kv)]), PANEL);
     }
     m.polygon(&face(&OUTLINE[2..9]), PANEL.scale(0.96));
     m.polygon(&face(&[OUTLINE[0], OUTLINE[1], OUTLINE[11], OUTLINE[12], OUTLINE[13], OUTLINE[14], OUTLINE[15]]), PANEL.scale(0.96));
     let mut rim: Vec<((f64, f64), (f64, f64))> = (0..OUTLINE.len()).filter(|&k| k != 1).map(|k| (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()])).collect();
-    rim.extend([((-HINGE, 0.0), (-k1, 0.0)), ((-k0, 0.0), (k0, 0.0)), ((k1, 0.0), (HINGE, 0.0))]);
+    rim.extend([((-HINGE, 0.0), (-k1, 0.0)), ((k1, 0.0), (HINGE, 0.0)), ((-k0, hv), (k0, hv))]);
     for s in [-1.0, 1.0] {
         let (i, o) = (s * k0, s * k1);
-        rim.extend([((o, 0.0), (o, kv)), ((o, kv), (i, kv)), ((i, kv), (i, 0.0))]);
-        m.polygon(&[pp(i, 0.0, -0.20), pp(o, 0.0, -0.20), pp(o, kv, -0.20), pp(i, kv, -0.20)], PANEL.scale(0.45));
+        rim.extend([((o, 0.0), (o, kv)), ((o, kv), (i, kv)), ((i, kv), (i, hv))]);
     }
     for (a, b) in rim {
         m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), pp(b.0, b.1, -0.20), pp(a.0, a.1, -0.20), PANEL.scale(0.7));
+    }
+    // The well itself: its sides, roof and back wall, deep enough for the
+    // shins, the pedals at its foot.
+    let well = |u: f64, v: f64, w: f64| pp(u, v, w);
+    let d = -WELL_DEPTH;
+    for s in [-1.0, 1.0] {
+        m.quad(well(s * k1, 0.0, -0.20), well(s * k1, kv, -0.20), well(s * k1, kv, d), well(s * k1, 0.0, d), PANEL.scale(0.4));
+        m.quad(well(s * k1, kv, -0.20), well(s * k0, kv, -0.20), well(s * k0, kv, d), well(s * k1, kv, d), PANEL.scale(0.35));
+        m.quad(well(s * k0, kv, -0.20), well(s * k0, hv, -0.20), well(s * k0, hv, d), well(s * k0, kv, d), PANEL.scale(0.4));
+    }
+    m.quad(well(-k0, hv, -0.20), well(k0, hv, -0.20), well(k0, hv, d), well(-k0, hv, d), PANEL.scale(0.35));
+    m.polygon(&[well(-k1, 0.0, d), well(k1, 0.0, d), well(k1, hv, d), well(-k1, hv, d)], PANEL.scale(0.3));
+    for s in [-1.0, 1.0] {
+        m.polygon(&[well(s * k0, hv, d), well(s * k1, hv, d), well(s * k1, kv, d), well(s * k0, kv, d)], PANEL.scale(0.3));
     }
     // Glare shield: a hood from the panel top edge up toward the windscreen.
     let top = &OUTLINE[4..];
