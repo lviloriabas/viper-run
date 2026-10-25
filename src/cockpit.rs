@@ -210,11 +210,12 @@ const OUTLINE: [(f64, f64); 16] = [
     (HINGE, 0.579), (0.28, 0.60), (-0.28, 0.60), (-HINGE, 0.579), (-0.34, 0.57), (-0.40, 0.52), (-0.45, 0.44), (-0.47, 0.36),
 ];
 
-/// Leg well under the centre panel: the HSI's half-width and the well's
-/// outer edge (m from the centreline), the height up the panel face of the
-/// knee wells' tops, under the gauges over them, and of the HSI's foot,
-/// below which the well is open right across.
-const KNEE_WELL: (f64, f64, f64, f64) = (0.066, 0.300, 0.167, 0.054);
+/// Leg well through the centre panel: the half-widths (m) of the HSI, of
+/// the ADI with the small gauges beside it, and of the well, then the
+/// heights up the panel face of the HSI's foot (open right across below),
+/// the gauges' foot and the MFDs' foot, where the well stops.
+const WELL_X: [f64; 3] = [0.066, 0.135, 0.305];
+const WELL_V: [f64; 3] = [0.054, 0.200, 0.290];
 /// How far the leg well reaches forward of the panel face, m.
 const WELL_DEPTH: f64 = 0.32;
 
@@ -566,40 +567,51 @@ fn build_static(m: &mut Mesh) {
     // Panel face in three parts, the centre and the two folded wings, and
     // its shoulder rim.
     let face = |pts: &[(f64, f64)]| -> Vec<V3> { pts.iter().map(|&(u, v)| pp(u, v, 0.0)).collect() };
-    // As in the real cockpit the centre part ends at the foot of the HSI,
-    // with the leg well open under it: wide knee wells either side of the
-    // HSI up to the gauges over them, open right across below it, boxed in
-    // behind, so the shins pass under the panel to the pedals.
-    let (k0, k1, kv, hv) = KNEE_WELL;
-    m.polygon(&face(&[(-HINGE, kv), (HINGE, kv), OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
-    m.polygon(&face(&[(-k0, hv), (k0, hv), (k0, kv), (-k0, kv)]), PANEL);
-    for (a, b) in [(-HINGE, -k1), (k1, HINGE)] {
-        m.polygon(&face(&[(a, 0.0), (b, 0.0), (b, kv), (a, kv)]), PANEL);
+    // As in the real cockpit the centre part is cut away under the MFDs for
+    // the knees: the leg well runs from the floor up to the MFDs' foot either
+    // side of the ADI and HSI stack, and right across under the HSI, boxed in
+    // behind, so the shins pass through the panel to the pedals.
+    let xs = [-HINGE, -WELL_X[2], -WELL_X[1], -WELL_X[0], WELL_X[0], WELL_X[1], WELL_X[2], HINGE];
+    let vs = [0.0, WELL_V[0], WELL_V[1], WELL_V[2]];
+    let open = |i: usize, j: usize| -> bool {
+        let (c, row) = ((xs[i] + xs[i + 1]) * 0.5, j);
+        let ac = c.abs();
+        ac < WELL_X[2] && (row == 0 || ac > WELL_X[0] && (row == 1 || ac > WELL_X[1]))
+    };
+    let d = -WELL_DEPTH;
+    for i in 0..xs.len() - 1 {
+        for j in 0..vs.len() - 1 {
+            let (u0, u1, v0, v1) = (xs[i], xs[i + 1], vs[j], vs[j + 1]);
+            if !open(i, j) {
+                m.polygon(&face(&[(u0, v0), (u1, v0), (u1, v1), (u0, v1)]), PANEL);
+                if j == 0 {
+                    m.quad(pp(u0, 0.0, 0.0), pp(u1, 0.0, 0.0), pp(u1, 0.0, -0.20), pp(u0, 0.0, -0.20), PANEL.scale(0.7));
+                }
+                continue;
+            }
+            // Back wall, then a side or roof against each closed neighbour.
+            m.polygon(&[pp(u0, v0, d), pp(u1, v0, d), pp(u1, v1, d), pp(u0, v1, d)], PANEL.scale(0.3));
+            let closed = |di: i32, dj: i32| {
+                let (ni, nj) = (i as i32 + di, j as i32 + dj);
+                nj >= vs.len() as i32 - 1 || ni < 0 || ni >= xs.len() as i32 - 1 || nj >= 0 && !open(ni as usize, nj as usize)
+            };
+            if closed(-1, 0) {
+                m.quad(pp(u0, v1, 0.0), pp(u0, v0, 0.0), pp(u0, v0, d), pp(u0, v1, d), PANEL.scale(0.4));
+            }
+            if closed(1, 0) {
+                m.quad(pp(u1, v0, 0.0), pp(u1, v1, 0.0), pp(u1, v1, d), pp(u1, v0, d), PANEL.scale(0.4));
+            }
+            if closed(0, 1) {
+                m.quad(pp(u0, v1, 0.0), pp(u1, v1, 0.0), pp(u1, v1, d), pp(u0, v1, d), PANEL.scale(0.35));
+            }
+        }
     }
+    m.polygon(&face(&[(-HINGE, vs[3]), (HINGE, vs[3]), OUTLINE[8], OUTLINE[9], OUTLINE[10], OUTLINE[11]]), PANEL);
     m.polygon(&face(&OUTLINE[2..9]), PANEL.scale(0.96));
     m.polygon(&face(&[OUTLINE[0], OUTLINE[1], OUTLINE[11], OUTLINE[12], OUTLINE[13], OUTLINE[14], OUTLINE[15]]), PANEL.scale(0.96));
-    let mut rim: Vec<((f64, f64), (f64, f64))> = (0..OUTLINE.len()).filter(|&k| k != 1).map(|k| (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()])).collect();
-    rim.extend([((-HINGE, 0.0), (-k1, 0.0)), ((k1, 0.0), (HINGE, 0.0)), ((-k0, hv), (k0, hv))]);
-    for s in [-1.0, 1.0] {
-        let (i, o) = (s * k0, s * k1);
-        rim.extend([((o, 0.0), (o, kv)), ((o, kv), (i, kv)), ((i, kv), (i, hv))]);
-    }
-    for (a, b) in rim {
+    for k in (0..OUTLINE.len()).filter(|&k| k != 1) {
+        let (a, b) = (OUTLINE[k], OUTLINE[(k + 1) % OUTLINE.len()]);
         m.quad(pp(a.0, a.1, 0.0), pp(b.0, b.1, 0.0), pp(b.0, b.1, -0.20), pp(a.0, a.1, -0.20), PANEL.scale(0.7));
-    }
-    // The well itself: its sides, roof and back wall, deep enough for the
-    // shins, the pedals at its foot.
-    let well = |u: f64, v: f64, w: f64| pp(u, v, w);
-    let d = -WELL_DEPTH;
-    for s in [-1.0, 1.0] {
-        m.quad(well(s * k1, 0.0, -0.20), well(s * k1, kv, -0.20), well(s * k1, kv, d), well(s * k1, 0.0, d), PANEL.scale(0.4));
-        m.quad(well(s * k1, kv, -0.20), well(s * k0, kv, -0.20), well(s * k0, kv, d), well(s * k1, kv, d), PANEL.scale(0.35));
-        m.quad(well(s * k0, kv, -0.20), well(s * k0, hv, -0.20), well(s * k0, hv, d), well(s * k0, kv, d), PANEL.scale(0.4));
-    }
-    m.quad(well(-k0, hv, -0.20), well(k0, hv, -0.20), well(k0, hv, d), well(-k0, hv, d), PANEL.scale(0.35));
-    m.polygon(&[well(-k1, 0.0, d), well(k1, 0.0, d), well(k1, hv, d), well(-k1, hv, d)], PANEL.scale(0.3));
-    for s in [-1.0, 1.0] {
-        m.polygon(&[well(s * k0, hv, d), well(s * k1, hv, d), well(s * k1, kv, d), well(s * k0, kv, d)], PANEL.scale(0.3));
     }
     // Glare shield: a hood from the panel top edge up toward the windscreen.
     let top = &OUTLINE[4..];
@@ -654,10 +666,10 @@ fn build_static(m: &mut Mesh) {
     for (i, y) in [0.86, 0.79, 0.72, 0.65].iter().enumerate() {
         gauge(m, &panel_at(0.392, *y, 0.0), 0.026, R_DIALS[3 + i]);
     }
-    plate(m, &panel_at(-0.376, 0.79, 0.0), 0.046, 0.16, R_ARM);
+    plate(m, &panel_at(-0.376, 0.834, 0.0), 0.046, 0.14, R_ARM);
     plate(m, &panel_at(0.40, 0.57, 0.0), 0.085, 0.060, R_CAUTION);
-    gauge(m, &panel_at(-0.245, 0.618, 0.0), 0.035, R_VVI);
-    gauge(m, &panel_at(0.245, 0.618, 0.0), 0.038, R_FUEL);
+    // Fuel quantity low on the left wing, clear of the leg well.
+    gauge(m, &panel_at(-0.385, 0.714, 0.0), 0.032, R_FUEL);
     plate(m, &panel_at(-0.39, 0.91, 0.0), 0.062, 0.030, R_TWP);
     plate(m, &panel_at(0.392, 0.93, 0.0), 0.065, 0.024, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
@@ -1204,8 +1216,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     ];
     for (i, (label, value)) in rows.iter().enumerate() {
         let y = r.y + 46.0 + i as f32 * 24.0;
-        cv.text(label, r.x + 10.0, y, 1.0, ink, Align::Left);
-        cv.text(value, r.x + r.w - 10.0, y, 1.0, ink, Align::Right);
+        cv.text(&format!("{label}  {value}"), r.x + 10.0, y, 1.0, ink, Align::Left);
     }
 
     // Vertical velocity: thousands of feet a minute, 0 at nine o'clock.
