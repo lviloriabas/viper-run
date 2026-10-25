@@ -714,12 +714,14 @@ impl<'a> Ui<'a> {
                 self.status_panel(kicker, DIM, title, ACID, &text, [("TIME", format_time(r.time), GREEN), (what, tally, CREAM), ("SCORE", pad(r.score, 5), AMBER), ("RATING", rank.to_string(), CREAM)], again, "");
             }
             Outcome::ShotDown => self.status_panel(
-                &if r.cause == "PILOT KILLED" { "// PILOT KILLED IN THE COCKPIT".to_string() } else { format!("// {}, PILOT EJECTED", if r.cause.is_empty() { "AIRFRAME LOST" } else { r.cause }) },
+                &if r.cause == "PILOT KILLED" { "// PILOT KILLED IN THE COCKPIT".to_string() } else if r.cause == "EJECTED" { "// PILOT EJECTED, JET LOST".to_string() } else { format!("// {}, PILOT EJECTED", if r.cause.is_empty() { "AIRFRAME LOST" } else { r.cause }) },
                 RED,
-                if r.cause == "PILOT KILLED" { "KILLED" } else { "SHOT DOWN" },
+                if r.cause == "PILOT KILLED" { "KILLED" } else if r.cause == "EJECTED" { "EJECTED" } else { "SHOT DOWN" },
                 RED,
                 &if r.cause == "PILOT KILLED" {
                     format!("The rounds came through the canopy, and the jet flew on without you. You took {} {unit} with you.", r.done)
+                } else if r.cause == "EJECTED" {
+                    format!("You pulled the handle, the seat fired and the chute let you down. You took {} {unit} with you.", r.done)
                 } else {
                     format!("The jet came apart around you and the seat did its job. You took {} {unit} with you.", r.done)
                 },

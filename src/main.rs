@@ -12,6 +12,7 @@ mod capture;
 mod combat;
 mod cockpit;
 mod damage;
+mod eject;
 mod font;
 mod fx;
 mod gamepad;
@@ -108,6 +109,8 @@ struct Opts {
     mission: Option<MissionKind>,
     /// Hold the trigger, and lock the nearest target, through a scripted run.
     fire: bool,
+    /// --input eject: pull the handle at once.
+    eject: bool,
     lock: bool,
     /// Track with the MiG's IRST instead of the radar.
     irst: bool,
@@ -161,6 +164,7 @@ fn parse_opts() -> Opts {
                         "flaps" => o.input.flaps = true,
                         "wheelbrake" => o.input.wheel_brake = true,
                         "fire" => o.fire = true,
+                        "eject" => o.eject = true,
                         "lock" => o.lock = true,
                         "irst" => o.irst = true,
                         "auto" => o.auto = true,
@@ -268,6 +272,12 @@ struct App {
     warn_clock: f64,
     /// Seconds the countermeasure button has been held since the last program.
     cm_hold: f64,
+    /// The pilot's ejection once the handle is pulled, and how long it has
+    /// been held.
+    ejection: Option<eject::Ejection>,
+    eject_hold: f64,
+    /// The jet the pilot left has hit the ground.
+    eject_wreck: bool,
     result: Option<RunResult>,
     /// The external camera sits inside the jet's Mach cone, where its boom
     /// has already passed.
@@ -414,6 +424,9 @@ impl App {
             flash_color: [180, 255, 190],
             warn_clock: 0.0,
             cm_hold: 0.0,
+            ejection: None,
+            eject_hold: 0.0,
+            eject_wreck: false,
             result: None,
             in_cone: false,
             breaths: 0,
@@ -604,6 +617,7 @@ impl App {
         self.transition_timer = 0.0;
         self.flash = 0.0;
         self.world.fx.clear();
+        (self.ejection, self.eject_hold, self.eject_wreck) = (None, 0.0, false);
         self.kick = 0.0;
         self.hands = Hands { throttle: self.mission.start_throttle, ..Default::default() };
         self.airbrake = false;
@@ -910,6 +924,7 @@ impl App {
                 self.audio.crash(a.impact_water);
                 self.world.fx.explode(a);
             }
+            Outcome::ShotDown if self.ejection.is_some() => {}
             Outcome::ShotDown => {
                 self.flash_color = [255, 100, 58];
                 self.flash = 0.8;
@@ -1120,9 +1135,24 @@ impl App {
         if m.timed {
             m.time_left = (m.time_left - dt).max(0.0);
         }
-        let input = self.pilot.controls(a, input);
+        // Nobody flies a jet the pilot has left.
+        let input = if a.ejected { Input::default() } else { self.pilot.controls(a, input) };
         let broken = a.gear_broken;
         a.update(dt, &input);
+        let mut eject_toast = None;
+        if let Some(e) = &mut self.ejection {
+            let toast = e.step(dt, a);
+            if e.rocket() {
+                self.world.fx.decoy(e.pilot.pos - e.pilot.q.axes().up * 0.75, e.pilot.vel * 0.6);
+            }
+            if let Some(t) = toast {
+                if e.phase == eject::Phase::Seat {
+                    self.audio.burst(1.1, 3.2, 650.0, 110.0, 0.0);
+                    self.kick = self.kick.max(0.9);
+                }
+                eject_toast = Some(t);
+            }
+        }
         // A leg folding under a hard arrival, and the airframe scraping the
         // runway in sparks.
         let folded = (0..3).find(|&i| a.gear_broken[i] && !broken[i]);
@@ -1136,6 +1166,9 @@ impl App {
         }
         if let Some(at) = sparks {
             self.world.fx.impact(at, fx::Impact::Metal);
+        }
+        if let Some(t) = eject_toast {
+            self.flash_toast(t, 2.4);
         }
         if self.pilot.glocs > glocs {
             self.flash_toast("G-LOC // PILOT UNCONSCIOUS", 3.0);
@@ -1181,6 +1214,10 @@ impl App {
         if self.fight(dt) {
             return;
         }
+        if self.ejection.is_some() {
+            self.after_ejection();
+            return;
+        }
         // A wing that broke off in flight: the pieces fly and the rest falls.
         let a = self.aircraft.as_ref().unwrap();
         if a.lost.any() && !a.crashed {
@@ -1219,11 +1256,59 @@ impl App {
         }
     }
 
+    /// Pulls the handle: the canopy goes and the seat sequence starts.
+    fn eject(&mut self) {
+        let Some(a) = self.aircraft.as_mut() else { return };
+        if self.ejection.is_some() || a.ejected {
+            return;
+        }
+        a.ejected = true;
+        let e = eject::Ejection::new(a);
+        self.flash_toast(&format!("EJECT // {}", e.spec.name), 2.0);
+        self.audio.burst(0.5, 2.6, 1800.0, 260.0, 0.0);
+        self.kick = self.kick.max(0.5);
+        self.flash_color = [255, 245, 220];
+        self.flash = self.flash.max(0.25);
+        self.ejection = Some(e);
+    }
+
+    /// The jet the pilot left flies on alone and comes down; the run ends a
+    /// few seconds after the pilot is on the ground.
+    fn after_ejection(&mut self) {
+        let a = self.aircraft.as_ref().unwrap();
+        if a.lost.any() && !a.crashed && !self.falling {
+            self.combat.break_up(a, a.lost);
+            self.falling = true;
+        }
+        let a = self.aircraft.as_ref().unwrap();
+        if a.crashed && !self.eject_wreck {
+            self.eject_wreck = true;
+            self.crash_time = self.time;
+            self.audio.crash(a.impact_water);
+            self.world.fx.explode(a);
+        }
+        let e = self.ejection.as_ref().unwrap();
+        if e.landed_for > 3.0 || e.age > 300.0 {
+            if !self.combat.player_dead {
+                self.combat.death = "EJECTED";
+            }
+            self.combat.player_lost = Default::default();
+            self.falling = false;
+            self.begin_finish(Outcome::ShotDown);
+        }
+    }
+
     /// The combat step after the jet has moved: weapons, bandits, targets
     /// and their effects. Returns true when it ended the run.
     fn fight(&mut self, dt: f64) -> bool {
         // A pilot out cold, or still coming round, cannot squeeze the trigger.
-        let trigger = self.trigger() && self.pilot.authority() > 0.5;
+        let trigger = self.trigger() && self.pilot.authority() > 0.5 && self.ejection.is_none();
+        // The handle, held for half a second by a pilot awake to pull it.
+        let pull = (self.settings.keys.held(Bind::Eject, &self.keys) || self.opts.eject) && self.pilot.authority() > 0.5;
+        self.eject_hold = if pull && self.ejection.is_none() { self.eject_hold + dt } else { 0.0 };
+        if self.eject_hold >= 0.5 {
+            self.eject();
+        }
         // Held down, the countermeasure button runs another program every
         // CM_REPEAT seconds; both sticks clicked together is the limiter override.
         let cm = self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.held(gamepad::LS) && !self.pad.held(gamepad::RS);
@@ -1247,6 +1332,30 @@ impl App {
             self.mission.score = self.combat.score(&self.mission);
         }
         if self.combat.player_dead {
+            if self.ejection.is_some() {
+                return false;
+            }
+            // Shot down with the pilot alive: the jet comes apart and he
+            // goes out of it.
+            if self.combat.death != "PILOT KILLED" {
+                let lost = self.combat.player_lost;
+                let a = self.aircraft.as_mut().unwrap();
+                if lost.any() {
+                    a.lose(lost);
+                    self.falling = true;
+                } else {
+                    a.crashed = true;
+                    a.impact_speed = a.speed;
+                    a.collision_label = "shot down";
+                    self.eject_wreck = true;
+                    self.crash_time = self.time;
+                    self.audio.crash(false);
+                }
+                self.flash_color = [255, 100, 58];
+                self.flash = 0.8;
+                self.eject();
+                return false;
+            }
             self.begin_finish(Outcome::ShotDown);
             return true;
         }
@@ -1408,6 +1517,32 @@ impl App {
         Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() }
     }
 
+    /// After ejecting: from the pilot's helmet, looking down and ahead under
+    /// the canopy, or from outside following the seat and then the chute.
+    fn eject_camera(&self, e: &eject::Ejection) -> Camera {
+        let p = &e.pilot;
+        let hanging = matches!(e.phase, eject::Phase::Chute | eject::Phase::Landed);
+        if self.view == View::Cockpit {
+            let down = if hanging { -25.0 * DEG } else { 0.0 };
+            let q = p.q.mul(Quat::axis_angle(V3::Y, -self.look.0)).mul(Quat::axis_angle(V3::X, self.look.1 + down));
+            let ax = q.axes();
+            let eye = p.pos + p.q.rotate(v3(0.0, 0.52, -0.16));
+            return Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() };
+        }
+        let course = v3(p.vel.x, 0.0, p.vel.z);
+        let back = if course.len() > 1.0 { -course.norm() } else { p.q.axes().back };
+        let center = p.pos + V3::Y * (0.4 + 3.6 * e.chute);
+        let mut off = back * (7.0 + 9.0 * e.chute) + V3::Y * (1.5 + 2.5 * e.chute);
+        off = Quat::axis_angle(V3::Y, self.chase_look.0).rotate(off);
+        let side = off.cross(V3::Y).norm();
+        off = Quat::axis_angle(side, -self.chase_look.1).rotate(off);
+        let mut eye = center + off * self.opts.zoom.unwrap_or(1.0);
+        eye.y = eye.y.max(terrain::floor(eye.x, eye.z) + 1.5);
+        let f = (center - eye).norm();
+        let r = f.cross(V3::Y).norm();
+        Camera { eye, forward: f, right: r, up: r.cross(f).norm(), fov: 55.0 * DEG * self.zoom_scale() }
+    }
+
     fn chase_camera(&self, a: &Aircraft) -> Camera {
         let ax = a.q.axes();
         let t = self.time;
@@ -1460,7 +1595,7 @@ impl App {
         let m = &self.mirror;
         self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
         let mission = matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission);
-        let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a) };
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a), ejection: None };
         self.world.draw(&mut *self.ctx, &rear, m.w as f64 / m.h as f64, self.time, mission, Some(a), true, Some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
         self.cockpit.blit_mirror(&mut *self.ctx, &self.world, m);
@@ -1469,6 +1604,7 @@ impl App {
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
             (_, State::Attract | State::Loadout) | (None, _) => self.attract_camera(self.attract_time),
+            (Some(_), _) if self.ejection.is_some() => self.eject_camera(self.ejection.as_ref().unwrap()),
             (Some(a), _) if a.crashed || a.lost.any() => self.wreck_camera(a),
             (Some(a), _) => {
                 if self.view == View::Chase {
@@ -1737,7 +1873,7 @@ impl EventHandler for App {
         let flying_view = !matches!(self.state, State::Attract | State::Loadout) && self.aircraft.is_some();
         // A wrecked jet leaves only the fireball and debris, seen from outside.
         let wrecked = self.aircraft.as_ref().is_some_and(|a| a.crashed);
-        let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked;
+        let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked && self.ejection.is_none();
         let cam = self.camera;
 
         // Instrument pages refresh at 30 Hz.
@@ -1761,7 +1897,7 @@ impl EventHandler for App {
             self.world.fx.extra_glow.clear();
         }
         let player = if flying_view && !wrecked { self.aircraft.as_ref() } else { None };
-        let scene = props::Scene { models: &self.models, combat: &self.combat, player };
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player, ejection: self.ejection.as_ref() };
         self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, player, cockpit_view, flying_view.then_some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
         if cockpit_view {

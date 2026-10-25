@@ -22,6 +22,8 @@ pub enum Bind {
     Countermeasures,
     /// Selective jettison: the selected store, one at a time.
     Jettison,
+    /// Ejection handle, held for half a second.
+    Eject,
     Airbrake,
     Gear,
     Flaps,
@@ -32,7 +34,7 @@ pub enum Bind {
     RightMfd,
 }
 
-pub const BINDS: [Bind; 23] = [
+pub const BINDS: [Bind; 24] = [
     Bind::PitchUp,
     Bind::PitchDown,
     Bind::RollLeft,
@@ -48,6 +50,7 @@ pub const BINDS: [Bind; 23] = [
     Bind::Sensor,
     Bind::Countermeasures,
     Bind::Jettison,
+    Bind::Eject,
     Bind::Airbrake,
     Bind::Gear,
     Bind::Flaps,
@@ -81,6 +84,7 @@ impl Bind {
             Bind::Sensor => "RADAR / IRST (MIG)",
             Bind::Countermeasures => "CHAFF / FLARE",
             Bind::Jettison => "JETTISON STORE",
+            Bind::Eject => "EJECT (HOLD)",
             Bind::Airbrake => "AIRBRAKE",
             Bind::Gear => "LANDING GEAR",
             Bind::Flaps => "FLAPS",
@@ -110,6 +114,7 @@ impl Bind {
             Bind::Sensor => "sensor",
             Bind::Countermeasures => "countermeasures",
             Bind::Jettison => "jettison",
+            Bind::Eject => "eject",
             Bind::Airbrake => "airbrake",
             Bind::Gear => "gear",
             Bind::Flaps => "flaps",
@@ -139,6 +144,7 @@ impl Bind {
             Bind::Sensor => (I, None),
             Bind::Countermeasures => (Z, None),
             Bind::Jettison => (J, None),
+            Bind::Eject => (Backspace, None),
             Bind::Airbrake => (H, None),
             Bind::Gear => (G, None),
             Bind::Flaps => (L, None),

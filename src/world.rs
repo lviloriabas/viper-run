@@ -1059,7 +1059,7 @@ impl World {
             }
             self.draw_gear(ctx, a, &base, &model);
             }
-            if !cockpit {
+            if !cockpit && !a.ejected {
                 // The MiG's pilot sits under its own design eye.
                 let seat = if a.kind == Type::Mig29 { basis(V3::X, V3::Y, V3::Z, crate::mig29::EYE - airframe::EYE) } else { basis(V3::X, V3::Y, V3::Z, V3::ZERO) };
                 self.draw_part(ctx, &self.crew, &base, &mat_mul(&model, &seat));
@@ -1106,7 +1106,7 @@ impl World {
         self.fx.draw(ctx, vp, Layer::Particles);
 
         // Chase canopy: back faces first, then front faces, for correct layering.
-        if let (Some(a), false) = (aircraft, cockpit) {
+        if let Some(a) = aircraft.filter(|a| !cockpit && !a.ejected) {
             let canopy = if a.kind == Type::Mig29 { &self.mig_canopy } else { &self.canopy };
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);

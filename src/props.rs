@@ -26,6 +26,13 @@ pub struct Models {
     mk82: Part,
     sites: Vec<Part>,
     ruin: Part,
+    /// Ejection, per jet (F-16, MiG-29): the seat (the K-36DM's with its
+    /// booms out), the pilot seated and hanging, the main canopy and the
+    /// cockpit canopy blown off.
+    seat: [Part; 2],
+    pilot: [[Part; 2]; 2],
+    chute: [Part; 2],
+    canopy: [Part; 2],
 }
 
 /// AIM-120 AMRAAM, 3.66 m and 178 mm, nose at the origin pointing forward:
@@ -71,7 +78,13 @@ impl Models {
         let mut a9 = Mesh::new();
         airframe::aim9(&mut a9, V3::ZERO);
         let sites = KINDS.iter().map(|&k| part(&targets::mesh(k))).collect();
-        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()) }
+        use crate::eject;
+        let mig = crate::mig29::build();
+        let seat = [part(&eject::seat_mesh(Type::F16, false)), part(&eject::seat_mesh(Type::Mig29, true))];
+        let pilot = [[part(&eject::pilot_mesh(Type::F16, false)), part(&eject::pilot_mesh(Type::F16, true))], [part(&eject::pilot_mesh(Type::Mig29, false)), part(&eject::pilot_mesh(Type::Mig29, true))]];
+        let chute = [part(&eject::chute_mesh(&eject::ACES2)), part(&eject::chute_mesh(&eject::K36DM))];
+        let canopy = [part(&frame.canopy), part(&mig.canopy)];
+        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, chute, canopy }
     }
 }
 
@@ -81,6 +94,8 @@ pub struct Scene<'a> {
     pub combat: &'a Combat,
     /// The player's jet, while it is drawn.
     pub player: Option<&'a Aircraft>,
+    /// The player's ejection, once the handle is pulled.
+    pub ejection: Option<&'a crate::eject::Ejection>,
 }
 
 /// Model transform of a body moving along `dir` at `pos`, relative to the eye.
@@ -162,6 +177,39 @@ impl Props for Scene<'_> {
         }
         for wr in &c.wrecks {
             w.draw_jet(ctx, vp, cam, &wr.jet, BURNT);
+        }
+        if let Some(e) = self.ejection {
+            use crate::eject::Phase;
+            let k = (e.kind == Type::Mig29) as usize;
+            let at = |b: &crate::eject::Body| {
+                let ax = b.q.axes();
+                basis(ax.right, ax.up, ax.back, b.pos - eye)
+            };
+            w.draw_prop(ctx, vp, &m.canopy[k], at(&e.canopy), NONE);
+            let hanging = matches!(e.phase, Phase::Chute | Phase::Landed);
+            if e.phase != Phase::Canopy {
+                w.draw_prop(ctx, vp, &m.pilot[k][hanging as usize], at(&e.pilot), NONE);
+            }
+            match &e.seat {
+                Some(seat) => w.draw_prop(ctx, vp, &m.seat[k], at(seat), NONE),
+                None if e.phase == Phase::Seat => w.draw_prop(ctx, vp, &m.seat[k], at(&e.pilot), NONE),
+                None => {}
+            }
+            if e.chute > 0.01 {
+                // Streaming out of its pack and filling: long and thin first,
+                // then the full spread.
+                let ax = e.pilot.q.axes();
+                let up = V3::Y;
+                let right = v3(ax.right.x, 0.0, ax.right.z).norm();
+                let back = right.cross(up);
+                let spread = (0.12 + 0.88 * e.chute * e.chute) as f32;
+                let rise = (0.35 + 0.65 * e.chute.sqrt()) as f32;
+                let mut model = basis(right, up, back, e.pilot.pos - eye);
+                for (i, v) in model.iter_mut().take(11).enumerate() {
+                    *v *= if (4..8).contains(&i) { rise } else { spread };
+                }
+                w.draw_prop(ctx, vp, &m.chute[k], model, NONE);
+            }
         }
         for d in &c.debris {
             w.draw_debris(ctx, vp, cam, d.kind, d.piece, d.pos, d.q, if d.burnt { BURNT } else { NONE });

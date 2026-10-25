@@ -1024,6 +1024,8 @@ pub struct Aircraft {
     pub flap_damage: f64,
     /// The airframe flown.
     pub kind: Type,
+    /// The pilot has ejected: canopy and seat gone, no one at the controls.
+    pub ejected: bool,
 }
 
 impl Aircraft {
@@ -1133,6 +1135,7 @@ impl Aircraft {
             gear_damage: 0.0,
             flap_damage: 0.0,
             kind: Type::F16,
+            ejected: false,
             wing_stores: 0.0,
         };
         a.update(0.0, &Input::default());
