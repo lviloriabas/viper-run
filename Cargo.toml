@@ -2,13 +2,18 @@
 name = "viper-run"
 version = "2.0.0"
 edition = "2021"
-description = "Small retro F-16 cockpit flight game"
+description = "Procedural cockpit combat flight game with flight school and multiplayer"
 publish = false
+default-run = "viper-run"
 
 [dependencies]
 # Window, input and OpenGL loading only. On Linux it dlopens libGL/libX11 at
 # runtime, so the binary needs no development libraries to build or run.
 miniquad = "=0.4.11"
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "=1.1.3", default-features = false, features = ["use-std"] }
+chacha20poly1305 = "=0.10.1"
+getrandom = "=0.2.16"
 
 [profile.release]
 opt-level = 3

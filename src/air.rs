@@ -258,8 +258,8 @@ impl AirData {
             vs_fpm: a.vel.y * FT * 60.0,
             qbar: 0.5 * atm.rho * tas * tas,
             sigma: atm.rho / RHO0,
-            vmax_kcas: VMAX_KCAS.min(cas_for_mach(MACH_MAX, atm.pressure) * KT),
-            vmax_mach: MACH_MAX.min(mach_for_cas(VMAX_KCAS / KT, atm.pressure)),
+            vmax_kcas: a.kind.vmax_kcas().min(cas_for_mach(a.kind.max_mach(), atm.pressure) * KT),
+            vmax_mach: a.kind.max_mach().min(mach_for_cas(a.kind.vmax_kcas() / KT, atm.pressure)),
             g: a.g_smooth,
             g_max: a.max_g,
             g_min: a.min_g,
@@ -267,7 +267,7 @@ impl AirData {
     }
 
     pub fn overspeed(&self) -> bool {
-        self.kcas > VMAX_KCAS || self.mach > MACH_MAX
+        self.kcas > self.vmax_kcas || self.mach > self.vmax_mach
     }
 }
 

@@ -218,8 +218,11 @@ pub struct Coeffs {
 }
 
 pub fn coefficients(f: &Flow) -> Coeffs {
-    if f.kind == Type::Mig29 {
-        return aero_mig29::coefficients(f);
+    match f.kind {
+        Type::Mig29 => return aero_mig29::coefficients(f),
+        Type::F18 => return crate::aero_hornet::coefficients(f),
+        Type::Su27 => return crate::aero_su27::coefficients(f),
+        Type::F16 => {}
     }
     let a = clamp(f.alpha, -10.0, 45.0);
     let b = clamp(f.beta, -30.0, 30.0);
@@ -351,6 +354,8 @@ pub fn thrust(kind: Type, power: f64, mach: f64, altitude_m: f64) -> f64 {
     let (mil_sl, max_sl, inlet) = match kind {
         Type::F16 => (MIL_THRUST, MAX_THRUST, inlet_factor(mach)),
         Type::Mig29 => (aero_mig29::MIL_THRUST, aero_mig29::MAX_THRUST, aero_mig29::inlet_factor(mach)),
+        Type::F18 => (crate::aero_hornet::MIL_THRUST,crate::aero_hornet::MAX_THRUST,crate::aero_hornet::inlet_factor(mach)),
+        Type::Su27 => (crate::aero_su27::MIL_THRUST,crate::aero_su27::MAX_THRUST,crate::aero_su27::inlet_factor(mach)),
     };
     let ft = altitude_m / 0.3048;
     let mil = engine_table(&MIL, mach, ft) * mil_sl * inlet;

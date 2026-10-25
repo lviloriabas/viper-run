@@ -48,12 +48,13 @@ pub struct Settings {
     pub performance_overlay: bool,
     /// Mission clocks on; off, no mission times out.
     pub clock: bool,
+    pub tutorial_completed: u8,
     pub keys: Keymap,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, tutorial_completed: 0, keys: Keymap::default() }
     }
 }
 
@@ -83,6 +84,7 @@ pub fn load() -> (Settings, Best) {
 
 fn parse(entries: Vec<(String, String)>) -> (Settings, Best) {
     let mut s = Settings::default();
+    let has_saved_ptt=entries.iter().any(|(key,_)|key=="key_push_to_talk");
     let mut b = Best::default();
     for (k, v) in entries {
         let num = v.parse::<f64>().ok().filter(|n| n.is_finite());
@@ -98,10 +100,18 @@ fn parse(entries: Vec<(String, String)>) -> (Settings, Best) {
             ("fullscreen", _) => s.fullscreen = v == "true",
             ("performance_overlay", _) => s.performance_overlay = v != "false",
             ("clock", _) => s.clock = v != "false",
+            ("tutorial_completed", _) => s.tutorial_completed = v.parse::<u8>().unwrap_or(0) & 31,
             ("best_score", Some(n)) => b.score = n.max(0.0),
             ("best_time", Some(n)) => b.time = n.max(0.0),
             (k, _) if k.starts_with("key_") => s.keys.load(&k[4..], &v),
             _ => {}
+        }
+    }
+    if !has_saved_ptt {
+        for (slot,key) in s.keys.get(crate::keymap::Bind::PushToTalk).into_iter().enumerate() {
+            if key.is_some() && crate::keymap::BINDS.iter().any(|&bind|bind!=crate::keymap::Bind::PushToTalk && s.keys.get(bind).contains(&key)) {
+                s.keys.set(crate::keymap::Bind::PushToTalk,slot,None);
+            }
         }
     }
     (s, b)
@@ -120,7 +130,7 @@ fn encode(s: &Settings, b: &Best) -> String {
         "sensitivity={:.1}\nexpo={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nperformance_overlay={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
         s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.performance_overlay, s.clock, b.score.round(), b.time
     );
-    text + &s.keys.save()
+    text + &format!("tutorial_completed={}\n", s.tutorial_completed) + &s.keys.save()
 }
 
 #[cfg(test)]
@@ -137,5 +147,21 @@ mod tests {
                 .map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
             assert_eq!(parse(entries).0.performance_overlay, enabled);
         }
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    #[test]
+    fn a_new_voice_binding_never_steals_an_existing_user_key() {
+        let (settings,_) = parse(vec![("key_airbrake".into(),"U,".into())]);
+        assert_eq!(settings.keys.lookup(miniquad::KeyCode::U),Some(crate::keymap::Bind::Airbrake));
+        assert_eq!(settings.keys.get(crate::keymap::Bind::PushToTalk),[None,None]);
+        let (fresh,_) = parse(Vec::new());
+        assert_eq!(fresh.keys.lookup(miniquad::KeyCode::U),Some(crate::keymap::Bind::PushToTalk));
+        let (saved,_) = parse(vec![("key_push_to_talk".into(),"F10,".into()),("tutorial_completed".into(),"31".into())]);
+        assert_eq!(saved.keys.lookup(miniquad::KeyCode::F10),Some(crate::keymap::Bind::PushToTalk));
+        assert_eq!(saved.tutorial_completed,31);
     }
 }

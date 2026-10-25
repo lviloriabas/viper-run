@@ -4,12 +4,13 @@
 - (ninguna)
 
 ## Pendientes más adelante
-- [ ] Tutoriales de controles, armas, vuelo, despegues y aterrizajes.
-- [ ] P2P multiplayer, con servidores, chat de voz con push to talk, detección de voz, todo el menu de muteado y esas cosas necesarias. detección de colisiones entre aviones, y un sistema de matchmaking.
-- [ ] PVP Y PVE misiones de mulitiplayer, con objetivos, misiones de combate, misiones de ataque a tierra, misiones de escolta, misiones de defensa aérea, etc.
-- [ ] Agregar más tipos de aviones.
+- (ninguna)
 
 ## Completadas
+- [x] Tutoriales interactivos de controles, armas, vuelo, despegues y aterrizajes, con objetivos medidos y progreso guardado.
+- [x] Multijugador P2P directo y con servidor de directorio/relay para Internet y LAN, búsqueda de salas por modo, voz con push to talk o detección, muteado, deafen y volumen por participante, y colisiones entre aviones.
+- [x] Misiones multijugador PVP (dogfight y equipos) y PVE cooperativas de combate, ataque a tierra, escolta y defensa aérea, con objetivos y resultados autoritativos.
+- [x] Agregar F/A-18C Hornet y Su-27SK seleccionables, con modelos, cabinas, datos de vuelo, tren, flaps y armamento propios; documentar fuentes y simplificaciones.
 - [x] Corregir los tres detalles marcados del F-16 y completar el soporte del HUD sin mover el cristal ni la simbología.
 - [x] Ajustar la curvatura de los espejos al aro, verificar el muestreo de FPS y corregir el centrado y la proporción de los instrumentos marcados del MiG-29.
 - [x] Abrir configuración con Esc y entrar directamente a cada modo con clic, Enter o A; comprobar el recorrido completo de los menús en Windows.

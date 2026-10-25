@@ -153,7 +153,7 @@ pub fn deploy(kind: MissionKind, aggressor: Type, t: &Threats, m: &Mission) -> D
     };
     let right = fwd.cross(V3::Y).norm();
     let n = t.bandits.min(MAX_BANDITS) as usize;
-    let other = if aggressor == Type::F16 { Type::Mig29 } else { Type::F16 };
+    let other = match aggressor { Type::F16=>Type::Mig29, Type::Mig29=>Type::F16, Type::F18=>Type::Su27, Type::Su27=>Type::F18 };
     let kind_of = |i: usize| if t.mixed && i % 2 == 1 { other } else { aggressor };
     // Leads fly better than their wingmen.
     let skill = |i: usize| if i % 2 == 0 { 0.55 } else { 0.35 };

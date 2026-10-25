@@ -44,29 +44,29 @@ pub(super) const QUADRANT_TOP: f64 = 0.655;
 const BULKHEAD_Z: f64 = -2.75;
 
 // Atlas faces below the F-16's instruments and beside the mirror texture.
-const R_ADI: R = r(0.0, 1280.0, 192.0, 192.0);
-const R_HSI: R = r(192.0, 1280.0, 192.0, 192.0);
-const R_ASI: R = r(384.0, 1280.0, 160.0, 160.0);
-const R_ALT: R = r(544.0, 1280.0, 160.0, 160.0);
-const R_VVI: R = r(704.0, 1280.0, 160.0, 160.0);
-const R_UUAP: R = r(864.0, 1280.0, 160.0, 160.0);
-const R_RPM: R = r(0.0, 1472.0, 160.0, 160.0);
-const R_EGT: R = r(160.0, 1472.0, 160.0, 160.0);
-const R_FUEL: R = r(1664.0, 1280.0, 96.0, 320.0);
-const R_HYD: R = r(1760.0, 1280.0, 224.0, 96.0);
-const R_CLOCK: R = r(608.0, 1472.0, 128.0, 128.0);
-const R_WARN: R = r(736.0, 1472.0, 96.0, 320.0);
-const R_GEAR: R = r(832.0, 1472.0, 192.0, 128.0);
-const R_TV: R = r(0.0, 1664.0, 256.0, 208.0);
-const R_LEFT: R = r(256.0, 1664.0, 224.0, 240.0);
-const R_COMPASS: R = r(480.0, 1664.0, 128.0, 128.0);
-const R_EGT_R: R = r(1024.0, 1472.0, 160.0, 160.0);
-const R_WEAPON: R = r(1024.0, 1664.0, 224.0, 160.0);
-const R_EKRAN: R = r(1248.0, 1664.0, 160.0, 160.0);
-const R_SPO: R = r(1408.0, 1664.0, 160.0, 160.0);
-const R_RADALT: R = r(1568.0, 1664.0, 160.0, 160.0);
-const R_ASIMACH: R = r(1728.0, 1664.0, 160.0, 160.0);
-const R_COUNTER: R = r(1888.0, 1664.0, 160.0, 48.0);
+pub(super) const R_ADI: R = r(0.0, 1280.0, 192.0, 192.0);
+pub(super) const R_HSI: R = r(192.0, 1280.0, 192.0, 192.0);
+pub(super) const R_ASI: R = r(384.0, 1280.0, 160.0, 160.0);
+pub(super) const R_ALT: R = r(544.0, 1280.0, 160.0, 160.0);
+pub(super) const R_VVI: R = r(704.0, 1280.0, 160.0, 160.0);
+pub(super) const R_UUAP: R = r(864.0, 1280.0, 160.0, 160.0);
+pub(super) const R_RPM: R = r(0.0, 1472.0, 160.0, 160.0);
+pub(super) const R_EGT: R = r(160.0, 1472.0, 160.0, 160.0);
+pub(super) const R_FUEL: R = r(1664.0, 1280.0, 96.0, 320.0);
+pub(super) const R_HYD: R = r(1760.0, 1280.0, 224.0, 96.0);
+pub(super) const R_CLOCK: R = r(608.0, 1472.0, 128.0, 128.0);
+pub(super) const R_WARN: R = r(736.0, 1472.0, 96.0, 320.0);
+pub(super) const R_GEAR: R = r(832.0, 1472.0, 192.0, 128.0);
+pub(super) const R_TV: R = r(0.0, 1664.0, 256.0, 208.0);
+pub(super) const R_LEFT: R = r(256.0, 1664.0, 224.0, 240.0);
+pub(super) const R_COMPASS: R = r(480.0, 1664.0, 128.0, 128.0);
+pub(super) const R_EGT_R: R = r(1024.0, 1472.0, 160.0, 160.0);
+pub(super) const R_WEAPON: R = r(1024.0, 1664.0, 224.0, 160.0);
+pub(super) const R_EKRAN: R = r(1248.0, 1664.0, 160.0, 160.0);
+pub(super) const R_SPO: R = r(1408.0, 1664.0, 160.0, 160.0);
+pub(super) const R_RADALT: R = r(1568.0, 1664.0, 160.0, 160.0);
+pub(super) const R_ASIMACH: R = r(1728.0, 1664.0, 160.0, 160.0);
+pub(super) const R_COUNTER: R = r(1888.0, 1664.0, 160.0, 48.0);
 
 // ================================================================ panel
 /// Main panel: tilted back 12 degrees, its foot 0.66 m above the datum just

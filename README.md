@@ -1,10 +1,10 @@
 # VIPER RUN
 
-A small, self-contained retro F-16 cockpit flight game. You start airborne in a
-black river gorge with ten navigation gates ahead, two and a half minutes on the
-clock, and a mountain range that does not move. Or you fly the same gorge armed:
-a dogfight against three AI-flown aggressors, a strike on a bridge, an SA-6
-battery and a convoy, or free flight with all of it and no clock.
+A self-contained retro cockpit flight game with four selectable aircraft:
+F-16C Block 50, MiG-29S, F/A-18C Hornet and Su-27SK. Fly the Cold River gorge,
+train in flight school, fight AI, strike ground targets or fly a runway circuit.
+Online rooms add PVP dogfights and team combat, plus cooperative combat,
+strike, escort and air defense for up to eight pilots on LAN or the Internet.
 
 The game is a single native executable, written in Rust:
 
@@ -16,6 +16,31 @@ The game is a single native executable, written in Rust:
 No installer, runtime, game engine or asset files. Everything, including the
 terrain, models, instrument pages, font and engine sounds, is generated procedurally
 at start-up. Original synthesised warning clips are embedded in the executable.
+
+## Flight school, aircraft and online rooms
+
+FLIGHT SCHOOL opens five objective-driven lessons: controls, basic flight,
+weapons, takeoff and landing. The instructor checks actual inputs and flight
+conditions, follows remapped keys and controller layouts, and saves completion.
+Training has no mission clock or return fire. Configuration includes restart
+when flying a local lesson.
+
+The F/A-18C and Su-27SK have distinct exterior and cockpit models, flight
+polars, engine ratings, gear, flap schedules and weapon stations.
+[New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
+variant data, calibration and shared game approximations.
+
+ONLINE provides private invitations, public directory browsing and quick
+matching by mode. Choose a callsign, airframe, mode and capacity; join or host,
+mark ready, then the host launches. The microphone starts off. Push to talk,
+voice detection, mute, deafen and participant volume are in the room panel.
+The default PTT key is U, remappable in configuration; controller View/Back is
+PTT online and Start opens configuration.
+
+The optional viper-server executable supplies directory and relay service on
+UDP 42861. Internet relay requires a reachable server running that binary;
+direct LAN rooms need no directory. See [multiplayer setup and verification](docs/MULTIPLAYER.md),
+[mission rules](docs/MULTIPLAYER-MISSIONS.md) and [voice chat](docs/VOICE-CHAT.md).
 
 ## Fly
 
@@ -143,7 +168,7 @@ energy and alpha. Roll into the turn first, then pull through the valley.
 ## Missions
 
 Pick the mission on the start screen; ENGAGE then opens its setup screen.
-Every mission sets the airframe (AIRFRAME: F-16C or MiG-29), the internal
+Every mission sets the airframe (F-16C, MiG-29S, F/A-18C or Su-27SK), the internal
 fuel and, except free flight, the mission clock there. DOGFIGHT, STRIKE and
 FREE FLIGHT add the loadout and the opposition: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
 pylon pairs, the internal fuel, and the gross weight, stores drag and
@@ -650,8 +675,9 @@ captures, `--performance` and `--no-performance` override it for that run.
 
 ## Build
 
-The only dependency is [miniquad](https://crates.io/crates/miniquad), a tiny
-windowing and OpenGL layer (no engine). On Linux it loads `libGL` and `libX11`
+Windowing uses [miniquad](https://crates.io/crates/miniquad), a tiny
+OpenGL layer (no engine). Multiplayer adds Serde/Postcard serialization,
+RustCrypto authenticated encryption and system randomness. On Linux miniquad loads `libGL` and `libX11`
 at run time, so building needs no system development packages.
 
 ```bash
@@ -688,7 +714,7 @@ viper-run --shot out.png --mission strike --screen loadout          # also shotd
 
 ```
 viper-run/
-├── Cargo.toml          # single dependency: miniquad
+├── Cargo.toml          # windowing, network codec and authenticated encryption
 ├── build.sh            # release binaries for Linux and Windows
 ├── dist/               # prebuilt executables
 ├── docs/F16-REFERENCES.md

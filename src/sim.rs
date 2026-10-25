@@ -102,13 +102,55 @@ pub enum Type {
     #[default]
     F16,
     Mig29,
+    F18,
+    Su27,
 }
 
 impl Type {
+    pub const ALL: [Type; 4] = [Type::F16, Type::Mig29, Type::F18, Type::Su27];
+    pub fn index(self) -> usize { match self { Type::F16 => 0, Type::Mig29 => 1, Type::F18 => 2, Type::Su27 => 3 } }
+    pub fn parse(text: &str) -> Option<Type> {
+        match text.to_ascii_lowercase().as_str() {
+            "f16" | "f-16" => Some(Type::F16), "mig29" | "mig-29" => Some(Type::Mig29),
+            "f18" | "fa18" | "f/a-18" | "hornet" => Some(Type::F18),
+            "su27" | "su-27" | "flanker" => Some(Type::Su27), _ => None,
+        }
+    }
+    pub fn russian(self) -> bool { matches!(self, Type::Mig29 | Type::Su27) }
+    pub fn has_mirrors(self)->bool{self!=Type::F16}
+    pub fn has_irst(self) -> bool { self.russian() }
+    pub fn panel_arm(self)->f64{if matches!(self,Type::F18|Type::Su27){self.span()*0.25}else{PANEL_ARM}}
+    pub fn engine_count(self) -> usize { if self == Type::F16 { 1 } else { 2 } }
+    /// Operating envelope used for the game's overspeed warning. It does
+    /// not clamp the physical speed or substitute for the aerodynamic polar.
+    pub fn vmax_kcas(self)->f64{match self{Type::F16=>crate::air::VMAX_KCAS,Type::Mig29=>1500.0/1.852,Type::F18=>600.0,Type::Su27=>1400.0/1.852}}
+    pub fn max_mach(self)->f64{match self{Type::F16=>crate::air::MACH_MAX,Type::Mig29=>2.35,Type::F18=>1.8,Type::Su27=>2.35}}
+    pub fn gear_limit_kt(self) -> f64 { match self { Type::F18 => 250.0, Type::Su27 => 500.0 / 1.852, _ => GEAR_LIMIT_KT } }
+    pub fn flap_limit_kt(self) -> f64 { match self { Type::F18 => 250.0, Type::Su27 => 600.0 / 1.852, _ => FLAP_BLOWBACK_KT } }
+    pub fn gear_drag(self)->f64{match self{Type::F18=>0.026,Type::Su27=>0.024,_=>GEAR_DRAG}}
+    pub fn flap_drag(self)->f64{match self{Type::F18=>0.085,Type::Su27=>0.045,_=>FLAP_CD}}
+    pub fn gear_flap_fraction(self)->f64{match self{Type::F18=>30.0/45.0,Type::Su27=>18.0/25.0,_=>1.0}}
+    pub fn flap_angle(self) -> f64 { match self { Type::F18 => 45.0, Type::Su27 => 25.0, _ => FLAP_MAX } }
+    pub fn critical_alpha(self) -> f64 { match self { Type::F18 => 35.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
+    pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18 => crate::hornet::EYE, Type::Su27 => crate::su27::EYE } }
+    pub fn nozzles(self) -> &'static [V3] {
+        const F16_NOZZLES:[V3;1]=[crate::airframe::NOZZLE_EXIT];
+        const MIG_NOZZLES:[V3;2]={let n=crate::mig29::NOZZLE;[v3(-n.x,n.y,n.z),v3(n.x,n.y,n.z)]};
+        match self { Type::F16 => &F16_NOZZLES,
+            Type::Mig29 => &MIG_NOZZLES,
+            Type::F18 => &crate::hornet::NOZZLES, Type::Su27 => &crate::su27::NOZZLES }
+    }
+    pub fn store_shift(self, at: V3) -> V3 {
+        match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18 => crate::hornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
+    }
+    pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18 => &F18_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
+    pub fn landing_height(self) -> f64 { -self.wheels()[0].local.y - 0.10 }
     pub fn name(self) -> &'static str {
         match self {
             Type::F16 => "F-16C BLOCK 50",
             Type::Mig29 => "MIG-29S 9.13S",
+            Type::F18 => "F/A-18C HORNET",
+            Type::Su27 => "SU-27SK FLANKER-B",
         }
     }
     /// The full name of the variant the model follows.
@@ -116,12 +158,16 @@ impl Type {
         match self {
             Type::F16 => "F-16C BLOCK 50 FIGHTING FALCON",
             Type::Mig29 => "MIG-29S FULCRUM-C, IZDELIYE 9.13S",
+            Type::F18 => "F/A-18C LOT 20 HORNET",
+            Type::Su27 => "SU-27SK FLANKER-B",
         }
     }
     pub fn empty_mass(self) -> f64 {
         match self {
             Type::F16 => EMPTY_MASS,
             Type::Mig29 => 11200.0,
+            Type::F18 => 10900.0,
+            Type::Su27 => 16300.0,
         }
     }
     /// Wing reference area, m^2.
@@ -129,6 +175,8 @@ impl Type {
         match self {
             Type::F16 => aero::WING_AREA,
             Type::Mig29 => aero_mig29::WING_AREA,
+            Type::F18 => crate::aero_hornet::WING_AREA,
+            Type::Su27 => crate::aero_su27::WING_AREA,
         }
     }
     /// Wing span and mean aerodynamic chord, m.
@@ -136,12 +184,16 @@ impl Type {
         match self {
             Type::F16 => aero::SPAN,
             Type::Mig29 => aero_mig29::SPAN,
+            Type::F18 => crate::aero_hornet::SPAN,
+            Type::Su27 => crate::aero_su27::SPAN,
         }
     }
     pub fn chord(self) -> f64 {
         match self {
             Type::F16 => aero::CHORD,
             Type::Mig29 => aero_mig29::CHORD,
+            Type::F18 => crate::aero_hornet::CHORD,
+            Type::Su27 => crate::aero_su27::CHORD,
         }
     }
     /// Thrust-specific fuel consumption, lb/(lbf h), from dry (0) to full
@@ -150,6 +202,8 @@ impl Type {
         match self {
             Type::F16 => mix(0.661, 1.9, ab),
             Type::Mig29 => mix(0.77, 1.85, ab),
+            Type::F18 => mix(0.81, 1.79, ab),
+            Type::Su27 => mix(0.75, 1.92, ab),
         }
     }
     /// Internal fuel, kg.
@@ -157,6 +211,8 @@ impl Type {
         match self {
             Type::F16 => FUEL_MAX,
             Type::Mig29 => 3820.0,
+            Type::F18 => 4930.0,
+            Type::Su27 => 9400.0,
         }
     }
     /// Full afterburner thrust at sea level, lbf: one F110-GE-129, two RD-33s.
@@ -164,6 +220,8 @@ impl Type {
         match self {
             Type::F16 => 29000.0,
             Type::Mig29 => 36600.0,
+            Type::F18 => 35400.0,
+            Type::Su27 => 55115.0,
         }
     }
     /// Least fuel a sortie can start with, kg: the F-16 Block 40+ minimum
@@ -173,6 +231,8 @@ impl Type {
         match self {
             Type::F16 => 1000.0 / 2.20462,
             Type::Mig29 => 550.0,
+            Type::F18 => 900.0,
+            Type::Su27 => 1200.0,
         }
     }
     /// AoA where the limiter starts trading g for AoA, and the hard stop of
@@ -182,11 +242,15 @@ impl Type {
         match self {
             Type::F16 => (ALPHA_LIMITER, ALPHA_MAX),
             Type::Mig29 => (22.0, 25.0),
+            Type::F18 => (27.0, 30.0),
+            Type::Su27 => (24.0, 26.0),
         }
     }
     /// Positive load limit at a gross weight (kg).
     pub fn g_limit(self, mass: f64, mach: f64) -> f64 {
         match self {
+            Type::F18 => (7.5_f64 * 14515.0 / mass.max(14515.0)).clamp(4.5, 7.5),
+            Type::Su27 if mass > 26000.0 => 8.0,
             Type::Mig29 if mach > 0.85 => 7.0,
             Type::Mig29 if mass > 14200.0 => 8.0,
             _ => G_LIMIT,
@@ -202,6 +266,8 @@ impl Type {
         match self {
             Type::F16 => 1.35,
             Type::Mig29 => 2.1,
+            Type::F18 => 1.7,
+            Type::Su27 => 2.4,
         }
     }
     /// The points of the airframe that can strike the ground.
@@ -209,24 +275,32 @@ impl Type {
         match self {
             Type::F16 => &COLLISION_POINTS,
             Type::Mig29 => &MIG_COLLISION_POINTS,
+            Type::F18 => &F18_CONTACTS,
+            Type::Su27 => &SU27_CONTACTS,
         }
     }
     pub fn flex_span(self) -> (f64, f64, f64) {
         match self {
             Type::F16 => (1.2, 4.8, 3.6),
             Type::Mig29 => (1.7, 5.68, 5.3),
+            Type::F18 => (1.4, 5.7, 3.5),
+            Type::Su27 => (2.1, 7.35, 6.6),
         }
     }
     pub fn inertia_scale(self) -> f64 {
         match self {
             Type::F16 => 1.0,
             Type::Mig29 => 1.35,
+            Type::F18 => 2.7,
+            Type::Su27 => 4.1,
         }
     }
     pub fn next(self) -> Type {
         match self {
             Type::F16 => Type::Mig29,
-            Type::Mig29 => Type::F16,
+            Type::Mig29 => Type::F18,
+            Type::F18 => Type::Su27,
+            Type::Su27 => Type::F16,
         }
     }
 }
@@ -249,6 +323,10 @@ impl Piece {
             (Piece::Wing(i), Type::Mig29) => v3(side(i) * 3.6, 0.35, 3.1),
             (Piece::Tail, Type::F16) => v3(0.0, 0.30, 6.0),
             (Piece::Tail, Type::Mig29) => v3(0.0, 0.36, 6.9),
+            (Piece::Wing(i), Type::F18) => v3(side(i) * 3.4, 0.2, 1.3),
+            (Piece::Wing(i), Type::Su27) => v3(side(i) * 4.5, 0.3, 3.6),
+            (Piece::Tail, Type::F18) => v3(0.0, 0.1, 6.3),
+            (Piece::Tail, Type::Su27) => v3(0.0, 0.2, 8.8),
         }
     }
 }
@@ -335,6 +413,17 @@ pub const WHEELS: [Wheel; 3] = [
     Wheel { name: "right main gear", local: v3(1.18, -1.55, 0.55), k: 4.5e5, d: 4.9e4, stroke: 0.30, limit: 3.4e5, brakes: true, steers: false },
 ];
 
+const F18_WHEELS: [Wheel; 3] = [
+    Wheel { name: "nose gear", local: v3(0.0,-1.65,-3.5), k:2.2e5,d:2.3e4,stroke:0.40,limit:3.2e5,brakes:false,steers:true },
+    Wheel { name: "left main gear", local:v3(-1.55,-1.65,1.35),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
+    Wheel { name: "right main gear", local:v3(1.55,-1.65,1.35),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
+];
+const SU27_WHEELS: [Wheel; 3] = [
+    Wheel { name: "nose gear",local:v3(0.0,-2.0,-4.0),k:3.0e5,d:3.2e4,stroke:0.38,limit:4.0e5,brakes:false,steers:true },
+    Wheel { name: "left main gear",local:v3(-2.2,-2.0,1.5),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
+    Wheel { name: "right main gear",local:v3(2.2,-2.0,1.5),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
+];
+
 /// Stiffening of the oleo's gas spring at the end of the stroke, and the
 /// tyre's own stiffness once the strut has bottomed (times `k`).
 const OLEO_STIFFEN: f64 = 2.0;
@@ -387,7 +476,22 @@ pub const MIG_COLLISION_POINTS: [ContactPoint; 14] = [
     cp("right fin", v3(2.05, 3.18, 6.78), 0.10, true),
     cp("left stabilator", v3(-3.82, 0.36, 7.70), 0.06, false),
     cp("right stabilator", v3(3.82, 0.36, 7.70), 0.06, false),
+];const F18_CONTACTS: [ContactPoint; 10] = [
+    cp("nose",v3(0.0,0.2,-8.0),0.1,false),cp("canopy",v3(0.0,1.7,-3.5),0.1,true),
+    cp("left wing",v3(-5.72,0.2,2.4),0.08,false),cp("right wing",v3(5.72,0.2,2.4),0.08,false),
+    cp("left intake",v3(-0.95,-0.55,-1.2),0.08,false),cp("right intake",v3(0.95,-0.55,-1.2),0.08,false),
+    cp("left fin",v3(-1.7,3.1,6.4),0.1,true),cp("right fin",v3(1.7,3.1,6.4),0.1,true),
+    cp("left stabilator",v3(-3.3,0.1,7.1),0.07,false),cp("right stabilator",v3(3.3,0.1,7.1),0.07,false),
 ];
+const SU27_CONTACTS: [ContactPoint; 10] = [
+    cp("nose",v3(0.0,0.3,-10.2),0.1,false),cp("canopy",v3(0.0,1.8,-4.6),0.1,true),
+    cp("left wing",v3(-7.35,0.3,5.3),0.08,false),cp("right wing",v3(7.35,0.3,5.3),0.08,false),
+    cp("left intake",v3(-1.4,-0.7,-1.9),0.08,false),cp("right intake",v3(1.4,-0.7,-1.9),0.08,false),
+    cp("left fin",v3(-2.1,3.8,8.5),0.1,true),cp("right fin",v3(2.1,3.8,8.5),0.1,true),
+    cp("left stabilator",v3(-4.8,0.15,10.3),0.07,false),cp("right stabilator",v3(4.8,0.15,10.3),0.07,false),
+];
+
+
 
 /// Skid contacts: spring and damping per point, sliding friction, and the
 /// sink rate (m/s) and depth (m) of an arrival that is a crash, not a skid.
@@ -1214,7 +1318,7 @@ impl Aircraft {
         };
         let ground_speed = v3(self.vel.x, 0.0, self.vel.z).len();
         let steer = -input.yaw() * mix(32.0, 4.0, smoothstep(8.0, 45.0, ground_speed)) * DEG;
-        for (i, wh) in WHEELS.iter().enumerate() {
+        for (i, wh) in self.kind.wheels().iter().enumerate() {
             if self.gear < 0.98 || self.gear_broken[i] {
                 self.compression[i] = 0.0;
                 continue;
@@ -1299,7 +1403,7 @@ impl Aircraft {
         let ground = 2.5 * (1.0 - smoothstep(0.0, 1.0, f.h_over_b));
         let slip = 0.2 * f.beta.abs();
         let dynamic = clamp(f.q * self.kind.chord() / (2.0 * f.speed.max(30.0)) * 300.0, -2.0, 4.0);
-        ALPHA_CRIT * compressibility - thin_air - ground - slip + dynamic
+        self.kind.critical_alpha() * compressibility - thin_air - ground - slip + dynamic
     }
 
     /// Steady wing-flow budget shared by pitch, roll and pilot pedals. No
@@ -1308,13 +1412,13 @@ impl Aircraft {
     fn alpha_protection(&self, f: &Flow) -> ((f64, f64), f64, f64) {
         let crit = self.critical_alpha(&Flow { q: f.q.min(0.0), ..*f });
         let v = f.speed.max(30.0);
-        let roll = (f.p * PANEL_ARM / v * RAD).abs();
+        let roll = (f.p * self.kind.panel_arm() / v * RAD).abs();
         let slip = (0.25 * f.beta * clamp(f.alpha / 10.0, -1.0, 1.0)).abs();
         let gust = self.turbulence * 3.0 / v * RAD;
         let cap = clamp(crit - roll - slip - gust - ALPHA_RESERVE, 0.0, self.kind.alpha_limits().1);
         let onset = self.kind.alpha_limits().0.min(cap - 2.5);
         let margin = crit - f.alpha - slip - gust;
-        let roll_max = ((margin - ALPHA_RESERVE) * v / PANEL_ARM).max(0.0);
+        let roll_max = ((margin - ALPHA_RESERVE) * v / self.kind.panel_arm()).max(0.0);
         let yaw_gain = smoothstep(2.0, 6.0, margin - roll);
         ((onset, cap), roll_max, yaw_gain)
     }
@@ -1332,9 +1436,9 @@ impl Aircraft {
         // a couple of degrees sooner.
         let crit = self.critical_alpha(f) - 2.0 * self.flaps;
         let v = f.speed.max(30.0);
-        let roll = f.p * PANEL_ARM / v * RAD;
+        let roll = f.p * self.kind.panel_arm() / v * RAD;
         let slip = 0.25 * f.beta * clamp(f.alpha / 10.0, -1.0, 1.0);
-        let span = self.q.axes().right * PANEL_ARM;
+        let span = self.q.axes().right * self.kind.panel_arm();
         let gusts = self.turbulence * 3.0 / v * RAD;
         let left = f.alpha - roll - slip + gust(self.pos - span) * gusts;
         let right = f.alpha + roll + slip + gust(self.pos + span) * gusts;
@@ -1350,7 +1454,7 @@ impl Aircraft {
         c.cz -= lost * (sl + sr);
         c.cx -= plate * (sl + sr) * ca;
         c.cz -= plate * (sl + sr) * sa;
-        let arm = PANEL_ARM / self.kind.span();
+        let arm = self.kind.panel_arm()/self.kind.span();
         c.cl += lost * (sl - sr) * arm;
         c.cn -= plate * (sl - sr) * arm;
         c.cm -= 0.03 * 0.5 * (sl + sr) * f.alpha.signum();
@@ -1410,9 +1514,9 @@ impl Aircraft {
         // moment the FLCS trims out.
         let fl = self.flaps;
         // Torn doors and bent legs or flaperons drag more than whole ones.
-        let parasite = GEAR_DRAG * self.gear * (1.0 + 1.5 * self.gear_damage + self.gear_broken.iter().filter(|&&b| b).count() as f64 * 0.25) + FLAP_CD * (fl + 0.4 * self.flap_damage);
+        let parasite = self.kind.gear_drag() * self.gear * (1.0 + 1.5 * self.gear_damage + self.gear_broken.iter().filter(|&&b| b).count() as f64 * 0.25) + self.kind.flap_drag() * (fl + 0.4 * self.flap_damage);
         c.cx -= parasite * alpha.cos();
-        c.cz -= parasite * alpha.sin() + FLAP_CL * fl * alpha.cos();
+        c.cz -= parasite * alpha.sin() + (if self.kind == Type::F18 { 0.65 } else if self.kind == Type::Su27 { 0.38 } else { FLAP_CL }) * fl * alpha.cos();
         c.cm -= 0.025 * fl;
         // Bombs and missiles on the pylons drag along the wind.
         c.cx -= self.stores_drag * alpha.cos();
@@ -1446,7 +1550,7 @@ impl Aircraft {
         let (span, chord) = (self.kind.span(), self.kind.chord());
         let (l, m, n) = (qs * span * c.cl, qs * chord * c.cm, qs * span * c.cn);
         // The MiG's engines sit 1.1 m either side of the centreline.
-        let n = n + full * self.battle.asymmetry * 1.1;
+        let n = n + full * self.battle.asymmetry * self.kind.nozzles()[0].x.abs();
         self.g_air = -fz / (self.mass * G0);
         let (gf, gm) = self.ground_forces(input, dt);
         let (fx, fy, fz) = (fx + gf.x, fy + gf.y, fz + gf.z);
@@ -1510,15 +1614,16 @@ impl Aircraft {
         // The gear runs to the handle; the trailing-edge flaps droop with the
         // gear handle down or the ALT FLAPS switch, and blow back up at speed.
         if self.gear_damage < GEAR_JAM {
-            self.gear = approach(self.gear, if input.gear_down { 1.0 } else { 0.0 }, dt / GEAR_TIME);
+            self.gear = approach(self.gear, if input.gear_down { 1.0 } else { 0.0 }, dt / if self.kind == Type::F18 { 4.0 } else if self.kind == Type::Su27 { 7.0 } else { GEAR_TIME });
         }
-        let blown = self.airspeed_kt > FLAP_BLOWBACK_KT;
-        let flaps = if (input.gear_down || input.flaps) && !blown { 1.0 - 0.7 * self.flap_damage } else { 0.0 };
+        let blown = self.airspeed_kt > self.kind.flap_limit_kt();
+        let requested=if input.flaps{1.0}else if input.gear_down{self.kind.gear_flap_fraction()}else{0.0};
+        let flaps = if !blown { requested * (1.0 - 0.7 * self.flap_damage) } else { 0.0 };
         self.flaps = approach(self.flaps, flaps, dt / FLAP_TIME);
         // The air load past the limits works the gear and flaps loose, the
         // faster the worse: some 20 s at 40 kt over the gear limit, a couple
         // of seconds at 120 kt over.
-        let over = self.airspeed_kt - GEAR_LIMIT_KT;
+        let over = self.airspeed_kt - self.kind.gear_limit_kt();
         if self.gear > 0.05 && over > 0.0 {
             self.gear_damage = (self.gear_damage + dt * self.gear * 0.6 * (over / 80.0).powi(2)).min(1.0);
             if self.gear_damage >= GEAR_BREAK {
@@ -1528,12 +1633,12 @@ impl Aircraft {
                 }
             }
         }
-        let over = self.airspeed_kt - FLAP_BLOWBACK_KT - 20.0;
+        let over = self.airspeed_kt - self.kind.flap_limit_kt() - 20.0;
         if self.flaps > 0.05 && over > 0.0 {
             self.flap_damage = (self.flap_damage + dt * self.flaps * 0.8 * (over / 60.0).powi(2)).min(1.0);
         }
         self.wheel_brake = approach(self.wheel_brake, if input.wheel_brake { 1.0 } else { 0.0 }, dt * 4.0);
-        if self.gear > 0.0 && self.airspeed_kt > GEAR_LIMIT_KT + 40.0 {
+        if self.gear > 0.0 && self.airspeed_kt > self.kind.gear_limit_kt() + 40.0 {
             self.gear_overspeed = true;
         }
         let fueled = self.fuel > 0.0 && self.battle.thrust() > 0.0;
@@ -1598,7 +1703,7 @@ impl Aircraft {
         let flow = self.flow(speed, alpha, beta, p, self.omega.x, r, self.mach, self.qbar);
         let ((_, cap), _, _) = self.alpha_protection(&flow);
         let cl_limit = aero::cl_at_alpha(self.kind, cap).min(aero::cl_max(self.kind)) * (1.0 - 0.25 * self.battle.wing);
-        self.g_avail = (self.kind.g_limit(self.mass, self.mach) * self.battle.strength()).min(self.qbar * self.kind.area() * (cl_limit + FLAP_CL * self.flaps) / (self.mass * G0)).max(0.0);
+        self.g_avail = (self.kind.g_limit(self.mass, self.mach) * self.battle.strength()).min(self.qbar * self.kind.area() * (cl_limit + (if self.kind == Type::F18 { 0.65 } else if self.kind == Type::Su27 { 0.38 } else { FLAP_CL }) * self.flaps) / (self.mass * G0)).max(0.0);
         self.g_smooth += (self.g_load - self.g_smooth) * clamp(dt * 4.0, 0.0, 1.0);
         self.max_g = self.max_g.max(self.g_smooth);
         self.min_g = self.min_g.min(self.g_smooth);
@@ -2370,4 +2475,197 @@ mod overspeed_gear_tests {
             assert!(a.gear_broken.iter().any(|&b| b));
         }
     }
+}
+
+#[cfg(test)]
+mod new_airframe_tests {
+    use super::*;
+    use crate::combat::{spawn_type,Config,Loadout,MissionKind,load};
+    /// A test pilot: stabilise speed with power, fly the approach line and
+    /// progressively arrest sink in the flare. Commands still go through the
+    /// normal stick shaping, FLCS, engines and undercarriage.
+    fn landing_input(a:&Aircraft,aim:V3,fwd:V3,kt:f64,touched:bool)->Input{
+        if touched{return Input{gear_down:true,flaps:true,throttle_down:true,wheel_brake:true,..Default::default()};}
+        let(pitch,roll)=if a.agl<30.0{
+            let sink=-((a.agl-a.kind.landing_height())*0.16).clamp(0.45,2.6);
+            let g=1.0+((sink-a.vs)*0.45).clamp(-3.0,3.5)/G0;
+            (stick_for_g(g),stick_for_roll(-a.bank*2.5))
+        }else{crate::ai::steer(a,(aim+fwd*400.0-a.pos).norm(),2.0)};
+        let base=if a.kind==Type::F18{0.32}else{0.25};
+        let want=(base+(kt-a.airspeed_kt)*0.024).clamp(0.0,0.80);
+        Input{gear_down:true,flaps:true,pitch_axis:pitch,roll_axis:roll,
+            throttle_up:a.throttle<want-0.01,throttle_down:a.throttle>want+0.01,..Default::default()}
+    }
+    #[test]
+    fn new_airframes_trim_and_remain_protected_across_the_envelope(){
+        terrain::init();
+        for kind in [Type::F18,Type::Su27]{
+            for (alt,speed) in [(1500.0_f64,150.0),(4000.0,230.0),(9500.0,310.0)]{
+                let mut a=spawn_type(kind,v3(0.0,alt.max(3500.0),0.0),0.0,speed);
+                let mut config=Config::for_jet(MissionKind::Dogfight,kind);config.fuel=0.5;
+                a.fuel=kind.fuel_max()*config.fuel;
+                load(&mut a,&Loadout::configure(&config));
+                for _ in 0..(8.0/FIXED_DT)as usize{
+                    a.update(FIXED_DT,&Input{pitch_axis:0.8,roll_axis:0.1,afterburner:true,..Default::default()});
+                    assert!(a.pos.is_finite() && a.vel.is_finite() && !a.lost.any() && !a.crashed,"{kind:?} at {speed}");
+                }
+                assert!(a.max_g<9.7,"{kind:?} {:.1}g",a.max_g);
+                assert!(a.alpha_deg<kind.alpha_limits().1+2.0,"{kind:?} alpha {}",a.alpha_deg);
+            }
+        }
+    }
+    #[test]
+    fn variant_loadouts_respect_native_weapon_families_and_hardpoints(){
+        use crate::combat::{Store,Family,arsenal};
+        for (kind,rounds,count) in [(Type::F18,578,8),(Type::Su27,150,10)]{
+            let cfg=Config::for_jet(MissionKind::Dogfight,kind);
+            let loadout=Loadout::configure(&cfg);
+            assert_eq!(loadout.rounds,rounds);
+            assert_eq!(loadout.stations.len(),count);
+            assert!(loadout.stations.iter().all(|s| s.store.missile().is_some()));
+            for pair in 0..4{
+                let mut c=cfg;
+                for _ in 0..12{
+                    c.cycle(pair);
+                    for s in Loadout::configure(&c).stations{
+                        if kind==Type::F18{
+                            assert!(!matches!(s.store,Store::Aim9x|Store::Aim120d));
+                            if s.at.x.abs()<3.0{assert!(matches!(s.store,Store::Aim7|Store::Aim120));}
+                        }else{assert_ne!(s.store,Store::R77);}
+                        let p=s.at+kind.store_shift(s.at);
+                        assert!(p.is_finite() && p.x.abs()<=kind.span()*0.56);
+                    }
+                }
+            }
+            assert!(!arsenal(kind,Family::SemiActive).is_empty());
+        }
+    }
+    #[test]
+    fn published_top_speed_targets_bound_the_engine_polar_fit(){
+        let excess=|kind:Type,mach:f64,alt:f64|{
+            let atm=atmosphere_at(alt);let speed=mach*atm.sound;
+            let mass=kind.empty_mass()+kind.fuel_max()*0.5;
+            let trim=trim_type(kind,alt,speed,mass);
+            let f=Flow{kind,alpha:trim.alpha*RAD,el:trim.el,speed,mach,qbar:0.5*atm.rho*speed*speed,xcg:XCG,h_over_b:10.0,..Default::default()};
+            let c=aero::coefficients(&f);let(sa,ca)=trim.alpha.sin_cos();
+            let drag=(-c.cx*ca-c.cz*sa)*0.5*atm.rho*speed*speed*kind.area();
+            aero::thrust(kind,100.0,mach,alt)*ca-drag
+        };
+        for(kind,sl_min,sl_max,high_min,high_max)in [
+            (Type::F18,1.05,1.32,1.65,1.98),
+            (Type::Su27,1.03,1.25,2.15,2.55)]{
+            for(alt,low,high)in[(0.0,sl_min,sl_max),(11000.0,high_min,high_max)]{
+                let(mut lo,mut hi)=(0.7,2.9);
+                for _ in 0..35{let mid=(lo+hi)*0.5;if excess(kind,mid,alt)>0.0{lo=mid}else{hi=mid}}
+                assert!(lo>=low && lo<=high,"{kind:?} {alt:.0}m top M{lo:.3} (target {low}..{high})");
+            }
+        }
+    }
+    #[test]
+    fn native_gear_limits_and_wheel_positions_are_used(){
+        for kind in [Type::F18,Type::Su27]{
+            let mut a=spawn_type(kind,v3(0.0,7000.0,0.0),0.0,330.0);
+            a.gear=1.0;
+            // One long aerodynamic overspeed exposure bends, jams and then
+            // fractures the legs through the normal fixed-step path.
+            for _ in 0..(18.0/FIXED_DT)as usize{
+                a.update(FIXED_DT,&Input{gear_down:true,afterburner:true,..Default::default()});
+            }
+            assert!(a.gear_damage>=GEAR_JAM && a.gear_broken.iter().any(|b|*b),"{kind:?}: damage {}",a.gear_damage);
+            assert!(kind.wheels()[0].local.z< -3.0 && kind.landing_height()>1.4);
+        }
+    }
+    #[test]
+    fn hornet_and_flanker_take_off_from_their_own_undercarriage(){
+        terrain::init();
+        let floor=terrain::base_elevation();
+        let(dx,dz)=terrain::runway_dir();
+        let(x,z)=terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH+160.0,0.0);
+        for kind in [Type::F18,Type::Su27]{
+            let mut a=spawn_type(kind,v3(x,floor+kind.landing_height(),z),dx.atan2(-dz),0.0);
+            a.gear=1.0;a.flaps=kind.gear_flap_fraction();a.throttle=0.0;a.power=0.0;
+            let initial=a.pos;let mut lift=None;
+            for k in 0..(45.0/FIXED_DT)as usize{
+                let rotate=a.airspeed_kt>if kind==Type::F18{150.0}else{165.0};
+                let pull=if rotate && a.pitch<9.0{0.32}else{0.0};
+                a.update(FIXED_DT,&Input{gear_down:true,flaps:false,afterburner:true,pitch_axis:pull,..Default::default()});
+                assert!(!a.crashed,"{kind:?}: {} at {}kt pitch {}",a.collision_label,a.airspeed_kt,a.pitch);
+                if a.agl>20.0{lift=Some((k as f64*FIXED_DT,(a.pos-initial).len()));break;}
+            }
+            let (time,distance)=lift.unwrap_or_else(||panic!("{kind:?} never lifted off, {}kt pitch {}",a.airspeed_kt,a.pitch));
+            assert!(time<40.0 && distance<2200.0,"{kind:?}: {time}s, {distance}m");
+        }
+    }
+
+    #[test]
+    fn hornet_and_flanker_land_and_brake_to_a_stop(){
+        terrain::init();
+        let floor=terrain::base_elevation();let(dx,dz)=terrain::runway_dir();let fwd=v3(dx,0.0,dz);
+        let(x,z)=terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH+320.0,0.0);
+        for kind in [Type::F18,Type::Su27]{
+            let aim=v3(x,floor+kind.landing_height(),z);
+            let start=aim-fwd*3000.0+V3::Y*(3000.0*(3.0*DEG).tan());
+            let kt=if kind==Type::F18{145.0}else{155.0};
+            let mut a=spawn_type(kind,start,dx.atan2(-dz),kt/1.944);
+            a.fuel=kind.fuel_max()*0.35;
+            let mut cfg=Config::for_jet(MissionKind::Airfield,kind);cfg.fuel=0.35;
+            load(&mut a,&Loadout::configure(&cfg));
+            let mut touched=false;
+            for _ in 0..(95.0/FIXED_DT)as usize{
+                let input=landing_input(&a,aim,fwd,kt,touched);
+                a.update(FIXED_DT,&input);
+                assert!(!a.crashed,"{kind:?}: {} at {}kt agl{}",a.collision_label,a.airspeed_kt,a.agl);
+                touched|=a.on_ground;
+                if touched && a.speed<1.0{break;}
+            }
+            assert!(touched && a.speed<1.0 && !a.gear_broken.iter().any(|b|*b),
+                "{kind:?}: stopped={} speed={} gear={:?}, agl={}",touched,a.speed,a.gear_broken,a.agl);
+            let(u,v)=terrain::runway_local(a.pos.x,a.pos.z);
+            assert!(u.abs()<terrain::RUNWAY_HALF_LENGTH && v.abs()<terrain::RUNWAY_HALF_WIDTH,"{kind:?} stopped off runway {u},{v}");
+        }
+    }
+
+    #[test]
+    fn tutorial_final_is_clear_and_flyable_for_hornet_and_flanker(){
+        use crate::tutorial::{self,Lesson};
+        terrain::init();
+        let floor=terrain::base_elevation();let(dx,dz)=terrain::runway_dir();let fwd=v3(dx,0.0,dz);
+        let(tx,tz)=terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH+320.0,0.0);
+        for kind in [Type::F18,Type::Su27]{
+            let mut a=spawn_type(kind,v3(0.0,5000.0,0.0),0.0,200.0);
+            a.fuel=kind.fuel_max()*0.5;
+            tutorial::position(Lesson::Landing,kind,&mut a);
+            // Standard training configuration: clean with half internal fuel.
+            a.fuel=kind.fuel_max()*0.5;
+            let cfg=Config::for_jet(MissionKind::Airfield,kind);
+            load(&mut a,&Loadout::configure(&cfg));
+            let start=a.pos;let aim=v3(tx,floor+kind.landing_height(),tz);
+            let side=fwd.cross(V3::Y);
+            let mut lowest=f64::INFINITY;
+            for k in 0..100{
+                let t=k as f64/100.0;
+                if (aim-start).len()*(1.0-t)<900.0{continue;}
+                let p=start.lerp(aim,t);
+                for offset in [-kind.span()*0.5,0.0,kind.span()*0.5]{
+                    let q=p+side*offset;
+                    lowest=lowest.min(q.y-terrain::floor(q.x,q.z));
+                }
+            }
+            assert!(lowest>15.0,"{kind:?}: approach path meets terrain with clearance {lowest}");
+            let kt=if kind==Type::F18{145.0}else{155.0};
+            let mut touched=false;let mut touchdown=None;
+            for step in 0..(110.0/FIXED_DT)as usize{
+                let input=landing_input(&a,aim,fwd,kt,touched);
+                a.update(FIXED_DT,&input);
+                assert!(!a.crashed,"{kind:?} tutorial: {}, {}kt, agl{}",a.collision_label,a.airspeed_kt,a.agl);
+                if a.on_ground && !touched{touchdown=Some((step as f64*FIXED_DT,terrain::runway_local(a.pos.x,a.pos.z),a.airspeed_kt,a.vs));}
+                touched|=a.on_ground;
+                if touched && a.speed<1.0{break;}
+            }
+            let(u,v)=terrain::runway_local(a.pos.x,a.pos.z);
+            assert!(touched && a.speed<1.0 && u.abs()<terrain::RUNWAY_HALF_LENGTH && v.abs()<terrain::RUNWAY_HALF_WIDTH,
+                "{kind:?} tutorial final unsuccessful: touchdown{touchdown:?} speed{} runway{u},{v}",a.speed);
+        }
+    }
+
 }

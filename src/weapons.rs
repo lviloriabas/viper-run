@@ -76,11 +76,17 @@ pub const GSH301: Gun = Gun {
     port: v3(-0.63, 0.69, -3.40),
 };
 
+/// Hornet nose-mounted M61A1, 578 rounds; Su-27 starboard LERX GSh-301.
+pub const M61_HORNET: Gun = Gun { rounds: 578, port: v3(0.0,0.65,-6.9), ..M61A1 };
+pub const GSH_FLANKER: Gun = Gun { port: v3(1.45,0.7,-3.6), ..GSH301 };
+
 /// The gun of an airframe.
 pub fn gun_of(kind: Type) -> &'static Gun {
     match kind {
         Type::F16 => &M61A1,
         Type::Mig29 => &GSH301,
+        Type::F18 => &M61_HORNET,
+        Type::Su27 => &GSH_FLANKER,
     }
 }
 
@@ -874,6 +880,8 @@ pub fn dispenser_of(kind: Type) -> &'static str {
     match kind {
         Type::F16 => "ALE-47",
         Type::Mig29 => "BVP-30-26M",
+        Type::F18 => "AN/ALE-39",
+        Type::Su27 => "APP-50",
     }
 }
 
@@ -1003,6 +1011,7 @@ pub const BOMB_DAMAGE: f64 = 400.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Bomb {
+    pub from: Who,
     pub spec: &'static BombSpec,
     pub pos: V3,
     pub vel: V3,
@@ -1014,7 +1023,7 @@ impl Bomb {
     /// ejector's push.
     pub fn release(spec: &'static BombSpec, a: &Aircraft, station: V3) -> Bomb {
         let ax = a.q.axes();
-        Bomb { spec, pos: a.pos + a.q.rotate(station), vel: a.vel - ax.up * BOMB_EJECT, age: 0.0 }
+        Bomb { from: Who::Player, spec, pos: a.pos + a.q.rotate(station), vel: a.vel - ax.up * BOMB_EJECT, age: 0.0 }
     }
 
     /// One fixed step; returns the impact point once it reaches the ground.

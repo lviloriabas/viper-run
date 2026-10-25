@@ -10,14 +10,16 @@ cd "$(dirname "$0")"
 
 if command -v cargo-zigbuild >/dev/null 2>&1; then
     # glibc 2.17 keeps the Linux binary runnable on old distributions.
-    cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17
-    cargo zigbuild --release --target x86_64-pc-windows-gnu
+    cargo zigbuild --release --bins --target x86_64-unknown-linux-gnu.2.17
+    cargo zigbuild --release --bins --target x86_64-pc-windows-gnu
 else
-    cargo build --release --target x86_64-unknown-linux-gnu
-    cargo build --release --target x86_64-pc-windows-gnu
+    cargo build --release --bins --target x86_64-unknown-linux-gnu
+    cargo build --release --bins --target x86_64-pc-windows-gnu
 fi
 
 mkdir -p dist
 cp target/x86_64-unknown-linux-gnu/release/viper-run dist/viper-run-linux-x86_64
 cp target/x86_64-pc-windows-gnu/release/viper-run.exe dist/viper-run-windows-x86_64.exe
+cp target/x86_64-unknown-linux-gnu/release/viper-server dist/viper-server-linux-x86_64
+cp target/x86_64-pc-windows-gnu/release/viper-server.exe dist/viper-server-windows-x86_64.exe
 ls -l dist

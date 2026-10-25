@@ -431,7 +431,11 @@ void main() {
     if (u_cut.z > 0.5 ? gone < 0.5 : gone > 0.5) discard;
     // From the seat, the cockpit model replaces the skin inside the canopy.
     // The MiG-29 box is mig29::CUTOUT.
-    if (u_cutout > 1.5) {
+    if (u_cutout > 3.5) {
+        if (v_local.z > -6.1 && v_local.z < -2.8 && abs(v_local.x) < 0.62 && v_local.y > 0.35) discard;
+    } else if (u_cutout > 2.5) {
+        if (v_local.z > -5.3 && v_local.z < -2.1 && abs(v_local.x) < 0.58 && v_local.y > 0.30) discard;
+    } else if (u_cutout > 1.5) {
         if (abs(v_local.x) < 0.44 && v_local.y > 0.55 && v_local.z > -4.78 && v_local.z < -2.0) discard;
     } else if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
     vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
@@ -646,6 +650,10 @@ struct Cloud {
     alpha: f64,
 }
 
+struct TwinParts {
+    body:Part, canopy:Part, stabs:[Part;2], flaps:[Part;2],
+    rudders:[Part;2],brake:Part,gear:[Part;3],
+}
 pub struct World {
     fullscreen: Bindings,
     sky: Pipeline,
@@ -685,6 +693,7 @@ pub struct World {
     mig_gear: [Part; 3],
     mig_canopy: Part,
     mig_brakes: [Part; 2],
+    twins: [TwinParts;2],
     /// Skins of the aggressor F-16s, one per airframe::SCHEMES entry.
     aggressor: Vec<TextureId>,
     /// Buildings, trees and pylons (scenery.rs), each at its cluster origin.
@@ -866,6 +875,12 @@ impl World {
         let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
         let mig_canopy = skinned(&fulcrum.canopy);
         let mig_brakes = [skinned(&fulcrum.brakes[0]), skinned(&fulcrum.brakes[1])];
+        let twins=[crate::hornet::build(),crate::su27::build()].map(|m|TwinParts {
+            body:skinned(&m.body),canopy:skinned(&m.canopy),
+            stabs:m.stabs.map(|m|skinned(&m)),flaps:m.flaps.map(|m|skinned(&m)),
+            rudders:m.rudders.map(|m|skinned(&m)),brake:skinned(&m.brake),
+            gear:m.gear.map(|m|skinned(&m)),
+        });
         let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
         World {
             post_bind: fullscreen.clone(),
@@ -906,6 +921,7 @@ impl World {
             mig_gear,
             mig_canopy,
             mig_brakes,
+            twins,
             aggressor,
             scenery,
             post,
@@ -1025,9 +1041,11 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else if a.kind == Type::Mig29 { 2.0 } else { 1.0 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4], cut: cut_of(a) };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else { (a.kind.index()+1) as f32 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4], cut: cut_of(a) };
             ctx.apply_pipeline(&self.air);
-            if a.kind == Type::Mig29 {
+            if matches!(a.kind,Type::F18|Type::Su27) {
+                self.draw_twin(ctx,a,&base,&model,false);
+            } else if a.kind == Type::Mig29 {
                 // The player's canopy is glass from outside (below) and gone from the seat.
                 self.draw_mig(ctx, a, &base, &model, false);
             } else {
@@ -1061,7 +1079,7 @@ impl World {
             }
             if !cockpit && !a.ejected {
                 // The MiG's pilot sits under its own design eye.
-                let seat = if a.kind == Type::Mig29 { basis(V3::X, V3::Y, V3::Z, crate::mig29::EYE - airframe::EYE) } else { basis(V3::X, V3::Y, V3::Z, V3::ZERO) };
+                let seat = basis(V3::X,V3::Y,V3::Z,a.kind.eye()-airframe::EYE);
                 self.draw_part(ctx, &self.crew, &base, &mat_mul(&model, &seat));
             }
             // The flame sits between the plume's shock diamonds and its sheath.
@@ -1070,15 +1088,9 @@ impl World {
                 ctx.apply_pipeline(&self.flame_pip);
                 let u = AirU { alpha: (0.18 + 0.30 * a.afterburner_visual) as f32, glow: 1.0, ..base };
                 gfx::depth_writes(false);
-                if a.kind == Type::Mig29 {
-                    // Two RD-33 nozzles out on the nacelles instead of the F110's.
-                    for s in [-1.0, 1.0] {
-                        let n = crate::mig29::NOZZLE;
-                        let shift = v3(s * n.x, n.y, n.z) - airframe::NOZZLE_EXIT;
-                        self.draw_part(ctx, &self.flame, &u, &mat_mul(&model, &basis(V3::X, V3::Y, V3::Z, shift)));
-                    }
-                } else {
-                    self.draw_part(ctx, &self.flame, &u, &model);
+                for &n in a.kind.nozzles() {
+                    let shift=n-airframe::NOZZLE_EXIT;
+                    self.draw_part(ctx,&self.flame,&u,&mat_mul(&model,&basis(V3::X,V3::Y,V3::Z,shift)));
                 }
                 gfx::depth_writes(true);
             }
@@ -1107,7 +1119,7 @@ impl World {
 
         // Chase canopy: back faces first, then front faces, for correct layering.
         if let Some(a) = aircraft.filter(|a| !cockpit && !a.ejected) {
-            let canopy = if a.kind == Type::Mig29 { &self.mig_canopy } else { &self.canopy };
+            let canopy = self.twin(a.kind).map(|p|&p.canopy).unwrap_or(if a.kind==Type::Mig29 {&self.mig_canopy}else{&self.canopy});
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
             let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4], cut: NO_CUT };
@@ -1146,6 +1158,9 @@ impl World {
         let model = basis(ax.right, ax.up, ax.back, rel);
         let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint, cut: cut_of(a) };
         ctx.apply_pipeline(&self.air);
+        if matches!(a.kind,Type::F18|Type::Su27) {
+            self.draw_twin(ctx,a,&base,&model,true);return;
+        }
         if a.kind == Type::Mig29 {
             self.draw_mig(ctx, a, &base, &model, true);
             return;
@@ -1173,6 +1188,36 @@ impl World {
         self.draw_gear(ctx, a, &base, &model);
         // Opaque canopy: the gold tint reads at a distance without the glass passes.
         self.draw_part(ctx, &self.canopy, &base, &model);
+    }
+
+    fn twin(&self,kind:Type)->Option<&TwinParts> {
+        match kind {Type::F18=>Some(&self.twins[0]),Type::Su27=>Some(&self.twins[1]),_=>None}
+    }
+    fn draw_twin(&self,ctx:&mut dyn RenderingBackend,a:&Aircraft,base:&AirU,model:&M4,canopy:bool) {
+        let Some(p)=self.twin(a.kind)else{return};
+        self.draw_part(ctx,&p.body,base,model);
+        if canopy{self.draw_part(ctx,&p.canopy,base,model);}
+        let flanker=a.kind==Type::Su27;
+        let pivot=if flanker{crate::su27::STAB_PIVOT}else{crate::hornet::STAB_PIVOT};
+        for (i,side) in [-1.0,1.0].into_iter().enumerate(){
+            let angle=(-a.surf_pitch*25.0-side*a.surf_roll*5.0).clamp(-25.0,25.0)*DEG;
+            if !a.lost.tail{
+                let local=rotate_about(v3(side*pivot.x,pivot.y,pivot.z),Quat::axis_angle(V3::X,angle));
+                self.draw_part(ctx,&p.stabs[i],base,&mat_mul(model,&local));
+            }
+            if !a.lost.wing[i]{
+                let fp=v3(side*if flanker{3.5}else{3.0},0.23,if flanker{4.97}else{2.62});
+                let angle=(a.flaps*a.kind.flap_angle()-side*a.surf_roll*16.0+a.flap_damage*8.0)*DEG;
+                self.draw_part(ctx,&p.flaps[i],base,&mat_mul(model,&rotate_about(fp,Quat::axis_angle(V3::X,angle))));
+            }
+            let root=if flanker{1.8}else{0.94};let z=if flanker{8.4}else{6.2};
+            let local=rotate_about(v3(side*root,0.5,z),Quat::axis_angle(V3::Y,a.surf_yaw*25.0*DEG));
+            self.draw_part(ctx,&p.rudders[i],base,&mat_mul(model,&local));
+        }
+        let z=if flanker{2.8}else{3.2};
+        self.draw_part(ctx,&p.brake,base,&mat_mul(model,&rotate_about(v3(0.0,0.87,z),Quat::axis_angle(V3::X,-a.brake*55.0*DEG))));
+        let pivots=if flanker{&crate::su27::GEAR_PIVOTS}else{&crate::hornet::GEAR_PIVOTS};
+        self.draw_legs(ctx,a,base,model,&p.gear,pivots);
     }
 
     /// The MiG-29 with its stabilators at their deflection and its gear.
@@ -1254,10 +1299,10 @@ impl World {
         match piece {
             Piece::Wing(i) => {
                 base.cut = [(i == 0) as i32 as f32, (i == 1) as i32 as f32, 1.0, kind.break_station() as f32];
-                self.draw_part(ctx, if kind == Type::Mig29 { &self.mig } else { &self.exterior }, &base, &model);
+                self.draw_part(ctx,self.twin(kind).map(|p|&p.body).unwrap_or(if kind==Type::Mig29{&self.mig}else{&self.exterior}),&base,&model);
             }
             Piece::Tail => {
-                for part in if kind == Type::Mig29 { &self.mig_stab } else { &self.stab } {
+                for part in self.twin(kind).map(|p|&p.stabs).unwrap_or(if kind==Type::Mig29{&self.mig_stab}else{&self.stab}) {
                     self.draw_part(ctx, part, &base, &model);
                 }
             }

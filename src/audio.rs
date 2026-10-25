@@ -127,6 +127,62 @@ impl Speech {
     }
 }
 
+/// A small, bounded voice bus, separate from the procedural game master.
+/// Network frames are resampled before entering the audio callback.
+#[derive(Default)]
+struct RemoteVoice {
+    pcm: std::collections::VecDeque<f32>,
+    target_gain: f32,
+    gain: f32,
+    envelope: f32,
+    last: f32,
+}
+#[derive(Default)]
+struct VoiceBus { peers: std::collections::BTreeMap<u64, RemoteVoice>, activity: f32 }
+impl VoiceBus {
+    fn enqueue(&mut self, peer: u64, samples: &[i16], rate: u32, gain: f32) -> bool {
+        if !(8000..=48000).contains(&rate) || samples.is_empty()
+            || samples.len() > rate as usize / 5 || !gain.is_finite() { return false; }
+        if !self.peers.contains_key(&peer) && self.peers.len() >= 16 { return false; }
+        let stream = self.peers.entry(peer).or_default();
+        stream.target_gain = gain.clamp(0.0, 4.0);
+        let count = samples.len() * RATE as usize / rate as usize;
+        // At most 120 ms per participant. Drop oldest speech after a stall.
+        let limit = RATE as usize * 120 / 1000;
+        if stream.pcm.len() + count > limit {
+            let discard = (stream.pcm.len() + count).saturating_sub(limit).min(stream.pcm.len());
+            stream.pcm.drain(..discard); stream.envelope = 0.0;
+        }
+        let skip = count.saturating_sub(limit);
+        for index in skip..count {
+            let at = index as f64 * rate as f64 / RATE as f64;
+            let lower = at as usize;
+            let a = samples[lower.min(samples.len()-1)] as f32 / 32768.0;
+            let b = samples[(lower+1).min(samples.len()-1)] as f32 / 32768.0;
+            stream.pcm.push_back(a + (b-a) * at.fract() as f32);
+        }
+        true
+    }
+    fn sample(&mut self) -> f32 {
+        let mut mixed = 0.0;
+        for peer in self.peers.values_mut() {
+            peer.gain += (peer.target_gain - peer.gain) * 0.003;
+            if let Some(sample) = peer.pcm.pop_front() {
+                peer.envelope += (1.0 - peer.envelope) * 0.008;
+                peer.last = sample;
+            } else {
+                peer.envelope *= 0.99;
+                peer.last *= 0.98;
+            }
+            mixed += peer.last * peer.gain * peer.envelope;
+        }
+        // Keep the bus bounded even when every participant speaks at once.
+        let smoothing = if mixed.abs() > self.activity { 0.01 } else { 0.0003 };
+        self.activity += (mixed.abs() - self.activity) * smoothing;
+        mixed.tanh() * 0.30
+    }
+}
+
 struct Synth {
     target: Params,
     cur: Params,
@@ -144,6 +200,7 @@ struct Synth {
     gun_env: f32,
     seeker_phase: f32,
     speech: Option<Speech>,
+    chat: VoiceBus,
     voices: Vec<Voice>,
     crash: Option<u32>,
     bursts: Vec<Burst>,
@@ -168,6 +225,7 @@ impl Synth {
             gun_env: 0.0,
             seeker_phase: 0.0,
             speech: None,
+            chat: VoiceBus::default(),
             voices: Vec::new(),
             crash: None,
             bursts: Vec::new(),
@@ -300,7 +358,12 @@ impl Synth {
                 if let Some(sample) = voice.next() { v = v * 0.48 + sample * 0.48; }
                 else { self.speech = None; }
             }
-            *s = ((v * p.master).clamp(-1.0, 1.0) * 32000.0) as i16;
+            let chat = self.chat.sample();
+            // Crew voice stays audible when game audio is paused. VMS has
+            // priority over crew speech, with headroom for both buses.
+            let chat = if self.speech.is_some() { chat * 0.55 } else { chat };
+            let game = v * p.master * (1.0 - 0.30 * (self.chat.activity * 20.0).min(1.0));
+            *s = ((game + chat).clamp(-1.0, 1.0) * 32000.0) as i16;
         }
     }
 }
@@ -319,6 +382,20 @@ impl Audio {
         }
         let available = backend::spawn(synth.clone());
         Audio { synth, available }
+    }
+
+    /// Queue mono PCM for one authenticated participant. At most 16 streams,
+    /// 120 ms per stream, 200 ms per call; gain is limited to 0..4.
+    pub fn voice_pcm(&self, peer: u64, samples: &[i16], rate: u32, gain: f32) -> bool {
+        self.synth.lock().is_ok_and(|mut synth| synth.chat.enqueue(peer, samples, rate, gain))
+    }
+    /// None clears every participant; Some clears one. Mute/deafen must call
+    /// this before submitting new frames, including when the game is paused.
+    pub fn voice_clear(&self, peer: Option<u64>) {
+        if let Ok(mut synth) = self.synth.lock() {
+            if let Some(peer) = peer { synth.chat.peers.remove(&peer); }
+            else { synth.chat = VoiceBus::default(); }
+        }
     }
 
     pub fn set(&self, p: Params) {
@@ -378,13 +455,13 @@ impl Audio {
 
     pub fn warning(&self, kind: crate::sim::Type, cue: crate::warnings::Cue) {
         use crate::warnings::Cue;
-        if kind == crate::sim::Type::F16 && matches!(cue, Cue::LowSpeed | Cue::HighAoa | Cue::Gear) {
+        if !kind.russian() && matches!(cue, Cue::LowSpeed | Cue::HighAoa | Cue::Gear) {
             let frequency = if cue == Cue::Gear { 800.0 } else { 300.0 };
             self.tone(frequency, 0.25, 0.10, Wave::Square, 0.0);
             self.tone(frequency, 0.25, 0.10, Wave::Square, 0.38);
             return;
         }
-        let wav: &'static [u8] = match (kind == crate::sim::Type::Mig29, cue) {
+        let wav: &'static [u8] = match (kind.russian(), cue) {
             (false, Cue::PullUp) => include_bytes!("../assets/voices/f16-pullup.wav"),
             (false, Cue::Altitude) => include_bytes!("../assets/voices/f16-altitude.wav"),
             (false, Cue::Fire) => include_bytes!("../assets/voices/f16-warning.wav"),
@@ -618,13 +695,13 @@ pub fn demo(path: &str, kind: crate::sim::Type) -> std::io::Result<()> {
         let time = block as f32 * 512.0 / RATE as f32;
         let rpm = ((time - 2.0) / 4.0).clamp(0.0, 1.0);
         let burner = if (7.0..10.0).contains(&time) { 1.0 } else { 0.0 };
-        synth.target = Params { master: 0.65, engines: if kind == crate::sim::Type::Mig29 { 2.0 } else { 1.0 },
+        synth.target = Params { master: 0.65, engines: if kind == crate::sim::Type::F16 { 1.0 } else { 2.0 },
             eng_gain: 0.06 + rpm * 0.06 + burner * 0.06, eng_freq: 450.0 + rpm * 1900.0,
             whine_gain: 0.002 + rpm * 0.006, whine_freq: 750.0 + rpm * 2250.0,
             rumble_gain: 0.02 + burner * 0.02, rumble_freq: 40.0 + rpm * 30.0, burner,
             ..Default::default() };
         if block == (RATE as usize * 10) / 512 {
-            let wav: &'static [u8] = if kind == crate::sim::Type::Mig29 {
+            let wav: &'static [u8] = if kind.russian() {
                 include_bytes!("../assets/voices/mig-altitude.wav")
             } else { include_bytes!("../assets/voices/f16-pullup.wav") };
             synth.speech = Speech::new(wav, 8);
@@ -689,6 +766,33 @@ mod tests {
             assert!(samples.len() - last < RATE as usize / 4, "{name}: excessive trailing silence");
             assert!(speech.next().is_none(), "{name}: speech must finish");
         }
+    }
+
+    #[test]
+    fn crew_voice_streams_are_resampled_bounded_and_cleared_without_a_device() {
+        let audio = Audio { synth: Arc::new(Mutex::new(Synth::new())), available: false };
+        let samples: Vec<i16> = (0..320).map(|i| (i as f32 * 0.2).sin().mul_add(10000.0, 0.0) as i16).collect();
+        assert!(!audio.voice_pcm(1, &samples, 0, 1.0));
+        assert!(!audio.voice_pcm(1, &samples, 16000, f32::NAN));
+        for _ in 0..100 { assert!(audio.voice_pcm(1, &samples, 16000, 1.0)); }
+        {
+            let synth = audio.synth.lock().unwrap();
+            assert_eq!(synth.chat.peers[&1].pcm.len(), RATE as usize * 120 / 1000);
+        }
+        let mut output = vec![0i16; RATE as usize / 20];
+        audio.synth.lock().unwrap().render(&mut output);
+        // The game bus is silent/paused; crew voice remains available.
+        assert!(output.iter().any(|x| x.abs() > 100));
+        assert!(output.iter().all(|x| x.abs() < 32000));
+        audio.voice_clear(Some(1));
+        assert!(audio.synth.lock().unwrap().chat.peers.is_empty());
+        for id in 0..16 { assert!(audio.voice_pcm(id, &samples, 16000, 4.0)); }
+        assert!(!audio.voice_pcm(17, &samples, 16000, 1.0));
+        audio.synth.lock().unwrap().render(&mut output);
+        assert!(output.iter().all(|x| x.abs() < 32000));
+        audio.voice_clear(None);
+        audio.synth.lock().unwrap().render(&mut output);
+        assert!(output.iter().all(|&x| x == 0));
     }
 
     #[test]

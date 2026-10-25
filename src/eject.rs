@@ -82,9 +82,18 @@ pub const K36DM: SeatSpec = SeatSpec {
     gores: &[WHITE, RED],
 };
 
+/// SJU-17(V)/A NACES reconstruction. The timing/drag here are gameplay
+/// approximations; the Hornet does not reuse the ACES II identity.
+pub const NACES:SeatSpec=SeatSpec {
+    name:"SJU-17 NACES",canopy_lead:0.35,catapult:12.5,rocket:(0.30,12.0),
+    rails:17.0*DEG,separate:(0.85,1.5),fast:250.0,hold:4570.0,inflate:1.7,
+    cda:(0.8,2.0,38.0,0.48),mass:(92.0,100.0),gores:&[WHITE,OLIVE,WHITE,OLIVE],
+};
+
 pub fn spec(kind: Type) -> &'static SeatSpec {
     match kind {
-        Type::Mig29 => &K36DM,
+        Type::Mig29 | Type::Su27 => &K36DM,
+        Type::F18 => &NACES,
         _ => &ACES2,
     }
 }
@@ -161,7 +170,7 @@ pub struct Ejection {
 
 /// Seat pan above the jet's body origin, from where the pilot sits.
 fn seat_point(a: &Aircraft) -> V3 {
-    let eye = if a.kind == Type::Mig29 { crate::mig29::EYE } else { crate::airframe::EYE };
+    let eye = a.kind.eye();
     eye - V3::Y * 0.80
 }
 
@@ -209,7 +218,7 @@ impl Ejection {
     }
 
     fn rocket_start(&self) -> f64 {
-        if self.kind == Type::Mig29 { 1.06 / self.spec.catapult } else { 0.0 }
+        if self.kind.russian() { 1.06 / self.spec.catapult } else { 0.0 }
     }
 
     /// Rocket burning after the catapult stroke, for thrust and flame alike.
@@ -239,7 +248,7 @@ impl Ejection {
                     self.pilot.spin = ax.right * -0.9;
                     self.fired = Some(self.age);
                     self.phase = Phase::Seat;
-                    toast = Some(if self.kind == Type::Mig29 { "K-36DM // SEAT AWAY, BOOMS OUT" } else { "ACES II // SEAT AWAY" });
+                    toast = Some(if self.kind.russian() { "K-36DM // SEAT AWAY, BOOMS OUT" } else if self.kind==Type::F18 { "SJU-17 // SEAT AWAY" } else { "ACES II // SEAT AWAY" });
                 }
             }
             Phase::Seat => {
@@ -315,7 +324,7 @@ impl Flat for V3 {
 pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
     let mut m = Mesh::new();
     let f = |o: V3| Frame { o, x: V3::X, y: V3::Y, z: V3::Z };
-    let (shell, cushion) = if kind == Type::Mig29 { (Rgb(0.30, 0.36, 0.36), Rgb(0.34, 0.24, 0.16)) } else { (Rgb(0.16, 0.17, 0.17), Rgb(0.20, 0.24, 0.18)) };
+    let (shell, cushion) = if kind.russian() { (Rgb(0.30, 0.36, 0.36), Rgb(0.34, 0.24, 0.16)) } else { (Rgb(0.16, 0.17, 0.17), Rgb(0.20, 0.24, 0.18)) };
     let pan = -HARNESS;
     m.block(&f(v3(0.0, pan - 0.08, -0.12)), v3(0.25, 0.08, 0.26), shell);
     m.block(&f(v3(0.0, pan + 0.01, -0.12)), v3(0.21, 0.03, 0.22), cushion);
@@ -327,7 +336,7 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
     }
     // Rocket nozzle under the pan.
     m.lathe(v3(0.0, pan - 0.16, 0.05), V3::Y * -1.0, &[(0.0, 0.0), (0.0, 0.05), (0.06, 0.07), (0.07, 0.0)], 6, Rgb(0.12, 0.12, 0.12));
-    if kind == Type::Mig29 && booms {
+    if kind.russian() && booms {
         for s in [-1.0, 1.0] {
             // Deployed arm protectors and leg lift retain the limbs in the bucket.
             let guard = Frame { o: v3(s * 0.245, pan + 0.51, -0.17), ..f(V3::ZERO) };
@@ -345,16 +354,16 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
 pub const HANDLE_FRAMES: usize = 12;
 
 pub fn handle_point(kind: Type, pull: f64) -> V3 {
-    v3(0.0, -HARNESS + (if kind == Type::Mig29 { 0.158 } else { 0.198 }) + pull * 0.10, -0.48)
+    v3(0.0, -HARNESS + (if kind.russian() { 0.158 } else { 0.198 }) + pull * 0.10, -0.48)
 }
 
 pub fn handle_mesh(kind: Type, pull: f64) -> Mesh {
     let mut m = Mesh::new();
     let centre = handle_point(kind, pull);
-    let loops: &[f64] = if kind == Type::Mig29 { &[-0.034, 0.034] } else { &[0.0] };
+    let loops: &[f64] = if kind.russian() { &[-0.034, 0.034] } else { &[0.0] };
     for &offset in loops {
         for i in 0..12 {
-            let point = |t: f64| centre + v3(offset + (if kind == Type::Mig29 { 0.029 } else { 0.060 }) * t.cos(), 0.032 * t.sin(), 0.0);
+            let point = |t: f64| centre + v3(offset + (if kind.russian() { 0.029 } else { 0.060 }) * t.cos(), 0.032 * t.sin(), 0.0);
             let col = if i % 2 == 0 { Rgb(0.95, 0.80, 0.10) } else { Rgb(0.05, 0.05, 0.05) };
             m.capsule(point(i as f64 * TAU / 12.0), point((i + 1) as f64 * TAU / 12.0), 0.007, 0.007, col, 5);
         }
@@ -366,7 +375,7 @@ pub fn handle_mesh(kind: Type, pull: f64) -> Mesh {
 /// The helmet is omitted from the view at his eyes.
 pub fn pilot_mesh(kind: Type, hanging: bool, first_person: bool, pull: f64) -> Mesh {
     let mut m = Mesh::new();
-    let (suit, helmet) = if kind == Type::Mig29 { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) } else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
+    let (suit, helmet) = if kind.russian() { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) } else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
     let gsuit = suit.scale(0.8);
     let hip = v3(0.0, -HARNESS + 0.10, if hanging { 0.0 } else { -0.26 });
     // The close view omits the rounded neck cap as well as the helmet;
@@ -394,8 +403,8 @@ pub fn pilot_mesh(kind: Type, hanging: bool, first_person: bool, pull: f64) -> M
         v3(0.026, 0.026, 0.008), Rgb(0.60, 0.61, 0.57));
     for s in [-1.0, 1.0] {
         let hp = hip + V3::X * (s * 0.10);
-        let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, if kind == Type::Mig29 { 0.17 } else { 0.10 }, -0.45),
-            hp + v3(0.0, if kind == Type::Mig29 { -0.18 } else { -0.32 }, -0.55)) };
+        let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, if kind.russian() { 0.17 } else { 0.10 }, -0.45),
+            hp + v3(0.0, if kind.russian() { -0.18 } else { -0.32 }, -0.55)) };
         m.capsule(hp, knee, 0.085, 0.07, gsuit, 6);
         m.capsule(knee, foot, 0.065, 0.055, gsuit, 6);
         m.capsule(foot, foot + v3(0.0, -0.03, -0.12), 0.05, 0.05, Rgb(0.08, 0.07, 0.06), 5);
@@ -462,8 +471,8 @@ mod tests {
             let eye = e.pilot.pos + a.q.rotate(v3(0.0, 0.52, 0.0));
             assert!((eye - crate::cockpit::eye_world(&a)).len() < 1e-8);
             let local = seat_point(&a) + V3::Y * HARNESS + handle_point(kind, 1.0);
-            let offset = if kind == Type::Mig29 { (crate::airframe::EYE - crate::mig29::EYE) } else { V3::ZERO };
-            let cockpit_handle = v3(0.0, if kind == Type::Mig29 { 0.725 } else { 0.760 }, -3.720) - offset;
+            let offset = if kind.russian() { crate::airframe::EYE - crate::mig29::EYE } else { V3::ZERO };
+            let cockpit_handle = v3(0.0, if kind.russian() { 0.725 } else { 0.760 }, -3.720) - offset;
             assert!((local - cockpit_handle).len() < 0.022);
         }
     }

@@ -3,6 +3,8 @@
 
 mod aero;
 mod aero_mig29;
+mod aero_hornet;
+mod aero_su27;
 mod ai;
 mod air;
 mod airframe;
@@ -22,6 +24,8 @@ mod keymap;
 mod math;
 mod mesh;
 mod mig29;
+mod hornet;
+mod su27;
 mod physio;
 mod performance;
 mod png;
@@ -36,6 +40,11 @@ mod targets;
 mod terrain;
 mod texture;
 mod ui;
+mod tutorial;
+mod net;
+mod voice;
+mod operation;
+mod multiplayer;
 mod ui_check;
 mod vapor;
 mod weapons;
@@ -65,6 +74,8 @@ const LOOK_PITCH: f64 = -14.0 * DEG;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     Attract,
+    School,
+    Network,
     Flying,
     /// Everything stops, but the camera can still look around and switch
     /// views, for screenshots.
@@ -86,6 +97,10 @@ enum View {
 #[derive(Default)]
 struct Opts {
     autostart: bool,
+    tutorial: Option<tutorial::Lesson>,
+    host:Option<String>, join:Option<String>, directory:Option<String>, callsign:Option<String>, online_mode:Option<net::GameMode>,
+    ready:bool, launch_ready:bool, invite_file:Option<String>, net_report:Option<String>, exit_after:Option<f64>, future_ui_check:bool,
+
     audio_demo: Option<String>,
     no_mirrors: bool,
     ui_check: bool,
@@ -137,7 +152,19 @@ fn parse_opts() -> Opts {
             args.get(*i).cloned().unwrap_or_default()
         };
         match args[i].as_str() {
+            "--host" => o.host=Some(next(&mut i)),
+            "--join" => o.join=Some(next(&mut i)),
+            "--directory" => o.directory=Some(next(&mut i)),
+            "--callsign" => o.callsign=Some(next(&mut i)),
+            "--online-mode" => o.online_mode=net::GameMode::parse(&next(&mut i)),
+            "--ready" => o.ready=true,
+            "--launch-when-ready" => o.launch_ready=true,
+            "--invite-file" => o.invite_file=Some(next(&mut i)),
+            "--net-report" => o.net_report=Some(next(&mut i)),
+            "--exit-after" => o.exit_after=next(&mut i).parse::<f64>().ok().filter(|t|t.is_finite()&&*t>0.0),
+            "--future-ui-check" => o.future_ui_check=true,
             "--autostart" => o.autostart = true,
+            "--tutorial" => { o.tutorial = tutorial::Lesson::parse(&next(&mut i)); o.autostart = o.tutorial.is_some(); },
             "--audio-demo" => o.audio_demo = Some(next(&mut i)),
             "--no-mirrors" => o.no_mirrors = true,
             "--ui-check" => o.ui_check = true,
@@ -192,7 +219,7 @@ fn parse_opts() -> Opts {
             }
             "--mission" => o.mission = MissionKind::parse(&next(&mut i)),
             "--jet" | "--bandits" => {
-                let t = if next(&mut i).contains("mig") { sim::Type::Mig29 } else { sim::Type::F16 };
+                let t = sim::Type::parse(&next(&mut i)).unwrap_or_default();
                 if args[i - 1] == "--jet" {
                     o.jet = Some(t);
                 } else {
@@ -224,7 +251,10 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29] [--bandits f16|mig29] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
+                println!("Online: --host ADDRESS:PORT | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
+                println!("QA: --future-ui-check --screen menu --shot FILE.png --frames 200; --invite-file FILE --net-report FILE --exit-after SECONDS");
                 std::process::exit(0);
             }
             _ => {}
@@ -257,6 +287,8 @@ struct App {
     kind: MissionKind,
     /// Stores and fuel chosen on the loadout screen.
     config: combat::Config,
+    training: Option<tutorial::Training>,
+    multiplayer: multiplayer::Multiplayer,
     combat: Combat,
     models: props::Models,
     /// Left mouse button held as the trigger.
@@ -420,6 +452,8 @@ impl App {
             kind,
             config: combat::Config { aggressor: opts.bandits.unwrap_or(sim::Type::Mig29), ..combat::Config::for_jet(kind, opts.jet.unwrap_or_default()) },
             combat,
+            training: None,
+            multiplayer: multiplayer::Multiplayer::default(),
             models,
             trigger_mouse: false,
             rwr_voice: props::RwrVoice::default(),
@@ -484,6 +518,7 @@ impl App {
         };
         app.performance.set_enabled(app.settings.performance_overlay);
         app.apply_test_options();
+        app.network_options();
         app
     }
 
@@ -491,7 +526,7 @@ impl App {
         if self.opts.bench.is_some() {
             self.start_mission();
         }
-        if self.opts.autostart || self.opts.shot.is_some() && !matches!(self.opts.screen.as_deref(), Some("menu") | Some("loadout")) {
+        if self.opts.autostart || self.opts.shot.is_some() && !matches!(self.opts.screen.as_deref(), Some("menu") | Some("loadout") | Some("school") | Some("network")) {
             if self.opts.autostart || self.opts.sim_seconds > 0.0 || self.opts.look.is_some() || self.opts.screen.is_some() || self.opts.chase {
                 self.start_mission();
             }
@@ -549,6 +584,8 @@ impl App {
             self.pilot.gloc = gloc;
         }
         match self.opts.screen.as_deref() {
+            Some("school") => self.state=State::School,
+            Some("network") => self.state=State::Network,
             Some("pause") => self.pause(),
             Some("loadout") => self.state = State::Loadout,
             Some("freeze") => self.toggle_freeze(),
@@ -602,8 +639,19 @@ impl App {
             self.toggle_controls(Some(false));
         }
         self.mission = Mission::new();
-        self.mission.timed = self.settings.clock;
+        let lesson = self.training.as_ref().map(|t| t.lesson).or(self.opts.tutorial);
+        if let Some(l) = lesson {
+            self.kind = l.mission();
+            if self.training.is_none() {
+                self.config = combat::Config::for_jet(if l==tutorial::Lesson::Landing {MissionKind::Airfield}else{self.kind},self.config.jet);
+                if l != tutorial::Lesson::Weapons { self.config.threats.bandits=0; }
+                self.config.threats.sams=0;self.config.threats.guns=0;self.config.refill=false;
+                if l==tutorial::Lesson::Landing { self.config.fuel=0.5; }
+            }
+        }
+        self.mission.timed = self.settings.clock && lesson.is_none();
         self.combat = Combat::new(self.kind, &mut self.mission);
+        self.combat.training = lesson.is_some();
         self.combat.deploy(&self.config, &mut self.mission);
         if self.kind != MissionKind::Gates {
             self.combat.equip(&self.config);
@@ -614,6 +662,7 @@ impl App {
         }
         let mut a = Aircraft::new(&self.mission);
         a.set_type(self.config.jet);
+        if a.on_ground { a.pos.y=terrain::floor(a.pos.x,a.pos.z)+a.kind.landing_height(); a.last_pos=a.pos; a.flaps=a.kind.gear_flap_fraction(); }
         // Only the airfield sortie starts on the ground, gear down.
         self.gear_lever = a.on_ground;
         self.flaps_switch = false;
@@ -623,6 +672,20 @@ impl App {
         } else {
             a.stores_mass = self.combat.loadout.mass();
             a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
+        }
+        if let Some(l) = lesson {
+            tutorial::position(l, self.config.jet, &mut a);
+            self.gear_lever = a.on_ground;
+            combat::load(&mut a, &self.combat.loadout);
+            if l==tutorial::Lesson::Weapons { self.combat.training_target(&a); }
+            else { self.combat.sites.clear(); }
+            if l==tutorial::Lesson::Landing {
+                let (x,z)=terrain::runway_point(-terrain::RUNWAY_HALF_LENGTH+320.0,0.0);
+                let (dx,dz)=terrain::runway_dir();
+                self.mission.gates=vec![sim::Gate{pos:v3(x,terrain::base_elevation(),z),axis:v3(dx,0.0,dz),radius:100.0,passed:false}];
+                self.mission.gate_index=0;
+            }
+            self.training = Some(tutorial::Training::new(l, &a, &self.combat));
         }
         self.mission.start_throttle = a.throttle;
         self.aircraft = Some(a);
@@ -690,6 +753,7 @@ impl App {
     /// P toggles a freeze-frame: the sim, effects and clock stop, the view stays
     /// where it is, and the mouse looks around without Alt.
     fn toggle_freeze(&mut self) {
+        if self.multiplayer.active() { self.toggle_controls(None); return; }
         match self.state {
             State::Flying => {
                 self.state = State::Frozen;
@@ -708,6 +772,9 @@ impl App {
     }
 
     fn go_menu(&mut self) {
+        self.multiplayer.disconnect(&self.audio);
+        self.training = None;
+        self.opts.tutorial = None;
         self.state = State::Attract;
         self.attract_time = 0.0;
         self.keys.clear();
@@ -747,14 +814,36 @@ impl App {
     }
 
     fn save(&self) {
-        if !self.opts.ui_check { settings::save(&self.settings, &self.best); }
+        if !self.opts.ui_check && !self.opts.future_ui_check && self.opts.net_report.is_none() { settings::save(&self.settings, &self.best); }
     }
 
     fn act(&mut self, a: Action) {
+        if self.network_action(a) { return; }
+        if self.multiplayer.active() && matches!(a,Action::Restart|Action::Start|Action::Launch) {
+            self.flash_toast("LEAVE THE ONLINE ROOM TO START A NEW SORTIE",2.0); return;
+        }
         if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Performance | Action::Restart | Action::Menu | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
         }
         match a {
+            Action::School => {
+                self.training = None;
+                self.opts.tutorial = None;
+                self.state = State::School;
+                self.grab(false);
+                self.selected = 0;
+            },
+            Action::Lesson(l) => {
+                self.kind = l.mission();
+                self.config = combat::Config::for_jet(if l==tutorial::Lesson::Landing {MissionKind::Airfield}else{self.kind}, self.config.jet);
+                if l != tutorial::Lesson::Weapons { self.config.threats.bandits = 0; }
+                self.config.threats.sams = 0;
+                self.config.threats.guns = 0;
+                self.config.refill = false;
+                if l==tutorial::Lesson::Landing { self.config.fuel=0.5; }
+                self.opts.tutorial = Some(l);
+                self.start_mission();
+            },
             Action::Controls => self.toggle_controls(None),
             // Every sortie goes through its setup screen first.
             Action::Start if self.state == State::Attract => {
@@ -801,6 +890,8 @@ impl App {
                 self.save();
             },
             Action::Pick(k) => {
+                self.training = None;
+                self.opts.tutorial = None;
                 self.kind = k;
                 let (jet, aggressor, mixed, refill) = (self.config.jet, self.config.aggressor, self.config.threats.mixed, self.config.refill);
                 self.config = combat::Config { aggressor, refill, ..combat::Config::for_jet(k, jet) };
@@ -808,7 +899,12 @@ impl App {
                 self.state = State::Loadout;
                 self.selected = 0;
             }
-            Action::Jet => self.config.set_jet(self.config.jet.next()),
+            Action::Jet => {
+                if !self.multiplayer.active() {
+                    self.config.set_jet(self.config.jet.next());
+                    if let Some(s)=&mut self.multiplayer.session { let _=s.set_ready(false,self.config.jet.index()as u8); }
+                }
+            },
             Action::Aggressor => self.config.next_fleet(),
             Action::Layout => {
                 let t = &self.config.threats;
@@ -831,7 +927,8 @@ impl App {
                 let muted = self.settings.muted;
                 let keys = self.settings.keys;
                 let clock = self.settings.clock;
-                self.settings = Settings { fullscreen: fs, muted, clock, keys, ..Settings::default() };
+                let tutorial_completed = self.settings.tutorial_completed;
+                self.settings = Settings { fullscreen: fs, muted, clock, keys, tutorial_completed, ..Settings::default() };
                 self.performance.set_enabled(self.settings.performance_overlay);
             }
             Action::Rebind(i, slot) => {
@@ -839,6 +936,7 @@ impl App {
                 self.flash_toast("PRESS A KEY // ESC CANCELS, BACKSPACE CLEARS", 4.0);
             }
             Action::ResetKeys => self.settings.keys = keymap::Keymap::default(),
+            _ => {},
         }
         if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Clock | Action::Reset | Action::ResetKeys) {
             self.mouse = (0.0, 0.0);
@@ -975,6 +1073,7 @@ impl App {
     }
 
     fn read_input(&self) -> Input {
+        if self.opts.net_report.is_some() { return self.opts.input; }
         let mut input = self.read_control_positions();
         if self.settings.invert_pitch {
             input.pitch_axis = -input.pitch_axis;
@@ -1058,7 +1157,7 @@ impl App {
     /// flight behave the same whichever is used.
     fn pad_buttons(&mut self) {
         use gamepad::{A, B, BACK, DOWN, LEFT, LS, RB, RIGHT, RS, START, UP, X, Y};
-        let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
+        let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout | State::School | State::Network);
         if !menu && self.ejection_chord() {
             self.zoom_pad = false;
             let weapon = if self.settings.pad_layout == PadLayout::Combat { gamepad::A } else { gamepad::UP };
@@ -1085,7 +1184,7 @@ impl App {
         self.zoom_pad = !menu && self.pad.held(RS);
         let nav = if menu { self.pad.nav() } else { 0 };
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
-        keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
+        keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b) && !(self.multiplayer.session.is_some() && b == BACK)).map(|(_, k)| k));
         let pad_navigation = !keys.is_empty();
         self.pad_dispatch = true;
         for k in keys {
@@ -1109,7 +1208,7 @@ impl App {
                 self.toggle_limiters();
             }
             // The MiG has no MFDs: its left d-pad works the radar / IRST switch.
-            let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
+            let mig = self.aircraft.as_ref().is_some_and(|a| a.kind.has_irst());
             // The weapon button cycles on release, so that holding it
             // jettisons the store selected now rather than the next one.
             let weapon = if self.settings.pad_layout == PadLayout::Combat { A } else { UP };
@@ -1137,7 +1236,8 @@ impl App {
             }
             // Holding the lock button half a second drops the lock, like TMS aft.
             if self.settings.pad_layout == PadLayout::Combat && self.state == State::Flying && self.pad.long_press(RB, 0.5) {
-                self.combat.drop_lock();
+                if self.multiplayer.active() {self.multiplayer.drop_lock=self.multiplayer.drop_lock.wrapping_add(1);}
+                else {self.combat.drop_lock();}
             }
         }
     }
@@ -1177,6 +1277,7 @@ impl App {
     }
 
     fn step(&mut self, dt: f64, input: Input) {
+        if self.multiplayer.active() { self.network_step(dt,input); return; }
         let blocked = self.flight_controls_blocked();
         let input = if blocked { self.read_input() } else { input };
         let m = &mut self.mission;
@@ -1228,7 +1329,7 @@ impl App {
         let m = &mut self.mission;
         let a = self.aircraft.as_mut().unwrap();
         m.score = m.final_score();
-        let rings = matches!(self.kind, MissionKind::Gates | MissionKind::Free);
+        let rings = self.training.is_none() && matches!(self.kind, MissionKind::Gates | MissionKind::Free);
         if rings && m.gate_index < m.gates.len() {
             let gi = m.gate_index;
             if gate_crossed(a, &m.gates[gi]) {
@@ -1264,6 +1365,8 @@ impl App {
         if self.fight(dt) {
             return;
         }
+        self.step_training(dt, input);
+        if self.state != State::Flying { return; }
         if self.ejection.is_some() {
             self.after_ejection();
             return;
@@ -1284,6 +1387,23 @@ impl App {
         }
         if self.mission.timed && self.mission.time_left <= 0.0 {
             self.begin_finish(Outcome::Timeout);
+        }
+    }
+
+    fn step_training(&mut self, dt: f64, input: Input) {
+        let Some(training) = &mut self.training else { return };
+        let a = self.aircraft.as_ref().unwrap();
+        let changed = training.step(dt, &tutorial::Observation {
+            jet: a, combat: &self.combat, input,
+            looking: self.look.0.abs() > 8.0 * DEG || (self.look.1 - LOOK_PITCH).abs() > 8.0 * DEG,
+            external_view: self.view == View::Chase,
+        });
+        if training.done() {
+            self.settings.tutorial_completed |= 1 << training.lesson.index();
+            self.save();
+            self.begin_finish(Outcome::Win);
+        } else if changed {
+            self.audio.gate();
         }
     }
 
@@ -1432,6 +1552,7 @@ impl App {
 
     /// Objective line for the overlays in a combat mission.
     fn objective(&self) -> Option<Objective> {
+        if let Some(b)=&self.multiplayer.battle { return Some(Objective {label:b.objective.clone(),score:0.0,cue:"MISSION"}); }
         let (done, total) = self.combat.tally();
         match self.kind {
             MissionKind::Gates => None,
@@ -1654,12 +1775,12 @@ impl App {
     /// Renders the world behind the jet, seen from over the pilot's head,
     /// into the rear-view mirrors' picture and hands it to the cockpit atlas.
     fn draw_mirrors(&mut self) {
-        // Only the MiG-29 has mirrors; the F-16 cockpit has none.
-        let Some(a) = self.aircraft.as_ref().filter(|a| a.kind == sim::Type::Mig29 && !self.opts.no_mirrors) else { return };
+        // The MiG-29, Hornet and Flanker carry mirrors; the F-16 has none.
+        let Some(a) = self.aircraft.as_ref().filter(|a| a.kind.has_mirrors() && !self.opts.no_mirrors) else { return };
         let rear = cockpit::mirror_camera(a);
         let m = &self.mirror;
         self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
-        let mission = matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission);
+        let mission = (self.training.is_none() && matches!(self.kind, MissionKind::Gates | MissionKind::Free)).then_some(&self.mission);
         let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a), ejection: None, first_person: false };
         self.world.draw(&mut *self.ctx, &rear, m.w as f64 / m.h as f64, self.time, mission, Some(a), true, Some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
@@ -1668,7 +1789,7 @@ impl App {
 
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
-            (_, State::Attract | State::Loadout) | (None, _) => self.attract_camera(self.attract_time),
+            (_, State::Attract | State::Loadout | State::School | State::Network) | (None, _) => self.attract_camera(self.attract_time),
             (Some(_), _) if self.ejection.is_some() => self.eject_camera(self.ejection.as_ref().unwrap()),
             (Some(a), _) if a.crashed || a.lost.any() => self.wreck_camera(a),
             (Some(a), _) => {
@@ -1689,7 +1810,7 @@ impl App {
             p.eng_gain = (0.025 + thr * 0.07 + ab * 0.075).clamp(0.0, 0.2);
             let rpm = ((a.rpm as f32 - 45.0) / 55.0).clamp(0.0, 1.05);
             p.eng_freq = 450.0 + rpm * 1900.0;
-            p.engines = if a.kind == sim::Type::Mig29 { 2.0 } else { 1.0 };
+            p.engines = a.kind.engine_count() as f32;
             p.burner = ab;
             // Separated flow roars and shudders through the airframe.
             let buffet = a.buffet as f32;
@@ -1721,6 +1842,7 @@ impl App {
     /// false for held actions (stick, throttle, trigger, brakes), which
     /// the caller tracks as keys held down.
     fn bind_pressed(&mut self, b: Bind) -> bool {
+        if self.multiplayer.active() && self.state == State::Flying && self.multiplayer.action(b) { return true; }
         if self.state == State::Flying && self.ejection_chord() && b != Bind::Eject {
             return true;
         }
@@ -1776,7 +1898,7 @@ impl App {
                 self.flaps_switch = !self.flaps_switch;
                 self.flash_toast(if self.flaps_switch { "FLAPS DOWN" } else { "FLAPS UP" }, 1.4);
             }
-            Bind::PitchUp | Bind::PitchDown | Bind::RollLeft | Bind::RollRight | Bind::YawLeft | Bind::YawRight | Bind::ThrottleUp | Bind::ThrottleDown | Bind::Afterburner | Bind::Trigger | Bind::WheelBrake => return false,
+            Bind::PitchUp | Bind::PitchDown | Bind::RollLeft | Bind::RollRight | Bind::YawLeft | Bind::YawRight | Bind::ThrottleUp | Bind::ThrottleDown | Bind::Afterburner | Bind::Trigger | Bind::WheelBrake | Bind::PushToTalk => return false,
             _ => {}
         }
         true
@@ -1789,7 +1911,7 @@ impl App {
             return;
         }
         self.limiters_off = !self.limiters_off;
-        let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
+        let mig = self.aircraft.as_ref().is_some_and(|a| a.kind.russian());
         let text = match (mig, self.limiters_off) {
             (false, true) => "FLCS LIMITERS OFF // G AND AOA UNPROTECTED",
             (false, false) => "FLCS LIMITERS ON",
@@ -1872,7 +1994,7 @@ impl EventHandler for App {
         }
         self.flash = (self.flash - dt * 2.4).max(0.0);
         match self.state {
-            State::Attract | State::Loadout => self.attract_time += dt,
+            State::Attract | State::Loadout | State::School | State::Network => self.attract_time += dt,
             State::Flying => {
                 self.accumulator = (self.accumulator + dt).min(0.12);
                 let mut steps = 0;
@@ -1936,12 +2058,19 @@ impl EventHandler for App {
         let head = self.look.0.abs() > 4.0 * DEG || (self.look.1 - LOOK_PITCH).abs() > 4.0 * DEG;
         let hud = self.aircraft.as_ref().is_some_and(|a| symbology::through_hud(a.q.conj().rotate(self.camera.forward)));
         self.combat.helmet = (self.view == View::Cockpit && head && !hud && matches!(self.state, State::Flying | State::Frozen)).then_some(self.camera.forward);
+        if self.multiplayer.active() && self.state != State::Flying {
+            self.accumulator=(self.accumulator+dt).min(0.12);
+            while self.accumulator>=FIXED_DT {
+                self.network_step(FIXED_DT,Input::default());self.accumulator-=FIXED_DT;
+            }
+        }
+        self.network_poll();
         self.update_audio();
     }
 
     fn draw(&mut self) {
         let (w, h) = self.win;
-        let flying_view = !matches!(self.state, State::Attract | State::Loadout) && self.aircraft.is_some();
+        let flying_view = !matches!(self.state, State::Attract | State::Loadout | State::School | State::Network) && self.aircraft.is_some();
         // A wrecked jet leaves only the fireball and debris, seen from outside.
         let wrecked = self.aircraft.as_ref().is_some_and(|a| a.crashed);
         let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked && self.ejection.as_ref().is_none_or(|e| e.phase == eject::Phase::Canopy);
@@ -1962,7 +2091,7 @@ impl EventHandler for App {
         self.ctx.begin_pass(Some(self.scene.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
         // Gate rings only on the gate run and in free flight; the fight brings
         // its own props and smoke.
-        let mission = if flying_view { matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission) } else { Some(&self.preview) };
+        let mission = if flying_view { (self.training.is_none() && matches!(self.kind, MissionKind::Gates | MissionKind::Free)).then_some(&self.mission) } else { Some(&self.preview) };
         if flying_view {
             props::fill_fx(&self.combat, &mut self.world.fx, &cam, self.aircraft.as_ref());
         } else {
@@ -1978,7 +2107,7 @@ impl EventHandler for App {
             let cam_b = cockpit::body_camera(&cam, a);
             let sun_b = a.q.conj().rotate(world::sun_dir());
             self.ctx.begin_pass(Some(self.scene.pass), PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
-            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind == sim::Type::Mig29, self.ejection.is_none());
+            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind, self.ejection.is_none());
             self.ctx.end_render_pass();
         }
 
@@ -1993,7 +2122,7 @@ impl EventHandler for App {
         if cockpit_view {
             let a = self.aircraft.as_ref().unwrap();
             let cam_b = cockpit::body_camera(&cam, a);
-            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32, a.kind == sim::Type::Mig29);
+            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32, a.kind);
         }
 
         // 2D overlays at native resolution.
@@ -2032,6 +2161,10 @@ impl EventHandler for App {
                     symbology::overlay(cv, w, h, ui::ui_scale(w, h), a, &self.combat, &cam, self.time, true);
                 }
             }
+            if flying_view && self.multiplayer.active() { ui::network_overlay(cv,w,h,&self.multiplayer,&self.combat,self.aircraft.as_ref().unwrap(),&cam); }
+            if flying_view && !self.controls_open && self.state == State::Flying {
+                if let Some(t) = &self.training { ui::training_overlay(cv, w, h, t, &self.settings, pad); }
+            }
             if flying_view && self.settings.performance_overlay {
                 let s = ui::ui_scale(w, h);
                 let u = (s - 1.0).max(1.0);
@@ -2047,18 +2180,22 @@ impl EventHandler for App {
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
+                    State::Network => u.network_screen(&self.multiplayer, self.config.jet, &self.settings.keys),
+                    State::School => u.school_screen(self.settings.tutorial_completed, self.config.jet),
                     State::Loadout => u.loadout_screen(self.kind, &self.config, self.settings.clock),
                     State::Paused => {}
                     State::Result => {
                         u.cv.rect(0.0, 0.0, w, h, rgba(2, 5, 4, 0.5));
                         if let Some(r) = &self.result {
-                            u.result_screen(r, &self.best);
+                            if let Some(t) = &self.training { u.training_result(t, r.kind); }
+                            else { u.result_screen(r, &self.best); }
                         }
                     }
                     _ => {}
                 }
             } else {
-                u.controls_drawer(&self.settings, matches!(self.state, State::Paused | State::Frozen), self.rebinding);
+                u.controls_drawer(&self.settings, matches!(self.state, State::Paused | State::Frozen), self.rebinding, self.multiplayer.active());
+                if self.multiplayer.active() { u.online_controls_button(); }
             }
             buttons.append(&mut u.buttons);
         }
@@ -2085,8 +2222,9 @@ impl EventHandler for App {
 
         self.performance.presented();
         self.frame += 1;
-        if self.opts.ui_check && ui_check::step(self, self.frame) {
+        if (self.opts.ui_check && ui_check::step(self,self.frame)) || (self.opts.future_ui_check && ui_check::future_step(self,self.frame)) {
             self.opts.ui_check = false;
+            self.opts.future_ui_check = false;
             self.opts.frames = self.frame;
         }
         if let (Some(path), Some(out)) = (self.opts.shot.clone(), self.output.as_ref()) {
@@ -2181,6 +2319,16 @@ impl EventHandler for App {
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
         self.pad_active = self.pad_dispatch;
+        if self.state==State::Network && self.multiplayer.menu.editing.is_some() {
+            match key {
+                KeyCode::Escape=>self.multiplayer.menu.finish(true),
+                KeyCode::Enter | KeyCode::KpEnter=>self.multiplayer.menu.finish(false),
+                KeyCode::Backspace=>self.multiplayer.menu.backspace(),
+                KeyCode::V if mods.ctrl=>{if let Some(text)=window::clipboard_get(){for ch in text.chars(){self.multiplayer.menu.character(ch);}}},
+                _=>{}
+            }
+            return;
+        }
         if key == KeyCode::F12 && !repeat {
             self.screenshot_pending = true;
             return;
@@ -2235,7 +2383,11 @@ impl EventHandler for App {
             self.toggle_controls(None);
             return;
         }
-        let in_menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
+        if self.multiplayer.session.is_some() && self.settings.keys.lookup(key)==Some(Bind::PushToTalk) {
+            self.keys.insert(key);
+            if !matches!(key,KeyCode::Up|KeyCode::Down|KeyCode::Left|KeyCode::Right|KeyCode::Tab){return;}
+        }
+        let in_menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout | State::School | State::Network);
         // Space engages from the mission board and launches from the setup
         // screen, whichever button is highlighted.
         if key == KeyCode::Space && !repeat && !self.controls_open && matches!(self.state, State::Attract | State::Loadout) {
@@ -2299,17 +2451,18 @@ impl EventHandler for App {
             },
             KeyCode::Escape => match self.state {
                 State::Flying | State::Frozen | State::Paused | State::Attract => self.toggle_controls(Some(true)),
-                State::Result | State::Loadout => self.go_menu(),
+                State::Network if self.multiplayer.active() => { self.network_action(Action::NetResume); },
+                State::Result | State::Loadout | State::School | State::Network => self.go_menu(),
                 _ => {}
             },
             KeyCode::Enter | KeyCode::KpEnter => {
-                if matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout) {
+                if matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout | State::School | State::Network) {
                     if let Some(b) = self.buttons.get(self.selected).copied() {
                         self.act(b.action);
                     }
                 }
             }
-            KeyCode::R if matches!(self.state, State::Paused | State::Result) => self.start_mission(),
+            KeyCode::R if matches!(self.state, State::Paused | State::Result) => self.act(Action::Restart),
             KeyCode::Q if mods.ctrl && self.state != State::Flying => window::order_quit(),
             _ => {
                 if self.state == State::Flying {
@@ -2325,6 +2478,10 @@ impl EventHandler for App {
             MouseButton::Right => self.zoom_mouse = false,
             _ => {}
         }
+    }
+
+    fn char_event(&mut self, character: char, keymods: KeyMods, _repeat: bool) {
+        if self.state==State::Network && !keymods.ctrl && !keymods.alt { self.multiplayer.menu.character(character); }
     }
 
     fn key_up_event(&mut self, key: KeyCode, _mods: KeyMods) {

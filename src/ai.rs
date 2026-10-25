@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn slow_pilots_unload_and_regain_energy_on_both_airframes() {
-        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+        for kind in crate::sim::Type::ALL {
             let mut me = crate::combat::spawn_type(kind, v3(0.0, 6000.0, 0.0), 0.0, 125.0);
             let foe = spawn(v3(1000.0, 6800.0, 3500.0), PI, 230.0);
             let mut pilot = Pilot::new(0.8);
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn protected_airframes_can_defeat_a_missile_by_manoeuvring() {
         use crate::weapons::{Fate, Missile, Who};
-        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+        for kind in crate::sim::Type::ALL {
             let mut escaped = 0;
             for range in [10000.0, 14000.0, 18000.0] {
                 let run = |defend: bool| {
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn gun_tracking_hits_with_both_airframes_ballistics() {
         use crate::weapons::{hits_airframe, Round, Who};
-        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+        for kind in crate::sim::Type::ALL {
             let mut me = crate::combat::spawn_type(kind, v3(30.0, 4980.0, 0.0), 0.0, 210.0);
             let mut foe = spawn(v3(0.0, 5000.0, -700.0), 0.0, 200.0);
             let mut pilot = Pilot::new(1.0);

@@ -5,6 +5,7 @@ use miniquad::KeyCode;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Bind {
+    PushToTalk,
     PitchUp,
     PitchDown,
     RollLeft,
@@ -34,7 +35,8 @@ pub enum Bind {
     RightMfd,
 }
 
-pub const BINDS: [Bind; 24] = [
+pub const BINDS: [Bind; 25] = [
+    Bind::PushToTalk,
     Bind::PitchUp,
     Bind::PitchDown,
     Bind::RollLeft,
@@ -69,6 +71,7 @@ impl Bind {
     /// Label in the controls drawer.
     pub fn label(self) -> &'static str {
         match self {
+            Bind::PushToTalk => "PUSH TO TALK",
             Bind::PitchUp => "PITCH UP (PULL)",
             Bind::PitchDown => "PITCH DOWN (PUSH)",
             Bind::RollLeft => "ROLL LEFT",
@@ -99,6 +102,7 @@ impl Bind {
     /// Name in the settings file.
     pub fn id(self) -> &'static str {
         match self {
+            Bind::PushToTalk => "push_to_talk",
             Bind::PitchUp => "pitch_up",
             Bind::PitchDown => "pitch_down",
             Bind::RollLeft => "roll_left",
@@ -129,6 +133,7 @@ impl Bind {
     fn defaults(self) -> [Option<KeyCode>; 2] {
         use KeyCode::*;
         let (a, b) = match self {
+            Bind::PushToTalk => (U, None),
             Bind::PitchUp => (S, Some(Down)),
             Bind::PitchDown => (W, Some(Up)),
             Bind::RollLeft => (A, Some(Left)),

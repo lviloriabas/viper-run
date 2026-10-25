@@ -28,6 +28,11 @@ const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     Start,
+    School,
+    Online, NetEdit(crate::multiplayer::Field), NetMode, NetCapacity, NetPublic,
+    NetHost, NetJoin, NetBrowse, NetRoom(u8), NetQuick, NetCopy, NetReady, NetLaunch, NetLeave, NetResume,
+    VoiceMode, VoiceMute, VoiceDeafen, VoiceInput(bool), VoiceOutput(bool), VoiceThreshold(bool), VoicePeer(u64), VoicePeerGain(u64),
+    Lesson(crate::tutorial::Lesson),
     Restart,
     Menu,
     Mute,
@@ -296,7 +301,9 @@ impl<'a> Ui<'a> {
         self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
         yy += 19.0 * s;
         let w3 = self.button("CONTROLS / CONFIG", "K", bx, yy, false, Action::Controls);
-        self.button("QUIT", "", bx + w3 + 6.0 * s, yy, false, Action::Quit);
+        let w4 = self.button("FLIGHT SCHOOL", "", bx + w3 + 6.0 * s, yy, false, Action::School);
+        let w5=self.button("ONLINE", "", bx+w3+w4+12.0*s,yy,false,Action::Online);
+        self.button("QUIT", "", bx+w3+w4+w5+18.0*s, yy, false, Action::Quit);
         let mut mx = bx;
         for k in MissionKind::ALL {
             // The chosen mission is the lit button; free flight's name is cut
@@ -316,12 +323,14 @@ impl<'a> Ui<'a> {
         let airframe = match cfg.jet {
             crate::sim::Type::F16 => ("AIRFRAME", crate::sim::Type::F16.full_name(), "LOCKHEED MARTIN, F110-GE-129"),
             crate::sim::Type::Mig29 => ("AIRFRAME", crate::sim::Type::Mig29.full_name(), "MIKOYAN, 2 X KLIMOV RD-33"),
+            crate::sim::Type::F18 => ("AIRFRAME", crate::sim::Type::F18.full_name(), "MCDONNELL DOUGLAS, 2 X F404-GE-402"),
+            crate::sim::Type::Su27 => ("AIRFRAME", crate::sim::Type::Su27.full_name(), "SUKHOI, 2 X AL-31F"),
         };
         let bandits = format!("{} BANDITS", cfg.threats.bandits);
         let heaters = match (cfg.threats.mixed, cfg.aggressor) {
             (true, _) => "AIM-9 + R-73",
-            (false, crate::sim::Type::Mig29) => "R-73",
-            (false, crate::sim::Type::F16) => "AIM-9",
+            (false, crate::sim::Type::Mig29 | crate::sim::Type::Su27) => "R-73",
+            (false, crate::sim::Type::F16 | crate::sim::Type::F18) => "AIM-9",
         };
         let fleet = format!("{}, {heaters}, GUN", cfg.fleet_name());
         let stores = cfg.stores_summary();
@@ -377,6 +386,133 @@ impl<'a> Ui<'a> {
         self.cv.line(x + m, fy - 8.0 * s, x + pw - m, fy - 8.0 * s, 1.0, LINE);
         self.cv.text(&best_line(best), x + m, fy, sm, AMBER, Align::Left);
         self.cv.text("37°14′N 081°06′E  ALT 2,140 FT", x + pw - m, fy, sm, DIM, Align::Right);
+    }
+
+    pub fn school_screen(&mut self, completed: u8, jet: crate::sim::Type) {
+        let s = self.s;
+        let (pw, ph) = ((self.w - 24.0*s).min(570.0*s), (self.h - 32.0*s).min(295.0*s));
+        let (x, y) = ((self.w-pw)/2.0, (self.h-ph)/2.0);
+        self.frame(x, y, pw, ph);
+        self.cv.text("FLIGHT SCHOOL", x+14.0*s, y+18.0*s, 2.0*s, GREEN, Align::Left);
+        self.cv.text("NO CLOCK. NO RETURN FIRE. OBJECTIVES CHECK YOUR FLIGHT.", x+14.0*s, y+38.0*s, (s-1.0).max(1.0), DIM, Align::Left);
+        let mut yy = y+58.0*s;
+        for l in crate::tutorial::Lesson::ALL {
+            let passed = completed & (1 << l.index()) != 0;
+            self.button(l.name(), "", x+14.0*s, yy, !passed, Action::Lesson(l));
+            self.cv.paragraph(l.brief(), x+155.0*s, yy+2.0*s, pw-170.0*s, (s-1.0).max(1.0), 1.35, CREAM);
+            if passed { self.cv.text("PASSED", x+14.0*s, yy+23.0*s, (s-1.0).max(1.0), ACID, Align::Left); }
+            yy += 39.0*s;
+        }
+        let w = self.button(&format!("AIRFRAME: {}", jet.name()), "", x+14.0*s, y+ph-26.0*s, false, Action::Jet);
+        self.button("MAIN MENU", "ESC", x+20.0*s+w, y+ph-26.0*s, false, Action::Menu);
+        self.legend(&[("ESC", "BACK"), ("K", "CONTROLS")]);
+    }
+
+    pub fn training_result(&mut self, t: &crate::tutorial::Training, outcome: Outcome) {
+        let passed = outcome == Outcome::Win && t.done();
+        self.status_panel("// FLIGHT SCHOOL", DIM, if passed { "LESSON PASSED" } else { "TRY AGAIN" },
+            if passed { ACID } else { AMBER }, t.lesson.brief(),
+            [("LESSON", t.lesson.name().to_string(), CREAM), ("STEPS", format!("{}/{}", t.stage, t.lesson.steps()), GREEN),
+             ("TIME", format_time(t.elapsed), CREAM), ("PROGRESS", if passed { "SAVED" } else { "RETRY" }.to_string(), AMBER)],
+            &[("REPEAT", "R", Action::Lesson(t.lesson)), ("FLIGHT SCHOOL", "", Action::School), ("MAIN MENU", "ESC", Action::Menu)],
+            "ESC CONFIGURATION DURING FLIGHT INCLUDES RESTART.");
+    }
+
+    fn network_field(&mut self, label:&str, value:&str, field:crate::multiplayer::Field, editing:bool, enabled:bool, x:f32,y:f32,w:f32) {
+        let s=self.s;let sm=(s-1.0).max(1.0);let h=22.0*s;
+        let action=Action::NetEdit(field);
+        let hot=enabled&&(editing||self.selected==self.buttons.len()||Button{x,y,w,h,action}.hit(self.mouse.0,self.mouse.1));
+        self.cv.rect(x,y,w,h,INK);self.cv.stroke_rect(x,y,w,h,1.0,if hot{ACID}else{LINE});
+        self.cv.text(label,x+5.0*s,y+5.0*s,sm,DIM,Align::Left);
+        let count=((w-12.0*s)/(6.0*sm)).max(5.0)as usize;
+        let shown=if value.len()>count{format!("...{}",&value[value.len()-count+3..])}else{value.to_string()};
+        self.cv.text(&format!("{}{}",shown,if editing{"_"}else{""}),x+5.0*s,y+15.0*s,sm,if hot{ACID}else{CREAM},Align::Left);
+        if enabled {self.buttons.push(Button{x,y,w,h,action});}
+    }
+    pub fn online_controls_button(&mut self) {
+        self.button("ONLINE / VOICE", "", 12.0*self.s, self.h-30.0*self.s, false, Action::Online);
+    }
+    pub fn network_screen(&mut self,mp:&crate::multiplayer::Multiplayer,jet:crate::sim::Type,keys:&crate::keymap::Keymap) {
+        use crate::multiplayer::Field;
+        let s=self.s;let sm=(s-1.0).max(1.0);
+        let(pw,ph)=((self.w-20.0*s).min(610.0*s),(self.h-30.0*s).min(320.0*s));
+        let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let cw=(pw-38.0*s)*0.49;let rx=x+cw+24.0*s;
+        self.frame(x,y,pw,ph);
+        self.cv.text("MULTIPLAYER",x+12.0*s,y+16.0*s,2.0*s,GREEN,Align::Left);
+        self.cv.text("DIRECT P2P OR INTERNET RELAY. THE HOST RUNS THE SIMULATION.",x+12.0*s,y+34.0*s,sm,DIM,Align::Left);
+        let menu=&mp.menu;let fields=[("CALLSIGN",Field::Name),("INVITATION (CTRL+V TO PASTE)",Field::Invite),
+            ("DIRECTORY HOST:PORT (OPTIONAL FOR DIRECT)",Field::Server),("HOST UDP PORT",Field::Port)];
+        for(i,(label,f))in fields.into_iter().enumerate(){self.network_field(label,menu.text(f),f,menu.editing==Some(f),mp.session.is_none(),x+12.0*s,y+(46.0+i as f32*25.0)*s,cw);}
+        if mp.session.is_none(){
+            let mut bx=x+12.0*s;let by=y+149.0*s;
+            for(label,act)in[("HOST",Action::NetHost),("JOIN",Action::NetJoin),("BROWSE",Action::NetBrowse)]{bx+=self.button(label,"",bx,by,false,act)+4.0*s;}
+            self.button(menu.rules.mode.name(),"",x+12.0*s,y+169.0*s,false,Action::NetMode);
+            let w=self.button(&format!("SLOTS {}",menu.rules.capacity),"",x+12.0*s,y+189.0*s,false,Action::NetCapacity);
+            self.button(if menu.public{"PUBLIC"}else{"PRIVATE"},"",x+18.0*s+w,y+189.0*s,false,Action::NetPublic);
+        }else{
+            let sref=mp.session.as_ref().unwrap();
+            self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy);
+            self.cv.text(sref.rules.mode.name(),x+12.0*s,y+174.0*s,s,AMBER,Align::Left);
+            self.cv.text(&sref.status,x+12.0*s,y+191.0*s,sm,CREAM,Align::Left);
+        }
+        self.cv.text(&format!("AIRFRAME: {}",jet.name()),rx,y+49.0*s,sm,AMBER,Align::Left);
+        if !mp.active(){self.button("CHANGE JET","",rx,y+57.0*s,false,Action::Jet);}
+        else {self.cv.text("AIRFRAME FIXED FOR THIS SORTIE",rx,y+65.0*s,sm,DIM,Align::Left);}
+        if let Some(session)=&mp.session{
+            self.cv.text("PILOTS / VOICE",rx,y+82.0*s,sm,DIM,Align::Left);
+            for(i,m)in session.members.iter().enumerate(){
+                let yy=y+(97.0+i as f32*13.0)*s;
+                let color=if (m.id==session.id&&mp.voice.transmitting())||mp.voice.peer_talking(m.id){ACID}else{CREAM};
+                let score=mp.battle.as_ref().and_then(|b|b.scores.iter().find(|r|r.0==m.id));
+                let name=m.name.chars().take(10).collect::<String>();
+                let text=if let Some((_,_,kills,deaths))=score{format!("{name} K{kills}/D{deaths}")}else{format!("{} {} {}",if m.ready{"READY"}else{"WAIT"},name,["F16","M29","F18","S27"][m.jet as usize])};
+                self.cv.text(&text,rx,yy,sm,color,Align::Left);
+                if m.id!=session.id{
+                    let bx=x+pw-103.0*s;
+                    self.key_cap(if menu.muted.contains(&m.id){"UNMUTE"}else{"MUTE"},bx,yy-4.0*sm,50.0*s,false,Action::VoicePeer(m.id));
+                    self.key_cap(&format!("{:.0}%",menu.gains.get(&m.id).copied().unwrap_or(1.0)*100.0),bx+54.0*s,yy-4.0*sm,38.0*s,false,Action::VoicePeerGain(m.id));
+                }
+            }
+        }else if let Some(browser)=&menu.browser{
+            self.cv.text("PUBLIC ROOMS",rx,y+84.0*s,sm,DIM,Align::Left);
+            for(i,r)in browser.rooms.iter().enumerate(){
+                let yy=y+(95.0+i as f32*22.0)*s;
+                self.button(&format!("{} {}/{}",r.title,r.players,r.capacity),"",rx,yy,false,Action::NetRoom(i as u8));
+                self.cv.text(r.mode.name(),rx,y+(113.0+i as f32*22.0)*s,sm,DIM,Align::Left);
+            }
+            self.button("QUICK MATCH","",rx,y+189.0*s,false,Action::NetQuick);
+        }else{self.cv.paragraph(menu.rules.mode.brief(),rx,y+91.0*s,pw-cw-40.0*s,sm,1.5,CREAM);}
+        let vs=mp.settings();let voice_label=match vs.mode{crate::voice::VoiceMode::Disabled=>"MIC OFF",crate::voice::VoiceMode::PushToTalk=>"PUSH TO TALK",crate::voice::VoiceMode::VoiceActivation=>"VOICE DETECTION"};
+        let mut bx=x+12.0*s;let vy=y+213.0*s;
+        for(label,act)in[(voice_label,Action::VoiceMode),(if vs.muted{"UNMUTE MIC"}else{"MUTE MIC"},Action::VoiceMute),(if vs.deafened{"UNDEAFEN"}else{"DEAFEN"},Action::VoiceDeafen)]{
+            bx+=self.button(label,"",bx,vy,false,act)+5.0*s;
+        }
+        for(i,(label,value,down,up))in[
+            ("MIC GAIN",format!("{:.0}%",vs.input_gain*100.0),Action::VoiceInput(false),Action::VoiceInput(true)),
+            ("VOICE VOLUME",format!("{:.0}%",vs.output_gain*100.0),Action::VoiceOutput(false),Action::VoiceOutput(true)),
+            ("DETECT RMS",format!("{:.3}",vs.activation_threshold),Action::VoiceThreshold(false),Action::VoiceThreshold(true)),
+        ].into_iter().enumerate(){
+            let xx=x+12.0*s+i as f32*(pw-24.0*s)/3.0;
+            self.cv.text(&format!("{label}: {value}"),xx,y+241.0*s,sm,DIM,Align::Left);
+            self.key_cap("-",xx,y+247.0*s,25.0*s,false,down);self.key_cap("+",xx+30.0*s,y+247.0*s,25.0*s,false,up);
+        }
+        let talk=keys.get(crate::keymap::Bind::PushToTalk).iter().flatten().map(|&k|crate::keymap::key_name(k)).collect::<Vec<_>>().join("/");
+        self.cv.text(&format!("MIC STARTS OFF. SELECT A MODE TO ENABLE. TALK: {} / PAD VIEW.",if talk.is_empty(){"UNBOUND"}else{&talk}),x+12.0*s,y+270.0*s,sm,DIM,Align::Left);
+        self.cv.text(&format!("MIC LEVEL {:.3}",mp.voice.input_level()),x+pw-145.0*s,y+217.0*s,sm,DIM,Align::Left);
+        self.cv.rect(x+pw-145.0*s,y+226.0*s,125.0*s,3.0*s,LINE);
+        self.cv.rect(x+pw-145.0*s,y+226.0*s,125.0*s*(mp.voice.input_level()*8.0).min(1.0),3.0*s,ACID);
+        let mut bx=x+12.0*s;let by=y+283.0*s;
+        if let Some(session)=&mp.session{
+            if session.rules.started{bx+=self.button("RESUME","",bx,by,true,Action::NetResume)+5.0*s;}
+            else{bx+=self.button("READY / WAIT","",bx,by,true,Action::NetReady)+5.0*s;
+                if session.host{bx+=self.button("LAUNCH","",bx,by,false,Action::NetLaunch)+5.0*s;}}
+            bx+=self.button("LEAVE ROOM","",bx,by,false,Action::NetLeave)+5.0*s;
+        }
+        self.button("MAIN MENU",if mp.active(){""}else{"ESC"},bx,by,false,Action::Menu);
+        let status=mp.voice.capture_error().unwrap_or(&menu.status);
+        let max=((pw-24.0*s)/(6.0*sm))as usize;
+        self.cv.text(&status.chars().take(max).collect::<String>(),x+12.0*s,y+310.0*s,sm,AMBER,Align::Left);
+        self.legend(if mp.active(){&[("ESC","RESUME")]}else{&[("ESC","BACK")]});
     }
 
     fn status_panel(&mut self, kicker: &str, kicker_col: Col, title: &str, title_col: Col, sub: &str, stats: [(&str, String, Col); 4], actions: &[(&str, &str, Action)], small: &str) {
@@ -484,7 +620,7 @@ impl<'a> Ui<'a> {
         self.cv.text(if armed { "LOADOUT" } else { "SETUP" }, x + m, yy, s * 3.0, GREEN, Align::Left);
         yy += 18.0 * s;
         let name = |st: Option<Store>| st.map_or("EMPTY", |s| s.pair());
-        let mig = cfg.jet == crate::sim::Type::Mig29;
+        let mig = cfg.jet.russian();
         let gun = crate::weapons::gun_of(cfg.jet);
         let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7", "STA 4 / 6", "PGU-28") };
         // The MiG's gauges read kilograms, the F-16's pounds.
@@ -776,7 +912,7 @@ impl<'a> Ui<'a> {
     }
 
     /// Left drawer with the control reference and live settings.
-    pub fn controls_drawer(&mut self, st: &Settings, paused_flight: bool, waiting: Option<(usize, usize)>) {
+    pub fn controls_drawer(&mut self, st: &Settings, paused_flight: bool, waiting: Option<(usize, usize)>, online: bool) {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         let w = (200.0 * s).min(self.w * 0.94);
@@ -789,7 +925,7 @@ impl<'a> Ui<'a> {
         self.button("CLOSE", "ESC", w - m - cw, y - 7.5 * s, false, Action::Controls);
         y += 16.0 * s;
         let heading = match (paused_flight, self.pad) {
-            (true, _) => "FLIGHT PAUSED",
+            (true, _) => if online{"LOCAL CONTROLS PAUSED"}else{"FLIGHT PAUSED"},
             (false, true) => "XBOX CONTROLLER",
             (false, false) => "FLIGHT CONTROLS",
         };
@@ -896,8 +1032,8 @@ impl<'a> Ui<'a> {
         let note = "Mouse and controller work together. Invert pitch applies to both. Use the input map on the right.";
         y += self.cv.paragraph(note, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0)) + 2.0 * s;
         if paused_flight {
-            self.button("RESTART", "", m, y, false, Action::Restart);
-            self.button("MAIN MENU", "", m + 75.0 * s, y, false, Action::Menu);
+            let width=self.button(if online{"LEAVE ROOM"}else{"RESTART"}, "", m, y, false, if online{Action::NetLeave}else{Action::Restart});
+            self.button("MAIN MENU", "", m+width+6.0*s, y, false, Action::Menu);
             y += 18.0 * s;
         }
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
@@ -1003,7 +1139,7 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if a.gear < 0.95 && !a.on_ground && a.agl < 300.0 && a.vs < -2.0 && a.airspeed_kt < 220.0 {
         w.push(Warn { text: "GEAR UP", color: RED });
     }
-    if a.gear > 0.0 && a.airspeed_kt > crate::sim::spec::GEAR_LIMIT_KT {
+    if a.gear > 0.0 && a.airspeed_kt > a.kind.gear_limit_kt() {
         w.push(Warn { text: "GEAR SPEED", color: AMBER });
     }
     if a.gear_broken.iter().any(|&b| b) {
@@ -1027,7 +1163,7 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     }
     if b.thrust() == 0.0 {
         w.push(Warn { text: "ENGINE OUT", color: RED });
-    } else if b.engine >= 0.45 && a.kind == crate::sim::Type::Mig29 {
+    } else if b.engine >= 0.45 && a.kind.engine_count()>1 {
         w.push(Warn { text: "ONE ENGINE OUT", color: AMBER });
     } else if b.engine > 0.0 {
         w.push(Warn { text: "ENGINE DAMAGE", color: AMBER });
@@ -1158,7 +1294,7 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
 /// With the limiters overridden it says so in amber, and in red what the
 /// jet is doing past them.
 fn limiter_line(cv: &mut Canvas, w: f32, y: f32, s: f32, a: &Aircraft) {
-    let name = if a.kind == crate::sim::Type::F16 { "FLCS" } else { "SOS" };
+    let name = if a.kind.russian() { "SOS" } else { "FLCS" };
     if a.flcs.limits_off && !a.crashed {
         let (label, col) = match a.flcs.danger {
             Some(text) => (format!("{text} // {name} LIMITERS OFF"), RED),
@@ -1273,10 +1409,10 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
         }
     }
     cv.text(if cue.pad { "{RS} ORBIT" } else { "C CENTER  //  ALT + MOUSE ORBIT" }, edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Left);
-    cv.text(&format!("FUEL {} LB", pad(a.fuel * 2.20462, 4)), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
+    cv.text(&format!("FUEL {} {}",pad(a.fuel * if a.kind.russian(){1.0}else{2.20462},4),if a.kind.russian(){"KG"}else{"LB"}), edge, h - 14.0 * s, sm, if a.fuel < 500.0 { RED } else { with_alpha(HUD, 0.48) }, Align::Left);
     if a.gear > 0.0 || a.flaps > 0.0 {
         let gear = if a.gear >= 1.0 { "GEAR DN" } else if a.gear > 0.0 { "GEAR TRANSIT" } else { "GEAR UP" };
-        let text = format!("{gear}  FLAPS {}{}", (a.flaps * crate::sim::spec::FLAP_MAX).round() as i64, if a.wheel_brake > 0.1 { "  BRAKES" } else { "" });
+        let text = format!("{gear}  FLAPS {}{}", (a.flaps * a.kind.flap_angle()).round() as i64, if a.wheel_brake > 0.1 { "  BRAKES" } else { "" });
         cv.text(&text, edge, h - 44.0 * s, sm, if a.gear > 0.0 && a.gear < 1.0 { AMBER } else { with_alpha(HUD, 0.6) }, Align::Left);
     }
     cv.text(if cue.pad { "{Y} COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
@@ -1365,5 +1501,55 @@ mod menu_geometry_tests {
         assert_eq!(navigation(&buttons, 3, 0.0, -1.0), Some(1));
         assert_eq!(navigation(&buttons, 3, -1.0, 0.0), Some(2));
         assert_eq!(navigation(&buttons, 0, 0.0, -1.0), None);
+    }
+}
+
+
+pub fn training_overlay(cv: &mut Canvas, w: f32, h: f32, t: &crate::tutorial::Training, settings: &Settings, pad: bool) {
+    let s = ui_scale(w,h); let sm = (s-1.0).max(1.0);
+    let pw = (w-24.0*s).min(410.0*s);
+    let (x,y) = ((w-pw)/2.0, h-80.0*s);
+    cv.rect(x,y,pw,66.0*s,PANEL); cv.stroke_rect(x,y,pw,66.0*s,1.0,LINE_HOT);
+    let (title, detail, _) = t.instruction();
+    cv.text(&format!("{}  {}/{}: {}", t.lesson.name(), t.stage+1, t.lesson.steps(), title),x+8.0*s,y+9.0*s,sm,ACID,Align::Left);
+    cv.paragraph(detail,x+8.0*s,y+20.0*s,pw-16.0*s,sm,1.3,CREAM);
+    cv.text(&t.hint(&settings.keys,pad,settings.pad_layout,settings.pitch),x+8.0*s,y+51.0*s,sm,AMBER,Align::Left);
+    cv.rect(x+8.0*s,y+60.0*s,pw-16.0*s,2.0*s,LINE);
+    cv.rect(x+8.0*s,y+60.0*s,(pw-16.0*s)*(t.held/t.duration().max(0.01)).min(1.0) as f32,2.0*s,ACID);
+}
+
+
+pub fn network_overlay(cv:&mut Canvas,w:f32,h:f32,mp:&crate::multiplayer::Multiplayer,c:&crate::combat::Combat,a:&Aircraft,cam:&Camera){
+    let s=ui_scale(w,h);let sm=(s-1.0).max(1.0);
+    let Some(session)=&mp.session else{return};
+    let vs=mp.settings();
+    let text=if vs.deafened{"VOICE DEAFENED"}else if vs.muted{"MIC MUTED"}else if mp.voice.transmitting(){"TRANSMITTING"}else if vs.mode==crate::voice::VoiceMode::Disabled{"MIC OFF"}else{"VOICE READY"};
+    cv.text(&format!("ONLINE {} PILOTS, {}  ESC CONFIG / VOICE",session.members.len(),text),w*0.5,12.0*s,sm,if mp.voice.transmitting(){ACID}else{GREEN},Align::Center);
+    if let Some(b)=&mp.battle{
+        let mut behind=0usize;
+        for(pos,label)in b.labels(session,c){
+            let r=pos-cam.eye;let depth=r.dot(cam.forward);
+            let focal=h as f64*0.5/(cam.fov*0.5).tan();
+            let side=r.dot(cam.right);let up=r.dot(cam.up);
+            let px=(w as f64*0.5+side*focal/depth.abs().max(1.0)).clamp(40.0*s as f64,w as f64-40.0*s as f64)as f32;
+            let py=(h as f64*0.5-up*focal/depth.abs().max(1.0)).clamp(34.0*s as f64,h as f64-100.0*s as f64)as f32;
+            let color=rgba(0x72,0xdf,0xff,0.95);
+            if depth>0.0 {
+                cv.line(px-4.0*s,py,px,py-4.0*s,1.0,color);cv.line(px,py-4.0*s,px+4.0*s,py,1.0,color);
+                cv.line(px+4.0*s,py,px,py+4.0*s,1.0,color);cv.line(px,py+4.0*s,px-4.0*s,py,1.0,color);
+                cv.text(&format!("{} {:.1}KM",label,(pos-a.pos).len()/1000.0),px,py+11.0*s,sm,color,Align::Center);
+            } else {
+                cv.text(&format!("{} BEHIND, {:.1}KM",label,(pos-a.pos).len()/1000.0),w*0.5,h-88.0*s-behind as f32*11.0*sm,sm,color,Align::Center);behind+=1;
+            }
+        }
+        if c.player_dead&&!b.finished {
+            cv.text(if session.rules.mode.pvp(){"AIRCRAFT LOST. RESPAWN PENDING."}else{"AIRCRAFT LOST. WATCHING THE SORTIE."},w*0.5,h*0.42,s,AMBER,Align::Center);
+        }
+        if b.finished{
+            cv.rect(w*0.16,h*0.35,w*0.68,65.0*s,PANEL);
+            cv.text("SORTIE ENDED",w*0.5,h*0.35+14.0*s,2.0*s,ACID,Align::Center);
+            cv.paragraph(&b.objective,w*0.18,h*0.35+32.0*s,w*0.64,sm,1.5,CREAM);
+            cv.text("ESC CONFIG, ONLINE / VOICE TO LEAVE OR RETURN",w*0.5,h*0.35+54.0*s,sm,DIM,Align::Center);
+        }
     }
 }

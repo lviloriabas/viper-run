@@ -6,7 +6,7 @@
 use crate::canvas::{rgba, with_alpha, Align, Canvas, Col};
 use crate::combat::{Combat, Mode};
 use crate::math::*;
-use crate::sim::{Aircraft, Type};
+use crate::sim::Aircraft;
 use crate::targets::Kind;
 use crate::weapons::{muzzle, Who};
 use crate::world::Camera;
@@ -467,7 +467,7 @@ pub fn through_hud(los_body: V3) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub fn helmet(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat, cam: &Camera, time: f64) {
     let Some(look) = c.helmet else { return };
-    if a.kind == Type::Mig29 {
+    if a.kind.russian() {
         shchel(cv, w, h, s, c, time);
     } else {
         jhmcs(cv, w, h, s, a, c, cam, look, time);

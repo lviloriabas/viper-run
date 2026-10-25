@@ -29,6 +29,7 @@ pub enum Part {
 /// One system: a box in body axes (x right, y up, z aft, from the centre
 /// of gravity), its hit points, the side it is on (-1 left, 1 right, 0 on
 /// the centreline) and its caution name.
+#[derive(Clone, Copy)]
 pub struct Module {
     pub part: Part,
     pub at: V3,
@@ -81,10 +82,40 @@ const MIG29: [Module; 14] = [
     m(Part::Structure, v3(0.0, 0.50, -0.30), v3(0.75, 0.60, 7.00), 55.0, 0.0, "AIRFRAME"),
 ];
 
+/// Approximate system volumes follow the new procedural geometry. Internal
+/// tank/line boundaries are game abstractions, not maintenance drawings.
+const fn twin_modules(sx:f64,sy:f64,sz:f64,eye:V3,flanker:bool)->[Module;14]{
+    let mut out=MIG29;let mut i=0;
+    while i<14 {
+        out[i].at=v3(out[i].at.x*sx,out[i].at.y*sy,out[i].at.z*sz);
+        out[i].half=v3(out[i].half.x*sx,out[i].half.y*sy,out[i].half.z*sz);
+        i+=1;
+    }
+    out[0].at=v3(eye.x,eye.y-0.2,eye.z);
+    let mut side=0;
+    while side<2{
+        let sign=if side==0{-1.0}else{1.0};
+        out[5+side].at=if flanker{v3(sign*1.4,-0.2,5.0)}else{v3(sign*0.72,-0.15,4.0)};
+        out[5+side].half=if flanker{v3(0.58,0.58,3.0)}else{v3(0.45,0.45,2.5)};
+        out[8+side].at=if flanker{v3(sign*4.6,0.32,2.5)}else{v3(sign*3.5,0.3,1.5)};
+        out[8+side].half=if flanker{v3(2.8,0.12,3.1)}else{v3(2.25,0.12,2.1)};
+        out[11+side].at=if flanker{v3(sign*2.0,2.2,7.3)}else{v3(sign*1.4,1.75,5.0)};
+        out[11+side].half=if flanker{v3(0.24,1.7,1.9)}else{v3(0.5,1.3,1.9)};
+        side+=1;
+    }
+    out[13].at=v3(0.0,0.4,-0.5);
+    out[13].half=if flanker{v3(1.1,0.68,9.7)}else{v3(0.80,0.62,7.8)};
+    out
+}
+const F18_MODULES:[Module;14]=twin_modules(0.86,1.0,0.94,crate::hornet::EYE,false);
+const SU27_MODULES:[Module;14]=twin_modules(1.28,1.17,1.28,crate::su27::EYE,true);
+
 pub fn layout(kind: Type) -> &'static [Module] {
     match kind {
         Type::F16 => &F16,
         Type::Mig29 => &MIG29,
+        Type::F18 => &F18_MODULES,
+        Type::Su27 => &SU27_MODULES,
     }
 }
 
@@ -116,7 +147,7 @@ pub struct Hull {
 
 impl Hull {
     pub fn new(kind: Type) -> Hull {
-        Hull { kind, hp: layout(kind).iter().map(|m| m.hp).collect(), fire: None, extinguisher: kind == Type::Mig29, dead: None }
+        Hull { kind, hp: layout(kind).iter().map(|m| m.hp).collect(), fire: None, extinguisher: kind.engine_count()==2, dead: None }
     }
 
     fn left(&self, i: usize) -> f64 {
@@ -264,7 +295,7 @@ impl Hull {
             match m.part {
                 Part::Engine => {
                     // A damaged engine gives less; a seized one nothing.
-                    let share = if self.kind == Type::Mig29 { 0.5 } else { 1.0 };
+                    let share = 1.0/self.kind.engine_count() as f64;
                     let loss = if lost >= 1.0 { 1.0 } else { lost * 0.7 };
                     engines += share * loss;
                     asymmetry += 0.5 * loss * m.side;
@@ -416,4 +447,20 @@ mod tests {
         }
         assert!(h.fire.is_none() && h.dead.is_none(), "extinguished");
     }
+    #[test]
+    fn new_type_system_volumes_cover_wings_and_separated_engines(){
+        for kind in [Type::F18,Type::Su27]{
+            let systems=layout(kind);
+            let engines:Vec<_>=systems.iter().filter(|m|m.part==Part::Engine).collect();
+            assert_eq!(engines.len(),2);
+            for nozzle in kind.nozzles(){
+                assert!(engines.iter().any(|m|(m.at.x-nozzle.x).abs()<0.1 && (m.at.y-nozzle.y).abs()<0.1));
+            }
+            let reach=systems.iter().filter(|m|m.part==Part::Wing).map(|m|m.at.x.abs()+m.half.x).fold(0.0_f64,f64::max);
+            assert!(reach>=kind.span()*0.49);
+            let pilot=systems.iter().find(|m|m.part==Part::Pilot).unwrap();
+            assert!((pilot.at.z-kind.eye().z).abs()<0.1);
+        }
+    }
+
 }

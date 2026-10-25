@@ -16,6 +16,7 @@ use miniquad::*;
 mod consoles;
 mod hud;
 mod mig;
+mod modern;
 mod pilot;
 
 /// Atlas height; the instrument pages fill the left 1024 square and the
@@ -384,6 +385,7 @@ pub struct Cockpit {
     canopy: Part,
     /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
     mig: [Part; 3],
+    extra: [[Part;3];2],
     hud_glass: Part,
     pub atlas: gfx::Target,
     atlas_pass: RenderPass,
@@ -437,11 +439,19 @@ impl Cockpit {
             p.bind.images = vec![atlas_tex];
             p
         });
+        let extra=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
+            let m=modern::build(kind);
+            let native=if kind==crate::sim::Type::F18{crate::hornet::build().canopy}else{crate::su27::build().canopy};
+            let mut shifted=native;
+            let offset=EYE-kind.eye();
+            for v in shifted.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
+            [world::part(ctx,&m),world::part(ctx,&self::faces(&m)),world::part(ctx,&shifted)].map(|mut p|{p.bind.images=vec![atlas_tex];p})
+        });
         let mut glass = Mesh::new();
         glass.quad(HUD_GLASS[0], HUD_GLASS[1], HUD_GLASS[2], HUD_GLASS[3], Rgb(0.4, 0.6, 0.5));
         let mut hud_glass = world::part(ctx, &glass);
         hud_glass.bind.images = vec![atlas_tex];
-        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -466,8 +476,14 @@ impl Cockpit {
 
     /// Draws the cockpit into the current pass, the MiG's when `mig`.
     /// `cam_b` is the camera in cockpit space (see body_camera).
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, mig: bool, canopy_on: bool) {
-        let (statics, canopy) = if mig { (&self.mig[0], &self.mig[2]) } else { (&self.statics, &self.canopy) };
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, kind: crate::sim::Type, canopy_on: bool) {
+        let mig=kind.russian();
+        let (statics,canopy)=match kind {
+            crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][2]),
+            crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][2]),
+            crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[2]),
+            crate::sim::Type::F16=>(&self.statics,&self.canopy),
+        };
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
         let vp = mat_mul(&proj, &cam_b.view());
         // The fuselage shades the tub when the sun is below the canopy rails.
@@ -479,7 +495,9 @@ impl Cockpit {
         ctx.draw(0, statics.count, 1);
 
         self.dynamic.clear();
-        if mig {
+        if kind == crate::sim::Type::F18 {
+            pilot::build_dynamic_center(&mut self.dynamic,hands,false);
+        } else if kind.russian() {
             pilot::build_dynamic_mig(&mut self.dynamic, hands);
         } else {
             pilot::build_dynamic(&mut self.dynamic, hands);
@@ -510,8 +528,13 @@ impl Cockpit {
     /// their text stays sharp. The cockpit from the last `draw` first lays
     /// down depth only, so hands, arms and knees still cover them.
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
-    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, mig: bool) {
-        let (statics, faces) = if mig { (&self.mig[0], &self.mig[1]) } else { (&self.statics, &self.faces) };
+    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, kind: crate::sim::Type) {
+        let (statics,faces)=match kind {
+            crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][1]),
+            crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][1]),
+            crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[1]),
+            crate::sim::Type::F16=>(&self.statics,&self.faces),
+        };
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
         let vp = mat_mul(&proj, &cam_b.view());
         let eye = cam_b.eye.f32();
@@ -1320,7 +1343,8 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // AOA indexer: high, on-speed, low chevrons.
     let r = R_AOA;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x12, 0x1b, 0x1c, 1.0));
-    let (hi, on_speed, lo) = (a.alpha_deg > 14.0, a.alpha_deg >= 11.0 && a.alpha_deg <= 14.0, a.alpha_deg < 11.0);
+    let (on_low,on_high)=if a.kind==crate::sim::Type::F18{(7.4,8.8)}else{(11.0,14.0)};
+    let (hi,on_speed,lo)=(a.alpha_deg>on_high,a.alpha_deg>=on_low && a.alpha_deg<=on_high,a.alpha_deg<on_low);
     let cx = r.x + r.w / 2.0;
     cv.polyline(&[[cx - 14.0, r.y + 14.0], [cx, r.y + 34.0], [cx + 14.0, r.y + 14.0]], 5.0, false, if hi { rgba(0xff, 0x5f, 0x46, 1.0) } else { rgba(0x60, 0x38, 0x2c, 1.0) });
     cv.circle(cx, r.y + 64.0, 11.0, 5.0, if on_speed { GREEN } else { rgba(0x27, 0x45, 0x34, 1.0) });
@@ -1332,18 +1356,22 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let ink = rgba(0x28, 0x3c, 0x30, 1.0);
     // Landing card: the limits and speeds the model flies to, in knots on
     // the F-16 and km/h on the MiG-29.
-    use crate::sim::{spec, Type};
-    let mig = a.kind == Type::Mig29;
+    let mig = a.kind.russian();
     let speed = |kt: f64| if mig { format!("{:.0} KM/H", (kt * 1.852 / 10.0).round() * 10.0) } else { format!("{kt:.0} KT") };
-    let (rotate, approach, aoa, g) = if mig { (130.0, 140.0, "11 DEG", "+8.0 / -3.0") } else { (150.0, 150.0, "13 DEG", "+9.0 / -3.0") };
+    let (rotate,approach,aoa,g)=match a.kind {
+        crate::sim::Type::F16=>(150.0,150.0,"13 DEG","+9.0 / -3.0"),
+        crate::sim::Type::Mig29=>(130.0,140.0,"11 DEG","+8.0 / -3.0"),
+        crate::sim::Type::F18=>(150.0,145.0,"8.1 DEG","+7.5 / -3.0"),
+        crate::sim::Type::Su27=>(165.0,155.0,"10 DEG","+9.0 / -3.0"),
+    };
     cv.text("LANDING CARD", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
     let rows = [
         ("ROTATE", speed(rotate)),
-        ("GEAR LIMIT", speed(spec::GEAR_LIMIT_KT)),
-        ("FLAP BLOWUP", speed(spec::FLAP_BLOWBACK_KT)),
+        ("GEAR LIMIT", speed(a.kind.gear_limit_kt())),
+        ("FLAP BLOWUP", speed(a.kind.flap_limit_kt())),
         ("FINAL", speed(approach)),
         ("FINAL AOA", aoa.to_string()),
-        ("FLAPS", format!("{:.0} DEG DOWN", spec::FLAP_MAX)),
+        ("FLAPS", format!("{:.0} DEG DOWN", a.kind.flap_angle())),
         ("G LIMIT", g.to_string()),
     ];
     for (i, (label, value)) in rows.iter().enumerate() {
@@ -1425,9 +1453,10 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, a.battle.controls > 0.2, a.battle.engine > 0.3, a.fuel < 450.0, a.fuel < 450.0 || a.battle.leak > 0.0, false, a.gear_broken.iter().any(|&b| b), false, false],
     };
     consoles::draw(cv, &lamps);
-    if a.kind == crate::sim::Type::Mig29 {
+    if a.kind.russian() {
         mig::draw(cv, a, &ad, m, c);
     }
+    if a.kind==crate::sim::Type::F18{modern::hornet_instruments(cv,a,&ad,m,time,c);}
 }
 
 /// Analogue heading indicator in the centre stack of the reference cockpit.
@@ -1568,7 +1597,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
             cv.stroke_rect(x0 - pad - 1.0, p[1] - 3.5 * mid - pad, tw + 2.0 * pad + 2.0, 7.0 * mid + 2.0 * pad, lw, col);
         }
     };
-    if a.kind == crate::sim::Type::Mig29 {
+    if a.kind.russian() {
         ils31(cv, a, c, cam, &world_dir, &at, big, small, lw);
         cv.set_clip(None);
         return;
@@ -1936,10 +1965,7 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
 /// Camera in body axes, for the cockpit pass and the combiner projection.
 /// The pilot's design eye in the jet's body axes.
 pub fn design_eye(a: &Aircraft) -> V3 {
-    match a.kind {
-        crate::sim::Type::Mig29 => crate::mig29::EYE,
-        crate::sim::Type::F16 => EYE,
-    }
+    a.kind.eye()
 }
 
 /// The camera in cockpit space: body axes, shifted so the design eye sits

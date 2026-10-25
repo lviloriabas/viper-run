@@ -1,10 +1,9 @@
 //! Low-poly effects drawn in the world pass: the afterburner plume with its
 //! shock diamonds, and the crash fireball, debris, sparks, smoke and spray.
 //! Every puff is a handful of flat-shaded facets, like the rest of the art.
-use crate::airframe;
 use crate::gfx;
 use crate::math::*;
-use crate::sim::{Aircraft, Type};
+use crate::sim::Aircraft;
 use crate::terrain;
 use crate::vapor::Vapor;
 use crate::world::{sun_dir, Camera, FOG};
@@ -37,17 +36,10 @@ void main() {
 const MAX_PARTICLES: usize = 1400;
 const MAX_VERTS: usize = 80000;
 const FLOATS: usize = 7;
-/// Nozzle exit in body axes (x right, y up, z aft), from the airframe.
-const NOZZLE: V3 = airframe::NOZZLE_EXIT;
-const MIG_NOZZLES: [V3; 2] = {
-    let n = crate::mig29::NOZZLE;
-    [v3(-n.x, n.y, n.z), v3(n.x, n.y, n.z)]
-};
-
 /// Nozzle exits of this aircraft's engines: the F-16's one on the centreline,
 /// the MiG-29's two out on the nacelles.
 fn nozzles(a: &Aircraft) -> &'static [V3] {
-    if a.kind == Type::Mig29 { &MIG_NOZZLES } else { std::slice::from_ref(&NOZZLE) }
+    a.kind.nozzles()
 }
 /// Drift of smoke columns.
 const WIND: V3 = v3(3.2, 0.0, -1.6);

@@ -29,12 +29,12 @@ pub struct Models {
     /// Ejection, per jet (F-16, MiG-29): the seat (the K-36DM's with its
     /// booms out), the pilot seated and hanging, the main canopy and the
     /// cockpit canopy blown off.
-    seat: [Part; 2],
-    pilot: [[Part; 2]; 2],
-    seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 2],
-    handle: [[Part; crate::eject::HANDLE_FRAMES]; 2],
-    chute: [Part; 2],
-    canopy: [Part; 2],
+    seat: [Part; 4],
+    pilot: [[Part; 2]; 4],
+    seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 4],
+    handle: [[Part; crate::eject::HANDLE_FRAMES]; 4],
+    chute: [Part; 4],
+    canopy: [Part; 4],
 }
 
 /// AIM-120 AMRAAM, 3.66 m and 178 mm, nose at the origin pointing forward:
@@ -82,16 +82,16 @@ impl Models {
         let sites = KINDS.iter().map(|&k| part(&targets::mesh(k))).collect();
         use crate::eject;
         let mig = crate::mig29::build();
-        let seat = [part(&eject::seat_mesh(Type::F16, false)), part(&eject::seat_mesh(Type::Mig29, true))];
+        let seat=Type::ALL.map(|kind|part(&eject::seat_mesh(kind,kind.russian())));
         let pilot = std::array::from_fn(|k| std::array::from_fn(|fp|
-            part(&eject::pilot_mesh(if k == 0 { Type::F16 } else { Type::Mig29 }, true, fp != 0, 1.0))));
+            part(&eject::pilot_mesh(Type::ALL[k], true, fp != 0, 1.0))));
         let seated = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
-            part(&eject::pilot_mesh(if k == 0 { Type::F16 } else { Type::Mig29 }, false, fp != 0,
+            part(&eject::pilot_mesh(Type::ALL[k], false, fp != 0,
                 frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)))));
         let handle = std::array::from_fn(|k| std::array::from_fn(|frame| part(&eject::handle_mesh(
-            if k == 0 { Type::F16 } else { Type::Mig29 }, frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
-        let chute = [part(&eject::chute_mesh(&eject::ACES2)), part(&eject::chute_mesh(&eject::K36DM))];
-        let canopy = [part(&frame.canopy), part(&mig.canopy)];
+            Type::ALL[k], frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
+        let chute=Type::ALL.map(|kind|part(&eject::chute_mesh(eject::spec(kind))));
+        let canopy=[part(&frame.canopy),part(&mig.canopy),part(&crate::hornet::build().canopy),part(&crate::su27::build().canopy)];
         Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, seated, handle, chute, canopy }
     }
 }
@@ -154,7 +154,7 @@ impl Props for Scene<'_> {
         // The stations sit where the F-16 hangs them; a MiG carries them on
         // its own pylons. Either way they ride the wing as it bends.
         let shift = |a: &Aircraft, at: V3| {
-            let d = if a.kind == Type::Mig29 { crate::mig29::store_shift(at) } else { V3::ZERO };
+            let d = a.kind.store_shift(at);
             d + V3::Y * a.flex_lift(at + d)
         };
         // What hung under a wing that broke off went with it.
@@ -164,7 +164,7 @@ impl Props for Scene<'_> {
                 if !kept(a, st.at) {
                     continue;
                 }
-                if st.tip {
+                if st.tip && a.kind==Type::F16 {
                     w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st.at), eye), NONE);
                     continue;
                 }
@@ -188,7 +188,7 @@ impl Props for Scene<'_> {
         }
         if let Some(e) = self.ejection {
             use crate::eject::Phase;
-            let k = (e.kind == Type::Mig29) as usize;
+            let k=e.kind.index();
             let at = |b: &crate::eject::Body| {
                 let ax = b.q.axes();
                 basis(ax.right, ax.up, ax.back, b.pos - eye)

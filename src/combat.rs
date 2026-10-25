@@ -13,6 +13,7 @@ use crate::targets::{self, Kind, Site};
 use crate::terrain::{self, river_x};
 use crate::weapons::*;
 use std::collections::VecDeque;
+pub mod network;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MissionKind {
@@ -295,7 +296,7 @@ impl Store {
 /// otherwise: the F-16's wingtip AIM-9Ms, the MiG-29's R-73s on the outer
 /// pylons.
 pub fn tip_store(jet: Type) -> Store {
-    if jet == Type::Mig29 {
+    if jet.russian() {
         Store::R73
     } else {
         Store::Aim9
@@ -321,6 +322,15 @@ fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
         (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 2) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82), Some(Store::Mk82Ter)],
         (Type::F16, _) => &[None, Some(Store::Mk82), Some(Store::Mk82Ter)],
+        // F/A-18C Lot 20: wingtip rails accept Sidewinders only; the
+        // fuselage cheeks (4/6) accept Sparrow/AMRAAM, never bombs.
+        (Type::F18, 0) => &[Some(Store::Aim9)],
+        (Type::F18, 1 | 2) => &[None,Some(Store::Aim9),Some(Store::Aim7),Some(Store::Aim120),Some(Store::Mk82)],
+        (Type::F18, _) => &[None,Some(Store::Aim7),Some(Store::Aim120)],
+        // Base Su-27SK has R-73/R-27, not the later R-77 integration.
+        (Type::Su27, 0) => &[Some(Store::R73)],
+        (Type::Su27, 1) => &[None,Some(Store::R73),Some(Store::Fab250)],
+        (Type::Su27, _) => &[None,Some(Store::R27r),Some(Store::R27t),Some(Store::Fab250),Some(Store::Fab500)],
         (Type::Mig29, 0) => &[Some(Store::R73), Some(Store::R60m)],
         (Type::Mig29, 1) => &[None],
         (Type::Mig29, 2) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250), Some(Store::Fab500)],
@@ -442,27 +452,33 @@ impl Config {
                 _ => (c.outboard, c.inboard),
             };
         }
+        if jet == Type::F18 {
+            (c.outer,c.outboard,c.inboard) = match kind {
+                MissionKind::Dogfight => (Some(Store::Aim9),Some(Store::Aim120),Some(Store::Aim7)),
+                MissionKind::Strike => (Some(Store::Mk82),Some(Store::Mk82),None),
+                MissionKind::Free => (Some(Store::Mk82),None,Some(Store::Aim120)),
+                _ => (None,None,None),
+            };
+        }
+        if jet == Type::Su27 {
+            (c.outer,c.outboard,c.inboard) = match kind {
+                MissionKind::Dogfight => (Some(Store::R73),Some(Store::R27r),Some(Store::R27r)),
+                MissionKind::Strike => (Some(Store::Fab250),Some(Store::Fab500),None),
+                MissionKind::Free => (Some(Store::R73),Some(Store::Fab500),Some(Store::R27t)),
+                _ => (None,None,None),
+            };
+        }
         c
     }
 
-    /// Next bandit fleet: F-16 aggressors, MiG-29s, then the two mixed.
+    /// Cycle all four fleets, then a mixed formation.
     pub fn next_fleet(&mut self) {
-        if self.threats.mixed {
-            self.threats.mixed = false;
-            self.aggressor = Type::F16;
-        } else if self.aggressor == Type::Mig29 {
-            self.threats.mixed = true;
-        } else {
-            self.aggressor = Type::Mig29;
-        }
+        if self.threats.mixed { self.threats.mixed=false; self.aggressor=Type::F16; }
+        else if self.aggressor==Type::Su27 { self.threats.mixed=true; }
+        else { self.aggressor=self.aggressor.next(); }
     }
-
     pub fn fleet_name(&self) -> &'static str {
-        if self.threats.mixed {
-            "F-16C + MIG-29S"
-        } else {
-            self.aggressor.name()
-        }
+        if self.threats.mixed { "MIXED AIRFRAMES" } else { self.aggressor.name() }
     }
 
     /// Changes the airframe, swapping each pylon's stores for what the new
@@ -595,6 +611,13 @@ impl Loadout {
             for &(dx, dy, dz) in places {
                 for s in [-1.0, 1.0] {
                     stations.push(Station { store, at: v3(s * (x + dx), y + dy, z + dz), loaded: true, tip: false });
+                }
+            }
+        }
+        if cfg.jet == Type::Su27 {
+            if let Some(store) = cfg.inboard {
+                for z in [-1.6,2.2] {
+                    stations.push(Station {store:store.unit(),at:v3(0.0,-0.85,z),loaded:true,tip:false});
                 }
             }
         }
@@ -740,6 +763,9 @@ fn smoke_sources(hull: &Hull, jet: &Aircraft) -> [Option<(Smoke, V3)>; 3] {
 }
 
 pub struct Bandit {
+    pub remote: bool,
+    pub last_hitter: Option<Who>,
+    pub team: u8,
     pub jet: Aircraft,
     pub pilot: Pilot,
     /// What is left of the airframe, 0 to 100 (`Hull::integrity`).
@@ -835,6 +861,12 @@ pub enum Event {
 }
 
 pub struct Combat {
+    pub networked: bool,
+    pub training: bool,
+    pub player_team: u8,
+    pub net_kills: Vec<(Who, Who)>,
+    net_damage_source: Option<Who>,
+    player_hitter: Option<Who>,
     pub kind: MissionKind,
     pub mode: Mode,
     /// The kind of store selected within the master mode, where it holds
@@ -853,6 +885,7 @@ pub struct Combat {
     team_shot_at: f64,
     /// Shared last observed track, extrapolated briefly when everyone loses it.
     flight_track: Option<Aircraft>,
+    flight_target: Who,
     track_age: f64,
     pub wrecks: Vec<Wreck>,
     /// Wings and tails broken off, falling.
@@ -1001,7 +1034,9 @@ fn bandit(mut jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
     let wing = CALLSIGNS.iter().position(|&name| name == callsign).unwrap_or(0) % 2 == 1;
     let mut cfg = Config::for_jet(MissionKind::Dogfight, jet.kind);
     if wing {
-        if jet.kind == Type::Mig29 {
+        if jet.kind == Type::Su27 {
+            cfg.outboard=Some(Store::R27t); cfg.inboard=Some(Store::R27r);
+        } else if jet.kind == Type::Mig29 {
             cfg.outboard = Some(Store::R77);
             cfg.inboard = Some(Store::R27r);
         } else {
@@ -1010,7 +1045,7 @@ fn bandit(mut jet: Aircraft, skill: f64, callsign: &'static str) -> Bandit {
     }
     let stores = Loadout::configure(&cfg);
     load(&mut jet, &stores);
-    Bandit { rounds: stores.rounds, missiles: stores.stations.len() as u32, stores,
+    Bandit { last_hitter: None, remote: false, team: 1, rounds: stores.rounds, missiles: stores.stations.len() as u32, stores,
         weapon: None, weapon_clock: 0.0, lock_clock: 0.0, radar_track: false,
         hull: Hull::new(jet.kind), jet, pilot: Pilot::new(skill), hp: 100.0,
         callsign, alive: true, gun_acc: 0.0, fired: 0, smoke: JetSmoke::default(),
@@ -1083,6 +1118,7 @@ impl Combat {
     /// and the steerpoints and clock in the mission record.
     pub fn new(kind: MissionKind, m: &mut Mission) -> Combat {
         let mut c = Combat {
+            networked: false, training: false, player_team: 0, net_kills: Vec::new(), net_damage_source: None, player_hitter: None,
             kind,
             mode: match kind {
                 MissionKind::Gates | MissionKind::Airfield => Mode::Nav,
@@ -1099,6 +1135,7 @@ impl Combat {
             flight: ai::Flight::default(),
             team_shot_at: -10.0,
             flight_track: None,
+            flight_target: Who::Player,
             track_age: 0.0,
             wrecks: Vec::new(),
             debris: Vec::new(),
@@ -1321,7 +1358,10 @@ impl Combat {
             if b.jet.kind != cfg.aggressor && !cfg.threats.mixed {
                 let j = &b.jet;
                 b.jet = spawn_type(cfg.aggressor, j.pos, heading_of(j.vel), j.speed);
-                b.rounds = gun_of(cfg.aggressor).rounds;
+                let fresh = bandit(b.jet.clone(), b.pilot.skill, b.callsign);
+                b.rounds=fresh.rounds; b.missiles=fresh.missiles; b.stores=fresh.stores;
+                b.weapon=None; b.weapon_clock=0.0;
+                load(&mut b.jet,&b.stores);
             }
         }
         self.cfg = *cfg;
@@ -1399,7 +1439,7 @@ impl Combat {
         };
         let st = self.loadout.stations[i];
         self.loadout.stations[i].loaded = false;
-        self.events.push(Event::Release { pos: a.pos + a.q.rotate(st.at) });
+        self.events.push(Event::Release { pos: a.pos + a.q.rotate(st.at + a.kind.store_shift(st.at)) });
         self.events.push(Event::Toast(format!("JETTISON // {}", st.store.name())));
         self.seeker = None;
         self.shoot = false;
@@ -1482,6 +1522,7 @@ impl Combat {
     pub fn radar_contact(&self, a: &Aircraft, i: usize) -> bool {
         let who = Who::Bandit(i);
         self.bandits.get(i).is_some_and(|b| b.alive
+            && self.enemy(Who::Player, who)
             && self.radar_sees(a, b.jet.pos, self.lock == Some(who))
             && self.radar_lock().is_none_or(|l| l == who))
     }
@@ -1492,7 +1533,7 @@ impl Combat {
     fn candidates(&self, a: &Aircraft, ground: bool) -> Vec<(Who, f64)> {
         if self.irst && !ground {
             let look = self.helmet.unwrap_or(a.q.axes().forward);
-            let mut v: Vec<(Who, f64)> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive && irst_sees(a, &b.jet, 1.0)).map(|(i, b)| {
+            let mut v: Vec<(Who, f64)> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive && b.team != self.player_team && irst_sees(a, &b.jet, 1.0)).map(|(i, b)| {
                 let r = b.jet.pos - a.pos;
                 (Who::Bandit(i), look.dot(r.norm()).clamp(-1.0, 1.0).acos() + r.len() / 400000.0)
             }).collect();
@@ -1515,7 +1556,7 @@ impl Combat {
                 consider(Who::Ground(i), s.centre(), 15000.0);
             }
         } else {
-            for (i, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
+            for (i, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive && b.team != self.player_team) {
                 if self.radar_sees(a, b.jet.pos, false) { consider(Who::Bandit(i), b.jet.pos, 74000.0); }
             }
         }
@@ -1553,7 +1594,7 @@ impl Combat {
     /// The MiG's sensor switch, radar or IRST; the F-16C has no IRST. The
     /// track is dropped as the sensors change over.
     pub fn toggle_irst(&mut self, a: &Aircraft) {
-        let text = if a.kind != Type::Mig29 {
+        let text = if !a.kind.has_irst() {
             "NO IRST ON THE F-16C"
         } else {
             self.irst = !self.irst;
@@ -1640,7 +1681,7 @@ impl Combat {
         self.ccip = match (self.mode, self.station()) {
             (Mode::Ccip, Some(i)) => {
                 let st = self.loadout.stations[i];
-                st.store.bomb().and_then(|b| ccip(b, a, st.at, &terrain::floor))
+                st.store.bomb().and_then(|b| ccip(b, a, st.at + a.kind.store_shift(st.at), &terrain::floor))
             }
             (Mode::Strf, _) => gun_ccip(a, &terrain::floor),
             _ => None,
@@ -1660,7 +1701,7 @@ impl Combat {
         if self.kind == MissionKind::Airfield && alive {
             self.circuit(a, m);
         }
-        if self.kind == MissionKind::Free && alive {
+        if self.kind == MissionKind::Free && alive && !self.training {
             self.practice(a);
         }
     }
@@ -1738,7 +1779,7 @@ impl Combat {
                 if let Some(i) = self.station() {
                     let st = self.loadout.stations[i];
                     self.loadout.stations[i].loaded = false;
-                    let b = Bomb::release(st.store.bomb().unwrap_or(&MK82), a, st.at);
+                    let b = Bomb::release(st.store.bomb().unwrap_or(&MK82), a, st.at + a.kind.store_shift(st.at));
                     self.events.push(Event::Release { pos: b.pos });
                     self.bombs.push(b);
                 }
@@ -1793,7 +1834,7 @@ impl Combat {
         }
         self.loadout.stations[i].loaded = false;
         let kick = if spec.drop > 0.0 { 3.0 } else { 0.0 };
-        let pos = a.pos + a.q.rotate(st.at);
+        let pos = a.pos + a.q.rotate(st.at + a.kind.store_shift(st.at));
         let vel = a.vel - a.q.axes().up * kick;
         self.events.push(Event::Launch { pos, from: Who::Player, name: spec.call });
         self.fire_missile(Missile::launch(spec, pos, vel, Who::Player, target));
@@ -1849,7 +1890,7 @@ impl Combat {
             // An infrared seeker sees a fighter a little past the missile's
             // own reach: some 17 km for the AIM-9M, 30 for the R-27T.
             let reach = spec.max_range * 1.2;
-            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < reach && matches!(w, Who::Bandit(_)) && line_of_sight(a.pos, p));
+            let usable = |w: Who, limit: f64| self.track(w, a).is_some_and(|(p, _)| off(p) < limit && (p - a.pos).len() < reach && matches!(w, Who::Bandit(_)) && self.enemy(Who::Player,w) && line_of_sight(a.pos, p));
             let look = self.helmet.unwrap_or(fwd);
             let near_look = |p: V3| look.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
             let seeker = if let Some(l) = self.lock.filter(|&l| usable(l, gimbal)) {
@@ -1897,6 +1938,21 @@ impl Combat {
     }
 
     fn step_bandits(&mut self, dt: f64, a: &Aircraft) {
+        let original_player = a;
+        let lead_pos = self.bandits.iter().find(|b| b.alive && !b.remote && b.team == 1).map_or(a.pos, |b| b.jet.pos);
+        let seen=|target:&Aircraft| self.hostile&&self.bandits.iter().filter(|b|b.alive&&!b.remote&&b.team==1).any(|b|{
+            let r=target.pos-b.jet.pos;
+            bandit_radar_sees(&b.jet,target,b.radar_track)||(r.len()<9000.0&&b.jet.q.axes().forward.dot(r.norm())>-0.2&&line_of_sight(b.jet.pos,target.pos))
+        });
+        let mut candidates=self.bandits.iter().enumerate().filter(|(_,b)|b.alive&&b.remote&&b.team==0&&seen(&b.jet))
+            .map(|(i,b)|(Who::Bandit(i),(b.jet.pos-lead_pos).len())).collect::<Vec<_>>();
+        if !self.player_dead&&seen(a){candidates.push((Who::Player,(a.pos-lead_pos).len()));}
+        let retained=match self.flight_target{Who::Bandit(i)if self.bandits.get(i).is_some_and(|b|b.alive)=>self.flight_target,_=>Who::Player};
+        let target_who=candidates.into_iter().min_by(|x,y|x.1.total_cmp(&y.1)).map_or(retained,|p|p.0);
+        if target_who!=self.flight_target{self.flight_target=target_who;self.flight_track=None;self.track_age=0.0;}
+        let target_copy = if let Who::Bandit(i) = target_who { Some(self.bandits[i].jet.clone()) } else { None };
+        let a = target_copy.as_ref().unwrap_or(original_player);
+        let target_alive = target_who != Who::Player || !self.player_dead;
         // The flanker arrives once the first bandit is down.
         if self.kills >= 1 && !self.reserve.is_empty() {
             let mut b = self.reserve.remove(0);
@@ -1911,7 +1967,7 @@ impl Combat {
         }
         // A wingman's observation is shared, but hiding from the whole
         // flight leaves only the last observed track, not the player's truth.
-        let observed = self.hostile && self.bandits.iter().filter(|b| b.alive).any(|b| {
+        let observed = self.hostile && target_alive && self.bandits.iter().filter(|b| b.alive && !b.remote && b.team==1).any(|b| {
             let r = a.pos - b.jet.pos;
             bandit_radar_sees(&b.jet, a, b.radar_track)
                 || r.len() < 9000.0 && b.jet.q.axes().forward.dot(r.norm()) > -0.2
@@ -1951,7 +2007,7 @@ impl Combat {
                     eta(x).total_cmp(&eta(y))
                 }).map(|m| (m.pos, m.vel, m.spec.infrared()))
         }).collect();
-        let members: Vec<_> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive).map(|(i, b)| {
+        let members: Vec<_> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive && !b.remote).map(|(i, b)| {
             ai::Member { id: i, jet: &b.jet, armed: b.rounds > 0 || b.missiles > 0,
                 defensive: threats[i].is_some_and(|(p, v, _)| {
                     let r = b.jet.pos - p;
@@ -1967,16 +2023,16 @@ impl Combat {
             })
         }).collect();
         for i in 0..self.bandits.len() {
-            if !self.bandits[i].alive { continue; }
+            if !self.bandits[i].alive || self.bandits[i].remote { continue; }
             let threat = threats[i];
             let supports = self.missiles.iter().any(|m| m.from == Who::Bandit(i)
-                && m.tracking && m.target == Some(Who::Player)
+                && m.tracking && m.target == Some(target_who)
                 && (m.spec.semi_active() || m.spec.active() && (m.pos - a.pos).len() > ACTIVE_RANGE));
             let inbound = self.missiles.iter().filter(|m| matches!(m.from, Who::Bandit(_))
-                && m.target == Some(Who::Player) && m.tracking).count();
+                && m.target == Some(target_who) && m.tracking).count();
             let b = &mut self.bandits[i];
             if self.hostile && (a.pos - b.jet.pos).len() < 18000.0 { b.patrol = None; }
-            let sees = self.hostile && !self.player_dead && bandit_radar_sees(&b.jet, a, b.radar_track);
+            let sees = self.hostile && target_alive && bandit_radar_sees(&b.jet, a, b.radar_track);
             b.lock_clock = if sees { b.lock_clock + dt } else { 0.0 };
             b.radar_track = b.lock_clock >= 0.6;
             b.weapon_clock -= dt;
@@ -1993,7 +2049,7 @@ impl Combat {
             tactical.radar_lock = b.radar_track;
             tactical.radar_support = supports;
             tactical.missile_ir = threat.is_some_and(|(_, _, ir)| ir);
-            tactical.combat = self.hostile && !self.player_dead && b.patrol.is_none() && self.track_age < 8.0;
+            tactical.combat = self.hostile && target_alive && b.patrol.is_none() && self.track_age < 8.0;
             // On patrol the foe it steers for is a mark parked on its next
             // point, as the autopilot does; the player is no part of it.
             let mark = b.patrol.as_mut().map(|p| {
@@ -2029,7 +2085,7 @@ impl Combat {
                 continue;
             }
             let mut shots = Vec::new();
-            if self.hostile && o.gun && b.rounds > 0 && !self.player_dead {
+            if self.hostile && o.gun && b.rounds > 0 && target_alive {
                 b.gun_acc += gun_of(b.jet.kind).rate * dt;
                 while b.gun_acc >= 1.0 && b.rounds > 0 {
                     b.gun_acc -= 1.0;
@@ -2055,7 +2111,7 @@ impl Combat {
                 self.decoy(Who::Bandit(i), p, v, burner);
             }
             let b = &mut self.bandits[i];
-            if self.hostile && o.missile && !self.player_dead {
+            if self.hostile && o.missile && target_alive {
                 if let Some(k) = b.weapon.take().filter(|&k| b.stores.stations[k].loaded) {
                     let station = b.stores.stations[k];
                     b.stores.stations[k].loaded = false;
@@ -2064,14 +2120,14 @@ impl Combat {
                     b.jet.stores_mass = b.stores.mass();
                     b.jet.stores_drag = b.stores.drag();
                     b.jet.wing_stores = b.stores.wing_mass();
-                    let at = if b.jet.kind == Type::Mig29 { station.at + crate::mig29::store_shift(station.at) } else { station.at };
+                    let at = station.at + b.jet.kind.store_shift(station.at);
                     let pos = b.jet.pos + b.jet.q.rotate(at);
                     let spec = station.store.missile().unwrap();
                     let vel = b.jet.vel;
                     self.team_shot_at = self.clock;
                     self.events.push(Event::Launch { pos, from: Who::Bandit(i), name: spec.name });
                     self.warn = 4.0;
-                    self.fire_missile(Missile::launch(spec, pos, vel, Who::Bandit(i), Some(Who::Player)));
+                    self.fire_missile(Missile::launch(spec, pos, vel, Who::Bandit(i), Some(target_who)));
                 }
             }
         }
@@ -2095,6 +2151,7 @@ impl Combat {
             return;
         }
         b.alive = false;
+        if self.networked { self.net_kills.push((b.last_hitter.unwrap_or(Who::Bandit(i)), Who::Bandit(i))); }
         let mut jet = b.jet.clone();
         let name = b.callsign;
         for t in std::mem::take(&mut b.smoke).slots.into_iter().flatten() {
@@ -2224,6 +2281,7 @@ impl Combat {
                 if self.player_dead {
                     return;
                 }
+                if self.net_damage_source.is_some() { self.player_hitter = self.net_damage_source; }
                 let before = self.hp;
                 let names = apply(&mut self.hull, &mut self.rnd);
                 self.hp = self.hull.integrity();
@@ -2236,6 +2294,7 @@ impl Combat {
             }
             Who::Bandit(i) => {
                 let Some(b) = self.bandits.get_mut(i).filter(|b| b.alive) else { return };
+                if self.net_damage_source.is_some() { b.last_hitter = self.net_damage_source; }
                 apply(&mut b.hull, &mut self.rnd);
                 b.hp = b.hull.integrity();
                 b.jet.battle = b.hull.effects();
@@ -2253,6 +2312,7 @@ impl Combat {
     /// that is coming apart. A wing or the tail shot away breaks off and the
     /// rest falls; anything else ends in a fireball.
     fn lose_player(&mut self, cause: &'static str, a: &Aircraft) {
+        if self.networked { self.net_kills.push((self.player_hitter.unwrap_or(Who::Player), Who::Player)); }
         self.hp = 0.0;
         self.player_dead = true;
         self.death = cause;
@@ -2296,7 +2356,7 @@ impl Combat {
         let mut hits: Vec<(Who, f64)> = Vec::new();
         // Rounds into jets: the target, the round's path through it in its
         // body axes, and the round's damage and explosive reach.
-        let mut strikes: Vec<(Who, V3, V3, f64, f64)> = Vec::new();
+        let mut strikes: Vec<(Who, V3, V3, f64, f64, Who)> = Vec::new();
         let mut i = 0;
         while i < self.rounds.len() {
             let mut r = self.rounds[i];
@@ -2306,25 +2366,25 @@ impl Combat {
                 hits.push((who, dmg));
                 events.push(Event::Hit { pos: at });
             };
-            if !gone && r.from != Who::Player && !self.player_dead && (r.pos - a.pos).len() < 40.0 {
+            if !gone && self.enemy(r.from, Who::Player) && !self.player_dead && (r.pos - a.pos).len() < 40.0 {
                 if let Some((t, p0, p1)) = round_path(a, &r, dt) {
                     self.events.push(Event::Hit { pos: r.prev.lerp(r.pos, t) });
-                    strikes.push((Who::Player, p0, p1, r.damage, splash(r.damage)));
+                    strikes.push((Who::Player, p0, p1, r.damage, splash(r.damage), r.from));
                     gone = true;
                 }
             }
-            if !gone && r.from == Who::Player {
-                for (k, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
+            if !gone {
+                for (k, b) in self.bandits.iter().enumerate().filter(|(k, b)| b.alive && self.enemy(r.from, Who::Bandit(*k))) {
                     if (r.pos - b.jet.pos).len() < 40.0 {
                         if let Some((t, p0, p1)) = round_path(&b.jet, &r, dt) {
                             self.events.push(Event::Hit { pos: r.prev.lerp(r.pos, t) });
-                            strikes.push((Who::Bandit(k), p0, p1, r.damage, splash(r.damage)));
+                            strikes.push((Who::Bandit(k), p0, p1, r.damage, splash(r.damage), r.from));
                             gone = true;
                             break;
                         }
                     }
                 }
-                if !gone {
+                if !gone && self.enemy(r.from, Who::Ground(0)) {
                     for (k, s) in self.sites.iter().enumerate().filter(|(_, s)| !s.dead) {
                         if (r.pos - s.centre()).len() < 80.0 {
                             if let Some(t) = hits_box(s.local(r.prev), s.local(r.pos), s.kind.half()) {
@@ -2355,8 +2415,10 @@ impl Combat {
         for (who, dmg) in hits {
             self.damage(who, dmg);
         }
-        for (who, p0, p1, dmg, reach) in strikes {
+        for (who, p0, p1, dmg, reach, source) in strikes {
+            self.net_damage_source = Some(source);
             self.harm_jet(who, a, |h, r| h.strike(p0, p1, dmg, reach, r).unwrap_or_default());
+            self.net_damage_source = None;
         }
     }
 
@@ -2377,39 +2439,32 @@ impl Combat {
             }
             // An active missile with no target searches with its own radar;
             // an AIM-9X fired with nothing to cue it, with its seeker.
-            let searching = (spec.active() || spec.infrared() && spec.loal) && self.missiles[i].from == Who::Player;
+            let searching = spec.active() || spec.infrared() && spec.loal;
             if searching && self.missiles[i].target.is_none() && self.missiles[i].age > 1.5 {
                 let (mp, mv) = (self.missiles[i].pos, self.missiles[i].vel.norm());
                 let (reach, cone) = if spec.active() { (ACTIVE_RANGE, spec.acquire) } else { (8000.0, 20.0 * DEG) };
-                let found = self.bandits.iter().enumerate().filter(|(_, b)| b.alive).map(|(k, b)| (k, b.jet.pos - mp)).filter(|(_, r)| r.len() < reach && mv.dot(r.norm()) > cone.cos()).min_by(|x, y| x.1.len().partial_cmp(&y.1.len()).unwrap_or(std::cmp::Ordering::Equal));
-                if let Some((k, _)) = found {
-                    self.missiles[i].target = Some(Who::Bandit(k));
-                    self.missiles[i].tracking = true;
+                let source=self.missiles[i].from;
+                let mut candidates=self.bandits.iter().enumerate().filter(|(k,b)|b.alive&&self.enemy(source,Who::Bandit(*k)))
+                    .map(|(k,b)|(Who::Bandit(k),b.jet.pos-mp)).collect::<Vec<_>>();
+                if !self.player_dead&&self.enemy(source,Who::Player){candidates.push((Who::Player,a.pos-mp));}
+                if let Some((who,_))=candidates.into_iter().filter(|(_,r)|r.len()<reach&&mv.dot(r.norm())>cone.cos()&&line_of_sight(mp,mp+*r))
+                    .min_by(|x,y|x.1.len().total_cmp(&y.1.len())){
+                    self.missiles[i].target=Some(who);self.missiles[i].tracking=true;
                 }
             }
             // An R-27R or Sparrow goes blind once the player's radar drops its target.
             if spec.semi_active() && self.missiles[i].from == Who::Player && self.radar_lock() != self.missiles[i].target {
                 self.missiles[i].tracking = false;
             }
-            if let Who::Bandit(k) = self.missiles[i].from {
-                let held = self.bandits.get(k).is_some_and(|b| b.alive && b.radar_track
-                    && bandit_radar_sees(&b.jet, a, true));
+            if let Who::Bandit(k) = self.missiles[i].from { if !self.bandits[k].remote {
+                let target_jet=self.missiles[i].target.and_then(|w|match w{Who::Player=>Some(a),Who::Bandit(j)=>self.bandits.get(j).map(|b|&b.jet),_=>None});
+                let held=self.bandits.get(k).is_some_and(|b|b.alive&&b.radar_track&&target_jet.is_some_and(|target|bandit_radar_sees(&b.jet,target,true)));
                 if !held && spec.semi_active() { self.missiles[i].tracking = false; }
                 if !held && spec.active() && spec.datalink && (self.missiles[i].pos - a.pos).len() > ACTIVE_RANGE {
                     self.missiles[i].target = None;
                     self.missiles[i].tracking = false;
                 }
-                // The active seeker can reacquire on its own when in range.
-                if spec.active() && self.missiles[i].target.is_none() && self.missiles[i].age > 1.5 {
-                    let r = a.pos - self.missiles[i].pos;
-                    if !self.player_dead && r.len() < ACTIVE_RANGE
-                        && self.missiles[i].vel.norm().dot(r.norm()) > spec.acquire.cos()
-                        && line_of_sight(self.missiles[i].pos, a.pos) {
-                        self.missiles[i].target = Some(Who::Player);
-                        self.missiles[i].tracking = true;
-                    }
-                }
-            }
+            }}
             // A semi-active SAM goes blind when its radar dies.
             if let Who::Ground(g) = self.missiles[i].from {
                 let launcher = self.sites[g].pos;
@@ -2443,7 +2498,8 @@ impl Combat {
                 }
                 Fate::Burst(p, miss) => {
                     let m = &self.missiles[i];
-                    let (spec, who, vel) = (m.spec, m.target, m.vel);
+                    let (spec, who, vel, source) = (m.spec, m.target, m.vel, m.from);
+                    self.net_damage_source = Some(source);
                     self.events.push(Event::Airburst { pos: p, vel: vel * 0.1, scale: 0.55 });
                     match who {
                         // A jet takes the warhead's fragments and blast where
@@ -2462,6 +2518,7 @@ impl Combat {
                 Fate::Ground(p) => self.events.push(Event::Blast { pos: p, scale: 0.5, burn: 0.0 }),
                 Fate::Spent(p) => self.events.push(Event::Airburst { pos: p, vel: V3::ZERO, scale: 0.3 }),
             }
+            self.net_damage_source = None;
             self.trails[trail].open = false;
             self.missiles.swap_remove(i);
             self.missile_trails.swap_remove(i);
@@ -2475,7 +2532,7 @@ impl Combat {
                 i += 1;
                 continue;
             };
-            let (armed, spec) = (self.bombs[i].armed(), self.bombs[i].spec);
+            let (armed, spec, source) = (self.bombs[i].armed(), self.bombs[i].spec, self.bombs[i].from);
             self.bombs.swap_remove(i);
             if !armed {
                 self.events.push(Event::Dud { pos: p });
@@ -2488,12 +2545,21 @@ impl Combat {
                     self.damage(Who::Ground(k), blast_damage(spec.damage, spec.lethal, spec.outer, d));
                 }
             }
+            self.net_damage_source=Some(source);
             // Fragments reach a jet that drops too low.
             if (a.pos - p).len() < BOMB_FRAGMENTS {
                 let inv = a.q.conj();
                 let at = inv.rotate(p - a.pos);
                 self.harm_jet(Who::Player, a, |h, r| h.burst(at, inv.rotate(V3::Y), 15.0, BOMB_FRAGMENTS, 600, r));
             }
+            for k in 0..self.bandits.len() {
+                let b=&self.bandits[k];
+                if b.alive&&(b.jet.pos-p).len()<BOMB_FRAGMENTS {
+                    let inv=b.jet.q.conj();let at=inv.rotate(p-b.jet.pos);
+                    self.harm_jet(Who::Bandit(k),a,|h,r|h.burst(at,inv.rotate(V3::Y),15.0,BOMB_FRAGMENTS,600,r));
+                }
+            }
+            self.net_damage_source=None;
         }
     }
 
@@ -2671,7 +2737,7 @@ impl Combat {
             let r = (a.pos - b.jet.pos).len();
             if r < 60000.0 {
                 let locked = self.hostile && b.radar_track;
-                v.push((b.jet.pos, if b.jet.kind == Type::Mig29 { "29" } else { "16" }, locked));
+                v.push((b.jet.pos, match b.jet.kind { Type::F16=>"16",Type::Mig29=>"29",Type::F18=>"18",Type::Su27=>"27" }, locked));
             }
         }
         for s in self.sites.iter().filter(|s| !s.dead) {
