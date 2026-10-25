@@ -10,6 +10,9 @@
 - [ ] Agregar más tipos de aviones.
 
 ## Completadas
+- [x] Corregir los tres detalles marcados del F-16 y completar el soporte del HUD sin mover el cristal ni la simbología.
+- [x] Ajustar la curvatura de los espejos al aro, verificar el muestreo de FPS y corregir el centrado y la proporción de los instrumentos marcados del MiG-29.
+- [x] Abrir configuración con Esc y entrar directamente a cada modo con clic, Enter o A; comprobar el recorrido completo de los menús en Windows.
 - [x] Afinar los hilos del paracaídas en primera persona y distinguirlos de las bandas y arneses.
 - [x] Refinar las asas y la postura de eyección de F-16 y MiG-29 con referencias de ACES II y K-36DM; corregir el salto de cámara al salir el asiento.
 - [x] Corregir los instrumentos cortados, la visera y los montajes señalados de ambas cabinas, con capturas de Windows y pruebas de visibilidad.

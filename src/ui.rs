@@ -264,7 +264,7 @@ impl<'a> Ui<'a> {
 
         let left_w = pw * 0.56;
         let mut yy = y + 34.0 * s;
-        self.cv.text("F-16 VIPER, MODERN COCKPIT", x + m, yy, s, AMBER, Align::Left);
+        self.cv.text(&format!("{} // COCKPIT", cfg.jet.name()), x + m, yy, s, AMBER, Align::Left);
         yy += 26.0 * s;
         let ts = s * 4.0;
         self.cv.text("VIPER", x + m, yy, ts, GREEN, Align::Left);
@@ -356,8 +356,8 @@ impl<'a> Ui<'a> {
             (true, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{A}", "FIRE"), ("{DD}", "LOCK TARGET"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{DU}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (false, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{DD}", "LANDING GEAR"), ("{DU}", "FLAPS"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
             (false, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{X}", "LANDING GEAR"), ("{R3} HOLD", "ZOOM"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
-            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("P ESC", "PAUSE")],
-            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("P ESC", "PAUSE")],
+            (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("ESC", "CONFIG")],
+            (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("ESC", "CONFIG")],
         };
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
@@ -785,8 +785,8 @@ impl<'a> Ui<'a> {
         let m = 10.0 * s;
         let mut y = m + 4.0 * s;
         self.cv.text("CONTROLS", m, y, s, CREAM, Align::Left);
-        let cw = self.button_width("CLOSE", "K");
-        self.button("CLOSE", "K", w - m - cw, y - 7.5 * s, false, Action::Controls);
+        let cw = self.button_width("CLOSE", "ESC");
+        self.button("CLOSE", "ESC", w - m - cw, y - 7.5 * s, false, Action::Controls);
         y += 16.0 * s;
         let heading = match (paused_flight, self.pad) {
             (true, _) => "FLIGHT PAUSED",
@@ -852,7 +852,7 @@ impl<'a> Ui<'a> {
                 ("{B} FROZEN", "Release mouse"),
                 ("{BACK}", "Controls and settings"),
             ],
-            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("ALT+O", "Limiters off / on"), ("P", "Freeze flight"), ("ESC", "Pause, release mouse"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("F12", "Save screenshot"), ("KEYS", "Change them at right")],
+            (false, _) => &[("MOUSE X", "Rudder"), ("ALT+MOUSE", "Look around"), ("R-CLICK", "Zoom, hold"), ("M-CLICK", "Center the mouse stick"), ("L-CLICK", "Fire"), ("ALT+O", "Limiters off / on"), ("P", "Freeze flight"), ("ESC", "Configuration, pause flight"), ("M", "Sound on / off"), ("F11", "Fullscreen"), ("F12", "Save screenshot"), ("KEYS", "Change them at right")],
         };
         // The controller map is long: like the key bindings, it gets its own
         // panel beside the drawer, which then holds only the settings.
@@ -902,7 +902,7 @@ impl<'a> Ui<'a> {
         }
         self.button("RESTORE DEFAULTS", "", m, y, false, Action::Reset);
         y += 15.0 * s + 8.0 * s;
-        self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press K to close. Settings are saved for this user." }, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
+        self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press Esc or K to close. Settings are saved for this user." }, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
         if !self.pad {
             self.key_bindings(&st.keys, w, waiting);
         }
@@ -1145,7 +1145,7 @@ pub fn cockpit_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Missio
     cv.text(&clk, rx, h * 0.058, s, if m.timed && m.time_left < 20.0 { RED } else { with_alpha(HUD, 0.82) }, Align::Right);
     cv.text(&format!("SCR {}", pad(score, 5)), rx, h * 0.058 + 11.0 * s, sm, with_alpha(HUD, 0.58), Align::Right);
     cv.text(&format!("{} KT", pad(a.airspeed_kt, 3)), rx, h * 0.058 + 20.0 * s, sm, with_alpha(HUD, 0.45), Align::Right);
-    let keys = if cue.pad { "{BACK} CONTROLS    {RS} LOOK    {Y} CAMERA" } else { "K  CONTROLS / CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
+    let keys = if cue.pad { "{BACK} CONTROLS    {RS} LOOK    {Y} CAMERA" } else { "ESC  CONFIG    ALT + MOUSE  LOOK    C  CENTER    V  CHASE" };
     cv.text(keys, 12.0 * sm, h - 10.0 * sm, sm, rgba(0xbf, 0xd0, 0xbf, 0.8), Align::Left);
     stick_cue(cv, rx - 22.0 * s, h - 20.0 * sm - 30.0 * s, s, cue);
     // Above the combiner, which the default head pitch lifts high on screen.

@@ -93,14 +93,15 @@ impl Performance {
         let fps = if avg > 0.0 { 1000.0 / avg } else { 0.0 };
         cv.text(&format!("{fps:.0} FPS   {avg:.2} MS AVG"), x, y + 10.0 * u, u, CREAM, Align::Left);
         let peak_ms = self.history.iter().copied().fold(33.3f32, f32::max);
-        let peak_fps = self.history.iter().map(|v| 1000.0 / v).fold(60.0f32, f32::max);
+        let mut rates: Vec<f32> = self.history.iter().map(|v| 1000.0 / v).collect();
+        rates.sort_by(f32::total_cmp);
+        let peak_fps = rates.get(rates.len().saturating_sub(1) * 95 / 100).copied().unwrap_or(60.0).max(60.0) * 1.1;
         for (row, label, peak, color) in [(0, "FPS", peak_fps, GREEN), (1, "MS", peak_ms, AMBER)] {
             let gy = y + (21.0 + row as f32 * 23.0) * u;
             let gh = 18.0 * u;
             cv.rect(x, gy, width, gh, rgba(2, 6, 4, 0.6));
             cv.line(x, gy + gh, x + width, gy + gh, 1.0, LINE);
             cv.text(label, x + 2.0 * u, gy + 5.0 * u, u, DIM, Align::Left);
-            cv.text(&format!("{peak:.0}"), x + 2.0 * u, gy + 14.0 * u, u, DIM, Align::Left);
             let mut prev = None;
             for (i, &v) in self.history.iter().enumerate() {
                 let value = if row == 0 { 1000.0 / v } else { v };

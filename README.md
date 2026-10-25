@@ -44,13 +44,13 @@ at start-up. Original synthesised warning clips are embedded in the executable.
 | `L` | ALT FLAPS: trailing-edge flaps down with the gear up (they droop on their own with the gear down) |
 | `B` (held) | Wheel brakes |
 | `P` | Freeze the flight; the mouse still looks around and `V`, `C`, `F1` / `F2` still work, for screenshots |
-| `Esc` | Pause / resume without covering the view; release the mouse while paused |
+| `Esc` | Open configuration and pause the flight; again closes it and resumes |
 | `R` | Restart while paused or from a result screen |
 | `M` | Audio on / off |
 | `F11` / `Alt+Enter` | Borderless fullscreen |
 | `F12` | Save a PNG screenshot in Pictures/viper-run, including in fullscreen |
 | Right-click (held) | Zoom the view in to 40 % of its field of view, for as long as it is held |
-| `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; `Space` engages from the Main Menu and launches from the setup screen; `Ctrl+Q` quits from a menu |
+| `Enter`, `Tab`, arrows, mouse | Menu navigation: arrows move the highlight, `Enter` acts on the highlighted button; choosing a game mode opens its setup immediately; `Space` engages from the Main Menu and launches from the setup screen; `Ctrl+Q` quits from a menu |
 
 Every flight key above, from the stick to the MFD pages, can be rebound: the
 K drawer opens a KEY BINDINGS panel with a primary and an alternate key per
@@ -673,6 +673,7 @@ viper-run --autostart                      # skip the menu
 viper-run --shot out.png --sim 3 --chase   # simulate 3 s, save a screenshot, exit
 viper-run --shot out.png --look 120,-20    # cockpit free look (yaw, pitch degrees)
 viper-run --shot out.png --screen pause    # pause | freeze | win | crash | timeout
+viper-run --ui-check --screen menu --shot menu-check.png --frames 200 --jet mig29 # input/menu integration check
 viper-run --audio-demo engine.wav --jet mig29 # render the runtime mixer without a window
 viper-run --bench 15 --size 1920x1080      # real-time frame timing, vsync off
 viper-run --shot out.png --mach 0.98       # start at a Mach number (vapor cone, shocks)

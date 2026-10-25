@@ -66,7 +66,7 @@ const R_EKRAN: R = r(1248.0, 1664.0, 160.0, 160.0);
 const R_SPO: R = r(1408.0, 1664.0, 160.0, 160.0);
 const R_RADALT: R = r(1568.0, 1664.0, 160.0, 160.0);
 const R_ASIMACH: R = r(1728.0, 1664.0, 160.0, 160.0);
-const R_COUNTER: R = r(1888.0, 1664.0, 160.0, 96.0);
+const R_COUNTER: R = r(1888.0, 1664.0, 160.0, 48.0);
 
 // ================================================================ panel
 /// Main panel: tilted back 12 degrees, its foot 0.66 m above the datum just
@@ -236,7 +236,7 @@ pub fn build_static(m: &mut Mesh) {
     // Countermeasure panel below the ILS-31 housing, as on the reference.
     let counter = raised_at(0.0, 1.035);
     m.block(&counter.at(0.0, 0.0, -0.020), v3(0.100, 0.032, 0.020), PANEL);
-    plate(m, &counter, 0.180, 0.048, R_COUNTER);
+    plate(m, &counter, 0.160, 0.048, R_COUNTER);
 
     // Tub: floor, walls up to the sills, the canopy rails and the consoles.
     m.quad(v3(-WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, -4.45), v3(WALL_X, FLOOR, BULKHEAD_Z), v3(-WALL_X, FLOOR, BULKHEAD_Z), WALL.scale(0.5));
@@ -348,7 +348,7 @@ pub fn build_static(m: &mut Mesh) {
         let up = (centre - anchor).norm();
         let mut mount = anchor + up * 0.012;
         mount.z = crate::mig29::CANOPY_Z[3] + OFFSET.z + 0.035;
-        let smaller = |x: f64, y: f64, d: f64| mount + (place(x, y, d) - centre) * (0.78 * 0.70);
+        let smaller = |x: f64, y: f64, d: f64| mount + place(x * (0.78 * 0.70), y * (0.78 * 0.70), d * (0.78 * 0.70)) - centre;
         super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), (mid - PI / 2.0).sin());
         for t in [-0.28, 0.28] {
             let x = t * (hi - lo) * radius;
@@ -654,10 +654,23 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
 
     let r = R_COUNTER;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x18, 0x1c, 0x1c, 1.0));
-    cv.text("ЛТЦ / ДО", r.x + r.w * 0.5, r.y + 16.0, 1.0, INK, Align::Center);
-    cv.rect(r.x + 14.0, r.y + 30.0, r.w - 28.0, 38.0, rgba(0x06, 0x08, 0x08, 1.0));
-    cv.text(&format!("{:02} {:02}", c.loadout.flares, c.loadout.chaff), r.x + r.w * 0.5, r.y + 49.0, 2.0, INK, Align::Center);
-    for x in [r.x + 30.0, r.x + r.w - 30.0] { cv.disc(x, r.y + 80.0, 6.0, INK); }
+    cv.text("ЛТЦ / ДО", r.x + r.w * 0.5, r.y + 7.0, 1.0, INK, Align::Center);
+    cv.rect(r.x + 8.0, r.y + 14.0, r.w - 16.0, 29.0, rgba(0x06, 0x08, 0x08, 1.0));
+    let digits = format!("{:02}{:02}", c.loadout.flares, c.loadout.chaff);
+    let masks = [0x3f_u8, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];
+    for (i, digit) in digits.bytes().enumerate() {
+        let x = r.x + 32.0 + i as f32 * 22.0 + if i >= 2 { 12.0 } else { 0.0 };
+        let y = r.y + 15.0;
+        for (k, (a, b)) in [((2.0,0.0),(16.0,0.0)), ((18.0,2.0),(18.0,11.0)),
+            ((18.0,15.0),(18.0,24.0)), ((2.0,26.0),(16.0,26.0)),
+            ((0.0,15.0),(0.0,24.0)), ((0.0,2.0),(0.0,11.0)),
+            ((2.0,13.0),(16.0,13.0))].iter().enumerate() {
+            if masks[(digit-b'0') as usize] & (1<<k) != 0 {
+                cv.line(x+a.0, y+a.1, x+b.0, y+b.1, 2.5, INK);
+            }
+        }
+    }
+    for x in [r.x + 5.0, r.x + r.w - 5.0] { cv.disc(x, r.y + 43.0, 2.0, INK); }
 
     // Warning lamp column, its legends transliterated.
     let lamps = [
@@ -834,7 +847,7 @@ mod tests {
         let mut mesh = Mesh::new();
         build_static(&mut mesh);
         for (u, y, w, h) in [(-0.320, 1.060, 0.100, 0.065),
-            (0.350, 1.025, 0.050, 0.045), (0.0, 1.035, 0.180, 0.048)] {
+            (0.350, 1.025, 0.050, 0.045), (0.0, 1.035, 0.160, 0.048)] {
             let f = raised_at(u, y);
             for x in [-0.9, 0.0, 0.9] {
                 for y in [-0.9, 0.0, 0.9] {

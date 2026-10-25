@@ -35,7 +35,8 @@ model every real navigation or radar mode.
 
 F-16 outer coaming depth now tapers smoothly. The accelerometer and four engine
 indicators clear their shelves and outer edge. Engine mounts move inward by
-2 cm; gauge faces sit 3 mm behind the front of their bezels instead of 24 mm.
+2 cm; gauge faces sit 0.5 mm behind the front of their bezels instead of floating
+11 mm above them; this removes the perspective offset.
 The fuel-flow strip has its own space above the right MFD. MiG raised controls
 mount on the front of the coaming, with backing, and the countermeasure readout
 sits below the HUD housing. The SPO-15 has a rectangular face and the IT-23
@@ -80,3 +81,29 @@ views, and menus at small and normal resolutions with keyboard and controller
 prompts. `--audio-demo file.wav --jet f16|mig29` writes the runtime mixer for
 idle, spool-up, dry thrust, afterburner and a voice cue. Rendering a demo does
 not claim an acoustic match to recordings of the real engines.
+
+## Follow-up from the marked F-16 screenshot
+
+The threat-warning controls move inboard inside the shoulder trim. Fuel flow
+retains the atlas aspect ratio, with larger digits; a 10 mm DED adjustment leaves
+room for its taller face above the MFD. The right warning group follows the
+sloping glare-shield edge on an inset mount. The HUD gains flat supports,
+glass clamps, foot plates, reinforcement and a collimator lens within the existing
+combiner envelope; the glass and projected symbology keep their original datums.
+
+MiG mirror dimensions are scaled in local coordinates before mapping them to
+the bow, preserving the bow radius instead of shrinking the radius with the pane.
+Performance samples are taken once after the final screen presentation, including
+the cost of the mirror pass. The graphs omit their formerly ambiguous maximum
+numbers; the main FPS and mean milliseconds describe the same frame intervals.
+`--no-mirrors` disables only the reflection pass for comparative diagnostics.
+
+Selecting a mode with click, Enter or controller A opens its setup directly.
+Escape opens configuration in flight, pauses and releases the mouse; closing
+configuration resumes the previous flying or frozen state. On setup and result
+screens Escape still returns to Main Menu. Controller-generated menu keys keep
+their input context, so the stick-response buttons adjust expo rather than mouse
+sensitivity.
+
+The MiG counter now uses matching physical and atlas proportions (160:48), with
+larger digits and round fasteners. The raised UUAP sphere shares the bezel plane.

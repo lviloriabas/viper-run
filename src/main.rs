@@ -36,6 +36,7 @@ mod targets;
 mod terrain;
 mod texture;
 mod ui;
+mod ui_check;
 mod vapor;
 mod weapons;
 mod warnings;
@@ -86,6 +87,8 @@ enum View {
 struct Opts {
     autostart: bool,
     audio_demo: Option<String>,
+    no_mirrors: bool,
+    ui_check: bool,
     chase: bool,
     shot: Option<String>,
     frames: u32,
@@ -136,6 +139,8 @@ fn parse_opts() -> Opts {
         match args[i].as_str() {
             "--autostart" => o.autostart = true,
             "--audio-demo" => o.audio_demo = Some(next(&mut i)),
+            "--no-mirrors" => o.no_mirrors = true,
+            "--ui-check" => o.ui_check = true,
             "--chase" => o.chase = true,
             "--shot" => o.shot = Some(next(&mut i)),
             "--frames" => o.frames = next(&mut i).parse().unwrap_or(3),
@@ -300,6 +305,8 @@ struct App {
     /// The controller was the last input used: on-screen prompts show its
     /// buttons until the keyboard or mouse is touched again.
     pad_active: bool,
+    /// Synthetic menu keys retain their controller input context.
+    pad_dispatch: bool,
     /// Smoothed right-stick position driving the head or chase camera.
     pad_look: (f64, f64),
     /// Zoom held on the right mouse button or the right stick click, and the eased
@@ -445,6 +452,7 @@ impl App {
             keys: HashSet::new(),
             pad: Gamepad::new(),
             pad_active: false,
+            pad_dispatch: false,
             pad_look: (0.0, 0.0),
             zoom_mouse: false,
             zoom_pad: false,
@@ -716,8 +724,9 @@ impl App {
         self.controls_open = open;
         self.selected = 0;
         if open {
-            self.controls_was_flying = matches!(self.state, State::Flying | State::Frozen);
-            self.controls_was_frozen = self.state == State::Frozen;
+            self.controls_was_flying = matches!(self.state, State::Flying | State::Frozen | State::Paused);
+            self.controls_was_frozen = self.state == State::Frozen
+                || self.state == State::Paused && self.paused_was_frozen;
             if self.controls_was_flying {
                 self.state = State::Paused;
                 self.keys.clear();
@@ -738,7 +747,7 @@ impl App {
     }
 
     fn save(&self) {
-        settings::save(&self.settings, &self.best);
+        if !self.opts.ui_check { settings::save(&self.settings, &self.best); }
     }
 
     fn act(&mut self, a: Action) {
@@ -796,6 +805,8 @@ impl App {
                 let (jet, aggressor, mixed, refill) = (self.config.jet, self.config.aggressor, self.config.threats.mixed, self.config.refill);
                 self.config = combat::Config { aggressor, refill, ..combat::Config::for_jet(k, jet) };
                 self.config.threats.mixed = mixed;
+                self.state = State::Loadout;
+                self.selected = 0;
             }
             Action::Jet => self.config.set_jet(self.config.jet.next()),
             Action::Aggressor => self.config.next_fleet(),
@@ -1076,9 +1087,11 @@ impl App {
         let mut keys: Vec<KeyCode> = [(UP, KeyCode::Up), (DOWN, KeyCode::Down), (LEFT, KeyCode::Left), (RIGHT, KeyCode::Right)].into_iter().filter(|&(b, _)| nav & b != 0).map(|(_, k)| k).collect();
         keys.extend(binds.into_iter().filter(|&(b, _)| self.pad.pressed(b)).map(|(_, k)| k));
         let pad_navigation = !keys.is_empty();
+        self.pad_dispatch = true;
         for k in keys {
             self.key_down_event(k, KeyMods::default(), false);
         }
+        self.pad_dispatch = false;
         if pad_navigation { self.pad_active = true; }
         if !menu {
             let airbrake = if self.state == State::Frozen { None } else { Some((B, Bind::Airbrake)) };
@@ -1642,7 +1655,7 @@ impl App {
     /// into the rear-view mirrors' picture and hands it to the cockpit atlas.
     fn draw_mirrors(&mut self) {
         // Only the MiG-29 has mirrors; the F-16 cockpit has none.
-        let Some(a) = self.aircraft.as_ref().filter(|a| a.kind == sim::Type::Mig29) else { return };
+        let Some(a) = self.aircraft.as_ref().filter(|a| a.kind == sim::Type::Mig29 && !self.opts.no_mirrors) else { return };
         let rear = cockpit::mirror_camera(a);
         let m = &self.mirror;
         self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
@@ -1834,15 +1847,18 @@ impl EventHandler for App {
         if !matches!(self.state, State::Paused | State::Frozen) {
             self.time += dt;
         }
-        if let Some(on) = self.pad.poll(now) {
-            if !matches!(self.state, State::Paused | State::Frozen) {
-                self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
+        // Snapshot and menu checks use scripted input, independent of live hardware.
+        if self.opts.shot.is_none() && self.opts.bench.is_none() {
+            if let Some(on) = self.pad.poll(now) {
+                if !matches!(self.state, State::Paused | State::Frozen) {
+                    self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
+                }
+                if !on {
+                    self.pause();
+                }
             }
-            if !on {
-                self.pause();
-            }
+            self.pad_buttons();
         }
-        self.pad_buttons();
         // Keyboard and mouse events hand the prompts back to themselves.
         if self.pad.active() || self.opts.pad {
             self.pad_active = true;
@@ -2069,6 +2085,10 @@ impl EventHandler for App {
 
         self.performance.presented();
         self.frame += 1;
+        if self.opts.ui_check && ui_check::step(self, self.frame) {
+            self.opts.ui_check = false;
+            self.opts.frames = self.frame;
+        }
         if let (Some(path), Some(out)) = (self.opts.shot.clone(), self.output.as_ref()) {
             if self.frame >= self.opts.frames {
                 let mut px = vec![0u8; (out.w * out.h * 4) as usize];
@@ -2160,7 +2180,7 @@ impl EventHandler for App {
     }
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
-        self.pad_active = false;
+        self.pad_active = self.pad_dispatch;
         if key == KeyCode::F12 && !repeat {
             self.screenshot_pending = true;
             return;
@@ -2278,8 +2298,7 @@ impl EventHandler for App {
                 _ => {}
             },
             KeyCode::Escape => match self.state {
-                State::Flying | State::Frozen => self.pause(),
-                State::Paused => self.resume(),
+                State::Flying | State::Frozen | State::Paused | State::Attract => self.toggle_controls(Some(true)),
                 State::Result | State::Loadout => self.go_menu(),
                 _ => {}
             },

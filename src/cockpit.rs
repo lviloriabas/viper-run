@@ -560,7 +560,7 @@ fn gauge(m: &mut Mesh, f: &Frame, radius: f64, rect: R) {
 
 fn gauge_mount(m: &mut Mesh, f: &Frame, radius: f64, rect: R, margin: f64) {
     m.ring(&f.at(0.0, 0.0, 0.014), radius, radius + 0.008, 0.014, BEZEL.scale(1.1), GAUGE_SIDES);
-    m.disc_uv(&f.at(0.0, 0.0, 0.025), radius, uv(rect), GAUGE_SIDES);
+    m.disc_uv(&f.at(0.0, 0.0, 0.0135), radius, uv(rect), GAUGE_SIDES);
     // Square mounting flange with four screws, as on the real gauges.
     let flange = f.at(0.0, 0.0, 0.002);
     m.bezel(&flange, &rounded_rect((radius + margin) * 2.0, (radius + margin) * 2.0, 0.006, 1), &rounded_rect(radius * 2.0 + 0.012, radius * 2.0 + 0.012, 0.004, 1), 0.002, 0.0, BEZEL.scale(0.8));
@@ -573,6 +573,14 @@ fn gauge_mount(m: &mut Mesh, f: &Frame, radius: f64, rect: R, margin: f64) {
 fn plate(m: &mut Mesh, f: &Frame, w: f64, h: f64, rect: R) {
     m.block(&f.at(0.0, 0.0, 0.004), v3(w / 2.0 + 0.006, h / 2.0 + 0.006, 0.004), BEZEL.scale(0.85));
     screen(m, &f.at(0.0, 0.0, 0.0085), w, h, rect);
+}
+
+fn right_eyebrow() -> Frame {
+    let n = panel().z;
+    let along = pp(0.34, 0.57, 0.0) - pp(0.28, 0.60, 0.0);
+    let x = (along - n * along.dot(n)).norm();
+    let y = n.cross(x);
+    Frame { o: pp(0.315, pv(0.980), 0.060) + y * 0.022, x, y, z: n }
 }
 
 fn build_static(m: &mut Mesh) {
@@ -649,18 +657,38 @@ fn build_static(m: &mut Mesh) {
     m.block(&ufc.at(0.0, 0.0, 0.060), v3(0.108, 0.083, 0.060), BEZEL.scale(0.95));
     screen(m, &ufc.at(0.0, 0.0, 0.1205), 0.194, 0.146, R_ICP);
     // The DED is beside the ICP, not stacked above it.
-    plate(m, &panel_at(0.24, 0.954, 0.0), 0.18, 0.054, R_DED);
+    plate(m, &panel_at(0.24, 0.964, 0.0), 0.18, 0.054, R_DED);
 
     // HUD: body on the glare shield, side posts and the tall combiner frame.
     // The body sits forward, inside the glare shield; only the glass rises above it.
     let hud_body = Frame { o: v3(0.0, 1.054, -4.15), x: V3::X, y: V3::Y, z: V3::Z };
     m.block(&hud_body, v3(0.10, 0.018, 0.12), GLARE.scale(1.5));
     m.block(&Frame { o: v3(0.0, 1.074, -4.04), ..hud_body }, v3(0.095, 0.004, 0.035), GLARE.scale(2.2));
+    let metal = Rgb(0.15, 0.17, 0.17);
+    let lens = Frame { o: v3(0.0, 1.081, -4.105), x: V3::X, y: -V3::Z, z: V3::Y };
+    m.bezel(&lens, &rounded_rect(0.145, 0.072, 0.010, 2),
+        &rounded_rect(0.122, 0.052, 0.008, 2), 0.004, 0.0, metal);
+    m.quad(lens.p(-0.061, -0.026, 0.001), lens.p(0.061, -0.026, 0.001),
+        lens.p(0.061, 0.026, 0.001), lens.p(-0.061, 0.026, 0.001), Rgb(0.10, 0.17, 0.17));
     for &s in &[-1.0, 1.0] {
-        let (b, t) = (v3(s * 0.104, 1.07, -4.02), v3(s * 0.104, 1.352, -3.958));
-        m.capsule(b, t, 0.0045, 0.004, GLARE.scale(2.0), 6);
+        let (foot, bend, top) = (v3(s * 0.112, 1.072, -4.025),
+            v3(s * 0.110, 1.145, -4.008), v3(s * 0.104, 1.352, -3.958));
+        pilot::bar(m, foot, bend, 0.006, 0.010, V3::Z, metal);
+        pilot::bar(m, bend, top, 0.004, 0.006, V3::Z, metal);
+        // Flat lower attachment and triangular reinforcement into the projector housing.
+        m.block(&Frame { o: foot - V3::Y * 0.012, ..hud_body }, v3(0.012, 0.008, 0.022), metal);
+        m.polygon(&[v3(s * 0.098, 1.055, -4.095), foot,
+            v3(s * 0.110, 1.058, -4.025)], metal.scale(0.8));
+        for y in [1.12, 1.30] {
+            let z = mix(-4.012, -3.958, (y-1.078)/(1.35-1.078));
+            let c = Frame { o: v3(s * 0.106, y, z), ..hud_body };
+            m.block(&c, v3(0.005, 0.011, 0.005), metal.scale(1.15));
+            m.capsule(c.p(s*0.005, 0.0, -0.003), c.p(s*0.005, 0.0, 0.004),
+                0.002, 0.002, METALC.scale(0.55), 6);
+        }
     }
-    m.capsule(v3(-0.104, 1.352, -3.958), v3(0.104, 1.352, -3.958), 0.0025, 0.0025, GLARE.scale(2.0), 6);
+    pilot::bar(m, v3(-0.104, 1.354, -3.958), v3(0.104, 1.354, -3.958),
+        0.002, 0.003, V3::Z, metal);
 
     // Glare-shield lamps: the AOA indexer left of the HUD; on the eyebrows
     // out over the panel's top corners, the master caution on the left and
@@ -670,8 +698,9 @@ fn build_static(m: &mut Mesh) {
     screen(m, &lamp(-0.14).at(0.0, 0.0, 0.006), 0.02, 0.07, R_AOA);
     m.block(&lamp(-EYEBROW).at(0.0, -0.01, -0.005), v3(0.026, 0.034, 0.01), GLARE.scale(1.4));
     screen(m, &lamp(-EYEBROW).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
-    m.block(&lamp(EYEBROW).at(0.0, -0.01, -0.005), v3(0.064, 0.034, 0.01), GLARE.scale(1.4));
-    screen(m, &lamp(EYEBROW).at(0.0, 0.0, 0.006), 0.118, 0.052, R_CAUTION);
+    let warning = right_eyebrow();
+    m.block(&warning.at(0.0, 0.0, -0.008), v3(0.062, 0.025, 0.012), GLARE.scale(1.4));
+    screen(m, &warning.at(0.0, 0.0, 0.006), 0.112, 0.040, R_CAUTION);
 
     // Airspeed and altimeter above the larger attitude/heading instruments.
     gauge(m, &panel_at(-0.061, 0.785, 0.0), 0.043, R_DIALS[0]);
@@ -690,8 +719,8 @@ fn build_static(m: &mut Mesh) {
     // Accelerometer low on the left wing, clear of the leg well; the fuel
     // quantity is on the right auxiliary console.
     gauge(m, &panel_at(-0.385, 0.730, 0.0), 0.026, R_ACCEL);
-    plate(m, &panel_at(-0.39, 0.911, 0.0), 0.062, 0.024, R_TWP);
-    plate(m, &panel_at(0.232, 0.907, 0.0), 0.130, 0.016, R_FFLOW);
+    plate(m, &panel_at(-0.345, 0.918, 0.0), 0.048, 0.018, R_TWP);
+    plate(m, &panel_at(0.232, 0.914, 0.0), 0.102, 0.034, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -800,6 +829,31 @@ mod geometry_tests {
     use super::*;
 
     #[test]
+    fn gauge_face_and_ring_share_the_same_plane_without_visible_parallax() {
+        let mut mesh = Mesh::new();
+        gauge(&mut mesh, &Frame { o: V3::ZERO, x: V3::X, y: V3::Y, z: V3::Z }, 0.031, R_DIALS[0]);
+        let front = mesh.v.chunks(crate::mesh::STRIDE).filter(|v| v[9] < 0.0)
+            .map(|v| v[2]).fold(f32::NEG_INFINITY, f32::max);
+        for v in mesh.v.chunks(crate::mesh::STRIDE).filter(|v| v[9] >= 0.0) {
+            assert!(front >= v[2] && front-v[2] < 0.001, "dial is floating above its bezel");
+        }
+    }
+
+    #[test]
+    fn marked_controls_clear_the_shield_and_neighbouring_instruments() {
+        let mut mesh = Mesh::new(); build_static(&mut mesh);
+        for (f, w, h, z) in [(panel_at(-0.345, 0.918, 0.0), 0.048, 0.018, 0.0085),
+            (panel_at(0.232, 0.914, 0.0), 0.102, 0.034, 0.0085),
+            (right_eyebrow(), 0.112, 0.040, 0.006)] {
+            for x in [-0.9, 0.0, 0.9] { for y in [-0.9, 0.0, 0.9] {
+                let target = f.p(x*w*0.5, y*h*0.5, z);
+                assert!(!mesh.v.chunks(crate::mesh::STRIDE*3).any(|tri| blocked(airframe::EYE, target, tri)),
+                    "marked panel hidden at {:?}, sample {x},{y}", f.o);
+            }}
+        }
+    }
+
+    #[test]
     fn outer_gauges_are_visible_past_coaming_and_auxiliary_shelves() {
         let mut mesh = Mesh::new();
         build_static(&mut mesh);
@@ -808,7 +862,7 @@ mod geometry_tests {
             let f = panel_at(u, y, 0.0);
             for k in 0..16 {
                 let a = k as f64 * TAU / 16.0;
-                let target = f.p(a.cos() * r * 0.90, a.sin() * r * 0.90, 0.025);
+                let target = f.p(a.cos() * r * 0.90, a.sin() * r * 0.90, 0.0135);
                 assert!(!mesh.v.chunks(crate::mesh::STRIDE * 3).any(|tri| blocked(airframe::EYE, target, tri)),
                     "gauge at {u},{y} is obscured at sample {k}");
             }
@@ -1341,8 +1395,9 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // Fuel flow counter, pounds an hour.
     let r = R_FFLOW;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x08, 0x0a, 0x0a, 1.0));
-    cv.text("FUEL FLOW", r.x + r.w / 2.0, r.y + 12.0, 1.0, WHITE, Align::Center);
-    cv.text(&format!("{} PPH", pad(a.fuel_flow * 7936.6, 5)), r.x + r.w / 2.0, r.y + 40.0, 2.0, WHITE, Align::Center);
+    cv.text("FUEL FLOW", r.x + r.w / 2.0, r.y + 12.0, 2.0, WHITE, Align::Center);
+    cv.text(&pad(a.fuel_flow * 7936.6, 5), r.x + 70.0, r.y + 44.0, 4.0, WHITE, Align::Center);
+    cv.text("PPH", r.x + r.w - 8.0, r.y + 47.0, 2.0, WHITE, Align::Right);
 
     // Right auxiliary console dials.
     let hyd = if a.rpm > 55.0 { 3000.0 } else { a.rpm * 50.0 };

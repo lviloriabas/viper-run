@@ -1,0 +1,103 @@
+{
+  "sample_rate": 22050,
+  "seed": 20261025,
+  "engines": {
+    "piper-tts": "1.4.2",
+    "vosk-tts": "0.3.61"
+  },
+  "models": {
+    "en_US-ljspeech-high.onnx": "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a",
+    "en_US-ljspeech-high.onnx.json": "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14",
+    "vosk-model-tts-ru-0.9-multi/model.onnx": "0fa5a36b22a8bf7fe7179a3882c6371d2c01e5317019e717516f892d329c24b9",
+    "vosk-model-tts-ru-0.9-multi/config.json": "e155fb266a730e1858a2420442b465acf08a3236dffad7d1a507bf155b213d50",
+    "vosk-model-tts-ru-0.9-multi/dictionary": "2939e72c170bb41ac8e256828cca1c5fac4db1e36717f9f53fde843b00a220ba",
+    "vosk-model-tts-ru-0.9-multi/bert/model.onnx": "2e2f1740eaae5e29c2b4844625cbb01ff644b2b5fb0560bd34374c35d8a092c1",
+    "vosk-model-tts-ru-0.9-multi/bert/vocab.txt": "bbe5063cc3d7a314effd90e9c5099cf493b81f2b9552c155264e16eeab074237"
+  },
+  "russian_speaker_id": 2,
+  "english_settings": {
+    "length_scale": 0.95,
+    "noise_scale": 0.55,
+    "noise_w_scale": 0.65
+  },
+  "russian_settings": {
+    "speech_rate": 1.04,
+    "noise_level": 0.55,
+    "duration_noise_level": 0.65
+  },
+  "cockpit_speaker": {
+    "highpass_hz": 280,
+    "lowpass_hz": 3600,
+    "saturation_drive": 1.6
+  },
+  "clips": {
+    "f16-pullup": {
+      "text": "Pull up.",
+      "repeats": 2,
+      "frames": 27080,
+      "sha256": "3ff0fe57b060c6b6cd316e9737b0b8ce9f4d99d6fee9a570e353a20119ae22fb",
+      "synthesis_text": "Pull, up.",
+      "synthesis_settings": {
+        "length_scale": 1.1,
+        "noise_scale": 0.4,
+        "noise_w_scale": 0.0,
+        "normalize_audio": false,
+        "volume": 0.7
+      }
+    },
+    "f16-altitude": {
+      "text": "Altitude.",
+      "repeats": 2,
+      "frames": 35710,
+      "sha256": "2679e332328858402cf1018b66b32214bf80e6cd72d21a3f219da7d19cbf5132"
+    },
+    "f16-warning": {
+      "text": "Warning.",
+      "repeats": 2,
+      "frames": 24558,
+      "sha256": "3261ceaa4bea2aefeaca8d8d74ce88d1c13f15f0a9394d8774839ed1ae74c747"
+    },
+    "f16-caution": {
+      "text": "Caution.",
+      "repeats": 2,
+      "frames": 32712,
+      "sha256": "75193ca3a5b7534fc56c97395a5a966546e2c596e4e8b2a717a6e7570294fe2f"
+    },
+    "mig-altitude": {
+      "text": "Опасная высота.",
+      "repeats": 1,
+      "frames": 29325,
+      "sha256": "62c893d747bd44292889b5465ccfc022b531a92f19cfd22d8b1270818a05340d"
+    },
+    "mig-aoa": {
+      "text": "Предельный угол атаки.",
+      "repeats": 1,
+      "frames": 36391,
+      "sha256": "b46d3d6cf41b7e5cd332736d1b8cac305d2ef733ef5a13fb71f6437a1f43ebcf"
+    },
+    "mig-speed": {
+      "text": "Предельная скорость.",
+      "repeats": 1,
+      "frames": 25429,
+      "sha256": "0702247b84672f53e2cd04410eabed255a42bb1446e5163421c660ff0e95baba"
+    },
+    "mig-g": {
+      "text": "Предельная перегрузка.",
+      "repeats": 1,
+      "frames": 29527,
+      "sha256": "60ff4ac602bfdd9be554a7a63842ab9d95b8b99a56da2d28a6e71668ef2c4f65"
+    },
+    "mig-gear": {
+      "text": "Выпусти шасси.",
+      "repeats": 1,
+      "frames": 24138,
+      "sha256": "30dc4ce74dbb7aa9def238011601dc4fa101d75a5a1b73e764931bb075909ecf"
+    },
+    "mig-fire": {
+      "text": "Пожар двигателя.",
+      "repeats": 1,
+      "frames": 25154,
+      "sha256": "a3bbb933c990c544cb8742d85071bb556e165829eb3f9397b61e91def9bed9c6"
+    }
+  }
+}

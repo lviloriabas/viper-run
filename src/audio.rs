@@ -656,6 +656,42 @@ mod tests {
         assert!(speech.next().is_none());
     }
     #[test]
+    fn all_embedded_warnings_have_clean_boundaries_and_usable_levels() {
+        let clips: [(&str, &[u8]); 10] = [
+            ("f16-pullup", include_bytes!("../assets/voices/f16-pullup.wav")),
+            ("f16-altitude", include_bytes!("../assets/voices/f16-altitude.wav")),
+            ("f16-warning", include_bytes!("../assets/voices/f16-warning.wav")),
+            ("f16-caution", include_bytes!("../assets/voices/f16-caution.wav")),
+            ("mig-altitude", include_bytes!("../assets/voices/mig-altitude.wav")),
+            ("mig-aoa", include_bytes!("../assets/voices/mig-aoa.wav")),
+            ("mig-speed", include_bytes!("../assets/voices/mig-speed.wav")),
+            ("mig-g", include_bytes!("../assets/voices/mig-g.wav")),
+            ("mig-gear", include_bytes!("../assets/voices/mig-gear.wav")),
+            ("mig-fire", include_bytes!("../assets/voices/mig-fire.wav")),
+        ];
+        for (name, wav) in clips {
+            let mut speech = Speech::new(wav, 8).expect(name);
+            assert_eq!(speech.rate, 22050, "{name}: source sample rate");
+            let source_frames = speech.pcm.len() / 2;
+            let samples: Vec<f32> = std::iter::from_fn(|| speech.next()).collect();
+            assert_eq!(samples.len(), source_frames * 2, "{name}: resampling duration");
+            assert!(samples.len() > RATE as usize / 2 && samples.len() < RATE as usize * 3,
+                "{name}: warning must stay concise");
+            assert!(samples.iter().all(|x| x.is_finite() && x.abs() <= 24000.0 / 32768.0),
+                "{name}: peak headroom");
+            assert_eq!(samples[0], 0.0, "{name}: no click at onset");
+            assert_eq!(*samples.last().unwrap(), 0.0, "{name}: no click at end");
+            let rms = (samples.iter().map(|x| x*x).sum::<f32>() / samples.len() as f32).sqrt();
+            assert!(rms > 0.045 && rms < 0.18, "{name}: audible and consistent level ({rms})");
+            let first = samples.iter().position(|x| x.abs() > 0.01).expect(name);
+            let last = samples.iter().rposition(|x| x.abs() > 0.01).expect(name);
+            assert!(first < RATE as usize / 5, "{name}: excessive leading silence");
+            assert!(samples.len() - last < RATE as usize / 4, "{name}: excessive trailing silence");
+            assert!(speech.next().is_none(), "{name}: speech must finish");
+        }
+    }
+
+    #[test]
     fn engine_output_is_continuous_nonrepeating_and_not_clipped_for_both_airframes() {
         for engines in [1.0, 2.0] {
             let mut s = Synth::new();
