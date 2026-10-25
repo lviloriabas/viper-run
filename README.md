@@ -33,6 +33,7 @@ at start-up in about half a second.
 | `X` | Cycle the weapon and master mode: GUN, SRM (AIM-9 or R-73), MRM (AIM-120 or R-27R), CCIP (bombs); weapons only, never NAV or the chaff and flares |
 | `T` | Lock the target nearest the nose (or the helmet line of sight); again for the next |
 | `I` | MiG-29: switch the radar and the IRST (OEPS-29) for locking |
+| Hold `Backspace` for 0.5 s | Eject; both hands pull the seat handle |
 | `Z` | Countermeasures: one chaff bundle and one flare |
 | `F1` / `F2` | Cycle left / right MFD through FCR, HSD and ENG |
 | `K` | Open / close the controls and configuration drawer |
@@ -71,6 +72,7 @@ fire with `RT`.
 | Left stick | Pitch and roll; pull back to raise the nose (push, with INVERT PITCH on). On the ground its X axis also steers the nose wheel |
 | Right stick | Look around the cockpit (the helmet line of sight), or orbit the chase camera; springs back |
 | `RT` | Fire / pickle (held for the gun) |
+| `LB` + `RB` held for 1.5 s | Eject; flight and weapon inputs are suspended during the hold |
 | `RB` | Lock the target nearest the helmet line of sight or the nose; again for the next; held half a second drops the lock |
 | `LB` / `LT` | Throttle up / down; `LB` held to the stop lights the afterburner |
 | `LT` on the ground | Wheel brakes |
@@ -368,6 +370,19 @@ held near 25 degrees (24 in the Russian manual, 26 in the German one, against
 26 to 28 critical), 9 g only below 14,200 kg, 8 g above, and 7 g past
 Mach 0.85 (German manual). The cockpit
 is the Fulcrum's own (docs/MIG29-REFERENCES.md).
+
+### Ejection views
+
+While the ejection key or both controller bumpers are held, steering, throttle,
+weapons and other flight bindings are suspended. The pilot looks down over his
+chest as both hands reach for and lift the handle. The cockpit remains visible
+until the seat fires, then V switches between the pilot's eyes and the external
+seat/parachute view. The close view omits the helmet and neck cap. On touchdown
+the parachute falls to the side and settles on the ground, retaining its fabric.
+
+The MiG-29 mirrors refresh on every rendered cockpit frame, independently of the
+30 Hz instruments, including at a 165 Hz display refresh. Actual frame rate
+still follows the renderer and display settings.
 
 ### Airbase, take-off and landing
 

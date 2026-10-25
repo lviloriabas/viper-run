@@ -965,6 +965,14 @@ impl App {
         self.selected = 0;
     }
 
+    fn ejection_chord(&self) -> bool {
+        ejection_requested(&self.settings.keys, &self.keys, &self.pad, self.opts.eject)
+    }
+
+    fn flight_controls_blocked(&self) -> bool {
+        self.ejection.is_some() || self.ejection_chord()
+    }
+
     fn read_input(&self) -> Input {
         let mut input = self.read_control_positions();
         if self.settings.invert_pitch {
@@ -975,6 +983,10 @@ impl App {
 
     /// Control positions before pitch inversion, for the on-screen stick cue.
     fn read_control_positions(&self) -> Input {
+        if self.flight_controls_blocked() {
+            return Input { airbrake: self.airbrake, limiters_off: self.limiters_off,
+                gear_down: self.gear_lever, flaps: self.flaps_switch, ..Default::default() };
+        }
         let km = &self.settings.keys;
         let k = |b: Bind| km.held(b, &self.keys);
         let mouse = if self.grabbed { self.mouse } else { (0.0, 0.0) };
@@ -1046,6 +1058,12 @@ impl App {
     fn pad_buttons(&mut self) {
         use gamepad::{A, B, BACK, DOWN, LEFT, LS, RB, RIGHT, RS, START, UP, X, Y};
         let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout);
+        if !menu && self.ejection_chord() {
+            self.zoom_pad = false;
+            let weapon = if self.settings.pad_layout == PadLayout::Combat { gamepad::A } else { gamepad::UP };
+            self.pad_jettisoned = self.pad.held(weapon);
+            return;
+        }
         if matches!(self.state, State::Attract | State::Loadout) && !self.controls_open && self.pad.pressed(START) {
             self.act(if self.state == State::Loadout { Action::Launch } else { Action::Start });
             return;
@@ -1090,6 +1108,9 @@ impl App {
             // The weapon button cycles on release, so that holding it
             // jettisons the store selected now rather than the next one.
             let weapon = if self.settings.pad_layout == PadLayout::Combat { A } else { UP };
+            if !self.pad.held(weapon) && !self.pad.released(weapon) {
+                self.pad_jettisoned = false;
+            }
             for (button, b) in actions.iter().copied().chain(airbrake) {
                 let b = if mig && b == Bind::LeftMfd { Bind::Sensor } else { b };
                 if b == Bind::Weapon {
@@ -1151,6 +1172,8 @@ impl App {
     }
 
     fn step(&mut self, dt: f64, input: Input) {
+        let blocked = self.flight_controls_blocked();
+        let input = if blocked { self.read_input() } else { input };
         let m = &mut self.mission;
         let a = self.aircraft.as_mut().unwrap();
         m.elapsed += dt;
@@ -1158,14 +1181,14 @@ impl App {
             m.time_left = (m.time_left - dt).max(0.0);
         }
         // Nobody flies a jet the pilot has left.
-        let input = if a.ejected { Input::default() } else { self.pilot.controls(a, input) };
+        let input = if blocked { input } else { self.pilot.controls(a, input) };
         let broken = a.gear_broken;
         a.update(dt, &input);
         let mut eject_toast = None;
         if let Some(e) = &mut self.ejection {
             let toast = e.step(dt, a);
             if e.rocket() {
-                self.world.fx.decoy(e.pilot.pos - e.pilot.q.axes().up * 0.75, e.pilot.vel * 0.6);
+                self.world.fx.seat_rocket(e.pilot.pos - e.pilot.q.axes().up * 0.75, e.pilot.vel, e.pilot.q.axes().up);
             }
             if let Some(t) = toast {
                 if e.phase == eject::Phase::Seat {
@@ -1324,7 +1347,7 @@ impl App {
     /// and their effects. Returns true when it ended the run.
     fn fight(&mut self, dt: f64) -> bool {
         // A pilot out cold, or still coming round, cannot squeeze the trigger.
-        let trigger = self.trigger() && self.pilot.authority() > 0.5 && self.ejection.is_none();
+        let trigger = self.trigger() && self.pilot.authority() > 0.5 && !self.flight_controls_blocked();
         // The handle, held by a pilot awake to pull it: half a second on the
         // key, both bumpers for a second and a half on the pad.
         let pad_pull = self.pad.held(gamepad::LB) && self.pad.held(gamepad::RB);
@@ -1335,7 +1358,7 @@ impl App {
         }
         // Held down, the countermeasure button runs another program every
         // CM_REPEAT seconds; both sticks clicked together is the limiter override.
-        let cm = self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.held(gamepad::LS) && !self.pad.held(gamepad::RS);
+        let cm = !self.flight_controls_blocked() && (self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.held(gamepad::LS) && !self.pad.held(gamepad::RS));
         self.cm_hold = if cm { self.cm_hold + dt } else { 0.0 };
         if self.cm_hold >= CM_REPEAT {
             self.cm_hold -= CM_REPEAT;
@@ -1426,6 +1449,9 @@ impl App {
         let r = 1.0 - (-dt.max(0.0) * 11.0).exp();
         let tr = 1.0 - (-dt.max(0.0) * 7.0).exp();
         let rr = 1.0 - (-dt.max(0.0) * 8.0).exp();
+        let pull_time = if self.pad.held(gamepad::LB) && self.pad.held(gamepad::RB) { 1.5 } else { 0.5 };
+        self.hands.eject = if self.ejection.as_ref().is_some_and(|e| e.phase == eject::Phase::Canopy) { 1.0 }
+            else if self.ejection_chord() { (self.eject_hold / pull_time).min(1.0) } else { 0.0 };
         let h = &mut self.hands;
         h.roll += (roll - h.roll) * r;
         h.pitch += (pitch - h.pitch) * r;
@@ -1535,9 +1561,12 @@ impl App {
             q = q.mul(Quat::axis_angle(V3::Z, sr * shake * 1.1));
         }
         q = q.mul(Quat::axis_angle(V3::Y, -self.look.0));
-        q = q.mul(Quat::axis_angle(V3::X, self.look.1));
+        let reach = smoothstep(0.0, 0.55, self.hands.eject);
+        let pitch = mix(self.look.1, self.look.1.min(-65.0 * DEG), reach);
+        q = q.mul(Quat::axis_angle(V3::X, pitch));
         let ax = q.axes();
-        let eye = cockpit::eye_world(a);
+        // Bow forward over the chest to see both hands at the seat handle.
+        let eye = cockpit::eye_world(a) + a.q.axes().forward * (0.18 * reach);
         Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() }
     }
 
@@ -1547,8 +1576,14 @@ impl App {
         let p = &e.pilot;
         let hanging = matches!(e.phase, eject::Phase::Chute | eject::Phase::Landed);
         if self.view == View::Cockpit {
-            let down = if hanging { -25.0 * DEG } else { 0.0 };
-            let q = p.q.mul(Quat::axis_angle(V3::Y, -self.look.0)).mul(Quat::axis_angle(V3::X, self.look.1 + down));
+            if e.phase == eject::Phase::Canopy {
+                return self.flight_camera(self.aircraft.as_ref().unwrap());
+            }
+            let reach = if e.phase == eject::Phase::Seat { 1.0 - smoothstep(0.0, 0.45, e.away().unwrap_or(0.0)) }
+                else { 0.0 };
+            let pitch = mix(self.look.1, self.look.1.min(-55.0 * DEG), reach)
+                + if hanging { -25.0 * DEG } else { 0.0 };
+            let q = p.q.mul(Quat::axis_angle(V3::Y, -self.look.0)).mul(Quat::axis_angle(V3::X, pitch));
             let ax = q.axes();
             let eye = p.pos + p.q.rotate(v3(0.0, 0.52, -0.16));
             return Camera { eye, forward: ax.forward, right: ax.right, up: ax.up, fov: self.settings.fov * DEG * self.zoom_scale() };
@@ -1619,7 +1654,7 @@ impl App {
         let m = &self.mirror;
         self.ctx.begin_pass(Some(m.pass), PassAction::clear_color(0.1, 0.14, 0.16, 1.0));
         let mission = matches!(self.kind, MissionKind::Gates | MissionKind::Free).then_some(&self.mission);
-        let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a), ejection: None };
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a), ejection: None, first_person: false };
         self.world.draw(&mut *self.ctx, &rear, m.w as f64 / m.h as f64, self.time, mission, Some(a), true, Some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
         self.cockpit.blit_mirror(&mut *self.ctx, &self.world, m);
@@ -1677,6 +1712,12 @@ impl App {
     /// false for held actions (stick, throttle, trigger, brakes), which
     /// the caller tracks as keys held down.
     fn bind_pressed(&mut self, b: Bind) -> bool {
+        if self.state == State::Flying && self.ejection_chord() && b != Bind::Eject {
+            return true;
+        }
+        if self.ejection.is_some() && !matches!(b, Bind::View | Bind::Center) {
+            return true;
+        }
         let flying = self.state == State::Flying;
         let looking = matches!(self.state, State::Flying | State::Frozen);
         match b {
@@ -1813,7 +1854,7 @@ impl EventHandler for App {
             self.pad_active = false;
         }
         self.toast_timer = (self.toast_timer - dt).max(0.0);
-        let zoomed = (self.zoom_mouse || self.zoom_pad) && matches!(self.state, State::Flying | State::Frozen);
+        let zoomed = !self.ejection_chord() && (self.zoom_mouse || self.zoom_pad) && matches!(self.state, State::Flying | State::Frozen);
         if matches!(self.state, State::Flying | State::Frozen) {
             self.zoom += (zoomed as i32 as f64 - self.zoom) * (1.0 - (-dt * 9.0).exp());
         }
@@ -1897,7 +1938,7 @@ impl EventHandler for App {
         let flying_view = !matches!(self.state, State::Attract | State::Loadout) && self.aircraft.is_some();
         // A wrecked jet leaves only the fireball and debris, seen from outside.
         let wrecked = self.aircraft.as_ref().is_some_and(|a| a.crashed);
-        let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked && self.ejection.is_none();
+        let cockpit_view = flying_view && self.view == View::Cockpit && !wrecked && self.ejection.as_ref().is_none_or(|e| e.phase == eject::Phase::Canopy);
         let cam = self.camera;
 
         // Instrument pages refresh at 30 Hz.
@@ -1905,6 +1946,8 @@ impl EventHandler for App {
             let a = self.aircraft.as_ref().unwrap();
             self.cockpit.update_atlas(&mut *self.ctx, &mut self.atlas_canvas, a, &self.mission, self.pages, self.time, &self.combat);
             self.cockpit.atlas_clock = self.time;
+        }
+        if cockpit_view {
             self.draw_mirrors();
         }
 
@@ -1921,7 +1964,7 @@ impl EventHandler for App {
             self.world.fx.extra_glow.clear();
         }
         let player = if flying_view && !wrecked { self.aircraft.as_ref() } else { None };
-        let scene = props::Scene { models: &self.models, combat: &self.combat, player, ejection: self.ejection.as_ref() };
+        let scene = props::Scene { models: &self.models, combat: &self.combat, player, ejection: self.ejection.as_ref(), first_person: self.view == View::Cockpit && self.ejection.is_some() };
         self.world.draw(&mut *self.ctx, &cam, aspect, self.time, mission, player, cockpit_view, flying_view.then_some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
         if cockpit_view {
@@ -1929,7 +1972,7 @@ impl EventHandler for App {
             let cam_b = cockpit::body_camera(&cam, a);
             let sun_b = a.q.conj().rotate(world::sun_dir());
             self.ctx.begin_pass(Some(self.scene.pass), PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
-            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind == sim::Type::Mig29);
+            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind == sim::Type::Mig29, self.ejection.is_none());
             self.ctx.end_render_pass();
         }
 
@@ -1957,7 +2000,17 @@ impl EventHandler for App {
             let cv = &mut self.overlay;
             if flying_view {
                 let a = self.aircraft.as_ref().unwrap();
-                if cockpit_view {
+                if let Some(e) = &self.ejection {
+                    let s = ui::ui_scale(w, h);
+                    cv.text(if self.view == View::Cockpit { "EJECTED PILOT // FIRST PERSON" } else { "EJECTED PILOT // EXTERNAL VIEW" },
+                        12.0 * s, 12.0 * s, s, cockpit::HUD, canvas::Align::Left);
+                    if self.toast_timer > 0.0 {
+                        cv.text(&self.toast, w * 0.5, 30.0 * s, s, cockpit::HUD, canvas::Align::Center);
+                    }
+                    cv.text(&format!("{} // {:.0} M AGL", e.spec.name, (e.pilot.pos.y - terrain::floor(e.pilot.pos.x, e.pilot.pos.z)).max(0.0)),
+                        12.0 * s, 27.0 * s, s, cockpit::HUD, canvas::Align::Left);
+                    cv.text("V VIEW    ALT + MOUSE LOOK    P FREEZE", 12.0 * s, h - 16.0 * s, s, cockpit::HUD, canvas::Align::Left);
+                } else if cockpit_view {
                     let cam_b = cockpit::body_camera(&cam, a);
                     let focal = h as f64 * 0.5 / (cam.fov / 2.0).tan();
                     let body = cockpit::BodyProjector { eye: cam_b.eye, right: cam_b.right, up: cam_b.up, fwd: cam_b.forward, focal, w: w as f64, h: h as f64 };
@@ -2161,6 +2214,13 @@ impl EventHandler for App {
             }
             return;
         }
+        if self.state == State::Flying && self.settings.keys.lookup(key) == Some(Bind::Eject) {
+            self.keys.insert(key);
+            return;
+        }
+        if self.state == State::Flying && self.ejection_chord() {
+            return;
+        }
         if key == KeyCode::K && !repeat {
             self.toggle_controls(None);
             return;
@@ -2319,4 +2379,34 @@ fn window_icon() -> conf::Icon {
     icon.medium.copy_from_slice(&icon::render(32));
     icon.big.copy_from_slice(&icon::render(64));
     icon
+}
+
+fn ejection_requested(km: &keymap::Keymap, keys: &HashSet<KeyCode>, pad: &Gamepad, scripted: bool) -> bool {
+    scripted || km.held(Bind::Eject, keys) || pad.held(gamepad::LB) && pad.held(gamepad::RB)
+}
+
+#[cfg(test)]
+mod input_priority_tests {
+    use super::*;
+
+    #[test]
+    fn ejection_chord_and_remapped_key_take_priority_in_both_pad_layouts() {
+        let mut km = keymap::Keymap::default();
+        km.set(Bind::Eject, 0, Some(KeyCode::J));
+        km.set(Bind::Eject, 1, None);
+        let mut keys = HashSet::new();
+        let mut pad = Gamepad::new();
+        for buttons in [0, gamepad::LB, gamepad::RB, gamepad::LB | gamepad::RB] {
+            pad.state.buttons = buttons;
+            assert_eq!(ejection_requested(&km, &keys, &pad, false), buttons == gamepad::LB | gamepad::RB);
+        }
+        pad.state.buttons = 0;
+        keys.insert(KeyCode::J);
+        keys.insert(KeyCode::F);
+        keys.insert(KeyCode::W);
+        assert!(ejection_requested(&km, &keys, &pad, false));
+        keys.remove(&KeyCode::J);
+        assert!(!ejection_requested(&km, &keys, &pad, false));
+        assert!(ejection_requested(&km, &keys, &pad, true));
+    }
 }

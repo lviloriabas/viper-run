@@ -57,6 +57,11 @@ but the nose and the IRST ball.
   sit beside the panel under the right rail, rather than below the knees.
 - Layout checked against the real photographs above and Figure 15, printed
   page 21, of the [Eagle Dynamics MiG-29 manual](https://www.digitalcombatsimulator.com/upload/iblock/463/DCS%20MIG-29%20Flight%20Manual%20EN.pdf).
+  The warning column's mount is inset from the right rail and lowered just
+  enough to clear it; a ray test checks the whole illuminated face against the
+  cockpit mesh. The three mirrors retain their existing curved geometry under
+  a uniform 0.78 scale about each pane's centre. This is a visual fit to the
+  reference photographs, not a surveyed mirror dimension.
   Dimensions and angles remain visual estimates. The supplied modernized
   cockpit photograph guides tub proportions and console orientation; the
   instruments retain the game's analogue 9.13S configuration. Both EGT

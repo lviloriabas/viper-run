@@ -213,7 +213,7 @@ fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3, cuff: (f64, f64)) {
     loft(m, &[St(wrist + back * 0.08, cw + 0.012, ch + 0.010, GLOVE_DARK), St(wrist + back * 0.03, cw + 0.008, ch + 0.006, GLOVE_DARK), St(wrist - back * 0.008, cw, ch, GLOVE)], V3::X, &HEX);
 }
 
-fn leg(m: &mut Mesh, s: f64, rudder: f64) {
+fn leg(m: &mut Mesh, s: f64, rudder: f64, pedal_tilt: f64) {
     // Right rudder pushes the right pedal forward and lets the left one back.
     // The pedals travel 7 cm, far more than the real ones, so the knees
     // visibly drop and rise with the yaw input.
@@ -265,11 +265,12 @@ fn leg(m: &mut Mesh, s: f64, rudder: f64) {
         screen(m, &kb, 0.12, 0.15, R_KNEE);
     }
     // Boot on the rudder pedal.
-    let foot = |dy: f64, dz: f64| ankle + v3(0.0, dy, dz);
+    let rot = Quat::axis_angle(V3::X, pedal_tilt);
+    let foot = |dy: f64, dz: f64| ankle + rot.rotate(v3(0.0, dy, dz));
     loft(m, &[St(foot(0.03, 0.0), 0.050, 0.052, BOOT), St(foot(-0.045, -0.05), 0.052, 0.048, BOOT), St(foot(-0.06, -0.15), 0.048, 0.034, BOOT), St(foot(-0.055, -0.205), 0.036, 0.022, BOOT)], V3::X, &OCT);
-    m.block(&Frame { o: foot(-0.07, 0.03), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.044, 0.034, 0.034), BOOT);
-    bar(m, foot(-0.104, 0.06), foot(-0.094, -0.215), 0.054, 0.009, V3::Y, SOLE);
-    m.block(&Frame { o: foot(-0.125, -0.10), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.06, 0.012, 0.10), Rgb(0.24, 0.26, 0.26));
+    m.block(&Frame { o: foot(-0.07, 0.03), x: V3::X, y: rot.rotate(V3::Y), z: rot.rotate(V3::Z) }, v3(0.044, 0.034, 0.034), BOOT);
+    bar(m, foot(-0.104, 0.06), foot(-0.094, -0.215), 0.054, 0.009, rot.rotate(V3::Y), SOLE);
+    m.block(&Frame { o: foot(-0.125, -0.10), x: V3::X, y: rot.rotate(V3::Y), z: rot.rotate(V3::Z) }, v3(0.06, 0.012, 0.10), Rgb(0.24, 0.26, 0.26));
 }
 
 /// Seat axes: reclined 30 degrees, `up` along the back, `fwd` out of it.
@@ -301,13 +302,6 @@ fn seat_and_torso(m: &mut Mesh) {
     }
     m.block(&seat(at(0.36, -0.17)), v3(0.23, 0.40, 0.05), SEAT);
     m.block(&seat(at(0.82, -0.21)), v3(0.155, 0.13, 0.07), SEAT.scale(1.1));
-    // Yellow and black ejection handle on the front of the seat pan.
-    for i in 0..8 {
-        let (t0, t1) = (i as f64 * PI / 8.0, (i + 1) as f64 * PI / 8.0);
-        let p = |t: f64| v3(0.06 * t.cos(), 0.535 + 0.045 * t.sin(), -3.655);
-        let col = if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
-        bar(m, p(t0), p(t1), 0.0085, 0.0085, V3::Z, col);
-    }
 
     // Torso in the flight suit, survival vest and harness. The head sits at
     // the eye and is left out.
@@ -425,6 +419,7 @@ fn throttle(m: &mut Mesh, h: &Hands) -> V3 {
     m.block(&k.frame(-0.038, 0.042, 0.012), v3(0.003, 0.013, 0.005), grey);
     knob(m, k.p(-0.034, 0.062, -0.012), -k.fwd, 0.009, 0.010, grey);
 
+    if h.eject > 0.0 { return palm(&k); }
     // The hand lies level on top of the grip, pointing forward in line with
     // the forearm: one mitten piece from the wrist over the root bulb and
     // down in front, the thumb along the aft face.
@@ -452,14 +447,42 @@ fn gear_handle(m: &mut Mesh, h: &Hands) {
     loft(m, &[St(tip + f.z * 0.012, 0.010, 0.010, lamp), St(tip + f.z * 0.016, 0.008, 0.008, lamp)], f.x, &OCT);
 }
 
+fn ejection_handle(m: &mut Mesh, pull: f64) {
+    let lift = smoothstep(0.55, 1.0, pull) * 0.10;
+    for i in 0..8 {
+        let (t0, t1) = (i as f64 * PI / 8.0, (i + 1) as f64 * PI / 8.0);
+        let p = |t: f64| v3(0.06 * t.cos(), 0.535 + lift + 0.045 * t.sin(), -3.655);
+        let col = if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
+        bar(m, p(t0), p(t1), 0.0085, 0.0085, V3::Z, col);
+    }
+}
+
+fn handle_hand(m: &mut Mesh, side: f64, from: V3, pull: f64) {
+    let lift = smoothstep(0.55, 1.0, pull) * 0.10;
+    let target = v3(side * 0.035, 0.568 + lift, -3.655);
+    let k = Grip::new(from.lerp(target, smoothstep(0.0, 0.55, pull)), V3::X * side, side);
+    let wrist = fist(m, &k, 0.009, 0.009,
+        [k.p(-0.02, 0.0, 0.02), k.p(0.0, 0.015, 0.02), k.p(0.016, 0.020, 0.0), k.p(0.015, 0.006, -0.008)]);
+    arm(m, v3(side * SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(side), (0.026, 0.036));
+}
+
 /// Legs on the pedals, both arms and the two controls under the hands.
 pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     gear_handle(m, h);
     for s in [-1.0, 1.0] {
-        leg(m, s, h.rudder);
+        leg(m, s, h.rudder, 15.0 * DEG);
     }
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
+    ejection_handle(m, h.eject);
+    if h.eject > 0.0 {
+        // Keep the controls visible after the hands leave them.
+        throttle(m, h);
+        handle_hand(m, 1.0, k.o, h.eject);
+        handle_hand(m, -1.0, palm(&throttle_grip(h)), h.eject);
+        m.facet();
+        return;
+    }
     let (rx, rf) = (0.019, 0.025);
     let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.012, 0.004, -rx * 0.1), k.p(-rf - 0.008, 0.030, -rx * 0.75), k.p(-0.028, 0.054, -rx - 0.003), k.p(-0.020, 0.074, -0.016)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
@@ -524,6 +547,7 @@ fn mig_throttle(m: &mut Mesh, h: &Hands) -> V3 {
     knob(m, f.p(0.020, 0.024, -0.02), V3::Y, 0.007, 0.008, RED);
     knob(m, f.p(0.034, 0.008, -0.01), V3::X, 0.009, 0.006, Rgb(0.55, 0.56, 0.55));
     knob(m, f.p(-0.010, 0.024, 0.012), V3::Y, 0.006, 0.006, METALC.scale(0.6));
+    if h.eject > 0.0 { return g + V3::Y * 0.040; }
     // The left hand on top, pointing forward, the thumb down the inboard side.
     let hf = v3(0.06, 0.0, -1.0).norm();
     let hs = V3::Y.cross(hf);
@@ -551,10 +575,18 @@ fn mig_gear_lever(m: &mut Mesh, h: &Hands) {
 pub fn build_dynamic_mig(m: &mut Mesh, h: &Hands) {
     mig_gear_lever(m, h);
     for s in [-1.0, 1.0] {
-        leg(m, s, h.rudder);
+        leg(m, s, h.rudder, 0.0);
     }
     let k = mig_stick_grip(h);
     mig_stick(m, &k);
+    ejection_handle(m, h.eject);
+    if h.eject > 0.0 {
+        mig_throttle(m, h);
+        handle_hand(m, 1.0, k.o, h.eject);
+        handle_hand(m, -1.0, mig_throttle_grip(h), h.eject);
+        m.facet();
+        return;
+    }
     let (rx, rf) = (0.019, 0.025);
     let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.012, 0.004, -rx * 0.1), k.p(-rf - 0.008, 0.030, -rx * 0.75), k.p(-0.028, 0.054, -rx - 0.003), k.p(-0.020, 0.074, -0.016)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));

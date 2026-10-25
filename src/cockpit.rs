@@ -229,6 +229,8 @@ pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012
 
 #[derive(Clone, Copy, Default)]
 pub struct Hands {
+    /// Hands reach for the seat handle, then lift it, 0 to 1.
+    pub eject: f64,
     pub roll: f64,
     pub pitch: f64,
     pub throttle: f64,
@@ -464,7 +466,7 @@ impl Cockpit {
 
     /// Draws the cockpit into the current pass, the MiG's when `mig`.
     /// `cam_b` is the camera in cockpit space (see body_camera).
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, mig: bool) {
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, mig: bool, canopy_on: bool) {
         let (statics, canopy) = if mig { (&self.mig[0], &self.mig[2]) } else { (&self.statics, &self.canopy) };
         let proj = perspective(cam_b.fov, aspect, 0.02, 40.0);
         let vp = mat_mul(&proj, &cam_b.view());
@@ -497,6 +499,7 @@ impl Cockpit {
         ctx.apply_bindings(&self.hud_glass.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.05, tint: [0.10, 0.16, 0.13], ..u }));
         ctx.draw(0, self.hud_glass.count, 1);
+        if !canopy_on { return; }
         ctx.apply_bindings(&canopy.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.035, tint: if mig { [0.08, 0.12, 0.12] } else { [0.16, 0.13, 0.05] }, ..u }));
         ctx.draw(0, canopy.count, 1);

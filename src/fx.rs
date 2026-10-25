@@ -380,6 +380,15 @@ impl Fx {
         }
     }
 
+    /// Short, narrow rocket exhaust below an ejection seat. This must not
+    /// use the metre-wide flare and chaff cloud from a countermeasure program.
+    pub fn seat_rocket(&mut self, pos: V3, vel: V3, up: V3) {
+        self.push(Particle { kind: Kind::Fire, pos, vel: vel - up * 18.0,
+            life: 0.10, size: (0.075, 0.025),
+            color: ([1.0, 0.85, 0.45], [0.8, 0.22, 0.04]),
+            drag: 0.0, gravity: 0.0, ..BASE });
+    }
+
     /// A countermeasure program, chaff and flares together, out of the
     /// dispensers on each side of the tail: a white-hot flare thrown down
     /// and outboard on each side, burning out as it falls, and a bundle of

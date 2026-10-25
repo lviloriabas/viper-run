@@ -919,7 +919,7 @@ impl World {
     /// exterior into the current pass.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam: &Camera, aspect: f64, time: f64, mission: Option<&Mission>, aircraft: Option<&Aircraft>, cockpit: bool, props: Option<&dyn Props>) {
-        let near = if cockpit { 0.25 } else { 0.7 };
+        let near = if props.is_some_and(|p| p.first_person()) { 0.03 } else if cockpit { 0.25 } else { 0.7 };
         let proj = perspective(cam.fov, aspect, near, 80000.0);
         let vp = mat_mul(&proj, &cam.view());
         let sun = sun_dir().f32();
@@ -1321,6 +1321,7 @@ impl World {
 /// Extra opaque geometry drawn in the world pass with the aircraft shader:
 /// bandits, stores, missiles, bombs and ground targets.
 pub trait Props {
+    fn first_person(&self) -> bool { false }
     fn draw(&self, world: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera);
 }
 

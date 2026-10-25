@@ -185,6 +185,29 @@ impl Ejection {
         self.fired.map(|t| self.age - t)
     }
 
+    /// Handle travel during canopy clearance. The hands are already on it.
+    pub fn handle_pull(&self) -> f64 {
+        if self.phase == Phase::Canopy { smoothstep(0.0, self.spec.canopy_lead, self.age) } else { 1.0 }
+    }
+
+    /// Canopy and suspension lines, rooted at the harness while airborne.
+    /// On touchdown the skirt drifts clear and the fabric settles beside the pilot.
+    pub fn chute_frame(&self) -> (V3, V3, V3, V3) {
+        let ax = self.pilot.q.axes();
+        let right = ax.right.with_y(0.0).norm_or(V3::X);
+        let back = right.cross(V3::Y);
+        let spread = 0.12 + 0.88 * self.chute * self.chute;
+        let rise = 0.35 + 0.65 * self.chute.sqrt();
+        if self.phase != Phase::Landed {
+            return (right * spread, V3::Y * rise, back * spread, self.pilot.pos);
+        }
+        let settle = smoothstep(0.0, 2.5, self.landed_for);
+        let mut target = self.pilot.pos + right * 4.2 + back * 0.8;
+        target.y = terrain::floor(target.x, target.z) + 0.05;
+        (right * mix(spread, 1.0, settle), V3::Y * mix(rise, 0.055, settle),
+            back * mix(spread, 0.65, settle), self.pilot.pos.lerp(target, settle))
+    }
+
     /// The rocket burning, for its flame.
     pub fn rocket(&self) -> bool {
         self.away().is_some_and(|t| t < self.spec.rocket.0)
@@ -241,12 +264,13 @@ impl Ejection {
                 }
                 if self.phase == Phase::Landed {
                     self.landed_for += dt;
-                    self.chute = (self.chute - dt / 2.5).max(0.0);
+                    // Keep the fabric on the ground after it falls to the side.
+                    // Deflation is a pose change, never a disappearance.
                     return None;
                 }
                 self.chute = (self.chute + dt / s.inflate).min(1.0);
                 let fill = self.chute * self.chute;
-                self.pilot.fly(dt, s.mass.1, s.cda.0 + fill * s.cda.2, 0.95);
+                self.pilot.fly(dt, s.mass.1, s.cda.0 + fill * s.cda.2, 1.45);
                 // The pilot hangs upright under the risers, facing where he
                 // drifts, swinging a little as the canopy takes him.
                 self.sway += dt;
@@ -299,11 +323,6 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
     }
     // Rocket nozzle under the pan.
     m.lathe(v3(0.0, pan - 0.16, 0.05), V3::Y * -1.0, &[(0.0, 0.0), (0.0, 0.05), (0.06, 0.07), (0.07, 0.0)], 6, Rgb(0.12, 0.12, 0.12));
-    // Yellow and black handle between the knees.
-    for k in 0..4 {
-        let col = if k % 2 == 0 { Rgb(0.95, 0.80, 0.10) } else { Rgb(0.05, 0.05, 0.05) };
-        m.block(&f(v3(-0.045 + k as f64 * 0.03, pan + 0.05, -0.36)), v3(0.015, 0.03, 0.015), col);
-    }
     if kind == Type::Mig29 && booms {
         for s in [-1.0, 1.0] {
             let root = v3(s * 0.14, pan + 1.12, 0.22);
@@ -315,15 +334,38 @@ pub fn seat_mesh(kind: Type, booms: bool) -> Mesh {
     m
 }
 
-/// The pilot: seated with the knees up, or hanging with the legs down.
-pub fn pilot_mesh(kind: Type, hanging: bool) -> Mesh {
+pub const HANDLE_FRAMES: usize = 12;
+
+pub fn handle_point(pull: f64) -> V3 {
+    v3(0.0, -HARNESS + 0.085 + pull * 0.10, -0.36)
+}
+
+pub fn handle_mesh(pull: f64) -> Mesh {
+    let mut m = Mesh::new();
+    let centre = handle_point(pull);
+    for i in 0..12 {
+        let point = |t: f64| centre + v3(0.065 * t.cos(), 0.035 * t.sin() - 0.035, 0.0);
+        let col = if i % 2 == 0 { Rgb(0.95, 0.80, 0.10) } else { Rgb(0.05, 0.05, 0.05) };
+        m.capsule(point(i as f64 * TAU / 12.0), point((i + 1) as f64 * TAU / 12.0), 0.009, 0.009, col, 5);
+    }
+    m
+}
+
+/// The pilot: seated with hands on the handle, or hanging from the risers.
+/// The helmet is omitted from the view at his eyes.
+pub fn pilot_mesh(kind: Type, hanging: bool, first_person: bool, pull: f64) -> Mesh {
     let mut m = Mesh::new();
     let (suit, helmet) = if kind == Type::Mig29 { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) } else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
     let gsuit = suit.scale(0.8);
     let hip = v3(0.0, -HARNESS + 0.10, 0.0);
-    m.capsule(hip, v3(0.0, 0.30, 0.04), 0.17, 0.19, suit, 8);
-    m.capsule(v3(0.0, 0.42, 0.04), v3(0.0, 0.58, 0.02), 0.13, 0.13, helmet, 8);
-    m.block(&Frame { o: v3(0.0, 0.48, -0.08), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.09, 0.04, 0.03), Rgb(0.12, 0.12, 0.10));
+    // The close view omits the rounded neck cap as well as the helmet;
+    // that cap otherwise crosses the eye when looking down at the handle.
+    m.capsule(hip, v3(0.0, if first_person { 0.24 } else { 0.30 }, 0.04), 0.17,
+        if first_person { 0.17 } else { 0.19 }, suit, 8);
+    if !first_person {
+        m.capsule(v3(0.0, 0.42, 0.04), v3(0.0, 0.58, 0.02), 0.13, 0.13, helmet, 8);
+        m.block(&Frame { o: v3(0.0, 0.48, -0.08), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.09, 0.04, 0.03), Rgb(0.12, 0.12, 0.10));
+    }
     for s in [-1.0, 1.0] {
         let hp = hip + V3::X * (s * 0.10);
         let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, 0.10, -0.45), hp + v3(0.0, -0.32, -0.55)) };
@@ -331,9 +373,12 @@ pub fn pilot_mesh(kind: Type, hanging: bool) -> Mesh {
         m.capsule(knee, foot, 0.065, 0.055, gsuit, 6);
         m.capsule(foot, foot + v3(0.0, -0.03, -0.12), 0.05, 0.05, Rgb(0.08, 0.07, 0.06), 5);
         let shoulder = v3(s * 0.20, 0.24, 0.04);
-        let hand = if hanging { v3(s * 0.22, 0.62, 0.0) } else { v3(s * 0.08, -0.40, -0.34) };
+        let hand = if hanging { v3(s * 0.22, 0.62, 0.0) } else { handle_point(pull) + V3::X * (s * 0.035) };
         m.capsule(shoulder, shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06), 0.06, 0.055, suit, 6);
-        m.capsule(shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06), hand, 0.055, 0.045, suit, 6);
+        m.capsule(shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06), hand, 0.055, 0.035, suit, 6);
+        let glove = Rgb(0.24, 0.26, 0.20);
+        m.capsule(hand - V3::X * 0.022, hand + V3::X * 0.022, 0.023, 0.023, glove, 6);
+        m.capsule(hand + v3(s * 0.01, 0.018, 0.015), hand + v3(-s * 0.01, -0.01, -0.01), 0.012, 0.010, glove.scale(0.9), 5);
     }
     m
 }
@@ -357,11 +402,93 @@ pub fn chute_mesh(spec: &SeatSpec) -> Mesh {
             let (t0, t1) = (0.12 + j as f64 / rows as f64 * 0.88, 0.12 + (j + 1) as f64 / rows as f64 * 0.88);
             let (a, b, c, d) = (ring(k, t0), ring(k + 1, t0), ring(k + 1, t1), ring(k, t1));
             m.quad(a, b, c, d, col);
-            m.quad(b, a, d, c, col.scale(0.92));
+            // One surface, visible from both sides. A coplanar reverse skin
+            // causes z-fighting and alternates the lighting as the camera moves.
         }
         let skirt_pt = ring(k, 1.0);
         let riser = v3(if skirt_pt.x > 0.0 { 0.16 } else { -0.16 }, 0.45, 0.0);
         m.capsule(skirt_pt, riser, 0.012, 0.012, Rgb(0.82, 0.80, 0.74), 3);
     }
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::{Mission, FIXED_DT};
+
+    #[test]
+    fn both_seats_clear_the_jet_separate_and_leave_the_chute_on_the_ground() {
+        for kind in [Type::F16, Type::Mig29] {
+            let mut a = Aircraft::new(&Mission::new());
+            a.kind = kind;
+            a.q = Quat::axis_angle(V3::Y, 0.0);
+            a.pos.y = terrain::floor(a.pos.x, a.pos.z) + 10.0;
+            a.vel = V3::ZERO;
+            let mut e = Ejection::new(&a);
+            let start = e.pilot.pos;
+            let mut saw_seat = false;
+            let mut saw_chute = false;
+            for _ in 0..(120.0 / FIXED_DT) as usize {
+                e.step(FIXED_DT, &a);
+                assert!(e.pilot.pos.x.is_finite() && e.pilot.pos.y.is_finite() && e.pilot.pos.z.is_finite());
+                if e.phase == Phase::Seat && e.away().unwrap() > 0.2 {
+                    saw_seat = true;
+                    assert!(e.pilot.pos.y > start.y + 1.0);
+                    assert!(e.seat.is_none());
+                }
+                saw_chute |= e.phase == Phase::Chute && e.chute > 0.9 && e.seat.is_some();
+                if e.phase == Phase::Landed && e.landed_for >= 2.5 { break; }
+            }
+            assert!(saw_seat && saw_chute, "{kind:?}");
+            assert_eq!(e.phase, Phase::Landed);
+            assert!(e.chute > 0.9, "fabric disappeared");
+            let (_, up, _, origin) = e.chute_frame();
+            assert!((origin - e.pilot.pos).with_y(0.0).len() > 4.0);
+            assert!((origin + up * 8.6).y < terrain::floor(origin.x, origin.z) + 0.6);
+            let landed = e.pilot.pos;
+            for _ in 0..120 { e.step(FIXED_DT, &a); }
+            assert_eq!(e.pilot.pos, landed);
+            assert!(e.chute > 0.9);
+        }
+    }
+
+    #[test]
+    fn parachute_has_one_fabric_surface_without_coplanar_reverse_faces() {
+        for spec in [&ACES2, &K36DM] {
+            let m = chute_mesh(spec);
+            let mut triangles = std::collections::HashSet::new();
+            for tri in m.v.chunks(crate::mesh::STRIDE * 3) {
+                // Suspension line tubes are a different material.
+                if (tri[6] - 0.82).abs() < 0.001 { continue; }
+                let mut points: Vec<[u32; 3]> = tri.chunks(crate::mesh::STRIDE)
+                    .map(|v| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()]).collect();
+                points.sort_unstable();
+                assert!(triangles.insert(points), "duplicate fabric surface");
+            }
+        }
+    }
+
+    #[test]
+    fn the_handle_moves_with_both_gloves_and_the_helmet_is_out_of_first_person() {
+        assert!((handle_point(1.0).y - handle_point(0.0).y - 0.10).abs() < 1e-10);
+        for kind in [Type::F16, Type::Mig29] {
+            for frame in 0..HANDLE_FRAMES {
+                let pull = frame as f64 / (HANDLE_FRAMES - 1) as f64;
+                let body = pilot_mesh(kind, false, true, pull);
+                let head = pilot_mesh(kind, false, false, pull);
+                assert!(body.count() < head.count());
+                for v in body.v.chunks(crate::mesh::STRIDE) {
+                    let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
+                    assert!((p - v3(0.0, 0.52, -0.16)).len() > 0.15);
+                    assert!(v.iter().all(|x| x.is_finite()));
+                }
+                for side in [-1.0, 1.0] {
+                    let grip = handle_point(pull) + V3::X * (side * 0.035);
+                    assert!(body.v.chunks(crate::mesh::STRIDE).any(|v|
+                        (v3(v[0] as f64, v[1] as f64, v[2] as f64) - grip).len() < 0.025));
+                }
+            }
+        }
+    }
 }

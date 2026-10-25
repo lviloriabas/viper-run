@@ -152,6 +152,12 @@ fn sill(s: f64, z: f64) -> V3 {
     cp(z, if s > 0.0 { 0.0 } else { PI })
 }
 
+fn warning_frame() -> Frame {
+    let n = v3(-0.85, 0.15, 0.50).norm();
+    let y = (V3::Y - n * n.y).norm();
+    Frame { o: v3(0.350, 0.850, -3.86), x: y.cross(n), y, z: n }
+}
+
 pub fn build_static(m: &mut Mesh) {
     let o = outline();
     let face = |ix: &[usize]| -> Vec<V3> { ix.iter().map(|&i| pp(o[i].0, o[i].1, 0.0)).collect() };
@@ -211,9 +217,7 @@ pub fn build_static(m: &mut Mesh) {
     plate(m, &weapons, 0.100, 0.065, R_WEAPON);
 
     // Ekran beside the engine group and the warning column under the rail.
-    let n = v3(-0.85, 0.15, 0.50).norm();
-    let y = (V3::Y - n * n.y).norm();
-    let warning = Frame { o: v3(0.404, 0.880, -3.80), x: y.cross(n), y, z: n };
+    let warning = warning_frame();
     plate(m, &warning, 0.052, 0.225, R_WARN);
     plate(m, &panel_at(0.330, 1.025), 0.064, 0.065, R_EKRAN);
 
@@ -322,12 +326,14 @@ pub fn build_static(m: &mut Mesh) {
             // of hanging across the forward view below it.
             p - inward(p, 0.018) + up * (y + h * 0.35) + n * d
         };
-        super::curved_mirror(m, (hi - lo) * radius, h, &place, COAMING.scale(1.8), (mid - PI / 2.0).sin());
+        let centre = place(0.0, 0.0, 0.0);
+        let smaller = |x: f64, y: f64, d: f64| centre + (place(x, y, d) - centre) * 0.78;
+        super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), (mid - PI / 2.0).sin());
         for t in [-0.28, 0.28] {
             let x = t * (hi - lo) * radius;
             let phi = mid - x / radius;
             let p = cp(za, phi);
-            crate::cockpit::pilot::bar(m, p - inward(p, 0.025), place(x, -h * 0.4, -0.018), 0.006, 0.006, V3::Z, FRAME);
+            crate::cockpit::pilot::bar(m, p - inward(p, 0.025), smaller(x, -h * 0.4, -0.018), 0.006, 0.006, V3::Z, FRAME);
         }
     }
 
@@ -815,6 +821,22 @@ mod tests {
                     assert!(!mesh.v.chunks(crate::mesh::STRIDE * 3).any(|tri| blocked(eye, target, tri)),
                         "pilot obscures primary dial {i} at rudder {rudder}, sample {u},{v}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn warning_column_is_clear_of_the_canopy_rail_and_panel() {
+        let mut mesh = Mesh::new();
+        build_static(&mut mesh);
+        let f = warning_frame();
+        for u in [-0.95, 0.0, 0.95] {
+            for v in [-0.95, -0.5, 0.0, 0.5, 0.95] {
+                let target = f.p(u * 0.026, v * 0.1125, 0.0085);
+                assert!(target.x < WALL_X - 0.01);
+                assert!(!mesh.v.chunks(crate::mesh::STRIDE * 3)
+                    .any(|tri| blocked(crate::airframe::EYE, target, tri)),
+                    "warning column obscured at {u},{v}");
             }
         }
     }

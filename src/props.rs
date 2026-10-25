@@ -31,6 +31,8 @@ pub struct Models {
     /// cockpit canopy blown off.
     seat: [Part; 2],
     pilot: [[Part; 2]; 2],
+    seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 2],
+    handle: [Part; crate::eject::HANDLE_FRAMES],
     chute: [Part; 2],
     canopy: [Part; 2],
 }
@@ -81,10 +83,15 @@ impl Models {
         use crate::eject;
         let mig = crate::mig29::build();
         let seat = [part(&eject::seat_mesh(Type::F16, false)), part(&eject::seat_mesh(Type::Mig29, true))];
-        let pilot = [[part(&eject::pilot_mesh(Type::F16, false)), part(&eject::pilot_mesh(Type::F16, true))], [part(&eject::pilot_mesh(Type::Mig29, false)), part(&eject::pilot_mesh(Type::Mig29, true))]];
+        let pilot = std::array::from_fn(|k| std::array::from_fn(|fp|
+            part(&eject::pilot_mesh(if k == 0 { Type::F16 } else { Type::Mig29 }, true, fp != 0, 1.0))));
+        let seated = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
+            part(&eject::pilot_mesh(if k == 0 { Type::F16 } else { Type::Mig29 }, false, fp != 0,
+                frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)))));
+        let handle = std::array::from_fn(|frame| part(&eject::handle_mesh(frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)));
         let chute = [part(&eject::chute_mesh(&eject::ACES2)), part(&eject::chute_mesh(&eject::K36DM))];
         let canopy = [part(&frame.canopy), part(&mig.canopy)];
-        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, chute, canopy }
+        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, seated, handle, chute, canopy }
     }
 }
 
@@ -96,6 +103,7 @@ pub struct Scene<'a> {
     pub player: Option<&'a Aircraft>,
     /// The player's ejection, once the handle is pulled.
     pub ejection: Option<&'a crate::eject::Ejection>,
+    pub first_person: bool,
 }
 
 /// Model transform of a body moving along `dir` at `pos`, relative to the eye.
@@ -138,6 +146,8 @@ fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
 }
 
 impl Props for Scene<'_> {
+    fn first_person(&self) -> bool { self.first_person }
+
     fn draw(&self, w: &World, ctx: &mut dyn RenderingBackend, vp: M4, cam: &Camera) {
         let (m, c, eye) = (self.models, self.combat, cam.eye);
         // The stations sit where the F-16 hangs them; a MiG carries them on
@@ -187,27 +197,27 @@ impl Props for Scene<'_> {
             };
             w.draw_prop(ctx, vp, &m.canopy[k], at(&e.canopy), NONE);
             let hanging = matches!(e.phase, Phase::Chute | Phase::Landed);
-            if e.phase != Phase::Canopy {
-                w.draw_prop(ctx, vp, &m.pilot[k][hanging as usize], at(&e.pilot), NONE);
+            let frame = (e.handle_pull() * (crate::eject::HANDLE_FRAMES - 1) as f64).round() as usize;
+            let pilot = if hanging { &m.pilot[k][self.first_person as usize] } else { &m.seated[k][frame][self.first_person as usize] };
+            if e.phase != Phase::Canopy || !self.first_person {
+                w.draw_prop(ctx, vp, pilot, at(&e.pilot), NONE);
             }
             match &e.seat {
-                Some(seat) => w.draw_prop(ctx, vp, &m.seat[k], at(seat), NONE),
-                None if e.phase == Phase::Seat => w.draw_prop(ctx, vp, &m.seat[k], at(&e.pilot), NONE),
+                Some(seat) => {
+                    w.draw_prop(ctx, vp, &m.seat[k], at(seat), NONE);
+                    w.draw_prop(ctx, vp, &m.handle[crate::eject::HANDLE_FRAMES - 1], at(seat), NONE);
+                }
+                None if e.phase != Phase::Canopy || !self.first_person => {
+                    w.draw_prop(ctx, vp, &m.seat[k], at(&e.pilot), NONE);
+                    w.draw_prop(ctx, vp, &m.handle[frame], at(&e.pilot), NONE);
+                }
                 None => {}
             }
             if e.chute > 0.01 {
                 // Streaming out of its pack and filling: long and thin first,
                 // then the full spread.
-                let ax = e.pilot.q.axes();
-                let up = V3::Y;
-                let right = v3(ax.right.x, 0.0, ax.right.z).norm();
-                let back = right.cross(up);
-                let spread = (0.12 + 0.88 * e.chute * e.chute) as f32;
-                let rise = (0.35 + 0.65 * e.chute.sqrt()) as f32;
-                let mut model = basis(right, up, back, e.pilot.pos - eye);
-                for (i, v) in model.iter_mut().take(11).enumerate() {
-                    *v *= if (4..8).contains(&i) { rise } else { spread };
-                }
+                let (right, up, back, origin) = e.chute_frame();
+                let model = basis(right, up, back, origin - eye);
                 w.draw_prop(ctx, vp, &m.chute[k], model, NONE);
             }
         }
