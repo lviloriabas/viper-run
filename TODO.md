@@ -1,4 +1,15 @@
 # TODO
+
+## Pendientes inmediatas
+- (ninguna)
+
+## Pendientes más adelante
+- [ ] Tutoriales de controles, armas, vuelo, despegues y aterrizajes.
+- [ ] P2P multiplayer, con servidores, chat de voz con push to talk, detección de voz, todo el menu de muteado y esas cosas necesarias. detección de colisiones entre aviones, y un sistema de matchmaking.
+- [ ] PVP Y PVE misiones de mulitiplayer, con objetivos, misiones de combate, misiones de ataque a tierra, misiones de escolta, misiones de defensa aérea, etc.
+- [ ] Agregar más tipos de aviones.
+
+## Completadas
 - [x] Positive G-forces blackout, redout for negative. Real values
 - [x] Wing and structural flutter, aeroelasticity, flutter speed, divergence speed, etc.
 - [x] Condensation plumes from manuevers
@@ -42,6 +53,25 @@
 - [x] el selector de armas debe ir seleccionando solo las armas disponibles, no todas.
 - [x] En free flight que los bandits no usen countermeasures
 - [x] Modela el IRCCM y anti countermeasure de los misiles.
-
-Más adelante
-- [ ] Tutoriales de controles, armas, vuelo, despegues y aterrizajes.
+- [x] En el F-16, el panel de la derecha tiene un error, algunas de las luces se cortan con el borde de la cabina, corregir
+- [x] El espacio de las piernas del F-16 no está, debe haber, actualmente las piernas chocan con los paneles frontales, corregir. Busca referencias de la cabina real y corrige la geometría de la cabina para las piernas.
+- [x] Me gustaría poder ver en la cabina el factor de carga o G force y aoa del avión, pero busca una forma real de ponerlo, si puede ir en el hud ponerlo. El F-16 ya tiene G, pero en los casos donde no haya, confirma.
+- [x] Ordenar la todo list poniendo arriba las tareas pendientes y separadas por inmediatas y más adelante.
+- [x] Quitar la cantidad de frames del performance overlay.
+- [x] Quitar la explosión de encender el afterburner, solo debería encenderse sin que haya una explosión.
+- [x] Agregar al HUD los respectivos modos de cañones a tierra, aparte del de aire. Con CCIP.
+- [x] Los número del hud para velocidad y altura están muy grandes, pueden reducirse un poco.
+- [x] Un control para jettison arma por arma, obviamente el cañon se deja normal.
+- [x] Haz la implementación completa y realista de las ejecciones y asientos de ejección, texturas, paracaidas diferentes si son diferentes para los dos modelos y primera y tercera persona.
+- [x] Modela el daño de tren de aterrizaje a altas velocidades y de flaps, tambien anima el movimiento de los flaps y su daño, lo mismo para el tren de aterrizaje, que se vea el daño y que afecte el desempeño del avión.
+- [x] Modela el efecto de los flaps en el desempeño del avión, incluyendo el aumento de drag y la disminución de velocidad máxima, mayor AoA, etc.
+- [x] que la info en la pierna del piloto sea info útil, como velocidades minimas, del tren de aterrizaje, flaps, etc. y no solo un texto random.
+- [x] Investiga el tren de nariz de aterrizaje del F-16, actualmente lo tienes mal ubicado, va justo debajo de la entrada del motor, no alfrente, usa datos de dimensiones reales.
+- [x] Flaps NORM NO, up o la configuración en la que estén.
+- [x] Simula el efecto de la temperatura del aire en el desempeño del avión, incluyendo la densidad del aire y su efecto en la sustentación y resistencia.
+- [x] Simula el burn time del misil y su aceleración y desaceleración acorde a la realidad, incluyendo el efecto de la altitud y velocidad del avión en el desempeño del misil.
+- [x] Los misiles suenan mucho al lanzarse, puedes reducir un poco el volumen.
+- [x] Si se mantiene presionado el botón de chaff y flares que se sigan lanzando periodicamente mientras se presiona, no tan seguido.
+- [x] Verifica que los misiles IR estén bien modelados, incluyendo el efecto del sol por ej, y su seguimiento a flares o al motor del avión.
+- [x] Verifica que los misiles radar estén bien modelados acorde a su tipo y modelo según datos reales.
+- [x] Que las nubes no giren con la vista del piloto, que tengan un movimiento propio.
