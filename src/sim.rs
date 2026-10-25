@@ -143,6 +143,15 @@ impl Type {
     pub fn store_shift(self, at: V3) -> V3 {
         match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18 => crate::hornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
     }
+    /// Tyre radius used to place each rendered axle above its contact point.
+    pub fn wheel_radius(self, i: usize) -> f64 {
+        match self {
+            Type::F16 => if i==0{0.22}else{0.35},
+            Type::Mig29 => if i==0{0.285}else{0.42},
+            Type::F18 => if i==0{0.25}else{0.34},
+            Type::Su27 => if i==0{0.34}else{0.51},
+        }
+    }
     pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18 => &F18_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
     pub fn landing_height(self) -> f64 { -self.wheels()[0].local.y - 0.10 }
     pub fn name(self) -> &'static str {
@@ -312,6 +321,8 @@ pub enum Piece {
     Wing(usize),
     /// Both stabilators.
     Tail,
+    /// Nose (0), left main (1), or right main (2), including wheel and strut.
+    Gear(usize),
 }
 
 impl Piece {
@@ -319,6 +330,7 @@ impl Piece {
     pub fn centre(self, kind: Type) -> V3 {
         let side = |i: usize| if i == 0 { -1.0 } else { 1.0 };
         match (self, kind) {
+            (Piece::Gear(i), _) => kind.wheels()[i].local + V3::Y * kind.wheel_radius(i),
             (Piece::Wing(i), Type::F16) => v3(side(i) * 2.9, 0.28, 1.6),
             (Piece::Wing(i), Type::Mig29) => v3(side(i) * 3.6, 0.35, 3.1),
             (Piece::Tail, Type::F16) => v3(0.0, 0.30, 6.0),
@@ -394,7 +406,7 @@ impl BattleDamage {
 /// The gas spring stiffens through the stroke and the tyre takes what is
 /// left at the bottom, so a firm arrival bottoms the strut without breaking
 /// it; a leg gives way at about four times its share of the weight, past a
-/// sink rate near 4 m/s (13 ft/s) on the mains, and folds instead of
+/// sink rate near 4 m/s (13 ft/s) on the mains, and detaches instead of
 /// holding the jet up.
 pub struct Wheel {
     pub name: &'static str,
@@ -1112,8 +1124,10 @@ pub struct Aircraft {
     pub on_ground: bool,
     pub compression: [f64; 3],
     pub wheel_brake: f64,
-    /// Legs that broke under a hard landing and folded.
+    /// Legs torn off by impact or air load. They never retract or return.
     pub gear_broken: [bool; 3],
+    /// Departures already emitted, preserved across network snapshots.
+    pub gear_shed: [bool; 3],
     /// Speed of the airframe scraping along the ground (m/s), and what of
     /// it is touching.
     pub skid: f64,
@@ -1233,6 +1247,7 @@ impl Aircraft {
             on_ground: parked,
             compression: [0.0; 3],
             gear_broken: [false; 3],
+            gear_shed: [false; 3],
             skid: 0.0,
             skid_part: "",
             skid_at: V3::ZERO,
@@ -1514,7 +1529,8 @@ impl Aircraft {
         // moment the FLCS trims out.
         let fl = self.flaps;
         // Torn doors and bent legs or flaperons drag more than whole ones.
-        let parasite = self.kind.gear_drag() * self.gear * (1.0 + 1.5 * self.gear_damage + self.gear_broken.iter().filter(|&&b| b).count() as f64 * 0.25) + self.kind.flap_drag() * (fl + 0.4 * self.flap_damage);
+        let legs = self.gear_broken.iter().filter(|&&b| !b).count() as f64 / 3.0;
+        let parasite = self.kind.gear_drag() * self.gear * (legs + 1.5 * self.gear_damage) + self.kind.flap_drag() * (fl + 0.4 * self.flap_damage);
         c.cx -= parasite * alpha.cos();
         c.cz -= parasite * alpha.sin() + (if self.kind == Type::F18 { 0.65 } else if self.kind == Type::Su27 { 0.38 } else { FLAP_CL }) * fl * alpha.cos();
         c.cm -= 0.025 * fl;
@@ -1586,8 +1602,21 @@ impl Aircraft {
         self.drag_n = qs * cd;
     }
 
-    /// Parts break off: they stay gone, the surfaces left stop answering the
-    /// stick and the gear stays where it was.
+    /// Pose of an attached leg, also used as the departure pose of its debris.
+    pub fn gear_pose(&self, i: usize) -> (V3, Quat) {
+        let pivots = match self.kind {
+            Type::F16 => &crate::airframe::GEAR_PIVOTS,
+            Type::Mig29 => &crate::mig29::GEAR_PIVOTS,
+            Type::F18 => &crate::hornet::GEAR_PIVOTS,
+            Type::Su27 => &crate::su27::GEAR_PIVOTS,
+        };
+        let (pivot, axis, swing) = pivots[i];
+        let t = smoothstep(if i == 0 { 0.15 } else { 0.25 }, if i == 0 { 0.9 } else { 1.0 }, self.gear);
+        let bent = self.gear_damage * if i == 0 { 0.12 } else { 0.08 };
+        (pivot, Quat::axis_angle(axis, (1.0 - t + bent) * swing))
+    }
+
+    /// Parts stay gone; the remaining surfaces stop answering the stick.
     pub fn lose(&mut self, parts: Breakup) {
         self.lost.wing[0] |= parts.wing[0];
         self.lost.wing[1] |= parts.wing[1];
@@ -2366,10 +2395,10 @@ mod ground_tests {
     }
 
     /// A firm arrival flown straight onto the runway without a flare (about
-    /// 4 m/s) bottoms the struts and holds; one at about 6 m/s folds the
+    /// 4 m/s) bottoms the struts and holds; one at about 6 m/s tears off the
     /// gear and the jet slides to a stop on its belly instead of exploding.
     #[test]
-    fn hard_landings_fold_the_gear_instead_of_exploding() {
+    fn hard_landings_tear_off_gear_instead_of_exploding() {
         for kind in [Type::F16, Type::Mig29] {
             let firm = land(kind, 3.0, 0.0, 150.0);
             assert!(!firm.crashed && firm.gear_broken == [false; 3] && firm.speed < 1.0, "{kind:?} firm: {} {:?}", firm.collision_label, firm.gear_broken);

@@ -222,6 +222,8 @@ impl Combat {
     }
     pub fn network_visual_step(&mut self, dt: f64) {
         self.clock += dt;
+        for i in 0..self.bandits.len() { self.shed_bandit_gear(i); }
+        self.step_wrecks(dt);
         for b in &mut self.bandits {
             if b.alive {
                 b.jet.last_pos = b.jet.pos;
@@ -376,6 +378,7 @@ impl Combat {
         self.network_controls(host, control, p, dt);
         let input = p.pilot.controls(host, control.input());
         host.update(dt, &input);
+        self.shed_gear(host);
         p.pilot.update(dt, host);
         self.sensors(dt, host);
         let trigger = control.trigger() && p.pilot.authority() > 0.5 && p.eject_clock == 0.0;
@@ -636,7 +639,10 @@ impl ActorState {
                 | ((a.lost.wing[0] as u16) << 2)
                 | ((a.lost.wing[1] as u16) << 3)
                 | ((a.lost.tail as u16) << 4)
-                | ((a.crashed as u16) << 5),
+                | ((a.crashed as u16) << 5)
+                | ((a.gear_broken[0] as u16) << 6)
+                | ((a.gear_broken[1] as u16) << 7)
+                | ((a.gear_broken[2] as u16) << 8),
             rounds: l.rounds,
             chaff: l.chaff,
             flares: l.flares,
@@ -691,6 +697,8 @@ impl ActorState {
             tail: self.flags & 16 != 0,
         };
         a.crashed = self.flags & 32 != 0;
+        a.gear_broken = [self.flags & 64 != 0, self.flags & 128 != 0, self.flags & 256 != 0];
+        for i in 0..3 { if !a.gear_broken[i] { a.gear_shed[i] = false; } }
         a.speed = a.vel.len();
         let atm = crate::air::atmosphere_at(a.pos.y);
         a.mach = a.speed / atm.sound;
@@ -702,7 +710,7 @@ impl ActorState {
         a.pitch = axes.forward.y.clamp(-1.0, 1.0).asin() * RAD;
         a.bank = (-axes.right.y).atan2(axes.up.y) * RAD;
         l.gun = gun_of(kind);
-        l.rounds = self.rounds;
+        l.rounds = self.rounds.min(l.gun.rounds);
         l.chaff = self.chaff;
         l.flares = self.flares;
         l.stations = self
@@ -724,10 +732,10 @@ impl ActorState {
         self.kind < 4
             && self.hp.is_finite()
             && (0.0..=100.0).contains(&self.hp)
-            && self.rounds <= 1000
+            && self.rounds <= gun_of(Type::ALL[self.kind as usize]).rounds
             && self.chaff <= 1000
             && self.flares <= 1000
-            && self.flags < 64
+            && self.flags < 512
             && self.stations.len() <= 24
             && self
                 .stations
@@ -916,6 +924,7 @@ impl Combat {
                 }
                 self.firing = state.rounds < self.loadout.rounds;
                 state.apply(a, &mut self.loadout);
+                self.shed_gear(a);
                 self.hp = state.hp as f64;
                 self.player_dead = !state.alive;
                 self.player_team = state.team;
@@ -1208,5 +1217,30 @@ mod bomb_network_tests {
             c.loadout.stations.iter().filter(|s| s.loaded).count(),
             before
         );
+    }
+}
+
+
+#[cfg(test)]
+mod gear_snapshot_tests {
+    use super::*;
+    #[test]
+    fn individual_missing_legs_survive_actor_roundtrip() {
+        for kind in Type::ALL {
+            let mut a=spawn_type(kind,v3(0.0,4500.0,0.0),0.0,200.0);
+            let mut l=Loadout::configure(&Config::for_jet(MissionKind::Free,kind));
+            a.gear_broken=[true,false,true];
+            let state=ActorState::new(0,None,0,&a,&l,100.0,true,Mode::Nav,None,None);
+            assert!(state.valid());
+            let mut b=a.clone();
+            b.gear_broken=[false;3];
+            b.gear_shed=[true,false,false];
+            state.apply(&mut b,&mut l);
+            assert_eq!(b.gear_broken,[true,false,true]);
+            assert_eq!(b.gear_shed,[true,false,false]);
+            let mut malformed=state.clone();
+            malformed.rounds=l.gun.rounds+1;
+            assert!(!malformed.valid(),"reject ammunition beyond the selected gun capacity");
+        }
     }
 }

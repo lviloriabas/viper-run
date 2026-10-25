@@ -215,6 +215,7 @@ impl<'a> Ui<'a> {
         } else {
             (if hot { rgba(0x1a, 0x2a, 0x20, 0.95) } else { rgba(0x0a, 0x11, 0x0e, 0.6) }, if hot { ACID } else { GREEN }, if hot { ACID } else { LINE_HOT })
         };
+        self.cv.layout_item(crate::menu_layout::Kind::Button,label,[x,y,w,h]);
         self.cv.rect(x, y, w, h, bg);
         self.cv.stroke_rect(x, y, w, h, 1.0, border);
         self.cv.text(label, x + 8.0 * s, y + h / 2.0, s, fg, Align::Left);
@@ -226,12 +227,23 @@ impl<'a> Ui<'a> {
         w
     }
 
+    fn button_row(&mut self, items: &[(&str,&str,Action,bool)], x:f32, y:f32, width:f32) -> f32 {
+        let mut bx=x; let mut by=y;
+        for &(label,hint,action,primary) in items {
+            let w=self.button_width(label,hint);
+            if bx>x && bx+w>x+width {bx=x;by+=19.0*self.s;}
+            bx+=self.button(label,hint,bx,by,primary,action)+6.0*self.s;
+        }
+        by+15.0*self.s
+    }
+
     /// A fixed-width key cap in the small font, for the bindings table.
     fn key_cap(&mut self, label: &str, x: f32, y: f32, w: f32, hot: bool, action: Action) {
         let sm = self.s.max(2.0) - 1.0;
         let h = 9.0 * sm;
         let i = self.buttons.len();
         let focus = hot || i == self.selected || Button { x, y, w, h, action }.hit(self.mouse.0, self.mouse.1);
+        self.cv.layout_item(crate::menu_layout::Kind::Button,label,[x,y,w,h]);
         let (bg, fg, border) = if focus { (rgba(0x1a, 0x2a, 0x20, 0.95), ACID, ACID) } else { (rgba(0x0a, 0x11, 0x0e, 0.6), GREEN, LINE_HOT) };
         self.cv.rect(x, y, w, h, bg);
         self.cv.stroke_rect(x, y, w, h, 1.0, border);
@@ -240,6 +252,7 @@ impl<'a> Ui<'a> {
     }
 
     fn frame(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"frame",[x,y,w,h]);
         self.cv.rect(x, y, w, h, PANEL);
         self.cv.stroke_rect(x, y, w, h, 1.0, LINE_HOT);
         let c = 8.0 * self.s;
@@ -252,7 +265,7 @@ impl<'a> Ui<'a> {
     // ---------------------------------------------------------- screens
     pub fn start_screen(&mut self, muted: bool, best: &Best, time: f64, pitch: PitchSource, mission: MissionKind, cfg: &Config, clock: bool) {
         let s = self.s;
-        let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 20.0 * s).min(250.0 * s));
+        let (pw, ph) = ((self.w - 24.0 * s).min(600.0 * s), (self.h - 32.0 * s).min(290.0 * s));
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
         self.frame(x, y, pw, ph);
         let m = 12.0 * s;
@@ -300,10 +313,9 @@ impl<'a> Ui<'a> {
         let w1 = self.button("ENGAGE", "SPACE", bx, yy, true, Action::Start);
         self.button(if muted { "AUDIO OFF" } else { "AUDIO ON" }, "M", bx + w1 + 6.0 * s, yy, false, Action::Mute);
         yy += 19.0 * s;
-        let w3 = self.button("CONTROLS / CONFIG", "K", bx, yy, false, Action::Controls);
-        let w4 = self.button("FLIGHT SCHOOL", "", bx + w3 + 6.0 * s, yy, false, Action::School);
-        let w5=self.button("ONLINE", "", bx+w3+w4+12.0*s,yy,false,Action::Online);
-        self.button("QUIT", "", bx+w3+w4+w5+18.0*s, yy, false, Action::Quit);
+        self.button_row(&[("CONTROLS / CONFIG","K",Action::Controls,false),
+            ("FLIGHT SCHOOL","",Action::School,false),("ONLINE","",Action::Online,false),
+            ("QUIT","",Action::Quit,false)],bx,yy,left_w-m-6.0*s);
         let mut mx = bx;
         for k in MissionKind::ALL {
             // The chosen mission is the lit button; free flight's name is cut
@@ -316,6 +328,7 @@ impl<'a> Ui<'a> {
         // Briefing card.
         let (bxx, byy, bw) = (x + left_w + 6.0 * s, y + 30.0 * s, pw - left_w - m - 6.0 * s);
         let bh = ph - 52.0 * s;
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"MISSION DATA",[bxx,byy,bw,bh]);
         self.cv.rect(bxx, byy, bw, bh, rgba(0x05, 0x0b, 0x08, 0.8));
         self.cv.stroke_rect(bxx, byy, bw, bh, 1.0, LINE);
         let sm = s.max(2.0) - 1.0;
@@ -347,9 +360,10 @@ impl<'a> Ui<'a> {
         let mut ry = byy + 20.0 * s;
         for (k, v1, v2) in rows {
             self.cv.text(k, bxx + 6.0 * s, ry, sm, DIM, Align::Left);
-            self.cv.text(v1, bxx + 6.0 * s + 58.0 * sm, ry, sm, CREAM, Align::Left);
-            self.cv.text(v2, bxx + 6.0 * s + 58.0 * sm, ry + 9.0 * sm, sm, with_alpha(GREEN, 0.75), Align::Left);
-            ry += 22.0 * sm;
+            let vx=bxx+6.0*s+58.0*sm;let vw=bxx+bw-6.0*s-vx;
+            let h1=self.cv.paragraph(v1,vx,ry-3.5*sm,vw,sm,1.3,CREAM);
+            let h2=self.cv.paragraph(v2,vx,ry-3.5*sm+h1,vw,sm,1.3,with_alpha(GREEN,0.75));
+            ry += (h1+h2+4.0*sm).max(22.0*sm);
             self.cv.rect(bxx + 6.0 * s, ry - 5.0 * sm, bw - 12.0 * s, 1.0, with_alpha(LINE, 0.6));
         }
         ry += 2.0 * s;
@@ -370,16 +384,21 @@ impl<'a> Ui<'a> {
         };
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
-        for (i, (k, v)) in keys.iter().enumerate() {
-            let col = i % 2;
-            let row = i / 2;
-            let kx = bxx + 6.0 * s + col as f32 * (bw - 12.0 * s) / 2.0;
-            let ky = ry + row as f32 * 10.0 * sm;
-            if ky > byy + bh - 6.0 * sm {
-                break;
+        let col_w=(bw-16.0*s)/2.0;
+        for pair in keys.chunks(2) {
+            let mut height=10.0*sm;
+            for (col,&(k,v)) in pair.iter().enumerate() {
+                let kx=bxx+6.0*s+col as f32*(col_w+4.0*s);
+                let kw=Canvas::text_width(k,sm)+4.0*sm;
+                self.cv.text(k,kx,ry,sm,ACID,Align::Left);
+                if kw+Canvas::text_width(v,sm)<=col_w {
+                    self.cv.text(v,kx+kw,ry,sm,with_alpha(CREAM,0.7),Align::Left);
+                }else{
+                    let used=self.cv.paragraph(v,kx,ry+6.0*sm,col_w,sm,1.3,with_alpha(CREAM,0.7));
+                    height=height.max(used+12.0*sm);
+                }
             }
-            self.cv.text(k, kx, ky, sm, ACID, Align::Left);
-            self.cv.text(v, kx + Canvas::text_width(k, sm) + 4.0 * sm, ky, sm, with_alpha(CREAM, 0.7), Align::Left);
+            ry+=height;
         }
         // Footer.
         let fy = y + ph - 12.0 * s;
@@ -422,6 +441,7 @@ impl<'a> Ui<'a> {
         let s=self.s;let sm=(s-1.0).max(1.0);let h=22.0*s;
         let action=Action::NetEdit(field);
         let hot=enabled&&(editing||self.selected==self.buttons.len()||Button{x,y,w,h,action}.hit(self.mouse.0,self.mouse.1));
+        self.cv.layout_item(if enabled{crate::menu_layout::Kind::Button}else{crate::menu_layout::Kind::Panel},label,[x,y,w,h]);
         self.cv.rect(x,y,w,h,INK);self.cv.stroke_rect(x,y,w,h,1.0,if hot{ACID}else{LINE});
         self.cv.text(label,x+5.0*s,y+5.0*s,sm,DIM,Align::Left);
         let count=((w-12.0*s)/(6.0*sm)).max(5.0)as usize;
@@ -518,7 +538,14 @@ impl<'a> Ui<'a> {
     fn status_panel(&mut self, kicker: &str, kicker_col: Col, title: &str, title_col: Col, sub: &str, stats: [(&str, String, Col); 4], actions: &[(&str, &str, Action)], small: &str) {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
-        let (pw, ph) = ((self.w - 24.0 * s).min(380.0 * s), (self.h - 20.0 * s).min(186.0 * s));
+        let pw=(self.w-24.0*s).min(380.0*s);
+        let content_w=pw-28.0*s;
+        let sub_h=Canvas::paragraph_height(sub,content_w,sm,1.7);
+        let note_h=Canvas::paragraph_height(small,content_w,sm,1.4);
+        let mut rows=1;let mut row_w=0.0;
+        for (label,hint,_) in actions {let w=self.button_width(label,hint);if row_w>0.0&&row_w+w>content_w {rows+=1;row_w=0.0;}row_w+=w+6.0*s;}
+        let needed=135.0*s+sub_h+note_h+(rows-1)as f32*19.0*s;
+        let ph=needed.max(186.0*s).min(self.h-24.0*s);
         let (x, y) = ((self.w - pw) / 2.0, (self.h - ph) / 2.0);
         self.frame(x, y, pw, ph);
         let m = 14.0 * s;
@@ -532,24 +559,16 @@ impl<'a> Ui<'a> {
         let cw = (pw - 2.0 * m - 3.0 * 4.0 * s) / 4.0;
         for (i, (k, v, c)) in stats.iter().enumerate() {
             let cx = x + m + i as f32 * (cw + 4.0 * s);
+            self.cv.layout_item(crate::menu_layout::Kind::Panel,k,[cx,yy,cw,30.0*s]);
             self.cv.rect(cx, yy, cw, 30.0 * s, rgba(0x05, 0x0b, 0x08, 0.85));
             self.cv.stroke_rect(cx, yy, cw, 30.0 * s, 1.0, LINE);
             self.cv.text(k, cx + 5.0 * s, yy + 8.0 * s, sm, DIM, Align::Left);
             self.cv.text(v, cx + 5.0 * s, yy + 20.0 * s, s, *c, Align::Left);
         }
         yy += 40.0 * s;
-        let mut bx = x + m;
-        for (i, (label, hint, act)) in actions.iter().enumerate() {
-            let hint = self.hint(hint);
-            let w = Canvas::text_width(label, s) + if hint.is_empty() { 0.0 } else { Canvas::text_width(hint, sm) + 8.0 * s } + 16.0 * s;
-            if bx + w > x + pw - m {
-                bx = x + m;
-                yy += 19.0 * s;
-            }
-            let used = self.button(label, hint, bx, yy, i == 0, *act);
-            bx += used + 6.0 * s;
-        }
-        self.cv.text(small, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        let items:Vec<_>=actions.iter().enumerate().map(|(i,&(label,hint,action))|(label,hint,action,i==0)).collect();
+        let end=self.button_row(&items,x+m,yy,pw-2.0*m);
+        self.cv.paragraph(small,x+m,(end+8.0*s).max(y+ph-12.0*s-note_h),pw-2.0*m,sm,1.4,DIM);
         let keys: Vec<(&str, &str)> = actions.iter().map(|&(label, hint, _)| (hint, label)).collect();
         self.legend(&keys);
     }
@@ -670,7 +689,8 @@ impl<'a> Ui<'a> {
         let stats = format!("GROSS {} {unit}   DRAG +{} COUNTS   T/W {:.2}", (mass * per_kg / 10.0).round() as i64 * 10, (drag * 10000.0).round() as i64, tw);
         self.cv.text(&stats, x + m, yy + 4.0 * s, sm, AMBER, Align::Left);
         let note = if armed { "HEAVIER AND DRAGGIER MEANS SLOWER AND LESS G." } else { "LESS FUEL IS LIGHTER AND QUICKER, AND SOONER EMPTY." };
-        self.cv.text(note, x + m, y + ph - 12.0 * s, sm, DIM, Align::Left);
+        let nh=Canvas::paragraph_height(note,pw-2.0*m,sm,1.4);
+        self.cv.paragraph(note,x+m,y+ph-8.0*s-nh,pw-2.0*m,sm,1.4,DIM);
         // After LAUNCH and the stores in the keyboard order.
         if threats && pw > left + 200.0 * s {
             self.threat_setup(x + left, y + m, pw - left - m, ph - 2.0 * m, mission, cfg);
@@ -733,6 +753,7 @@ impl<'a> Ui<'a> {
         let cx = terrain::river_x((z0 + z1) * 0.5);
         let to = |p: V3| -> [f32; 2] { [x + (((p.x - cx) / span_x + 0.5) as f32) * w, y + (((p.z - z0) / span_z) as f32) * h] };
         let px = |metres: f64| (metres / span_z) as f32 * h;
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"tactical map",[x,y,w,h]);
         self.cv.set_clip(Some(vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]]));
         // Ground: cells shaded by height, lit from the north-west.
         let (nx, nz) = (((w / h) * 72.0).round().max(8.0) as usize, 72usize);
@@ -916,6 +937,7 @@ impl<'a> Ui<'a> {
         let s = self.s;
         let sm = s.max(2.0) - 1.0;
         let w = (200.0 * s).min(self.w * 0.94);
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"controls",[0.0,0.0,w,self.h]);
         self.cv.rect(0.0, 0.0, w, self.h, rgba(0x09, 0x10, 0x12, 0.97));
         self.cv.rect(w - 1.0, 0.0, 1.0, self.h, rgba(0x78, 0x8e, 0x7b, 1.0));
         let m = 10.0 * s;
@@ -1000,11 +1022,11 @@ impl<'a> Ui<'a> {
             ui.cv.text(&value, w - m, y, sm, rgba(0xc9, 0xe9, 0xa0, 1.0), Align::Right);
             let by = y + 9.0 * s;
             ui.button("-", "", m, by, false, down);
-            let bw = 15.0 * s;
+            let bw = ui.button_width("-", "");
             let (tx, tw) = (m + bw + 4.0 * s, w - 2.0 * m - 2.0 * bw - 8.0 * s);
             ui.cv.rect(tx, by + 7.0 * s, tw, 2.0, LINE_HOT);
             ui.cv.rect(tx + tw * t as f32 - 2.0 * s, by + 3.0 * s, 4.0 * s, 9.0 * s, ACID);
-            ui.button("+", "", w - m - bw + 1.0 * s, by, false, up);
+            ui.button("+", "", w - m - bw, by, false, up);
         };
         if self.pad {
             slider(self, y, "STICK RESPONSE (EXPO)", format!("{:.0}%", st.expo * 100.0), st.expo, Action::SensDown, Action::SensUp);
@@ -1053,6 +1075,7 @@ impl<'a> Ui<'a> {
         let w = (340.0 * s).min(self.w - x0 - 4.0);
         if w < 120.0 * s { return false; }
         let (x, y0, h) = (x0 + 4.0, 12.0 * s, self.h - 24.0 * s);
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"input map",[x,y0,w,h]);
         self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
         self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
         let key_w = rows.iter().map(|&(k, _)| Canvas::text_width(k, sm)).fold(72.0 * sm, f32::max) + 8.0 * sm;
@@ -1080,6 +1103,7 @@ impl<'a> Ui<'a> {
         }
         let h = self.h - 24.0 * s;
         let (x, y0) = (x0 + 4.0, 12.0 * s);
+        self.cv.layout_item(crate::menu_layout::Kind::Panel,"input map",[x,y0,w,h]);
         self.cv.rect(x, y0, w, h, rgba(0x09, 0x10, 0x12, 0.95));
         self.cv.stroke_rect(x, y0, w, h, 1.0, LINE);
         let mut y = y0 + m + 4.0 * s;
@@ -1509,6 +1533,7 @@ pub fn training_overlay(cv: &mut Canvas, w: f32, h: f32, t: &crate::tutorial::Tr
     let s = ui_scale(w,h); let sm = (s-1.0).max(1.0);
     let pw = (w-24.0*s).min(410.0*s);
     let (x,y) = ((w-pw)/2.0, h-80.0*s);
+    cv.layout_item(crate::menu_layout::Kind::Panel,"training instruction",[x,y,pw,66.0*s]);
     cv.rect(x,y,pw,66.0*s,PANEL); cv.stroke_rect(x,y,pw,66.0*s,1.0,LINE_HOT);
     let (title, detail, _) = t.instruction();
     cv.text(&format!("{}  {}/{}: {}", t.lesson.name(), t.stage+1, t.lesson.steps(), title),x+8.0*s,y+9.0*s,sm,ACID,Align::Left);

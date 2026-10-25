@@ -77,7 +77,11 @@ pub(super) fn step(app: &mut App, frame: u32) -> bool {
 
 
 // Hold the loopback peer only for the native UI integration check.
-thread_local! { static FUTURE_PEER:std::cell::RefCell<Option<crate::net::Session>>=const{std::cell::RefCell::new(None)}; }
+thread_local! {
+    static FUTURE_PEER:std::cell::RefCell<Option<crate::net::Session>>=const{std::cell::RefCell::new(None)};
+    static FUTURE_DELAY:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};
+    static FUTURE_JOINED:std::cell::RefCell<Option<std::time::Instant>>=const{std::cell::RefCell::new(None)};
+}
 pub(super) fn future_step(app:&mut App,frame:u32)->bool{
     fn bounds(app:&App){
         for b in &app.buttons{
@@ -89,7 +93,7 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             assert!(area<=0.5||height<=0.5,"overlapping {:?} and {:?}",a.action,b.action);
         }}
     }
-    let i=frame as usize-1;
+    let i=frame as usize-1-FUTURE_DELAY.with(|v|v.get());
     if i<60{
         let lesson=crate::tutorial::Lesson::ALL[(i/4)/3];
         let method=(i/4)%3;
@@ -136,12 +140,23 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             let mut invite=crate::net::Invite::parse(&app.multiplayer.session.as_ref().unwrap().invitation()).unwrap();
             invite.endpoint.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
             FUTURE_PEER.with(|p|*p.borrow_mut()=Some(crate::net::Session::join(invite,"Wing",1).unwrap()));
+            FUTURE_JOINED.with(|t|*t.borrow_mut()=Some(std::time::Instant::now()));
         }
         5..=15=>{
             FUTURE_PEER.with(|p|{let mut peer=p.borrow_mut();let peer=peer.as_mut().unwrap();peer.poll().unwrap();peer.set_ready(true,1).unwrap();});
             app.network_poll();
         }
-        16=>{assert_eq!(app.multiplayer.session.as_ref().unwrap().members.len(),2);select(app,Action::NetLaunch,2);}
+        16=>{
+            FUTURE_PEER.with(|p|{let mut peer=p.borrow_mut();let peer=peer.as_mut().unwrap();peer.poll().unwrap();peer.set_ready(true,1).unwrap();});
+            app.network_poll();
+            let session=app.multiplayer.session.as_ref().unwrap();
+            if session.members.len()!=2 || session.members.iter().any(|m|!m.ready) {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0),"loopback peer did not join and become ready within five seconds");
+                FUTURE_DELAY.with(|v|v.set(v.get()+1));
+                return false;
+            }
+            assert_eq!(session.members.len(),2);select(app,Action::NetLaunch,2);
+        }
         17=>{assert!(app.multiplayer.active());assert_eq!(app.state,State::Flying);key(app,KeyCode::Escape);}
         18=>{
             assert!(app.controls_open);assert!(!app.buttons.iter().any(|b|b.action==Action::Restart));
@@ -166,4 +181,63 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             println!("PASS future menu integration check complete");return true;
         }
     }false
+}
+
+/// Offline fixture states for long labels, full lobbies and all drawer variants.
+/// Rendering these never calls voice tick or starts microphone capture.
+pub(super) fn layout_scene(app:&mut App,scene:&str) {
+    use crate::{net,settings,voice,tutorial};
+    let known=matches!(scene,"keys"|"mouse"|"classic-invert"|"rebind"|"school-passed"|"fuel-min"|"lesson-passed"|"lesson-failed"|"lobby"|"lobby-client"|"lobby-voice"|"browser"|"fields")
+        ||scene.starts_with("training-")||scene.starts_with("threats-")||scene.starts_with("network-");
+    assert!(known,"unknown layout scene: {scene}");
+    if let Some(mode)=scene.strip_prefix("network-") {
+        app.multiplayer.menu.rules.mode=net::GameMode::parse(mode).expect("known multiplayer layout mode");
+    }
+    if let Some(stage)=scene.strip_prefix("training-").and_then(|n|n.parse::<usize>().ok()) {
+        let training=app.training.as_mut().expect("use --tutorial with a training layout scene");
+        assert!(stage<training.lesson.steps()); training.stage=stage;
+    }
+    if scene.contains("classic") {app.settings.pad_layout=settings::PadLayout::Classic;}
+    if scene.contains("invert") {app.settings.invert_pitch=true;}
+    if scene.contains("mouse") {app.settings.pitch=settings::PitchSource::Mouse;}
+    if scene.contains("keys") {app.settings.pitch=settings::PitchSource::Keys;}
+    if scene=="rebind" {app.rebinding=Some((0,0));}
+    if scene=="school-passed" {app.settings.tutorial_completed=31;}
+    if let Some(index)=scene.strip_prefix("threats-").and_then(|n|n.parse::<usize>().ok()) {
+        app.config.threats=crate::scenario::Threats::with_layout(crate::scenario::Layout::ALL[index],app.kind,true);
+        app.config.threats.bandits=crate::scenario::MAX_BANDITS;
+        app.config.threats.sams=crate::scenario::MAX_SAMS;
+        app.config.threats.guns=crate::scenario::MAX_GUNS;
+    }
+    if scene=="fuel-min" {for _ in 0..16 {if app.config.fuel_is_min(){break;} app.config.cycle_fuel();}}
+    if scene.starts_with("lesson-") {
+        let passed=scene.ends_with("passed");
+        let a=app.aircraft.as_ref().expect("use --screen win for lesson results");
+        let mut training=tutorial::Training::new(tutorial::Lesson::Weapons,a,&app.combat);
+        if passed {training.stage=training.lesson.steps();}
+        app.training=Some(training);
+    }
+    if scene.starts_with("lobby") {
+        let mut session=net::Session::host("127.0.0.1:0".parse().unwrap(),None,false,"Longest-Callsign",0,net::Rules{capacity:8,..Default::default()}).unwrap();
+        for i in 1..8 {session.members.push(net::Member{id:session.id+i,name:"Longest-Callsign".into(),jet:(i%4)as u8,ready:i%2==0,team:(i%2)as u8});}
+        if scene=="lobby-client" {session.host=false;}
+        app.multiplayer.session=Some(session);
+    }
+    if scene=="browser" {
+        let mut browser=net::Browser::new("127.0.0.1:9".parse().unwrap()).unwrap();
+        for i in 0..4 {browser.rooms.push(net::Advert{title:"Longest-Callsign".into(),endpoint:"127.0.0.1:9".parse().unwrap(),key:[0;32],mode:net::GameMode::ALL[i],players:8,capacity:8});}
+        app.multiplayer.menu.browser=Some(browser);
+    }
+    if scene=="fields" {
+        app.multiplayer.menu.name="Longest-Callsign".into();
+        app.multiplayer.menu.invite="0123456789ABCDEF".repeat(10);
+        app.multiplayer.menu.server="long-directory-hostname.example.invalid:42861".into();
+        app.multiplayer.menu.port="65535".into();
+        app.multiplayer.menu.editing=Some(crate::multiplayer::Field::Invite);
+        app.multiplayer.menu.status="A LONG STATUS MESSAGE THAT MUST STAY INSIDE THE PANEL. ".repeat(5);
+    }
+    if scene.contains("voice") {
+        app.multiplayer.voice.configure(voice::VoiceSettings{mode:voice::VoiceMode::VoiceActivation,muted:true,deafened:true,..Default::default()});
+        assert!(!app.multiplayer.voice.capturing());
+    }
 }

@@ -199,6 +199,22 @@ impl Ejection {
         if self.phase == Phase::Canopy { smoothstep(0.0, self.spec.canopy_lead, self.age) } else { 1.0 }
     }
 
+    /// Cached landing pose shared by the arms, loose risers and cord roots.
+    pub fn landing_frame(&self) -> usize {
+        (smoothstep(0.0, 0.8, self.landed_for) * (LANDING_FRAMES - 1) as f64).round() as usize
+    }
+
+    /// Cord endpoints use the pilot and canopy frames independently, so
+    /// inflation and sway never pull the cords away from the risers.
+    pub fn suspension(&self, gore: usize) -> (V3, V3) {
+        let skirt = skirt_point(gore);
+        let side = if skirt.x > 0.0 { 1.0 } else { -1.0 };
+        let lower = self.landing_frame() as f64 / (LANDING_FRAMES - 1) as f64;
+        let root = self.pilot.pos + self.pilot.q.rotate(riser_tip(side, lower));
+        let (right, up, back, origin) = self.chute_frame();
+        (root, origin + right * skirt.x + up * skirt.y + back * skirt.z)
+    }
+
     /// Canopy and suspension lines, rooted at the harness while airborne.
     /// On touchdown the skirt drifts clear and the fabric settles beside the pilot.
     pub fn chute_frame(&self) -> (V3, V3, V3, V3) {
@@ -371,68 +387,186 @@ pub fn handle_mesh(kind: Type, pull: f64) -> Mesh {
     m
 }
 
-/// The pilot: seated with hands on the handle, or hanging from the risers.
-/// The helmet is omitted from the view at his eyes.
+pub const LANDING_FRAMES: usize = 16;
+pub const GORES: usize = 16;
+const WEB: Rgb = Rgb(0.52, 0.49, 0.36);
+const GLOVE: Rgb = Rgb(0.24, 0.26, 0.20);
+const TORSO_RING: [(f64, f64); 8] = [(1.0, -0.45), (1.0, 0.45), (0.55, 1.0),
+    (-0.55, 1.0), (-1.0, 0.45), (-1.0, -0.45), (-0.55, -1.0), (0.55, -1.0)];
+
+fn hip_point(hanging: bool) -> V3 {
+    v3(0.0, -HARNESS + 0.10, if hanging { 0.0 } else { -0.26 })
+}
+
+/// The harness samples the same cross-sections as the suit, in either pose.
+/// The torso is identical in both views; only the external helmet is omitted.
+fn torso_point(hanging: bool, t: f64, x: f64, front: f64) -> V3 {
+    let hip = hip_point(hanging);
+    let top = v3(0.0, 0.29, 0.04);
+    let forward = (top - hip).norm().cross(V3::X);
+    let width = mix(0.165, 0.19, t);
+    let depth = mix(0.105, 0.115, t);
+    hip.lerp(top, t) + V3::X * (width * x) + forward * (depth * front)
+}
+
+fn harness_anchor(hanging: bool, side: f64) -> V3 {
+    torso_point(hanging, 0.94, side * 0.50, 1.0)
+}
+
+fn webbing(m: &mut Mesh, a: V3, b: V3, width: f64) {
+    let y = (b - a).norm();
+    let x = y.cross(V3::Z).norm();
+    webbing_across(m, a, b, width, x);
+}
+
+fn webbing_across(m: &mut Mesh, a: V3, b: V3, width: f64, across: V3) {
+    let y = (b - a).norm();
+    let x = (across - y * y.dot(across)).norm();
+    m.block(&Frame { o: (a + b) * 0.5, x, y, z: x.cross(y) },
+        v3(width * 0.5, (b - a).len() * 0.5, 0.003), WEB);
+}
+
+fn riser_tip(side: f64, lower: f64) -> V3 {
+    v3(side * 0.24, 1.35, -0.12).lerp(v3(side * 0.23, -0.23, -0.11), lower)
+}
+
+fn riser_grip(side: f64) -> V3 {
+    harness_anchor(true, side).lerp(riser_tip(side, 0.0), 0.33)
+}
+
+fn resting_hand(side: f64) -> V3 { v3(side * 0.25, -0.30, -0.08) }
+
+/// A closed glove around the webbing, with the fingers on the front and
+/// the thumb returning across the inboard face. The strap passes through it.
+fn riser_hand(m: &mut Mesh, side: f64, lower: f64) -> V3 {
+    let centre = riser_grip(side).lerp(resting_hand(side), lower);
+    let y = (riser_tip(side, 0.0) - harness_anchor(true, side)).norm()
+        .lerp(-V3::Y, lower).norm_or(-V3::Y);
+    let x = y.cross(V3::Z).norm_or(V3::X) * side;
+    let z = (V3::Z - y * y.z).norm();
+    let at = |a: f64, b: f64, c: f64| centre + x * a + y * b + z * c;
+    m.capsule(at(0.031, -0.035, 0.023), at(0.031, 0.035, 0.023), 0.021, 0.023, GLOVE, 6);
+    for finger in 0..4 {
+        let h = -0.027 + finger as f64 * 0.018;
+        m.capsule(at(0.029, h, 0.014), at(0.018, h, -0.021), 0.011, 0.010, GLOVE, 5);
+        m.capsule(at(0.018, h, -0.021), at(-0.022, h, -0.018), 0.010, 0.009, GLOVE, 5);
+        m.capsule(at(-0.022, h, -0.018), at(-0.025, h, 0.008), 0.009, 0.008, GLOVE, 5);
+    }
+    m.capsule(at(0.030, -0.026, 0.026), at(-0.023, -0.036, 0.018), 0.014, 0.011, GLOVE.scale(0.9), 5);
+    m.capsule(at(-0.023, -0.036, 0.018), at(-0.028, -0.010, -0.003), 0.011, 0.009, GLOVE.scale(0.9), 5);
+    at(0.036, -0.052, 0.022)
+}
+
 pub fn pilot_mesh(kind: Type, hanging: bool, first_person: bool, pull: f64) -> Mesh {
+    pilot_pose(kind, hanging, first_person, pull, 0.0)
+}
+
+pub fn landed_mesh(kind: Type, first_person: bool, frame: usize) -> Mesh {
+    pilot_pose(kind, true, first_person, 1.0, frame as f64 / (LANDING_FRAMES - 1) as f64)
+}
+
+/// Seated, suspended or releasing the risers after touchdown.
+fn pilot_pose(kind: Type, hanging: bool, first_person: bool, pull: f64, lower: f64) -> Mesh {
     let mut m = Mesh::new();
-    let (suit, helmet) = if kind.russian() { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) } else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
+    let (suit, helmet) = if kind.russian() { (Rgb(0.40, 0.42, 0.36), Rgb(0.88, 0.88, 0.84)) }
+        else { (Rgb(0.30, 0.34, 0.22), Rgb(0.78, 0.80, 0.78)) };
     let gsuit = suit.scale(0.8);
-    let hip = v3(0.0, -HARNESS + 0.10, if hanging { 0.0 } else { -0.26 });
-    // The close view omits the rounded neck cap as well as the helmet;
-    // that cap otherwise crosses the eye when looking down at the handle.
-    m.capsule(hip, v3(0.0, if first_person { 0.18 } else { 0.30 }, 0.04), 0.17,
-        if first_person { 0.17 } else { 0.19 }, suit, 8);
+    let hip = hip_point(hanging);
+    for i in 0..8 {
+        let (x0, f0) = TORSO_RING[i];
+        let (x1, f1) = TORSO_RING[(i + 1) % 8];
+        m.quad(torso_point(hanging, 0.0, x0, f0), torso_point(hanging, 0.0, x1, f1),
+            torso_point(hanging, 1.0, x1, f1), torso_point(hanging, 1.0, x0, f0), suit);
+        m.tri(torso_point(hanging, 1.0, 0.0, 0.0), torso_point(hanging, 1.0, x0, f0),
+            torso_point(hanging, 1.0, x1, f1), suit);
+    }
     if !first_person {
         m.capsule(v3(0.0, 0.42, 0.04), v3(0.0, 0.58, 0.02), 0.13, 0.13, helmet, 8);
-        m.block(&Frame { o: v3(0.0, 0.48, -0.08), x: V3::X, y: V3::Y, z: V3::Z }, v3(0.09, 0.04, 0.03), Rgb(0.12, 0.12, 0.10));
+        m.block(&Frame { o: v3(0.0, 0.48, -0.08), x: V3::X, y: V3::Y, z: V3::Z },
+            v3(0.09, 0.04, 0.03), Rgb(0.12, 0.12, 0.10));
     }
-    let web = Rgb(0.52, 0.49, 0.36);
-    let belt = |m: &mut Mesh, a: V3, b: V3, width: f64| {
-        let y = (b - a).norm();
-        let x = y.cross(V3::Z).norm();
-        m.block(&Frame { o: (a + b) * 0.5, x, y, z: x.cross(y) }, v3(width * 0.5, (b - a).len() * 0.5, 0.003), web);
-    };
-    for s in [-1.0, 1.0] {
-        belt(&mut m, v3(s * 0.13, 0.30, -0.14), v3(s * 0.10, -0.36, -0.155), 0.035);
-        belt(&mut m, v3(s * 0.10, -0.36, -0.155), v3(s * 0.16, -0.52, -0.10), 0.030);
-        m.ring(&Frame { o: v3(s * 0.13, 0.29, -0.155), x: V3::X, y: V3::Y, z: V3::Z },
+    // Webbing is centred on the suit surface: half its thickness is embedded
+    // in the fabric. It follows the seated lean as well as the upright torso.
+    for side in [-1.0, 1.0] {
+        for pair in [0.14, 0.38, 0.66, 0.94, 1.0].windows(2) {
+            let at = |t: f64| torso_point(hanging, t, side * mix(0.32, 0.51, t), 1.0);
+            webbing(&mut m, at(pair[0]), at(pair[1]), 0.035);
+        }
+        let a = torso_point(hanging, 1.0, side * 0.51, 1.0);
+        let b = torso_point(hanging, 1.0, side * 0.51, -1.0);
+        webbing_across(&mut m, a, b, 0.035, V3::X);
+        webbing(&mut m, b, torso_point(hanging, 0.14, side * 0.32, -1.0), 0.035);
+        m.ring(&Frame { o: harness_anchor(hanging, side), x: V3::X, y: V3::Y, z: V3::Z },
             0.012, 0.019, 0.004, Rgb(0.55, 0.56, 0.53), 8);
+        if hanging {
+            let anchor = harness_anchor(true, side);
+            // Once released, the loose riser folds down beside the hip.
+            let bend = anchor.lerp(riser_tip(side, lower), 0.45) + V3::X * (side * 0.045 * lower);
+            webbing(&mut m, anchor, bend, 0.032);
+            webbing(&mut m, bend, riser_tip(side, lower), 0.032);
+        }
     }
-    belt(&mut m, v3(-0.16, -0.35, -0.15), v3(0.16, -0.35, -0.15), 0.040);
-    m.block(&Frame { o: v3(0.0, -0.35, -0.16), x: V3::X, y: V3::Y, z: V3::Z },
+    for i in 0..8 {
+        let (a, b) = (TORSO_RING[i], TORSO_RING[(i + 1) % 8]);
+        let up = (v3(0.0, 0.29, 0.04) - hip).norm();
+        webbing_across(&mut m, torso_point(hanging, 0.14, a.0, a.1),
+            torso_point(hanging, 0.14, b.0, b.1), 0.040, up);
+    }
+    m.block(&Frame { o: torso_point(hanging, 0.14, 0.0, 1.0), x: V3::X, y: V3::Y, z: V3::Z },
         v3(0.026, 0.026, 0.008), Rgb(0.60, 0.61, 0.57));
-    for s in [-1.0, 1.0] {
-        let hp = hip + V3::X * (s * 0.10);
-        let (knee, foot) = if hanging { (hp + v3(s * 0.03, -0.45, -0.06), hp + v3(s * 0.04, -0.92, 0.0)) } else { (hp + v3(0.0, if kind.russian() { 0.17 } else { 0.10 }, -0.45),
-            hp + v3(0.0, if kind.russian() { -0.18 } else { -0.32 }, -0.55)) };
+    for side in [-1.0, 1.0] {
+        let hp = hip + V3::X * (side * 0.10);
+        let (knee, foot) = if hanging { (hp + v3(side * 0.03, -0.45, -0.06), hp + v3(side * 0.04, -0.92, 0.0)) }
+            else { (hp + v3(0.0, if kind.russian() { 0.17 } else { 0.10 }, -0.45),
+                hp + v3(0.0, if kind.russian() { -0.18 } else { -0.32 }, -0.55)) };
         m.capsule(hp, knee, 0.085, 0.07, gsuit, 6);
         m.capsule(knee, foot, 0.065, 0.055, gsuit, 6);
         m.capsule(foot, foot + v3(0.0, -0.03, -0.12), 0.05, 0.05, Rgb(0.08, 0.07, 0.06), 5);
-        let shoulder = v3(s * 0.20, 0.24, 0.04);
-        let hand = if hanging { v3(s * 0.22, 0.62, 0.0) } else { handle_point(kind, pull) + V3::X * (s * 0.035) };
-        let elbow = if hanging { shoulder.lerp(hand, 0.5) + V3::X * (s * 0.06) }
-            else { v3(s * 0.22, mix(shoulder.y, hand.y, 0.60), -0.30) };
+        let shoulder = v3(side * 0.20, 0.24, 0.04);
+        let hand = if hanging { riser_hand(&mut m, side, lower) }
+            else { handle_point(kind, pull) + V3::X * (side * 0.035) };
+        let elbow = if hanging { shoulder.lerp(hand, 0.5) + v3(side * mix(0.09, 0.025, lower), 0.0, -0.06) }
+            else { v3(side * 0.22, mix(shoulder.y, hand.y, 0.60), -0.30) };
         m.capsule(shoulder, elbow, 0.06, 0.055, suit, 6);
         m.capsule(elbow, hand, 0.055, 0.035, suit, 6);
-        let glove = Rgb(0.24, 0.26, 0.20);
-        m.capsule(hand - V3::X * 0.022, hand + V3::X * 0.022, 0.023, 0.023, glove, 6);
-        m.capsule(hand + v3(s * 0.01, 0.018, 0.015), hand + v3(-s * 0.01, -0.01, -0.01), 0.012, 0.010, glove.scale(0.9), 5);
+        if !hanging {
+            m.capsule(hand - V3::X * 0.022, hand + V3::X * 0.022, 0.023, 0.023, GLOVE, 6);
+            m.capsule(hand + v3(side * 0.01, 0.018, 0.015), hand + v3(-side * 0.01, -0.01, -0.01), 0.012, 0.010, GLOVE.scale(0.9), 5);
+        }
     }
     m
 }
 
-/// Main canopy filled, with its lines down to the risers at the harness:
-/// gores from the vent to the skirt, the seat's own colours.
+/// One reusable cord, transformed between its two world-space endpoints.
+pub fn cord_mesh() -> Mesh {
+    let mut m = Mesh::new();
+    m.block(&Frame { o: V3::Y * 0.5, x: V3::X, y: V3::Y, z: V3::Z },
+        v3(0.0018, 0.5, 0.0018), Rgb(0.82, 0.80, 0.74));
+    m
+}
+
+pub fn cord_frame(a: V3, b: V3) -> Frame {
+    let y = b - a;
+    let axis = y.norm();
+    let x = axis.cross(if axis.z.abs() < 0.9 { V3::Z } else { V3::X }).norm();
+    Frame { o: a, x, y, z: x.cross(axis) }
+}
+
+fn canopy_point(k: usize, t: f64) -> V3 {
+    let a = k as f64 * TAU / GORES as f64;
+    let th = t * 80.0 * DEG;
+    let r = 3.4 * th.sin() / (80.0 * DEG).sin();
+    v3(a.cos() * r, mix(8.6, 6.6, (1.0 - th.cos()) / (1.0 - (80.0 * DEG).cos())), a.sin() * r)
+}
+
+fn skirt_point(gore: usize) -> V3 { canopy_point(gore, 1.0) }
+
+/// Main canopy fabric, from vent to skirt in the seat's own colours.
+/// The scene attaches separate suspension cords to the moving pilot.
 pub fn chute_mesh(spec: &SeatSpec) -> Mesh {
     let mut m = Mesh::new();
-    let n = 16;
-    let (radius, skirt, crown) = (3.4, 6.6, 8.6);
-    let ring = |k: usize, t: f64| {
-        let a = k as f64 * TAU / n as f64;
-        let th = t * 80.0 * DEG;
-        let r = radius * th.sin() / (80.0 * DEG).sin();
-        v3(a.cos() * r, mix(crown, skirt, (1.0 - th.cos()) / (1.0 - (80.0 * DEG).cos())), a.sin() * r)
-    };
+    let n = GORES;
+    let ring = canopy_point;
     let rows = 4;
     for k in 0..n {
         let col = spec.gores[k % spec.gores.len()];
@@ -443,17 +577,6 @@ pub fn chute_mesh(spec: &SeatSpec) -> Mesh {
             // One surface, visible from both sides. A coplanar reverse skin
             // causes z-fighting and alternates the lighting as the camera moves.
         }
-        let skirt_pt = ring(k, 1.0);
-        let riser = v3(if skirt_pt.x > 0.0 { 0.22 } else { -0.22 }, 1.35, 0.0);
-        // Suspension cord is about 3.6 mm across, separate from the broad riser webbing.
-        m.capsule(skirt_pt, riser, 0.0018, 0.0018, Rgb(0.82, 0.80, 0.74), 4);
-    }
-    for s in [-1.0, 1.0] {
-        let (a, b) = (v3(s * 0.13, 0.29, -0.155), v3(s * 0.22, 1.35, 0.0));
-        let y = (b - a).norm();
-        let x = y.cross(V3::Z).norm();
-        m.block(&Frame { o: (a + b) * 0.5, x, y, z: x.cross(y) },
-            v3(0.016, (b - a).len() * 0.5, 0.0018), Rgb(0.52, 0.49, 0.36));
     }
     m
 }
@@ -478,8 +601,8 @@ mod tests {
     }
 
     #[test]
-    fn both_seats_clear_the_jet_separate_and_leave_the_chute_on_the_ground() {
-        for kind in [Type::F16, Type::Mig29] {
+    fn all_seats_clear_the_jet_separate_and_leave_the_chute_on_the_ground() {
+        for kind in Type::ALL {
             let mut a = Aircraft::new(&Mission::new());
             a.kind = kind;
             a.q = Quat::axis_angle(V3::Y, 0.0);
@@ -519,8 +642,6 @@ mod tests {
             let m = chute_mesh(spec);
             let mut triangles = std::collections::HashSet::new();
             for tri in m.v.chunks(crate::mesh::STRIDE * 3) {
-                // Suspension line tubes are a different material.
-                if (tri[6] - 0.82).abs() < 0.001 { continue; }
                 let mut points: Vec<[u32; 3]> = tri.chunks(crate::mesh::STRIDE)
                     .map(|v| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()]).collect();
                 points.sort_unstable();
@@ -529,10 +650,105 @@ mod tests {
         }
     }
 
+    fn segment_distance(p: V3, a: V3, b: V3) -> f64 {
+        let ab = b - a;
+        (p - a.lerp(b, clamp((p - a).dot(ab) / ab.dot(ab), 0.0, 1.0))).len()
+    }
+
+    #[test]
+    fn harness_webbing_follows_the_suit_in_both_views_and_poses() {
+        for kind in Type::ALL {
+            for hanging in [false, true] {
+                let body = pilot_mesh(kind, hanging, true, 1.0);
+                let external = pilot_mesh(kind, hanging, false, 1.0);
+                let hip = hip_point(hanging);
+                let up = (v3(0.0, 0.29, 0.04) - hip).norm();
+                let len = (v3(0.0, 0.29, 0.04) - hip).len();
+                let front = up.cross(V3::X);
+                for v in body.v.chunks(crate::mesh::STRIDE).filter(|v| (v[6] as f64 - WEB.0).abs() < 1e-6) {
+                    let p = v3(v[0] as f64, v[1] as f64, v[2] as f64);
+                    let t = (p - hip).dot(up) / len;
+                    if hanging && t > 0.90 { continue; } // The free risers above the shoulder.
+                    let tc = clamp(t, 0.0, 1.0);
+                    let centre = hip.lerp(v3(0.0, 0.29, 0.04), tc);
+                    let ring: Vec<_> = TORSO_RING.iter().map(|&(x, z)| v3(x * mix(0.165, 0.19, tc), 0.0, z * mix(0.105, 0.115, tc))).collect();
+                    let p2 = v3(p.x, 0.0, (p - centre).dot(front));
+                    let distance = (0..8).map(|i| segment_distance(p2, ring[i], ring[(i + 1) % 8]))
+                        .fold(f64::INFINITY, f64::min);
+                    assert!(distance < 0.014, "floating harness: {kind:?}, hanging={hanging}, {p:?}, gap={distance}");
+                    assert!(external.v.chunks(crate::mesh::STRIDE).any(|e| e[..3] == v[..3] && e[6..9] == v[6..9]));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gloves_wrap_the_risers_and_landing_lowers_both_arms() {
+        for kind in Type::ALL {
+            let mut previous = [f64::INFINITY; 2];
+            for frame in 0..LANDING_FRAMES {
+                for fp in [false, true] {
+                    let body = landed_mesh(kind, fp, frame);
+                    assert!(body.v.iter().all(|v| v.is_finite()));
+                    for (i, side) in [-1.0, 1.0].into_iter().enumerate() {
+                        let glove: Vec<_> = body.v.chunks(crate::mesh::STRIDE)
+                            .filter(|v| (v[6] as f64 - GLOVE.0).abs() < 1e-6 && (v[7] as f64 - GLOVE.1).abs() < 1e-6 && (v[8] as f64 - GLOVE.2).abs() < 1e-6 && v[0] as f64 * side > 0.0)
+                            .map(|v| v3(v[0] as f64, v[1] as f64, v[2] as f64)).collect();
+                        let top = glove.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+                        if fp {
+                            assert!(top <= previous[i] + 0.005, "hand rose after touchdown");
+                            previous[i] = top;
+                        }
+                        if frame == 0 {
+                            let grip = riser_grip(side);
+                            let axis = (riser_tip(side, 0.0) - harness_anchor(true, side)).norm();
+                            let x = axis.cross(V3::Z).norm() * side;
+                            assert!(glove.iter().any(|p| (*p - grip).dot(x) > 0.020));
+                            assert!(glove.iter().any(|p| (*p - grip).dot(x) < -0.020));
+                            assert!(glove.iter().any(|p| p.z < grip.z - 0.012));
+                            assert!(glove.iter().any(|p| p.z > grip.z + 0.012));
+                        } else if frame == LANDING_FRAMES - 1 {
+                            assert!(top < -0.23, "hand still raised on the ground");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cords_stay_on_the_risers_during_inflation_sway_and_touchdown() {
+        let a = Aircraft::new(&Mission::new());
+        for fill in [0.02, 0.25, 0.65, 1.0] {
+            for angle in [-9.0, 0.0, 9.0] {
+                let mut e = Ejection::new(&a);
+                e.phase = Phase::Chute;
+                e.chute = fill;
+                e.pilot.q = Quat::axis_angle(V3::Y, 0.7).mul(Quat::axis_angle(V3::X, angle * DEG));
+                for landed in [false, true] {
+                    e.phase = if landed { Phase::Landed } else { Phase::Chute };
+                    e.landed_for = if landed { 2.5 } else { 0.0 };
+                    let lower = e.landing_frame() as f64 / (LANDING_FRAMES - 1) as f64;
+                    for gore in 0..GORES {
+                        let (root, skirt) = e.suspension(gore);
+                        let side = if skirt_point(gore).x > 0.0 { 1.0 } else { -1.0 };
+                        let attachment = e.pilot.q.conj().rotate(root - e.pilot.pos);
+                        assert!((attachment - riser_tip(side, lower)).len() < 1e-8);
+                        assert!(root.is_finite() && skirt.is_finite() && (root - skirt).len() > 0.1);
+                        let f = cord_frame(root, skirt);
+                        assert!((f.p(0.0, 0.0, 0.0) - root).len() < 1e-8);
+                        assert!((f.p(0.0, 1.0, 0.0) - skirt).len() < 1e-8);
+                        assert!(f.x.len() > 0.99 && f.z.len() > 0.99);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_handle_moves_with_both_gloves_and_the_helmet_is_out_of_first_person() {
         assert!((handle_point(Type::F16, 1.0).y - handle_point(Type::F16, 0.0).y - 0.10).abs() < 1e-10);
-        for kind in [Type::F16, Type::Mig29] {
+        for kind in Type::ALL {
             for frame in 0..HANDLE_FRAMES {
                 let pull = frame as f64 / (HANDLE_FRAMES - 1) as f64;
                 let body = pilot_mesh(kind, false, true, pull);

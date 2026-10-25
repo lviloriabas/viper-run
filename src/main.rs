@@ -46,6 +46,7 @@ mod voice;
 mod operation;
 mod multiplayer;
 mod ui_check;
+mod menu_layout;
 mod vapor;
 mod weapons;
 mod warnings;
@@ -104,6 +105,9 @@ struct Opts {
     audio_demo: Option<String>,
     no_mirrors: bool,
     ui_check: bool,
+    layout_check: bool,
+    layout_failed: bool,
+    layout_scene: Option<String>,
     chase: bool,
     shot: Option<String>,
     frames: u32,
@@ -117,6 +121,7 @@ struct Opts {
     mach: Option<f64>,
     /// Parts broken off the jet at the start, to show it coming apart.
     breakup: Option<sim::Breakup>,
+    broken_gear: bool,
     controls: bool,
     performance_overlay: Option<bool>,
     /// Show the controller prompts, for screenshots without a pad.
@@ -168,7 +173,10 @@ fn parse_opts() -> Opts {
             "--audio-demo" => o.audio_demo = Some(next(&mut i)),
             "--no-mirrors" => o.no_mirrors = true,
             "--ui-check" => o.ui_check = true,
+            "--layout-check" => o.layout_check = true,
+            "--layout-scene" => o.layout_scene = Some(next(&mut i)),
             "--chase" => o.chase = true,
+            "--break-gear" => o.broken_gear = true,
             "--shot" => o.shot = Some(next(&mut i)),
             "--frames" => o.frames = next(&mut i).parse().unwrap_or(3),
             "--look" => {
@@ -254,6 +262,7 @@ fn parse_opts() -> Opts {
                 println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
                 println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
                 println!("Online: --host ADDRESS:PORT | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
+                println!("Layout QA: --layout-check --shot FILE.png [--layout-scene NAME]");
                 println!("QA: --future-ui-check --screen menu --shot FILE.png --frames 200; --invite-file FILE --net-report FILE --exit-after SECONDS");
                 std::process::exit(0);
             }
@@ -261,6 +270,8 @@ fn parse_opts() -> Opts {
         }
         i += 1;
     }
+    assert!(!o.layout_check || o.shot.is_some(),"--layout-check requires --shot FILE.png");
+    assert!(o.layout_scene.is_none() || o.layout_check,"--layout-scene requires --layout-check");
     o
 }
 
@@ -547,6 +558,11 @@ impl App {
         if let (Some(parts), Some(a)) = (self.opts.breakup, self.aircraft.as_mut()) {
             a.lose(parts);
         }
+        if let (true,Some(a))=(self.opts.broken_gear,self.aircraft.as_mut()) {
+            a.gear=1.0;
+            a.gear_broken=[true;3];
+            self.combat.shed_gear(a);
+        }
         if let (true, Some(a)) = (self.opts.irst, self.aircraft.as_ref()) {
             self.combat.toggle_irst(a);
         }
@@ -609,6 +625,7 @@ impl App {
         if self.opts.controls {
             self.toggle_controls(Some(true));
         }
+        if let Some(scene)=self.opts.layout_scene.clone() { ui_check::layout_scene(self,&scene); }
     }
 
     // ------------------------------------------------------------ flow
@@ -814,7 +831,7 @@ impl App {
     }
 
     fn save(&self) {
-        if !self.opts.ui_check && !self.opts.future_ui_check && self.opts.net_report.is_none() { settings::save(&self.settings, &self.best); }
+        if !self.opts.ui_check && !self.opts.future_ui_check && !self.opts.layout_check && self.opts.net_report.is_none() { settings::save(&self.settings, &self.best); }
     }
 
     fn act(&mut self, a: Action) {
@@ -1311,7 +1328,7 @@ impl App {
         let (glocs, gcas) = (self.pilot.glocs, self.pilot.gcas);
         self.pilot.update(dt, a);
         if let Some(i) = folded {
-            self.flash_toast(&format!("{} COLLAPSED", sim::WHEELS[i].name.to_uppercase()), 2.4);
+            self.flash_toast(&format!("{} DETACHED", sim::WHEELS[i].name.to_uppercase()), 2.4);
             self.kick = self.kick.max(0.6);
             self.audio.burst(0.5, 2.2, 700.0, 60.0, 0.0);
         }
@@ -2064,7 +2081,7 @@ impl EventHandler for App {
                 self.network_step(FIXED_DT,Input::default());self.accumulator-=FIXED_DT;
             }
         }
-        self.network_poll();
+        if self.opts.layout_scene.is_none() { self.network_poll(); }
         self.update_audio();
     }
 
@@ -2162,6 +2179,9 @@ impl EventHandler for App {
                 }
             }
             if flying_view && self.multiplayer.active() { ui::network_overlay(cv,w,h,&self.multiplayer,&self.combat,self.aircraft.as_ref().unwrap(),&cam); }
+            if self.opts.layout_check && flying_view && !self.controls_open && self.training.is_some() {
+                cv.layout_audit=Some(menu_layout::Audit::default());
+            }
             if flying_view && !self.controls_open && self.state == State::Flying {
                 if let Some(t) = &self.training { ui::training_overlay(cv, w, h, t, &self.settings, pad); }
             }
@@ -2176,6 +2196,7 @@ impl EventHandler for App {
                 cv.rect(0.0, 0.0, w, h, rgba(c[0], c[1], c[2], (self.flash * 0.34) as f32));
             }
             let s = ui::ui_scale(w, h);
+            if self.opts.layout_check && cv.layout_audit.is_none() { cv.layout_audit=Some(menu_layout::Audit::default()); }
             let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout };
             if !self.controls_open {
                 match self.state {
@@ -2198,6 +2219,13 @@ impl EventHandler for App {
                 if self.multiplayer.active() { u.online_controls_button(); }
             }
             buttons.append(&mut u.buttons);
+            if let Some(audit)=cv.layout_audit.take() {
+                let issues=audit.issues(w,h);
+                if !issues.is_empty() {
+                    if !self.opts.layout_failed {for issue in &issues { eprintln!("LAYOUT frame {}: {issue}",self.frame); }}
+                    self.opts.layout_failed=true;
+                }else if self.frame==0 { println!("PASS menu layout: {} items checked",audit.items.len()); }
+            }
         }
         self.overlay.flush(&mut *self.ctx, w, h);
         if self.screenshot_pending && self.output.is_none() {
@@ -2228,13 +2256,14 @@ impl EventHandler for App {
             self.opts.frames = self.frame;
         }
         if let (Some(path), Some(out)) = (self.opts.shot.clone(), self.output.as_ref()) {
-            if self.frame >= self.opts.frames {
+            if self.frame >= self.opts.frames && !self.opts.ui_check && !self.opts.future_ui_check {
                 let mut px = vec![0u8; (out.w * out.h * 4) as usize];
                 self.ctx.texture_read_pixels(out.color, &mut px);
                 match png::write(&path, out.w, out.h, &px, true) {
                     Ok(()) => println!("saved {path} ({}x{}), {} terrain chunks drawn", out.w, out.h, self.world.drawn_chunks),
                     Err(e) => eprintln!("screenshot failed: {e}"),
                 }
+                assert!(!self.opts.layout_failed,"menu layout check failed; screenshot saved for inspection");
                 window::order_quit();
             }
         }

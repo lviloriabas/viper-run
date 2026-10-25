@@ -48,6 +48,7 @@ pub struct Canvas {
     /// Affine transform: x' = a x + c y + e, y' = b x + d y + f.
     xf: [f32; 6],
     solid: (f32, f32),
+    pub layout_audit: Option<crate::menu_layout::Audit>,
 }
 
 #[repr(C)]
@@ -89,6 +90,7 @@ impl Canvas {
             clip: None,
             xf: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             solid: font::solid_uv(),
+            layout_audit: None,
         }
     }
 
@@ -104,6 +106,10 @@ impl Canvas {
         ctx.apply_uniforms(UniformsSource::table(&Uniforms { size: [w, h] }));
         ctx.draw(0, n as i32, 1);
         self.data.clear();
+    }
+
+    pub fn layout_item(&mut self, kind: crate::menu_layout::Kind, label: &str, rect: [f32;4]) {
+        if let Some(audit)=&mut self.layout_audit { audit.add(kind,label,rect); }
     }
 
     // ---------------------------------------------------------- state
@@ -292,6 +298,12 @@ impl Canvas {
     /// in braces draw as the pad's buttons: coloured face buttons, shoulder
     /// and trigger caps, sticks, the D-pad and the menu and view buttons.
     pub fn text(&mut self, s: &str, x: f32, y: f32, scale: f32, col: Col, align: Align) {
+        if self.layout_audit.is_some() && self.clip.is_none() && !s.trim().is_empty() {
+            let w=Self::text_width(s,scale);
+            let h=if s.contains('{') {9.2*scale} else {font::GLYPH_H*scale};
+            let left=match align {Align::Left=>x,Align::Center=>x-w*0.5,Align::Right=>x-w};
+            self.layout_item(crate::menu_layout::Kind::Text,s,[left,y-h*0.5,w,h]);
+        }
         if !s.contains('{') {
             return self.plain_text(s, x, y, scale, col, align);
         }
@@ -415,28 +427,33 @@ impl Canvas {
         }
     }
 
+    /// Lines measured with the same glyph and controller-token widths as drawing.
+    pub fn wrapped_lines(s:&str,max_w:f32,scale:f32)->Vec<String> {
+        let mut lines=Vec::new(); let mut line=String::new();
+        for word in s.split_whitespace() {
+            let candidate=if line.is_empty(){word.to_string()}else{format!("{line} {word}")};
+            if !line.is_empty() && Self::text_width(&candidate,scale)>max_w {
+                lines.push(std::mem::take(&mut line));
+            }
+            if Self::text_width(word,scale)>max_w {
+                for ch in word.chars() {
+                    if Self::text_width(&format!("{line}{ch}"),scale)>max_w && !line.is_empty() {lines.push(std::mem::take(&mut line));}
+                    line.push(ch);
+                }
+            } else {if !line.is_empty(){line.push(' ');}line.push_str(word);}
+        }
+        if !line.is_empty(){lines.push(line);}
+        lines
+    }
+    pub fn paragraph_height(s:&str,max_w:f32,scale:f32,leading:f32)->f32 {
+        Self::wrapped_lines(s,max_w,scale).len() as f32*font::GLYPH_H*scale*leading
+    }
     /// Word-wrapped paragraph; returns the height used.
     pub fn paragraph(&mut self, s: &str, x: f32, y: f32, max_w: f32, scale: f32, leading: f32, col: Col) -> f32 {
-        let max_chars = ((max_w / scale + 1.0) / font::ADVANCE).floor().max(1.0) as usize;
-        let mut line = String::new();
-        let mut yy = y;
-        let line_h = font::GLYPH_H * scale * leading;
-        for word in s.split_whitespace() {
-            if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > max_chars {
-                self.text(&line, x, yy + line_h * 0.5, scale, col, Align::Left);
-                yy += line_h;
-                line.clear();
-            }
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push_str(word);
-        }
-        if !line.is_empty() {
-            self.text(&line, x, yy + line_h * 0.5, scale, col, Align::Left);
-            yy += line_h;
-        }
-        yy - y
+        let lines=Self::wrapped_lines(s,max_w,scale);
+        let line_h=font::GLYPH_H*scale*leading;
+        for (i,line) in lines.iter().enumerate(){self.text(line,x,y+(i as f32+0.5)*line_h,scale,col,Align::Left);}
+        lines.len() as f32*line_h
     }
 }
 
@@ -518,4 +535,17 @@ fn spans(s: &str) -> impl Iterator<Item = Span<'_>> {
         rest = r;
         Some(Span::Text(t))
     })
+}
+
+#[cfg(test)]
+mod wrapping_tests {
+    use super::*;
+    #[test] fn controller_tokens_and_long_words_respect_the_available_width() {
+        for text in ["Press {BACK} or {B} to close. Settings are saved for this user.","ABCDEFGHIJKLMNOPQRSTUVWXY0123456789"] {
+            let lines=Canvas::wrapped_lines(text,90.0,1.0);
+            assert!(lines.len()>1);
+            assert!(lines.iter().all(|line|Canvas::text_width(line,1.0)<=90.0));
+            assert!(!lines.iter().any(|line|line.contains('{')&&!line.contains('}')));
+        }
+    }
 }

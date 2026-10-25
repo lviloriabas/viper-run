@@ -836,7 +836,7 @@ pub struct Debris {
     /// Burnt black on a bandit, as its wreck is.
     pub burnt: bool,
     spin: V3,
-    trail: usize,
+    trail: Option<usize>,
 }
 
 /// What happened in a step, for the effects, the sound and the messages.
@@ -1341,6 +1341,7 @@ impl Combat {
             a.battle = BattleDamage::default();
             (a.gear_damage, a.flap_damage) = (0.0, 0.0);
             a.gear_broken = [false; 3];
+            a.gear_shed = [false; 3];
             a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
             a.stores_mass = self.loadout.mass();
             a.wing_stores = self.loadout.wing_mass();
@@ -1664,6 +1665,7 @@ impl Combat {
                 self.lose_player(cause, a);
             }
         }
+        self.shed_gear(a);
         a.battle = self.hull.effects();
         self.warn = (self.warn - dt).max(0.0);
         let pressed = trigger && !self.trigger_was;
@@ -1689,6 +1691,7 @@ impl Combat {
 
         self.bandit_hulls(dt);
         self.step_bandits(dt, a);
+        for i in 0..self.bandits.len() { self.shed_bandit_gear(i); }
         self.step_wrecks(dt);
         self.step_rounds(dt, a);
         self.step_missiles(dt, a);
@@ -2190,8 +2193,37 @@ impl Combat {
             let spin = axis * mix(2.0, 6.0, self.rnd.next());
             let trail = self.open_trail(if matches!(piece, Piece::Wing(_)) { Smoke::Fire } else { Smoke::Damage });
             self.events.push(Event::Airburst { pos, vel, scale: 0.3 });
-            self.debris.push(Debris { kind: jet.kind, piece, pos, vel, q: jet.q, burnt, spin, trail });
+            self.debris.push(Debris { kind: jet.kind, piece, pos, vel, q: jet.q, burnt, spin, trail: Some(trail) });
         }
+    }
+
+    /// A torn-off leg inherits its aircraft's velocity and angular motion.
+    /// It starts in exactly the attached pose, then tumbles clear of the fuselage.
+    pub fn shed_gear(&mut self, a: &mut Aircraft) {
+        for i in 0..3 {
+            if !a.gear_broken[i] || a.gear_shed[i] { continue; }
+            a.gear_shed[i] = true;
+            let piece = Piece::Gear(i);
+            let (pivot, rotation) = a.gear_pose(i);
+            let local = pivot + rotation.rotate(piece.centre(a.kind) - pivot);
+            let r = a.q.rotate(local);
+            let pos = a.pos + r;
+            let side = if i == 1 { -1.0 } else if i == 2 { 1.0 } else { 0.0 };
+            let kick = a.q.rotate(v3(side * 4.0, -2.0, 7.0)) + V3::Y * 5.5;
+            let vel = a.vel + a.q.rotate(a.omega).cross(r) + kick;
+            let spin = v3(2.8, side * 2.2 + 0.8, 1.8);
+            // No burning-fuel trail on a wheel or strut.
+            self.events.push(Event::Hit { pos });
+            self.debris.push(Debris { kind: a.kind, piece, pos, vel,
+                q: a.q.mul(rotation), burnt: false, spin, trail: None });
+        }
+    }
+
+    fn shed_bandit_gear(&mut self, i: usize) {
+        if !(0..3).any(|leg| self.bandits[i].jet.gear_broken[leg] && !self.bandits[i].jet.gear_shed[leg]) { return; }
+        let mut jet = self.bandits[i].jet.clone();
+        self.shed_gear(&mut jet);
+        self.bandits[i].jet.gear_shed = jet.gear_shed;
     }
 
     /// The player's jet coming apart: the pieces shed, and fire from the
@@ -2249,7 +2281,8 @@ impl Combat {
         let mut down = Vec::new();
         for (i, d) in self.debris.iter_mut().enumerate() {
             let v = d.vel.len();
-            d.vel += (d.vel * (-2.6e-3 * v) - V3::Y * G0) * dt;
+            let drag = if matches!(d.piece, Piece::Gear(_)) { 7.0e-4 } else { 2.6e-3 };
+            d.vel += (d.vel * (-drag * v) - V3::Y * G0) * dt;
             d.pos += d.vel * dt;
             d.q = d.q.integrate(d.spin, dt);
             if d.pos.y < terrain::floor(d.pos.x, d.pos.z) + 0.5 {
@@ -2257,17 +2290,17 @@ impl Combat {
             }
         }
         for i in 0..self.debris.len() {
-            let (p, t) = (self.debris[i].pos, self.debris[i].trail);
-            self.lay(t, p);
+            if let Some(t) = self.debris[i].trail { self.lay(t, self.debris[i].pos); }
         }
         for &i in down.iter().rev() {
             let d = self.debris.remove(i);
-            self.trails[d.trail].open = false;
+            if let Some(t) = d.trail { self.trails[t].open = false; }
             let water = in_river(d.pos) || d.pos.y < 2.0;
             self.events.push(match (water, d.piece) {
                 (true, _) => Event::Splash { pos: d.pos },
                 (false, Piece::Wing(_)) => Event::Blast { pos: d.pos, scale: 0.45, burn: 6.0 },
                 (false, Piece::Tail) => Event::Dirt { pos: d.pos },
+                (false, Piece::Gear(_)) => Event::Hit { pos: d.pos },
             });
         }
     }
@@ -3537,4 +3570,44 @@ mod tests {
         }
     }
 
+}
+
+
+#[cfg(test)]
+mod gear_departure_tests {
+    use super::*;
+    #[test]
+    fn torn_gear_keeps_its_release_pose_then_flies_free_once() {
+        terrain::init();
+        for kind in Type::ALL {
+            let mut m=Mission::new();
+            let mut c=Combat::new(MissionKind::Free,&mut m);
+            let mut a=spawn_type(kind,v3(1000.0,4500.0,1000.0),0.35,220.0);
+            a.gear=0.82;
+            a.gear_damage=0.93;
+            a.q=a.q.mul(Quat::axis_angle(V3::Z,0.45));
+            a.omega=v3(0.2,-0.1,0.3);
+            a.gear_broken=[true;3];
+            c.shed_gear(&mut a);
+            assert_eq!(c.debris.len(),3);
+            for (i,d) in c.debris.iter().enumerate() {
+                assert_eq!(d.piece,Piece::Gear(i));
+                let (pivot,q)=a.gear_pose(i);
+                let centre=Piece::Gear(i).centre(kind);
+                let expected=a.pos+a.q.rotate(pivot+q.rotate(centre-pivot));
+                assert!((d.pos-expected).len()<1e-8);
+                // Compare another point too: the mesh's attitude is preserved.
+                let top=pivot;
+                let release=d.pos+d.q.rotate(top-centre);
+                assert!((release-(a.pos+a.q.rotate(pivot))).len()<1e-8);
+                assert!((d.vel-a.vel).len()>5.0 && d.trail.is_none());
+            }
+            c.shed_gear(&mut a);
+            assert_eq!(c.debris.len(),3,"loss is emitted only once");
+            let first=c.debris[0].pos;
+            for _ in 0..120 {c.step_wrecks(1.0/120.0);}
+            assert!((c.debris[0].pos-first).len()>100.0);
+            assert!((c.debris[0].q.rotate(V3::X)-a.q.rotate(V3::X)).len()>0.1);
+        }
+    }
 }

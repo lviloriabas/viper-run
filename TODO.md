@@ -7,6 +7,7 @@
 - (ninguna)
 
 ## Completadas
+- [x] Eliminar superposiciones de botones, textos y paneles en los menús; comprobar las cuatro aeronaves, configuraciones, resultados, tutoriales y salas con teclado y mando.
 - [x] Tutoriales interactivos de controles, armas, vuelo, despegues y aterrizajes, con objetivos medidos y progreso guardado.
 - [x] Multijugador P2P directo y con servidor de directorio/relay para Internet y LAN, búsqueda de salas por modo, voz con push to talk o detección, muteado, deafen y volumen por participante, y colisiones entre aviones.
 - [x] Misiones multijugador PVP (dogfight y equipos) y PVE cooperativas de combate, ataque a tierra, escolta y defensa aérea, con objetivos y resultados autoritativos.

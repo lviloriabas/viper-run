@@ -1206,18 +1206,17 @@ impl World {
                 self.draw_part(ctx,&p.stabs[i],base,&mat_mul(model,&local));
             }
             if !a.lost.wing[i]{
-                let fp=v3(side*if flanker{3.5}else{3.0},0.23,if flanker{4.97}else{2.62});
+                let (fp,axis)=crate::hornet::flap_hinge(flanker,side);
                 let angle=(a.flaps*a.kind.flap_angle()-side*a.surf_roll*16.0+a.flap_damage*8.0)*DEG;
-                self.draw_part(ctx,&p.flaps[i],base,&mat_mul(model,&rotate_about(fp,Quat::axis_angle(V3::X,angle))));
+                self.draw_part(ctx,&p.flaps[i],base,&mat_mul(model,&rotate_about(fp,Quat::axis_angle(axis,angle))));
             }
-            let root=if flanker{1.8}else{0.94};let z=if flanker{8.4}else{6.2};
-            let local=rotate_about(v3(side*root,0.5,z),Quat::axis_angle(V3::Y,a.surf_yaw*25.0*DEG));
+            let (pivot,axis)=crate::hornet::rudder_hinge(flanker,side);
+            let local=rotate_about(pivot,Quat::axis_angle(axis,a.surf_yaw*25.0*DEG));
             self.draw_part(ctx,&p.rudders[i],base,&mat_mul(model,&local));
         }
-        let z=if flanker{2.8}else{3.2};
-        self.draw_part(ctx,&p.brake,base,&mat_mul(model,&rotate_about(v3(0.0,0.87,z),Quat::axis_angle(V3::X,-a.brake*55.0*DEG))));
-        let pivots=if flanker{&crate::su27::GEAR_PIVOTS}else{&crate::hornet::GEAR_PIVOTS};
-        self.draw_legs(ctx,a,base,model,&p.gear,pivots);
+        let hinge=crate::hornet::brake_hinge(flanker);
+        self.draw_part(ctx,&p.brake,base,&mat_mul(model,&rotate_about(hinge,Quat::axis_angle(V3::X,-a.brake*55.0*DEG))));
+        self.draw_legs(ctx,a,base,model,&p.gear);
     }
 
     /// The MiG-29 with its stabilators at their deflection and its gear.
@@ -1243,29 +1242,25 @@ impl World {
             let local = rotate_about(crate::mig29::brake_hinge(upper), Quat::axis_angle(V3::X, angle));
             self.draw_part(ctx, &self.mig_brakes[i], base, &mat_mul(model, &local));
         }
-        self.draw_legs(ctx, a, base, model, &self.mig_gear, &crate::mig29::GEAR_PIVOTS);
+        self.draw_legs(ctx, a, base, model, &self.mig_gear);
     }
 
     fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {
-        self.draw_legs(ctx, a, base, model, &self.gear, &airframe::GEAR_PIVOTS);
+        self.draw_legs(ctx, a, base, model, &self.gear);
         self.draw_doors(ctx, a, base, model, &self.gear_doors, &airframe::GEAR_DOORS);
     }
 
     /// Landing gear legs, swung up toward their wells as the gear retracts,
     /// and gone once it is up and locked. The doors open first, then the
     /// legs travel with an eased start and stop, the nose leg leading.
-    fn draw_legs(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, legs: &[Part; 3], pivots: &[(V3, V3, f64); 3]) {
+    fn draw_legs(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, legs: &[Part; 3]) {
         if a.gear < 0.01 {
             return;
         }
         for (i, part) in legs.iter().enumerate() {
-            let (pivot, axis, swing) = pivots[i];
-            let t = smoothstep(if i == 0 { 0.15 } else { 0.25 }, if i == 0 { 0.9 } else { 1.0 }, a.gear);
-            // A leg broken in a hard landing lies folded half way into its well;
-            // one the air load has bent is knocked back off its down lock.
-            let t = if a.gear_broken[i] { t.min(0.45) } else { t };
-            let bent = a.gear_damage * if i == 0 { 0.12 } else { 0.08 };
-            let local = rotate_about(pivot, Quat::axis_angle(axis, (1.0 - t + bent) * swing));
+            if a.gear_broken[i] { continue; }
+            let (pivot, rotation) = a.gear_pose(i);
+            let local = rotate_about(pivot, rotation);
             self.draw_part(ctx, part, base, &mat_mul(model, &local));
         }
     }
@@ -1300,6 +1295,10 @@ impl World {
             Piece::Wing(i) => {
                 base.cut = [(i == 0) as i32 as f32, (i == 1) as i32 as f32, 1.0, kind.break_station() as f32];
                 self.draw_part(ctx,self.twin(kind).map(|p|&p.body).unwrap_or(if kind==Type::Mig29{&self.mig}else{&self.exterior}),&base,&model);
+            }
+            Piece::Gear(i) => {
+                let legs = self.twin(kind).map(|p| &p.gear).unwrap_or(if kind == Type::Mig29 { &self.mig_gear } else { &self.gear });
+                self.draw_part(ctx, &legs[i], &base, &model);
             }
             Piece::Tail => {
                 for part in self.twin(kind).map(|p|&p.stabs).unwrap_or(if kind==Type::Mig29{&self.mig_stab}else{&self.stab}) {
