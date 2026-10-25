@@ -73,6 +73,8 @@ pub mod spec {
     pub const FLAP_CD: f64 = 0.028;
     pub const FLAP_TIME: f64 = 2.5;
     pub const FLAP_BLOWBACK_KT: f64 = 370.0;
+    /// Gear damage that jams the legs where they are.
+    pub const GEAR_JAM: f64 = 0.5;
 }
 use spec::*;
 
@@ -1013,6 +1015,13 @@ pub struct Aircraft {
     pub skid_at: V3,
     /// Gear lowered or held down past its limit speed: the doors are bent.
     pub gear_overspeed: bool,
+    /// Harm the air load has done the extended gear past its limit speed,
+    /// 0 to 1: torn doors and bent legs drag more, a leg that is half gone
+    /// jams the gear where it is, and the struts take less on landing.
+    pub gear_damage: f64,
+    /// Harm to the flaps held down past their blow-back speed, 0 to 1: bent
+    /// flaperons that droop less and drag more.
+    pub flap_damage: f64,
     /// The airframe flown.
     pub kind: Type,
 }
@@ -1121,6 +1130,8 @@ impl Aircraft {
             skid_at: V3::ZERO,
             wheel_brake: 0.0,
             gear_overspeed: false,
+            gear_damage: 0.0,
+            flap_damage: 0.0,
             kind: Type::F16,
             wing_stores: 0.0,
         };
@@ -1215,7 +1226,7 @@ impl Aircraft {
             let x = c / wh.stroke;
             let spring = wh.k * c * (1.0 + OLEO_STIFFEN * x.min(1.0).powi(2)) + TYRE_STIFF * wh.k * (c - wh.stroke).max(0.0);
             let normal = (spring - wh.d * v.y).max(0.0);
-            if normal > wh.limit && dt > 0.0 {
+            if normal > wh.limit * (1.0 - 0.5 * self.gear_damage) && dt > 0.0 {
                 self.gear_broken[i] = true;
                 self.compression[i] = 0.0;
                 continue;
@@ -1391,8 +1402,10 @@ impl Aircraft {
         // Gear legs and doors drag; the flaps add lift, drag and a nose-down
         // moment the FLCS trims out.
         let fl = self.flaps;
-        c.cx -= (GEAR_DRAG * self.gear + FLAP_CD * fl) * alpha.cos();
-        c.cz -= (GEAR_DRAG * self.gear + FLAP_CD * fl) * alpha.sin() + FLAP_CL * fl * alpha.cos();
+        // Torn doors and bent legs or flaperons drag more than whole ones.
+        let parasite = GEAR_DRAG * self.gear * (1.0 + 1.5 * self.gear_damage) + FLAP_CD * (fl + 0.4 * self.flap_damage);
+        c.cx -= parasite * alpha.cos();
+        c.cz -= parasite * alpha.sin() + FLAP_CL * fl * alpha.cos();
         c.cm -= 0.025 * fl;
         // Bombs and missiles on the pylons drag along the wind.
         c.cx -= self.stores_drag * alpha.cos();
@@ -1489,10 +1502,23 @@ impl Aircraft {
         }
         // The gear runs to the handle; the trailing-edge flaps droop with the
         // gear handle down or the ALT FLAPS switch, and blow back up at speed.
-        self.gear = approach(self.gear, if input.gear_down { 1.0 } else { 0.0 }, dt / GEAR_TIME);
+        if self.gear_damage < GEAR_JAM {
+            self.gear = approach(self.gear, if input.gear_down { 1.0 } else { 0.0 }, dt / GEAR_TIME);
+        }
         let blown = self.airspeed_kt > FLAP_BLOWBACK_KT;
-        let flaps = if (input.gear_down || input.flaps) && !blown { 1.0 } else { 0.0 };
+        let flaps = if (input.gear_down || input.flaps) && !blown { 1.0 - 0.7 * self.flap_damage } else { 0.0 };
         self.flaps = approach(self.flaps, flaps, dt / FLAP_TIME);
+        // The air load past the limits works the gear and flaps loose, the
+        // faster the worse: some 20 s at 40 kt over the gear limit, a couple
+        // of seconds at 120 kt over.
+        let over = self.airspeed_kt - GEAR_LIMIT_KT;
+        if self.gear > 0.05 && over > 0.0 {
+            self.gear_damage = (self.gear_damage + dt * self.gear * 0.6 * (over / 80.0).powi(2)).min(1.0);
+        }
+        let over = self.airspeed_kt - FLAP_BLOWBACK_KT - 20.0;
+        if self.flaps > 0.05 && over > 0.0 {
+            self.flap_damage = (self.flap_damage + dt * self.flaps * 0.8 * (over / 60.0).powi(2)).min(1.0);
+        }
         self.wheel_brake = approach(self.wheel_brake, if input.wheel_brake { 1.0 } else { 0.0 }, dt * 4.0);
         if self.gear > 0.0 && self.airspeed_kt > GEAR_LIMIT_KT + 40.0 {
             self.gear_overspeed = true;

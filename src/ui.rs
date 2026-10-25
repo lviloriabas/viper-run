@@ -989,6 +989,14 @@ pub fn warnings(a: &Aircraft, m: &Mission) -> Vec<Warn> {
     if a.gear > 0.0 && a.airspeed_kt > crate::sim::spec::GEAR_LIMIT_KT {
         w.push(Warn { text: "GEAR SPEED", color: AMBER });
     }
+    if a.gear_damage >= crate::sim::spec::GEAR_JAM {
+        w.push(Warn { text: "GEAR JAMMED", color: RED });
+    } else if a.gear_damage > 0.1 {
+        w.push(Warn { text: "GEAR DAMAGED", color: AMBER });
+    }
+    if a.flap_damage > 0.1 {
+        w.push(Warn { text: "FLAPS DAMAGED", color: AMBER });
+    }
     // Past the placard, on the way to the flutter boundary.
     if a.structure.margin > 0.87 {
         w.push(Warn { text: "OVERSPEED", color: AMBER });

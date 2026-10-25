@@ -1265,6 +1265,7 @@ impl Combat {
             self.hp = 100.0;
             self.hull = Hull::new(a.kind);
             a.battle = BattleDamage::default();
+            (a.gear_damage, a.flap_damage) = (0.0, 0.0);
             a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
             a.stores_mass = self.loadout.mass();
             a.wing_stores = self.loadout.wing_mass();

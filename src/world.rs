@@ -1196,9 +1196,11 @@ impl World {
         for (i, part) in legs.iter().enumerate() {
             let (pivot, axis, swing) = pivots[i];
             let t = smoothstep(if i == 0 { 0.15 } else { 0.25 }, if i == 0 { 0.9 } else { 1.0 }, a.gear);
-            // A leg broken in a hard landing lies folded half way into its well.
+            // A leg broken in a hard landing lies folded half way into its well;
+            // one the air load has bent is knocked back off its down lock.
             let t = if a.gear_broken[i] { t.min(0.45) } else { t };
-            let local = rotate_about(pivot, Quat::axis_angle(axis, (1.0 - t) * swing));
+            let bent = a.gear_damage * if i == 0 { 0.12 } else { 0.08 };
+            let local = rotate_about(pivot, Quat::axis_angle(axis, (1.0 - t + bent) * swing));
             self.draw_part(ctx, part, base, &mat_mul(model, &local));
         }
     }
@@ -1207,6 +1209,10 @@ impl World {
     /// is up, swung open over the first part of the cycle.
     fn draw_doors(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, doors: &[Part], hinges: &[(V3, V3, f64)]) {
         if a.gear < 0.01 {
+            return;
+        }
+        // Doors torn off by the air load are gone.
+        if a.gear_damage > 0.3 {
             return;
         }
         for (part, &(hinge, axis, open)) in doors.iter().zip(hinges) {
