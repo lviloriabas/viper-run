@@ -98,6 +98,11 @@ impl Gamepad {
         self.held(b) && self.prev.buttons & b == 0
     }
 
+    /// True on the frame the button comes up.
+    pub fn released(&self, b: u16) -> bool {
+        !self.held(b) && self.prev.buttons & b != 0
+    }
+
     /// True on the frame a held button has been down for `secs`.
     pub fn long_press(&self, b: u16, secs: f64) -> bool {
         let t = self.down_at[b.trailing_zeros() as usize] + secs;

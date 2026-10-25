@@ -253,10 +253,15 @@ fn leg(m: &mut Mesh, s: f64, rudder: f64) {
     }
     if s < 0.0 {
         // Kneeboard strapped to the left thigh, riding with it.
-        let y = (thigh - V3::X * thigh.x).norm();
+        // Lying on top of the thigh, its backing on the suit: tilted to the
+        // taper from the full upper thigh down toward the knee.
+        let flat = (thigh - V3::X * thigh.x).norm();
+        let up = V3::X.cross(flat);
+        let (p0, p1) = (hip.lerp(knee, 0.42) + up * 0.093, hip.lerp(knee, 0.76) + up * 0.077);
+        let y = (p1 - p0).norm();
         let z = V3::X.cross(y);
-        let kb = Frame { o: hip.lerp(knee, 0.58) + z * 0.090 - V3::X * 0.036, x: V3::X, y, z };
-        m.block(&kb.at(0.0, 0.0, -0.006), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
+        let kb = Frame { o: p0.lerp(p1, 0.5) - V3::X * 0.012, x: V3::X, y, z };
+        m.block(&kb.at(0.0, 0.0, -0.005), v3(0.068, 0.085, 0.005), Rgb(0.22, 0.24, 0.20));
         screen(m, &kb, 0.12, 0.15, R_KNEE);
     }
     // Boot on the rudder pedal.

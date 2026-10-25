@@ -55,19 +55,23 @@ const R_DIALS: [R; 7] = [
     r(640.0, 320.0, 128.0, 128.0),
     r(768.0, 320.0, 128.0, 128.0),
 ];
-const R_GMETER: R = r(896.0, 320.0, 128.0, 128.0);
+/// Angle-of-attack indicator, the tape left of the ADI.
+const R_AOAI: R = r(896.0, 320.0, 128.0, 128.0);
 /// The rear-view picture (see `mirror_camera`), for the cockpits with mirrors
 /// (the MiG-29; the F-16 has none).
 const R_MIRROR: R = r(1024.0, 1280.0, 512.0, 160.0);
 /// Vertical field of view of the rear-view camera; its picture is 512 by 160.
 pub const MIRROR_SIZE: (u32, u32) = (512, 160);
 const MIRROR_FOV: f64 = 40.0 * DEG;
+/// Warning lights on the right eyebrow.
 const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
+/// Eyebrow panels' distance out from the centreline, m.
+const EYEBROW: f64 = 0.30;
 const R_ARM: R = r(256.0, 448.0, 96.0, 256.0);
 const R_AOA: R = r(512.0, 448.0, 48.0, 128.0);
 const R_KNEE: R = r(560.0, 448.0, 192.0, 240.0);
 /// Dials on the right auxiliary console: hydraulic pressure A and B, EPU
-/// fuel, oxygen, cabin altitude and the clock.
+/// fuel, fuel quantity, cabin altitude and the clock.
 const R_AUX_DIALS: [R; 6] = [
     r(0.0, 1024.0, 128.0, 128.0),
     r(128.0, 1024.0, 128.0, 128.0),
@@ -76,7 +80,8 @@ const R_AUX_DIALS: [R; 6] = [
     r(512.0, 1024.0, 128.0, 128.0),
     r(640.0, 1024.0, 128.0, 128.0),
 ];
-const R_FUEL: R = r(768.0, 1024.0, 128.0, 128.0);
+/// Accelerometer, low on the left wing of the panel.
+const R_ACCEL: R = r(768.0, 1024.0, 128.0, 128.0);
 const R_VVI: R = r(896.0, 1024.0, 128.0, 128.0);
 const R_TWP: R = r(0.0, 1152.0, 256.0, 96.0);
 const R_FFLOW: R = r(256.0, 1152.0, 192.0, 64.0);
@@ -647,31 +652,36 @@ fn build_static(m: &mut Mesh) {
     }
     m.capsule(v3(-0.104, 1.352, -3.958), v3(0.104, 1.352, -3.958), 0.0025, 0.0025, GLARE.scale(2.0), 6);
 
-    // Glare-shield lamps: AOA indexer left of the HUD, master caution right.
+    // Glare-shield lamps: the AOA indexer left of the HUD; on the eyebrows
+    // out over the panel's top corners, the master caution on the left and
+    // the warning lights on the right.
     let lamp = |u: f64| Frame { o: v3(u, 1.045, -4.035), x: V3::X, y: v3(0.0, 0.94, -0.34), z: v3(0.0, 0.34, 0.94) };
     m.block(&lamp(-0.14).at(0.0, 0.0, -0.005), v3(0.017, 0.045, 0.01), GLARE.scale(1.4));
     screen(m, &lamp(-0.14).at(0.0, 0.0, 0.006), 0.02, 0.07, R_AOA);
-    m.block(&lamp(0.14).at(0.0, 0.0, -0.005), v3(0.024, 0.024, 0.01), GLARE.scale(1.4));
-    screen(m, &lamp(0.14).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
+    m.block(&lamp(-EYEBROW).at(0.0, -0.01, -0.005), v3(0.026, 0.034, 0.01), GLARE.scale(1.4));
+    screen(m, &lamp(-EYEBROW).at(0.0, 0.0, 0.006), 0.036, 0.036, R_MC);
+    m.block(&lamp(EYEBROW).at(0.0, -0.01, -0.005), v3(0.064, 0.034, 0.01), GLARE.scale(1.4));
+    screen(m, &lamp(EYEBROW).at(0.0, 0.0, 0.006), 0.118, 0.052, R_CAUTION);
 
     // Airspeed and altimeter above the larger attitude/heading instruments.
     gauge(m, &panel_at(-0.061, 0.785, 0.0), 0.043, R_DIALS[0]);
     gauge(m, &panel_at(0.061, 0.785, 0.0), 0.043, R_DIALS[1]);
     gauge(m, &panel_at(0.0, 0.655, 0.0), 0.048, R_DIALS[2]);
     gauge(m, &panel_at(0.0, 0.515, 0.0), 0.048, R_HSI);
-    gauge(m, &panel_at(-0.092, 0.635, 0.0), 0.022, R_VVI);
-    gauge(m, &panel_at(0.091, 0.635, 0.0), 0.022, R_GMETER);
+    // The AOA tape left of the ADI and the VVI right of it, as in the jet.
+    gauge(m, &panel_at(-0.092, 0.635, 0.0), 0.022, R_AOAI);
+    gauge(m, &panel_at(0.091, 0.635, 0.0), 0.022, R_VVI);
     // RWR above the left MFD; engine gauges follow the right shoulder.
     display(m, &panel_at(-0.245, 0.951, 0.0), 0.085, 0.080, 0.063, 0.061, R_RWR, false);
-    for (i, y) in [0.86, 0.79, 0.72, 0.65].iter().enumerate() {
+    for (i, y) in [0.84, 0.77, 0.70, 0.63].iter().enumerate() {
         gauge(m, &panel_at(0.392, *y, 0.0), 0.026, R_DIALS[3 + i]);
     }
     plate(m, &panel_at(-0.376, 0.834, 0.0), 0.046, 0.14, R_ARM);
-    plate(m, &panel_at(0.40, 0.57, 0.0), 0.085, 0.060, R_CAUTION);
-    // Fuel quantity low on the left wing, clear of the leg well.
-    gauge(m, &panel_at(-0.385, 0.714, 0.0), 0.032, R_FUEL);
+    // Accelerometer low on the left wing, clear of the leg well; the fuel
+    // quantity is on the right auxiliary console.
+    gauge(m, &panel_at(-0.385, 0.714, 0.0), 0.032, R_ACCEL);
     plate(m, &panel_at(-0.39, 0.91, 0.0), 0.062, 0.030, R_TWP);
-    plate(m, &panel_at(0.392, 0.93, 0.0), 0.065, 0.024, R_FFLOW);
+    plate(m, &panel_at(0.356, 0.90, 0.0), 0.065, 0.024, R_FFLOW);
     // Small switch rows low on the panel, mostly behind the knees.
     for &s in &[-1.0, 1.0] {
         for i in 0..3 {
@@ -931,6 +941,28 @@ fn altimeter(cv: &mut Canvas, r: R, ad: &AirData) {
 /// Accelerometer: normal load factor from -5 to +10 G, +1 at nine o'clock,
 /// red beyond the +9 / -3 airframe limits, with amber memory pointers that
 /// hold the peak positive and negative G of the sortie.
+/// AOA indicator: a tape of degrees scrolling past a fixed index, the
+/// approach band (11 to 15) green, the high-AoA end red.
+fn aoa_tape(cv: &mut Canvas, r: R, a: &Aircraft) {
+    let (x, y, rad) = gauge_face(cv, r);
+    let (l, w) = (x - rad * 0.32, rad * 0.64);
+    let (top, bottom) = (y - rad * 0.78, y + rad * 0.78);
+    cv.rect(l, top, w, bottom - top, rgba(0x1a, 0x1e, 0x1c, 1.0));
+    let per = rad * 0.07;
+    let at = |deg: f64| y - ((deg - a.alpha_deg) as f32) * per;
+    cv.set_clip(Some(vec![[l, top], [l + w, top], [l + w, bottom], [l, bottom]]));
+    cv.rect(l, at(15.0), w * 0.25, at(11.0) - at(15.0), GREEN);
+    cv.rect(l, at(32.0), w * 0.25, at(25.0) - at(32.0), RED);
+    for deg in (-5..=32).step_by(5) {
+        let yy = at(deg as f64);
+        cv.line(l + w * 0.28, yy, l + w * 0.5, yy, 2.0, WHITE);
+        cv.text(&format!("{deg}"), l + w * 0.95, yy, 1.0, WHITE, Align::Right);
+    }
+    cv.set_clip(None);
+    cv.line(l - 4.0, y, l + w + 4.0, y, 3.0, POINTER);
+    cv.text("AOA", x, top - 6.0, 1.0, WHITE, Align::Center);
+}
+
 fn g_meter(cv: &mut Canvas, r: R, ad: &AirData) {
     let (x, y, rad) = gauge_face(cv, r);
     let ang = |g: f64| (180.0 + (clamp(g, -5.0, 10.0) - 1.0) * 22.0) * DEG;
@@ -1078,13 +1110,14 @@ fn mfd(cv: &mut Canvas, r: R, page: Page, a: &Aircraft, ad: &AirData, m: &Missio
                 ("G / AOA", format!("{:.1} / {:.1}", a.g_smooth, a.alpha_deg)),
             ];
             for (i, (k, v)) in rows.iter().enumerate() {
-                let yy = y0 + 48.0 + i as f32 * 36.0;
+                let yy = y0 + 44.0 + i as f32 * 30.0;
                 cv.text(k, x0 + 14.0, yy, 1.0, DIM, Align::Left);
                 cv.text(v, x0 + w - 14.0, yy + 12.0, 2.0, GREEN, Align::Right);
                 cv.line(x0 + 12.0, yy + 24.0, x0 + w - 12.0, yy + 24.0, 1.0, rgba(0x1c, 0x34, 0x31, 1.0));
             }
             let (s, c) = if a.ab { ("AFTERBURNER", AMBER) } else { ("FLCS NORM", GREEN) };
-            cv.text(s, x0 + w / 2.0, y0 + h - 40.0, 2.0, c, Align::Center);
+            // Status line in its own row under the table, clear of the readouts.
+            cv.text(s, x0 + w / 2.0, y0 + h - 30.0, 1.0, c, Align::Center);
         }
     }
 }
@@ -1149,20 +1182,22 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // Dials: airspeed/Mach, altimeter, accelerometer, standby ADI, RPM, FTIT, nozzle, oil.
     asi_mach(cv, R_DIALS[0], &ad);
     altimeter(cv, R_DIALS[1], &ad);
-    g_meter(cv, R_GMETER, &ad);
+    g_meter(cv, R_ACCEL, &ad);
+    aoa_tape(cv, R_AOAI, a);
     adi(cv, R_DIALS[2], a);
     dial(cv, R_DIALS[3], a.rpm, 0.0, 110.0, "RPM", &pad(a.rpm, 2), 10);
     dial(cv, R_DIALS[4], a.ftit, 200.0, 1200.0, "FTIT", &pad(a.ftit, 3), 9);
     dial(cv, R_DIALS[5], a.nozzle, 0.0, 100.0, "NOZ", &pad(a.nozzle, 2), 11);
     dial(cv, R_DIALS[6], a.oil_psi, 0.0, 100.0, "OIL", &pad(a.oil_psi, 2), 11);
 
-    // Caution light panel.
+    // Warning lights (the right eyebrow), lit red.
     let r = R_CAUTION;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x20, 0x27, 0x29, 1.0));
-    let labels = [("FLCS", a.alpha_deg > 25.0 || a.battle.controls > 0.2), ("FUEL LOW", a.fuel < 450.0 || a.battle.leak > 0.0), ("ENGINE", a.fuel <= 0.0 || a.battle.engine > 0.3), ("OIL", a.oil_psi < 20.0), ("ALT LOW", ad.radar_ft < 300.0), ("AIR BRK", a.brake > 0.1)];
+    let low_slow = a.agl < 3000.0 && a.airspeed_kt < 190.0 && !a.on_ground;
+    let labels = [("ENG FIRE", a.battle.fire), ("ENGINE", a.fuel <= 0.0 || a.battle.thrust() == 0.0), ("HYD/OIL", a.oil_psi < 20.0), ("FLCS", a.alpha_deg > 25.0 || a.battle.controls > 0.5), ("TO/LDG", low_slow && a.gear < 0.999), ("CANOPY", a.ejected)];
     for (i, (s, lit)) in labels.iter().enumerate() {
         let (x, y) = (r.x + (i % 2) as f32 * 128.0, r.y + (i / 2) as f32 * 42.6);
-        cv.rect(x + 3.0, y + 3.0, 122.0, 36.0, if *lit { rgba(0xd4, 0x96, 0x38, 1.0) } else { rgba(0x0c, 0x14, 0x14, 1.0) });
+        cv.rect(x + 3.0, y + 3.0, 122.0, 36.0, if *lit { rgba(0xe0, 0x40, 0x30, 1.0) } else { rgba(0x0c, 0x14, 0x14, 1.0) });
         cv.text(s, x + 64.0, y + 21.0, 2.0, if *lit { rgba(0x1c, 0x14, 0x05, 1.0) } else { rgba(0x6b, 0x75, 0x69, 1.0) }, Align::Center);
     }
 
@@ -1233,7 +1268,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     cv.disc(x, y, 4.0, rgba(0x9d, 0xa7, 0x9b, 1.0));
 
     // Fuel quantity: aft-left and forward-right pointers, totalizer below.
-    let (x, y, rad) = gauge_face(cv, R_FUEL);
+    let (x, y, rad) = gauge_face(cv, R_AUX_DIALS[3]);
     let lb = a.fuel * 2.20462;
     let ang = |t: f64| (-225.0 + 270.0 * clamp(t, 0.0, 1.0)) * DEG;
     for k in 0..=8 {
@@ -1271,7 +1306,6 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     dial(cv, R_AUX_DIALS[0], hyd, 0.0, 4000.0, "HYD A", &pad(hyd, 4), 9);
     dial(cv, R_AUX_DIALS[1], hyd * 0.99, 0.0, 4000.0, "HYD B", &pad(hyd * 0.99, 4), 9);
     dial(cv, R_AUX_DIALS[2], 100.0, 0.0, 100.0, "EPU %", "100", 11);
-    dial(cv, R_AUX_DIALS[3], 4.6, 0.0, 5.0, "OXY L", "4.6", 11);
     // Cabin altitude: 8,000 ft until the 5 psi schedule takes over near 23,000.
     let cabin = if ad.pressure_alt_ft < 23000.0 { ad.pressure_alt_ft.min(8000.0) } else { 8000.0 + (ad.pressure_alt_ft - 23000.0) * 0.45 };
     dial(cv, R_AUX_DIALS[4], cabin, 0.0, 50000.0, "CABIN", &pad(cabin / 1000.0, 2), 9);
@@ -1287,9 +1321,10 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
 
     // Side and auxiliary console lightplates, with their lamps.
     let gear_down = a.gear >= 0.999;
-    let low_slow = a.agl < 3000.0 && a.airspeed_kt < 190.0 && !a.on_ground;
     let lamps = consoles::Lamps {
-        on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, a.battle.fire, a.fuel <= 0.0 || a.battle.thrust() == 0.0, a.oil_psi < 20.0, a.alpha_deg > 25.0, false, low_slow && !gear_down, false],
+        // Then the caution panel: FLCS FAULT, ENGINE FAULT, FWD and AFT FUEL
+        // LOW, ELEC SYS, ANTI SKID, CABIN PRESS, SEAT NOT ARMED.
+        on: [gear_down, gear_down, gear_down, a.flaps > 0.5, a.wheel_brake > 0.1, a.battle.controls > 0.2, a.battle.engine > 0.3, a.fuel < 450.0, a.fuel < 450.0 || a.battle.leak > 0.0, false, a.gear_broken.iter().any(|&b| b), false, false],
     };
     consoles::draw(cv, &lamps);
     if a.kind == crate::sim::Type::Mig29 {

@@ -278,6 +278,8 @@ struct App {
     eject_hold: f64,
     /// The jet the pilot left has hit the ground.
     eject_wreck: bool,
+    /// The pad's weapon button was held into a jettison.
+    pad_jettisoned: bool,
     result: Option<RunResult>,
     /// The external camera sits inside the jet's Mach cone, where its boom
     /// has already passed.
@@ -342,6 +344,9 @@ fn stick_curve(v: f64) -> f64 {
     const DEAD: f64 = 0.04;
     v.signum() * ((v.abs() - DEAD).max(0.0) / (1.0 - DEAD)).min(1.0)
 }
+
+/// Seconds the pad's weapon button is held to jettison the selected store.
+const JETTISON_HOLD: f64 = 0.8;
 
 /// Seconds between countermeasure programs while the button is held.
 const CM_REPEAT: f64 = 1.0;
@@ -427,6 +432,7 @@ impl App {
             ejection: None,
             eject_hold: 0.0,
             eject_wreck: false,
+            pad_jettisoned: false,
             result: None,
             in_cone: false,
             breaths: 0,
@@ -1081,11 +1087,27 @@ impl App {
             }
             // The MiG has no MFDs: its left d-pad works the radar / IRST switch.
             let mig = self.aircraft.as_ref().is_some_and(|a| a.kind == sim::Type::Mig29);
+            // The weapon button cycles on release, so that holding it
+            // jettisons the store selected now rather than the next one.
+            let weapon = if self.settings.pad_layout == PadLayout::Combat { A } else { UP };
             for (button, b) in actions.iter().copied().chain(airbrake) {
                 let b = if mig && b == Bind::LeftMfd { Bind::Sensor } else { b };
+                if b == Bind::Weapon {
+                    continue;
+                }
                 if self.pad.pressed(button) && !(both && button == LS) {
                     self.bind_pressed(b);
                 }
+            }
+            if self.state == State::Flying && self.pad.long_press(weapon, JETTISON_HOLD) {
+                self.pad_jettisoned = true;
+                self.bind_pressed(Bind::Jettison);
+            }
+            if self.pad.released(weapon) {
+                if !self.pad_jettisoned {
+                    self.bind_pressed(Bind::Weapon);
+                }
+                self.pad_jettisoned = false;
             }
             // Holding the lock button half a second drops the lock, like TMS aft.
             if self.settings.pad_layout == PadLayout::Combat && self.state == State::Flying && self.pad.long_press(RB, 0.5) {
@@ -1303,10 +1325,12 @@ impl App {
     fn fight(&mut self, dt: f64) -> bool {
         // A pilot out cold, or still coming round, cannot squeeze the trigger.
         let trigger = self.trigger() && self.pilot.authority() > 0.5 && self.ejection.is_none();
-        // The handle, held for half a second by a pilot awake to pull it.
-        let pull = (self.settings.keys.held(Bind::Eject, &self.keys) || self.opts.eject) && self.pilot.authority() > 0.5;
+        // The handle, held by a pilot awake to pull it: half a second on the
+        // key, both bumpers for a second and a half on the pad.
+        let pad_pull = self.pad.held(gamepad::LB) && self.pad.held(gamepad::RB);
+        let pull = (self.settings.keys.held(Bind::Eject, &self.keys) || self.opts.eject || pad_pull) && self.pilot.authority() > 0.5;
         self.eject_hold = if pull && self.ejection.is_none() { self.eject_hold + dt } else { 0.0 };
-        if self.eject_hold >= 0.5 {
+        if self.eject_hold >= if pad_pull { 1.5 } else { 0.5 } {
             self.eject();
         }
         // Held down, the countermeasure button runs another program every

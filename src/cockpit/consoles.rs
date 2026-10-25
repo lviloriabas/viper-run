@@ -331,11 +331,11 @@ const PANELS: [Panel; 28] = [
 ];
 
 /// What the live lamps show, refreshed with the instruments: gear down
-/// and locked (nose, left, right), flaps, wheel brakes, then the warning
-/// row: ENG FIRE, ENGINE, HYD/OIL PRESS, FLCS, DBU ON, TO/LDG CONFIG, CANOPY.
+/// and locked (nose, left, right), flaps, wheel brakes, then the caution
+/// panel's lights.
 #[derive(Clone, Copy, Default)]
 pub struct Lamps {
-    pub on: [bool; 12],
+    pub on: [bool; 13],
 }
 
 /// Auxiliary consoles: a 10 x 10 in plate on each ramp under the panel
@@ -374,14 +374,15 @@ const AUX: [Aux; 2] = [
         T(1.4, 8.75, "LIGHTS"), T(1.4, 9.15, "LANDING"), T(1.4, 9.55, "TAXI"), Tg(3.0, 9.25, 1),
         T(5.6, 8.75, "ALT GEAR"), Th(5.6, 9.45),
     ]},
-    // The warning lights along the top, clear of the stick grip, which
-    // stands in front of the plate's lower half; the dial faces carry their
-    // own names, so the plate needs none to crowd between the flanges.
+    // The caution light panel along the top, clear of the stick grip, which
+    // stands in front of the plate's lower half; the warning lights are on
+    // the right eyebrow. The dial faces carry their own names, so the plate
+    // needs none to crowd between the flanges.
     Aux { side: RT, rect: R { x: 1392.0, y: 1024.0, w: 360.0, h: 360.0 }, items: &[
-        Lp(2.5, 1.0, 3.0, 0.5, "ENG FIRE", 5), Lp(6.3, 1.0, 3.0, 0.5, "ENGINE", 6),
-        Lp(2.5, 1.6, 3.0, 0.5, "HYD/OIL PRESS", 7), Lp(6.3, 1.6, 3.0, 0.5, "FLCS", 8),
-        Lp(2.5, 2.2, 3.0, 0.5, "DBU ON", 9), Lp(6.3, 2.2, 3.0, 0.5, "TO/LDG CONFIG", 10),
-        Lp(2.5, 2.8, 3.0, 0.5, "CANOPY", 11), Lp(6.3, 2.8, 3.0, 0.5, "OXY LOW", 11),
+        Lp(2.5, 1.0, 3.0, 0.5, "FLCS FAULT", 5), Lp(6.3, 1.0, 3.0, 0.5, "ENGINE FAULT", 6),
+        Lp(2.5, 1.6, 3.0, 0.5, "FWD FUEL LOW", 7), Lp(6.3, 1.6, 3.0, 0.5, "AFT FUEL LOW", 8),
+        Lp(2.5, 2.2, 3.0, 0.5, "ELEC SYS", 9), Lp(6.3, 2.2, 3.0, 0.5, "ANTI SKID", 10),
+        Lp(2.5, 2.8, 3.0, 0.5, "CABIN PRESS", 11), Lp(6.3, 2.8, 3.0, 0.5, "SEAT NOT ARMED", 12),
         Ln(0.5, 3.4, 9.0, 3.4),
         Ga(1.75, 4.85, 0.85, 0), Ga(5.0, 4.85, 0.85, 1), Ga(8.25, 4.85, 0.85, 5),
         Ga(1.75, 7.65, 0.85, 2), Ga(5.0, 7.65, 0.85, 3), Ga(8.25, 7.65, 0.85, 4),
