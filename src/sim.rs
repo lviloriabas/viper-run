@@ -1323,7 +1323,9 @@ impl Aircraft {
     /// like a plate; an uneven stall drops that wing and yaws the nose
     /// towards it, and the lost lift lets the nose fall.
     fn separation(&mut self, f: &Flow, c: &mut Coeffs, dt: f64) {
-        let crit = self.critical_alpha(f);
+        // Drooped trailing-edge flaps lift the curve but the wing lets go
+        // a couple of degrees sooner.
+        let crit = self.critical_alpha(f) - 2.0 * self.flaps;
         let v = f.speed.max(30.0);
         let roll = f.p * PANEL_ARM / v * RAD;
         let slip = 0.25 * f.beta * clamp(f.alpha / 10.0, -1.0, 1.0);
