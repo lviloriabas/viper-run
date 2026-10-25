@@ -40,7 +40,8 @@ The fuel-flow strip has its own space above the right MFD. MiG raised controls
 mount on the front of the coaming, with backing, and the countermeasure readout
 sits below the HUD housing. The SPO-15 has a rectangular face and the IT-23
 shows a flight repeater. MiG mirrors retain their outline at 70% of the previous
-size and sit close to the canopy bow, above the HUD sight line.
+size and mount on the pilot-facing side of the complete canopy bow, slightly
+overlapping its front rim and above the HUD sight line.
 
 Both handle grips rise with the hands, with elbows forward and tucked in clear
 of the vest. The head stays at the cockpit eye, avoiding the former camera jump

@@ -325,9 +325,9 @@ pub fn build_static(m: &mut Mesh) {
         p - inward(p, 0.025)
     }).collect();
     crate::cockpit::pilot::band(m, &arch, 0.012, 0.022, V3::Z, FRAME);
-    // Three separate panes follow the arch: a broad one across the crown,
-    // and a long one down each shoulder. Their lower rims meet the arch;
-    // the glass sits aft of it, clear of the HUD and windscreen posts.
+    // Three panes on the pilot-facing side of the bow, beyond the canopy's
+    // full painted arch thickness. Their lower rims overlap its front face
+    // instead of sitting inside the bow and appearing behind it.
     for (lo, hi) in [(1.08, PI - 1.08), (0.30, 1.00), (PI - 1.00, PI - 0.30)] {
         let z0 = za + 0.025;
         let mid = (lo + hi) * 0.5;
@@ -346,7 +346,8 @@ pub fn build_static(m: &mut Mesh) {
         let centre = place(0.0, 0.0, 0.0);
         let anchor = cp(za, mid) - inward(cp(za, mid), 0.025);
         let up = (centre - anchor).norm();
-        let mount = anchor + up * 0.024;
+        let mut mount = anchor + up * 0.012;
+        mount.z = crate::mig29::CANOPY_Z[3] + OFFSET.z + 0.035;
         let smaller = |x: f64, y: f64, d: f64| mount + (place(x, y, d) - centre) * (0.78 * 0.70);
         super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), (mid - PI / 2.0).sin());
         for t in [-0.28, 0.28] {
@@ -751,6 +752,23 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirror_glass_is_in_front_of_the_full_bow_on_the_pilot_side() {
+        let mut mesh = Mesh::new();
+        build_static(&mut mesh);
+        let r = super::super::R_MIRROR;
+        let mut count = 0;
+        for v in mesh.v.chunks(crate::mesh::STRIDE) {
+            let (u, y) = (v[9] as f64 * 2048.0, (1.0-v[10] as f64) * 2048.0);
+            if u > r.x as f64 && u < (r.x+r.w) as f64 && y > r.y as f64 && y < (r.y+r.h) as f64 {
+                count += 1;
+                assert!(v[2] as f64 > crate::mig29::CANOPY_Z[3] + OFFSET.z + 0.010,
+                    "mirror glass is embedded in or behind the canopy bow");
+            }
+        }
+        assert!(count > 100);
+    }
 
     #[test]
     fn mounting_flanges_fit_the_panel_without_crossing_or_overlapping() {
