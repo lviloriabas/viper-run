@@ -439,7 +439,18 @@ void main() {
         if (abs(v_local.x) < 0.44 && v_local.y > 0.55 && v_local.z > -4.78 && v_local.z < -2.0) discard;
     } else if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
     vec3 base = v_uv.x >= 0.0 ? texture(u_tex, v_uv).rgb * v_color : v_color;
-    if (v_uv.x < -1.5) {
+    if (v_uv.x < -2.5) {
+        // Flanker blue-grey scheme (su27::flag_camo): larger, softer cells
+        // and a tighter palette than the MiG's high-contrast digital paint.
+        vec3 cell = floor(v_local * 3.1);
+        vec3 c = (cell + 0.5) / 3.1;
+        float r1 = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
+        float r2 = fract(sin(dot(cell, vec3(39.346, 11.135, 83.155))) * 24634.6345) - 0.5;
+        float dark = sin(c.z * 0.72 + 1.15 * sin(c.x * 0.62)) + sin(c.x * 1.22 - c.z * 0.48 + c.y * 1.55) + 0.8 * r1;
+        float mid = sin(c.z * 1.42 - 0.55 * c.x + 1.8) + sin(c.x * 1.85 + c.z * 0.92 + c.y) + 0.8 * r2;
+        vec3 paint = dark > 0.72 ? vec3(0.38, 0.44, 0.50) : (mid > 0.12 ? vec3(0.50, 0.57, 0.62) : vec3(0.61, 0.67, 0.70));
+        base = paint * (v_color.g / 0.72);
+    } else if (v_uv.x < -1.5) {
         // Digital camouflage (mig29::flag_camo): 22 cm square cells in body
         // space, each taking one of three grey-blues from two blob fields
         // sampled at the cell centre, so the blobs keep stepped pixel edges,

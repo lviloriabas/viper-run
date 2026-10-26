@@ -83,3 +83,31 @@ produced 28 reviewed Linux captures; both Windows cockpit captures also complete
 successfully with the final distribution executable. Checks include panel and
 console sightlines, leg/throttle clearance, distinct HUD apertures, fixed HUD
 readout fit, continuous wing/flap skin and the Su-27 forebody envelope.
+
+## Completed OpenCode model revision (26 October 2026)
+
+The `test` branch passes 271 game tests and 6 standalone server tests with
+`cargo test --release`. Additional regressions cover the two-pane Hornet mirror
+installation, clear canopy bubbles and both sill rails, the Hornet fixed-fin
+boundary, five-point Flanker insignia and the stowed Flanker speedbrake's fit
+against the curved spine. Existing wing/flap, gear, instrument sightline and
+pilot-clearance tests also pass.
+
+`./build.sh` rebuilt both Linux and Windows distributions. The 30-case
+`tools/check_airframe_views.py` matrix completed on Linux and native Windows,
+using the final distribution executables (the Linux build output was checked
+byte-for-byte against `dist/`). All 60 images were reviewed for cockpit and
+exterior geometry, gear, detached gear, rudders and deployed speedbrakes. Four
+additional lateral speedbrake captures completed, two per platform. The expanded
+overhead camera framing includes the complete aircraft.
+
+Reproduce the matrix with:
+
+```sh
+python3 tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/opencode-final
+python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/opencode-final-windows
+```
+
+Run the second command on native Windows. Reports and captures stay under the
+ignored `target/model-review/` directory. FlightGear reference models, their
+hashes and variant differences are documented in HORNET-FLANKER-MODELS.md.

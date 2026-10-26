@@ -470,7 +470,7 @@ pub fn build(kind: Type) -> Mesh {
     let offset = crate::airframe::EYE - kind.eye();
     let native = |z: f64, phi: f64| crate::hornet::canopy_point(russian, z, phi) + offset;
     let bow = crate::hornet::canopy_bow(russian);
-    let aft = if russian { -2.85 } else { -2.18 };
+    let aft = if russian { -2.38 } else { -2.10 };
     for k in 0..24 {
         let (a, b) = (
             native(bow, k as f64 * PI / 24.0),
@@ -487,18 +487,48 @@ pub fn build(kind: Type) -> Mesh {
             m.capsule(native(z0, edge), native(z1, edge), 0.025, 0.025, DARK, 6);
         }
     }
-    for phi in [0.88, PI / 2.0, PI - 0.88] {
-        let at = native(bow, phi);
-        let tangent = v3(phi.sin(), -phi.cos(), 0.0);
-        let radial = v3(phi.cos(), phi.sin(), 0.0);
-        curved_mirror(
-            &mut m,
-            if phi == PI / 2.0 { 0.095 } else { 0.086 },
-            0.035,
-            &|x, y, d| at + tangent * x + radial * (y - 0.038) + V3::Z * (0.045 + d),
-            DARK,
-            -0.01,
-        );
+    if russian {
+        // MiG-style three-pane installation: small centre panorama and two
+        // angled shoulder panes on the canopy bow.
+        for phi in [0.88, PI / 2.0, PI - 0.88] {
+            let at = native(bow, phi);
+            let tangent = v3(phi.sin(), -phi.cos(), 0.0);
+            let radial = v3(phi.cos(), phi.sin(), 0.0);
+            curved_mirror(
+                &mut m,
+                if phi == PI / 2.0 { 0.095 } else { 0.086 },
+                0.035,
+                &|x, y, d| at + tangent * x + radial * (y - 0.038) + V3::Z * (0.045 + d),
+                DARK,
+                -0.01,
+            );
+        }
+    } else {
+        // The Hornet carries two large rectangular panes, one either side of
+        // the centreline, on short brackets under the windscreen bow. They
+        // are deliberately much larger than the Flanker/MiG shoulder panes.
+        for (i, phi) in [0.74, PI - 0.74].into_iter().enumerate() {
+            let at = native(bow, phi);
+            let tangent = v3(phi.sin(), -phi.cos(), 0.0);
+            let radial = v3(phi.cos(), phi.sin(), 0.0);
+            let centre = at + radial * -0.058 + V3::Z * 0.050;
+            m.capsule(
+                at + V3::Z * 0.035,
+                centre + radial * 0.036 + V3::Z * 0.035,
+                0.009,
+                0.009,
+                DARK,
+                6,
+            );
+            curved_mirror(
+                &mut m,
+                0.156,
+                0.070,
+                &|x, y, d| at + tangent * x + radial * (y - 0.058) + V3::Z * (0.050 + d),
+                DARK,
+                if i == 0 { -0.42 } else { 0.42 },
+            );
+        }
     }
     let back_z = -2.70;
     m.block(&plain(v3(0.0, 0.63, back_z)), v3(0.49, 0.47, 0.025), wall);
@@ -630,6 +660,34 @@ pub fn flanker_instruments(cv: &mut Canvas) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hornet_has_two_large_mirrors_while_flanker_keeps_three_small_panes() {
+        for kind in [Type::F18, Type::Su27] {
+            let m = build(kind);
+            let glass: Vec<_> = m.v.chunks(crate::mesh::STRIDE).filter(|v| {
+                let x = v[9] as f64 * AW;
+                let y = (1.0 - v[10] as f64) * A;
+                x >= R_MIRROR.x as f64 && x <= (R_MIRROR.x + R_MIRROR.w) as f64
+                    && y >= R_MIRROR.y as f64 && y <= (R_MIRROR.y + R_MIRROR.h) as f64
+            }).collect();
+            assert!(glass.len() > 100);
+            assert!(glass.iter().any(|v| v[0] < -0.20));
+            assert!(glass.iter().any(|v| v[0] > 0.20));
+            assert_eq!(glass.iter().any(|v| v[0].abs() < 0.10), kind == Type::Su27);
+            let width = |side: f32| {
+                let mut lo = f32::INFINITY;
+                let mut hi = f32::NEG_INFINITY;
+                for v in glass.iter().filter(|v| side * v[0] > 0.20) {
+                    lo = lo.min(v[0]); hi = hi.max(v[0]);
+                }
+                hi - lo
+            };
+            for side in [-1.0, 1.0] {
+                assert!(width(side) > if kind == Type::F18 { 0.09 } else { 0.04 });
+            }
+        }
+    }
+
     #[test]
     fn fixed_readouts_fit_inside_the_model_specific_hud_glass() {
         for (kind, ys) in [

@@ -1,6 +1,6 @@
 # Hornet and Flanker model reconstruction
 
-Revised 25 October 2026. The models retain the game's procedural, faceted art
+Revised 26 October 2026. The models retain the game's procedural, faceted art
 style. As with the F-16 and MiG-29, the process uses aircraft-specific stations,
 cross sections, planforms and visual references, followed by cockpit clearance
 tests and screenshots. Dimensions inside the cockpit are visual estimates,
@@ -45,6 +45,36 @@ leading-edge strakes blend into the main wing without the old broad lobes.
 References are used to reconstruct geometry. Their photographs and drawings
 are not redistributed or used as in-game textures.
 
+## FlightGear geometry reference revision, 26 October 2026
+
+The `test` branch completes the exterior work started in OpenCode. Two downloaded
+AC3D models from FlightGear FGAddon were inspected as 3D references, including
+component bounds and orthographic silhouettes:
+
+- [Legacy F-18 model, f18.ac](https://sourceforge.net/p/flightgear/fgaddon/HEAD/tree/trunk/Aircraft/f18/Models/f18.ac).
+  Download SHA-256: `358c8e35a4484e899715e2917d91e6a95c15d51721a79d95dd0c986eb20c76ec`.
+- [Su-33 model, su33.ac](https://sourceforge.net/p/flightgear/fgaddon/HEAD/tree/trunk/Aircraft/Sukhoi-Su-33/Models/su33.ac).
+  Download SHA-256: `ab06f1096c6571ab299d0186fda602bcc48804a57b2ff6d63ff0bd246dccee22`.
+
+The Flanker reference supplies family proportions; the game remains a baseline
+Su-27SK with no canards, folding-wing hardware or naval arresting hook. The Hornet
+remains the legacy F/A-18C, including its dorsal speedbrake between the fins.
+The production drawings and cockpit photographs described above resolve details
+that differ between variants. FlightGear meshes and textures are reference-only;
+the executable continues to generate its geometry from aircraft-specific station
+tables and mesh primitives. Reference downloads stay outside the tracked assets.
+
+The rebuilt models have separate fuselage, LEX, intake and nozzle profiles, wing
+planforms, stabilators, rudders, pylons and launch rails. The Flanker uses a
+separate blue-grey camouflage palette selected only by its own mesh marker.
+Windscreen divisions and sill rails follow the same canopy surface in the exterior
+and cockpit; the clear bubble has no intermediate transverse frames. The Hornet's
+fixed fins stop at the rudder hinges. The Flanker's IRST sits above the forebody,
+its insignia have five points, and its closed speedbrake follows the curved spine.
+
+The shared rendering change only handles the Flanker's new paint marker. The
+F-16 and MiG-29 models and cockpit layouts are unchanged by this revision.
+
 ## Exterior
 
 Each aircraft has its own smoothly interpolated longitudinal stations. The
@@ -81,7 +111,9 @@ Both boards have tilted, orthonormal instrument frames, folded outer
 cheeks, continuous shaped coamings and separate knee wells. The console
 inboard edges stay outside the seat bucket, the floor is below the boots,
 and the left console leaves the full throttle and hand travel clear.
-Native canopy bows and three rear-view mirrors replace the generic arch.
+Native canopy bows replace the generic arch. The Hornet has two larger
+rectangular rear-view panes on short brackets; the Flanker retains three
+small panes.
 The bows sit farther forward, and the side mirrors follow the arch tangent.
 The Su-27 tub and bow use the reference blue-green finish. The main boards
 are denser and farther forward, with closed joins to the cockpit sidewalls.
