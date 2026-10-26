@@ -584,7 +584,13 @@ fn mig_gear_lever(m: &mut Mesh, h: &Hands) {
 /// MiG legs, stick, throttle and gear lever, with both arms.
 pub fn build_dynamic_mig(m:&mut Mesh,h:&Hands){build_dynamic_center(m,h,true);}
 pub fn build_dynamic_center(m: &mut Mesh, h: &Hands, russian:bool) {
-    mig_gear_lever(m, h);
+    build_dynamic_center_inner(m,h,russian,true);
+}
+pub fn build_dynamic_twin(m:&mut Mesh,h:&Hands,russian:bool) {
+    build_dynamic_center_inner(m,h,russian,false);
+}
+fn build_dynamic_center_inner(m: &mut Mesh, h: &Hands, russian:bool, gear:bool) {
+    if gear { mig_gear_lever(m, h); }
     for s in [-1.0, 1.0] {
         leg(m, s, h.rudder, 0.0);
     }

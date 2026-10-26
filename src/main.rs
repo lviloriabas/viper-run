@@ -550,6 +550,8 @@ impl App {
             }
         }
         self.airbrake = self.opts.input.airbrake;
+        self.gear_lever |= self.opts.input.gear_down;
+        self.flaps_switch = self.opts.input.flaps;
         self.limiters_off = self.opts.input.limiters_off;
         if let (Some(mach), Some(a)) = (self.opts.mach, self.aircraft.as_mut()) {
             a.vel = a.vel.norm() * mach * sim::atmosphere_at(a.pos.y).sound;
@@ -1606,6 +1608,12 @@ impl App {
         let lever = if self.gear_lever { 1.0 } else { 0.0 };
         self.hands.gear = approach(self.hands.gear, lever, dt.max(0.0) * 4.0);
         self.hands.gear_warn = self.aircraft.as_ref().is_some_and(|a| a.gear > 0.0 && a.gear < 1.0);
+        self.hands.flaps = if self.flaps_switch { 1.0 } else { 0.0 };
+        self.hands.airbrake = if self.airbrake { 1.0 } else { 0.0 };
+        self.hands.irst = self.combat.irst;
+        self.hands.weapon_mode = match self.combat.mode {
+            Mode::Nav=>0,Mode::Gun=>1,Mode::Srm=>2,Mode::Mrm=>3,Mode::Ccip=>4,Mode::Strf=>5
+        };
     }
 
     // ------------------------------------------------------------ cameras

@@ -4,9 +4,12 @@
 use super::*;
 use crate::sim::Type;
 const DARK: Rgb = Rgb(0.075, 0.085, 0.09);
-const IFEI: R = r(0.0, 1872.0, 384.0, 160.0);
-const UFC: R = r(384.0, 1872.0, 320.0, 176.0);
-const HUD_CONTROL: R = r(704.0, 1872.0, 320.0, 96.0);
+const IFEI: R = r(0.0, 1872.0, 256.0, 176.0);
+const UFC: R = r(384.0, 1872.0, 160.0, 176.0);
+const HUD_CONTROL: R = r(704.0, 1872.0, 256.0, 96.0);
+const FLANKER_WEAPONS: R = r(1024.0, 1840.0, 448.0, 64.0);
+const FLANKER_SYSTEMS: R = r(1472.0, 1840.0, 192.0, 64.0);
+const FLANKER_WARN: R = r(1024.0, 640.0, 96.0, 320.0);
 
 /// The outer cheeks toe toward the seat, while the central board stays flat.
 fn instrument(kind: Type, x: f64, y: f64) -> Frame {
@@ -76,6 +79,17 @@ fn label(x: f64, y: f64, w: f64, h: f64, rect: R) -> Instrument {
         shape: Shape::Label,
     }
 }
+/// Fit the complete face without stretching or cropping its pixel grid.
+fn face_size(item: &Instrument) -> (f64, f64) {
+    let margin = match item.shape {
+        Shape::Display(true) => 0.69,
+        Shape::Display(false) => 0.91,
+        _ => 1.0,
+    };
+    let scale = (item.w * margin / item.rect.w as f64).min(item.h * margin / item.rect.h as f64);
+    (item.rect.w as f64 * scale, item.rect.h as f64 * scale)
+}
+
 // Dense groups and proportions reconstructed from the supplied cockpit photos.
 fn layout(kind: Type) -> Vec<Instrument> {
     if kind == Type::Su27 {
@@ -94,11 +108,13 @@ fn layout(kind: Type) -> Vec<Instrument> {
             display_face(0.355, 0.980, 0.185, 0.165, mig::R_TV, false),
             dial(0.390, 0.650, 0.047, mig::R_SPO),
             label(0.335, 0.505, 0.180, 0.055, mig::R_HYD),
-            label(0.292, 0.725, 0.030, 0.235, mig::R_FUEL),
+            label(0.292, 0.725, 0.060, 0.200, mig::R_FUEL),
             label(-0.250, 0.505, 0.065, 0.070, mig::R_GEAR),
-            label(-0.080, 0.915, 0.300, 0.045, mig::R_WEAPON),
+            label(-0.080, 0.915, 0.300, 0.045, FLANKER_WEAPONS),
             label(-0.025, 1.035, 0.235, 0.090, HUD_CONTROL),
-            label(-0.305, 0.950, 0.100, 0.050, mig::R_LEFT),
+            label(-0.305, 0.950, 0.100, 0.050, FLANKER_SYSTEMS),
+            label(0.075, 0.505, 0.105, 0.105, mig::R_EKRAN),
+            label(0.452, 0.530, 0.035, 0.120, FLANKER_WARN),
         ]
     } else {
         // The first supplied photo has the upgraded UFCD, not a keypad UFC.
@@ -114,6 +130,7 @@ fn layout(kind: Type) -> Vec<Instrument> {
             dial(0.190, 0.515, 0.031, R_DIALS[1]),
             dial(0.300, 0.515, 0.031, R_DIALS[3]),
             dial(0.410, 0.515, 0.031, R_VVI),
+            dial(-0.432, 0.690, 0.029, R_RWR),
             label(-0.432, 0.880, 0.040, 0.170, R_ARM),
             label(-0.420, 1.035, 0.034, 0.075, R_AOA),
             label(-0.270, 1.065, 0.150, 0.050, R_CAUTION),
@@ -149,68 +166,280 @@ fn mount(kind: Type, item: &Instrument) -> Frame {
 }
 // The console atlas occupies the F-16 console area only for these aircraft;
 // the active type draws its own legends after the common atlas pass.
-fn console_rect(side:f64,row:usize)->R {
-    let i=row+if side>0.0 {6} else {0};
-    r(1024.0+(i%4) as f32*256.0,(i/4) as f32*192.0,if side<0.0 && (1..=3).contains(&row) {128.0} else {256.0},192.0)
+fn console_rect(side: f64, row: usize) -> R {
+    let i = row + if side > 0.0 { 6 } else { 0 };
+    r(
+        1024.0 + (i % 4) as f32 * 256.0,
+        (i / 4) as f32 * 192.0,
+        if side < 0.0 && (1..=3).contains(&row) {
+            128.0
+        } else {
+            256.0
+        },
+        192.0,
+    )
 }
-fn console_labels(russian:bool,side:f64,row:usize)->[&'static str;9] {
+fn console_labels(russian: bool, side: f64, row: usize) -> [&'static str; 9] {
     if russian {
-        if side<0.0 {
+        if side < 0.0 {
             [
-                ["SHASSI / ZAKRYLKI","SHASSI","ZAKR","NOS","TORM","VYP","UBR","AVAR","TEST"],
-                ["DVIGATELI","LEV","PRAV","ZAP","STOP","TOPL","NASOS","REZH","OTKL"],
-                ["SAU","KREN","TANG","VYS","KURS","STAB","MARSH","POS","TEST"],
-                ["VOORUZHENIE","PUSK","SBROS","SER","PUSH","BORT","ZALP","AVAR","OTKL"],
-                ["RADIO","VHF","UHF","VOL","KAN","RSBN","ARK","SAU","SVYAZ"],
-                ["TOPLIVO","LEV","PRAV","NASOS","BAKI","PODV","OSN","AVAR","TEST"],
+                [
+                    "SHASSI / ZAKRYLKI",
+                    "SHASSI",
+                    "ZAKR",
+                    "NOS",
+                    "TORM",
+                    "VYP",
+                    "UBR",
+                    "AVAR",
+                    "TEST",
+                ],
+                [
+                    "DVIGATELI",
+                    "LEV",
+                    "PRAV",
+                    "ZAP",
+                    "STOP",
+                    "TOPL",
+                    "NASOS",
+                    "REZH",
+                    "OTKL",
+                ],
+                [
+                    "SAU", "KREN", "TANG", "VYS", "KURS", "STAB", "MARSH", "POS", "TEST",
+                ],
+                [
+                    "VOORUZHENIE",
+                    "PUSK",
+                    "SBROS",
+                    "SER",
+                    "PUSH",
+                    "BORT",
+                    "ZALP",
+                    "AVAR",
+                    "OTKL",
+                ],
+                [
+                    "RADIO", "VHF", "UHF", "VOL", "KAN", "RSBN", "ARK", "SAU", "SVYAZ",
+                ],
+                [
+                    "TOPLIVO", "LEV", "PRAV", "NASOS", "BAKI", "PODV", "OSN", "AVAR", "TEST",
+                ],
             ][row]
         } else {
             [
-                ["ELEKTRO","AKK","GEN L","GEN R","AC","SET","PIT","AVAR","TEST"],
-                ["KONDITSIONER","TEMP","DAVL","KAB","VENT","OBDUV","OTOP","STEK","TEST"],
-                ["NAVIGATSIYA","RSBN","ARK","KURS","REZH","KAN","MARSH","POS","TEST"],
-                ["OSVESHCHENIE","PRIB","PULT","FARA","BORT","DEN","NOCH","YARK","TEST"],
-                ["KISLOROD","PIT","DAVL","REZH","AVAR","SMES","OBDUV","MASKA","TEST"],
-                ["AVTOMATY","RLS","OEPS","SAU","SVYAZ","PIT","PRIB","NAV","REZ"],
+                [
+                    "ELEKTRO", "AKK", "GEN L", "GEN R", "AC", "SET", "PIT", "AVAR", "TEST",
+                ],
+                [
+                    "KONDITSIONER",
+                    "TEMP",
+                    "DAVL",
+                    "KAB",
+                    "VENT",
+                    "OBDUV",
+                    "OTOP",
+                    "STEK",
+                    "TEST",
+                ],
+                [
+                    "NAVIGATSIYA",
+                    "RSBN",
+                    "ARK",
+                    "KURS",
+                    "REZH",
+                    "KAN",
+                    "MARSH",
+                    "POS",
+                    "TEST",
+                ],
+                [
+                    "OSVESHCHENIE",
+                    "PRIB",
+                    "PULT",
+                    "FARA",
+                    "BORT",
+                    "DEN",
+                    "NOCH",
+                    "YARK",
+                    "TEST",
+                ],
+                [
+                    "KISLOROD", "PIT", "DAVL", "REZH", "AVAR", "SMES", "OBDUV", "MASKA", "TEST",
+                ],
+                [
+                    "AVTOMATY", "RLS", "OEPS", "SAU", "SVYAZ", "PIT", "PRIB", "NAV", "REZ",
+                ],
             ][row]
         }
-    } else if side<0.0 {
+    } else if side < 0.0 {
         [
-            ["FLIGHT CONTROL","FLAPS","TRIM","FCS","T/O","LAUNCH","BAR","FOLD","RESET"],
-            ["ENGINES","L ENG","R ENG","START","CRANK","FUEL","BOOST","IGN","STOP"],
-            ["THROTTLE","IDLE","MIL","AB","CUT","L ENG","R ENG","FUEL","TEST"],
-            ["COMMUNICATION","COMM1","COMM2","VOL","ICS","IFF","TCN","ILS","TEST"],
-            ["FUEL","PROBE","DUMP","EXT","BINGO","WING","CTR","FEED","TEST"],
-            ["EXTERIOR LIGHTS","POS","FORM","STROBE","TAXI","NAV","BRT","DIM","TEST"],
+            [
+                "FLIGHT CONTROL",
+                "FLAPS",
+                "TRIM",
+                "FCS",
+                "T/O",
+                "LAUNCH",
+                "BAR",
+                "FOLD",
+                "RESET",
+            ],
+            [
+                "ENGINES", "L ENG", "R ENG", "START", "CRANK", "FUEL", "BOOST", "IGN", "STOP",
+            ],
+            [
+                "THROTTLE", "IDLE", "MIL", "AB", "CUT", "L ENG", "R ENG", "FUEL", "TEST",
+            ],
+            [
+                "COMMUNICATION",
+                "COMM1",
+                "COMM2",
+                "VOL",
+                "ICS",
+                "IFF",
+                "TCN",
+                "ILS",
+                "TEST",
+            ],
+            [
+                "FUEL", "PROBE", "DUMP", "EXT", "BINGO", "WING", "CTR", "FEED", "TEST",
+            ],
+            [
+                "EXTERIOR LIGHTS",
+                "POS",
+                "FORM",
+                "STROBE",
+                "TAXI",
+                "NAV",
+                "BRT",
+                "DIM",
+                "TEST",
+            ],
         ][row]
     } else {
         [
-            ["ELECTRICAL","BATT","L GEN","R GEN","AC","RESET","DC","EXT","TEST"],
-            ["ENVIRONMENT","TEMP","CABIN","BLEED","DEFOG","RAM","ANTI-I","VENT","TEST"],
-            ["NAVIGATION","INS","RADAR","ALT","MAP","ALIGN","NAV","ATT","TEST"],
-            ["INTERIOR LIGHTS","INST","CONSL","FLOOD","CHART","DAY","NIGHT","BRT","TEST"],
-            ["OXYGEN","SUPPLY","FLOW","MASK","EMERG","NORMAL","100%","PRESS","TEST"],
-            ["CIRCUIT BREAKERS","AVION","COMM","NAV","HUD","DDI L","DDI R","FCS","AUX"],
+            [
+                "ELECTRICAL",
+                "BATT",
+                "L GEN",
+                "R GEN",
+                "AC",
+                "RESET",
+                "DC",
+                "EXT",
+                "TEST",
+            ],
+            [
+                "ENVIRONMENT",
+                "TEMP",
+                "CABIN",
+                "BLEED",
+                "DEFOG",
+                "RAM",
+                "ANTI-I",
+                "VENT",
+                "TEST",
+            ],
+            [
+                "NAVIGATION",
+                "INS",
+                "RADAR",
+                "ALT",
+                "MAP",
+                "ALIGN",
+                "NAV",
+                "ATT",
+                "TEST",
+            ],
+            [
+                "INTERIOR LIGHTS",
+                "INST",
+                "CONSL",
+                "FLOOD",
+                "CHART",
+                "DAY",
+                "NIGHT",
+                "BRT",
+                "TEST",
+            ],
+            [
+                "OXYGEN", "SUPPLY", "FLOW", "MASK", "EMERG", "NORMAL", "100%", "PRESS", "TEST",
+            ],
+            [
+                "CIRCUIT BREAKERS",
+                "AVION",
+                "COMM",
+                "NAV",
+                "HUD",
+                "DDI L",
+                "DDI R",
+                "FCS",
+                "AUX",
+            ],
         ][row]
     }
 }
-fn draw_consoles(cv:&mut Canvas,russian:bool) {
-    for side in [-1.0,1.0] {
+fn draw_consoles(cv: &mut Canvas, russian: bool) {
+    for side in [-1.0, 1.0] {
         for row in 0..6 {
-            let r=console_rect(side,row);
-            let names=console_labels(russian,side,row);
-            let ink=rgba(0xc9,0xd1,0xcb,1.0);
-            cv.rect(r.x,r.y,r.w,r.h,if russian {rgba(0x28,0x39,0x3c,1.0)} else {rgba(0x20,0x24,0x25,1.0)});
-            cv.text(names[0],r.x+r.w*0.5,r.y+16.0,1.0,ink,Align::Center);
-            cv.line(r.x+10.0,r.y+29.0,r.x+r.w-10.0,r.y+29.0,1.0,DIM);
-            let cols=if r.w<200.0 {2} else {4};
+            let r = console_rect(side, row);
+            let names = console_labels(russian, side, row);
+            let ink = rgba(0xc9, 0xd1, 0xcb, 1.0);
+            cv.rect(
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                if russian {
+                    rgba(0x28, 0x39, 0x3c, 1.0)
+                } else {
+                    rgba(0x20, 0x24, 0x25, 1.0)
+                },
+            );
+            cv.text(
+                names[0],
+                r.x + r.w * 0.5,
+                r.y + 16.0,
+                1.0,
+                ink,
+                Align::Center,
+            );
+            cv.line(
+                r.x + 10.0,
+                r.y + 29.0,
+                r.x + r.w - 10.0,
+                r.y + 29.0,
+                1.0,
+                DIM,
+            );
+            let cols = if r.w < 200.0 { 2 } else { 4 };
             for k in 0..2 {
                 for j in 0..cols {
-                    let x=r.x+if cols==2 {28.8+j as f32*70.4} else {34.0+j as f32*61.4};
-                    let y=r.y+if k==0 {64.4} else {140.7};
-                    cv.text(names[1+k*cols+j],x,y-20.0,1.0,ink,Align::Center);
-                    cv.circle(x,y,9.0,1.0,DIM);
-                    cv.text(if k==0 {"ON"} else {"OFF"},x,y+22.0,1.0,ink,Align::Center);
+                    let x = r.x
+                        + if cols == 2 {
+                            28.8 + j as f32 * 70.4
+                        } else {
+                            34.0 + j as f32 * 61.4
+                        };
+                    let y = r.y + if k == 0 { 64.4 } else { 140.7 };
+                    cv.text(
+                        names[1 + k * cols + j],
+                        x,
+                        y - 20.0,
+                        1.0,
+                        ink,
+                        Align::Center,
+                    );
+                    cv.circle(x, y, 9.0, 1.0, DIM);
+                    cv.text(
+                        if k == 0 { "ON" } else { "OFF" },
+                        x,
+                        y + 22.0,
+                        1.0,
+                        ink,
+                        Align::Center,
+                    );
                 }
             }
         }
@@ -270,8 +499,8 @@ pub fn build(kind: Type) -> Mesh {
             .enumerate()
         {
             // Leave the whole throttle slot and hand travel clear.
-            let narrow=side<0.0 && z>-3.74 && z< -3.23;
-            let x = side * if narrow {0.445} else {0.375};
+            let narrow = side < 0.0 && z > -3.74 && z < -3.23;
+            let x = side * if narrow { 0.445 } else { 0.375 };
             let across = v3(1.0, side * 0.14, 0.0).norm();
             let cf = Frame {
                 o: c(x.abs(), z) + V3::Y * 0.005,
@@ -279,22 +508,66 @@ pub fn build(kind: Type) -> Mesh {
                 y: -V3::Z,
                 z: across.cross(-V3::Z),
             };
-            m.block(&cf, v3(if narrow {0.040} else {0.098}, 0.073, 0.004), DARK.scale(1.7));
-            screen(&mut m,&cf.at(0.0,0.0,0.0045),if narrow {0.080} else {0.196},0.146,console_rect(side,row));
+            m.block(
+                &cf,
+                v3(if narrow { 0.040 } else { 0.098 }, 0.073, 0.004),
+                DARK.scale(1.7),
+            );
+            let rect = console_rect(side, row);
+            let width = if narrow { 0.080 } else { 0.196 };
+            let height = (width * rect.h as f64 / rect.w as f64).min(0.146);
+            let width = height * rect.w as f64 / rect.h as f64;
+            screen(&mut m, &cf.at(0.0, 0.0, 0.0045), width, height, rect);
             for k in 0..2 {
-                for j in 0..if narrow {2} else {4} {
-                    let at=cf.p(if narrow {-0.022+j as f64*0.044} else {-0.072+j as f64*0.047},if k==0 {0.024} else {-0.034},0.006);
-                    if (row+j+k)%4==0 {
-                        m.capsule(at,at+cf.z*0.015,0.008,0.007,DARK,10);
-                        m.capsule(at+cf.z*0.016,at+cf.z*0.016+cf.y*0.005,0.001,0.001,METALC,4);
-                    } else if russian && side>0.0 && row==5 || row==4 && j==0 {
-                        m.block(&Frame{o:at+cf.z*0.008,..cf},v3(0.006,0.012,0.009),Rgb(0.65,0.10,0.06));
+                for j in 0..if narrow { 2 } else { 4 } {
+                    if j == 0 && k == 0 && (row == 0 || side > 0.0 && row == 2) {
+                        continue;
+                    }
+                    let at = cf.p(
+                        if narrow {
+                            -0.022 + j as f64 * 0.044
+                        } else {
+                            -0.072 + j as f64 * 0.047
+                        },
+                        if k == 0 { 0.024 } else { -0.034 },
+                        0.006,
+                    );
+                    if (row + j + k) % 4 == 0 {
+                        m.capsule(at, at + cf.z * 0.015, 0.008, 0.007, DARK, 10);
+                        m.capsule(
+                            at + cf.z * 0.016,
+                            at + cf.z * 0.016 + cf.y * 0.005,
+                            0.001,
+                            0.001,
+                            METALC,
+                            4,
+                        );
+                    } else if russian && side > 0.0 && row == 5 || row == 4 && j == 0 {
+                        m.block(
+                            &Frame {
+                                o: at + cf.z * 0.008,
+                                ..cf
+                            },
+                            v3(0.006, 0.012, 0.009),
+                            Rgb(0.65, 0.10, 0.06),
+                        );
                     } else {
-                        m.capsule(at,at+cf.z*0.017-cf.y*0.005,0.0028,0.0018,METALC,6);
+                        m.capsule(
+                            at,
+                            at + cf.z * 0.017 - cf.y * 0.005,
+                            0.0028,
+                            0.0018,
+                            METALC,
+                            6,
+                        );
                     }
                 }
             }
-            for x in if narrow {[-0.033,0.033]} else {[-0.087, 0.087]} {
+            for x in if narrow {
+                [-0.033, 0.033]
+            } else {
+                [-0.087, 0.087]
+            } {
                 m.block(&cf.at(x, 0.058, 0.006), v3(0.002, 0.002, 0.001), METALC);
             }
         }
@@ -392,19 +665,13 @@ pub fn build(kind: Type) -> Mesh {
     }
     for item in layout(kind) {
         let f = mount(kind, &item);
+        let (face_w, face_h) = face_size(&item);
         match item.shape {
             Shape::Dial => gauge_mount(&mut m, &f, item.w * 0.5, item.rect, 0.008),
             Shape::Display(buttons) => display(
-                &mut m,
-                &f,
-                item.w,
-                item.h,
-                item.w * if buttons { 0.69 } else { 0.91 },
-                item.h * if buttons { 0.69 } else { 0.91 },
-                item.rect,
-                buttons,
+                &mut m, &f, item.w, item.h, face_w, face_h, item.rect, buttons,
             ),
-            Shape::Label => plate(&mut m, &f, item.w, item.h, item.rect),
+            Shape::Label => plate(&mut m, &f, face_w, face_h, item.rect),
         }
     }
     // Recessed radar hood and deep projector housing reproduce their silhouettes.
@@ -470,7 +737,7 @@ pub fn build(kind: Type) -> Mesh {
     let offset = crate::airframe::EYE - kind.eye();
     let native = |z: f64, phi: f64| crate::hornet::canopy_point(russian, z, phi) + offset;
     let bow = crate::hornet::canopy_bow(russian);
-    let aft = if russian { -2.38 } else { -2.10 };
+    let aft = crate::hornet::canopy_aft(russian);
     for k in 0..24 {
         let (a, b) = (
             native(bow, k as f64 * PI / 24.0),
@@ -535,6 +802,61 @@ pub fn build(kind: Type) -> Mesh {
     pilot::build_static_mig(&mut m);
     m
 }
+/// Main levers and selector respond to the same commands as the flight model.
+pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
+    let f = instrument(kind, -0.438, 0.555);
+    m.block(&f.at(0.0, 0.0, 0.012), v3(0.018, 0.048, 0.012), DARK);
+    let base = f.p(0.0, mix(0.030, -0.030, h.gear), 0.024);
+    let tip = base + f.z * 0.065;
+    m.capsule(base, tip, 0.005, 0.005, METALC, 8);
+    m.lathe(
+        tip - f.z * 0.008,
+        f.z,
+        &[(0.0, 0.022), (0.016, 0.022), (0.016, 0.0)],
+        12,
+        Rgb(0.85, 0.86, 0.80),
+    );
+    let lamp = if h.gear_warn {
+        Rgb(1.2, 0.18, 0.08)
+    } else {
+        Rgb(0.12, 0.06, 0.04)
+    };
+    m.ellipsoid(tip + f.z * 0.010, v3(0.007, 0.007, 0.004), lamp, 4, 8);
+    let switch = |m: &mut Mesh, at: V3, value: f64, col: Rgb| {
+        let to = at + v3(0.0, 0.024, mix(-0.010, 0.010, value));
+        m.capsule(at, to, 0.0027, 0.0027, METALC, 6);
+        m.ellipsoid(to, v3(0.005, 0.005, 0.008), col, 4, 8);
+    };
+    switch(m, v3(-0.447, 0.650, -3.805), h.flaps, DARK);
+    // Speedbrake rocker on the outboard side of the moving throttle grip.
+    let throttle = v3(-0.355, 0.747, -3.40 - h.throttle * 0.22);
+    switch(m, throttle, h.airbrake, Rgb(0.50, 0.51, 0.48));
+    if kind == Type::Su27 {
+        switch(
+            m,
+            v3(0.445, 0.650, -3.805),
+            if h.irst { 1.0 } else { 0.0 },
+            DARK,
+        );
+    }
+    let f = Frame {
+        o: v3(0.445, 0.653, -3.485),
+        x: V3::X,
+        y: -V3::Z,
+        z: V3::Y,
+    };
+    m.lathe(f.o, f.z, &[(0.0, 0.012), (0.012, 0.011)], 10, DARK);
+    let angle = h.weapon_mode as f64 * 45.0 * DEG;
+    m.capsule(
+        f.p(0.0, 0.0, 0.013),
+        f.p(angle.sin() * 0.009, angle.cos() * 0.009, 0.013),
+        0.0012,
+        0.0012,
+        Rgb(0.85, 0.85, 0.77),
+        4,
+    );
+}
+
 pub fn hornet_instruments(
     cv: &mut Canvas,
     a: &Aircraft,
@@ -543,7 +865,7 @@ pub fn hornet_instruments(
     time: f64,
     c: &Combat,
 ) {
-    draw_consoles(cv,false);
+    draw_consoles(cv, false);
     mfd(cv, R_HSI, Page::Hsd, a, ad, m, time, c);
     let r = UFC;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x02, 0x0d, 0x08, 1.0));
@@ -592,7 +914,7 @@ pub fn hornet_instruments(
         Align::Center,
     );
     cv.text(
-        "NAV",
+        c.mode.label(),
         r.x + r.w * 0.5,
         r.y + 119.0,
         1.0,
@@ -603,7 +925,7 @@ pub fn hornet_instruments(
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x2a, 0x2a, 1.0));
     for (i, name) in ["HUD", "BRT", "DAY", "ATT", "ALT"].into_iter().enumerate() {
-        let x = r.x + 32.0 + i as f32 * 63.0;
+        let x = r.x + 28.0 + i as f32 * 50.0;
         cv.text(name, x, r.y + 13.0, 1.0, WHITE, Align::Center);
         cv.disc(x, r.y + 49.0, 13.0, rgba(0x09, 0x0b, 0x0b, 1.0));
         cv.line(x, r.y + 49.0, x + 4.0, r.y + 38.0, 2.0, WHITE);
@@ -614,44 +936,133 @@ pub fn hornet_instruments(
         ("RPM", format!("{:.0}", a.rpm)),
         ("TEMP", format!("{:.0}", a.ftit)),
         ("FF", format!("{:.1}", a.fuel_flow * 7936.64 * 0.5 / 1000.0)),
-        ("NOZ", format!("{:.0}", if a.ab { 100.0 } else { 28.0 })),
-        ("OIL", "95".to_string()),
+        ("NOZ", format!("{:.0}", a.nozzle)),
+        ("OIL", format!("{:.0}", a.oil_psi)),
     ]
     .into_iter()
     .enumerate()
     {
         let y = r.y + 17.0 + i as f32 * 26.0;
-        cv.text(name, r.x + 104.0, y, 1.0, DIM, Align::Center);
-        for x in [r.x + 40.0, r.x + 163.0] {
-            cv.text(&value, x, y, 1.4, GREEN, Align::Center);
+        cv.text(name, r.x + 80.0, y, 1.0, DIM, Align::Center);
+        for x in [r.x + 27.0, r.x + 130.0] {
+            cv.text(&value, x, y, 1.0, GREEN, Align::Center);
         }
     }
     cv.text(
         "L   ENGINE   R",
-        r.x + 103.0,
+        r.x + 80.0,
         r.y + 148.0,
         1.0,
         DIM,
         Align::Center,
     );
-    cv.text("FUEL", r.x + 295.0, r.y + 20.0, 1.1, DIM, Align::Center);
+    cv.text("FUEL", r.x + 211.0, r.y + 20.0, 1.1, DIM, Align::Center);
     cv.text(
         &format!("{:.0}", a.fuel * 2.20462),
-        r.x + 295.0,
+        r.x + 211.0,
         r.y + 48.0,
         1.6,
         GREEN,
         Align::Center,
     );
-    cv.text("BINGO", r.x + 295.0, r.y + 91.0, 1.0, DIM, Align::Center);
-    cv.text("2000", r.x + 295.0, r.y + 116.0, 1.4, GREEN, Align::Center);
+    cv.text("BINGO", r.x + 211.0, r.y + 91.0, 1.0, DIM, Align::Center);
+    cv.text("2000", r.x + 211.0, r.y + 116.0, 1.4, GREEN, Align::Center);
 }
-pub fn flanker_instruments(cv: &mut Canvas) {
-    draw_consoles(cv,true);
+pub fn flanker_instruments(cv: &mut Canvas, a: &Aircraft, c: &Combat) {
+    draw_consoles(cv, true);
+    let r = FLANKER_WEAPONS;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x36, 0x39, 1.0));
+    let weapon = symbology::weapon_line(c);
+    cv.text(
+        &weapon,
+        r.x + r.w * 0.5,
+        r.y + 19.0,
+        1.0,
+        GREEN,
+        Align::Center,
+    );
+    cv.text(
+        if c.irst {
+            "OEPS-27 / IRST"
+        } else {
+            "N001 / RLS"
+        },
+        r.x + 12.0,
+        r.y + 46.0,
+        1.0,
+        WHITE,
+        Align::Left,
+    );
+    cv.text(
+        if c.lock.is_some() { "ZAKHVAT" } else { "POISK" },
+        r.x + r.w - 12.0,
+        r.y + 46.0,
+        1.0,
+        GREEN,
+        Align::Right,
+    );
+    let r = FLANKER_SYSTEMS;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x32, 0x48, 0x4b, 1.0));
+    for (i, (name, on)) in [
+        ("SHASSI", a.gear > 0.98),
+        ("ZAKR", a.flaps > 0.05),
+        ("TORM", a.brake > 0.05),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let x = r.x + 32.0 + i as f32 * 64.0;
+        cv.text(name, x, r.y + 15.0, 1.0, WHITE, Align::Center);
+        cv.disc(
+            x,
+            r.y + 42.0,
+            7.0,
+            if on {
+                GREEN
+            } else {
+                rgba(0x12, 0x24, 0x1b, 1.0)
+            },
+        );
+    }
+    let r = FLANKER_WARN;
+    cv.rect(r.x, r.y, r.w, r.h, rgba(0x11, 0x19, 0x1a, 1.0));
+    for (i, (name, on)) in [
+        ("POZHAR", a.battle.fire),
+        ("MASLO", a.oil_psi < 20.0),
+        ("TOPLIVO", a.fuel < 800.0),
+        ("SHASSI", a.gear > 0.02 && a.gear < 0.98),
+        ("TORMOZ", a.brake > 0.1),
+        ("ALFA", a.alpha_deg > 22.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let height = r.h / 6.0;
+        let y = r.y + i as f32 * height;
+        cv.rect(
+            r.x + 3.0,
+            y + 2.0,
+            r.w - 6.0,
+            height - 4.0,
+            if on {
+                AMBER
+            } else {
+                rgba(0x16, 0x22, 0x1b, 1.0)
+            },
+        );
+        cv.text(
+            name,
+            r.x + r.w * 0.5,
+            y + height * 0.5,
+            1.0,
+            if on { rgba(0x12, 0x10, 0x08, 1.0) } else { DIM },
+            Align::Center,
+        );
+    }
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x1b, 0x22, 0x22, 1.0));
     for (i, name) in ["СЕТКА", "ЯРК", "НОЧЬ", "ДЕНЬ"].into_iter().enumerate() {
-        let x = r.x + 38.0 + i as f32 * 79.0;
+        let x = r.x + 32.0 + i as f32 * 64.0;
         cv.text(name, x, r.y + 18.0, 1.0, WHITE, Align::Center);
         cv.circle(x, r.y + 56.0, 12.0, 2.0, DIM);
         cv.line(x, r.y + 56.0, x + 4.0, r.y + 45.0, 2.0, WHITE);
@@ -664,12 +1075,17 @@ mod tests {
     fn hornet_has_two_large_mirrors_while_flanker_keeps_three_small_panes() {
         for kind in [Type::F18, Type::Su27] {
             let m = build(kind);
-            let glass: Vec<_> = m.v.chunks(crate::mesh::STRIDE).filter(|v| {
-                let x = v[9] as f64 * AW;
-                let y = (1.0 - v[10] as f64) * A;
-                x >= R_MIRROR.x as f64 && x <= (R_MIRROR.x + R_MIRROR.w) as f64
-                    && y >= R_MIRROR.y as f64 && y <= (R_MIRROR.y + R_MIRROR.h) as f64
-            }).collect();
+            let glass: Vec<_> =
+                m.v.chunks(crate::mesh::STRIDE)
+                    .filter(|v| {
+                        let x = v[9] as f64 * AW;
+                        let y = (1.0 - v[10] as f64) * A;
+                        x >= R_MIRROR.x as f64
+                            && x <= (R_MIRROR.x + R_MIRROR.w) as f64
+                            && y >= R_MIRROR.y as f64
+                            && y <= (R_MIRROR.y + R_MIRROR.h) as f64
+                    })
+                    .collect();
             assert!(glass.len() > 100);
             assert!(glass.iter().any(|v| v[0] < -0.20));
             assert!(glass.iter().any(|v| v[0] > 0.20));
@@ -678,12 +1094,110 @@ mod tests {
                 let mut lo = f32::INFINITY;
                 let mut hi = f32::NEG_INFINITY;
                 for v in glass.iter().filter(|v| side * v[0] > 0.20) {
-                    lo = lo.min(v[0]); hi = hi.max(v[0]);
+                    lo = lo.min(v[0]);
+                    hi = hi.max(v[0]);
                 }
                 hi - lo
             };
             for side in [-1.0, 1.0] {
                 assert!(width(side) > if kind == Type::F18 { 0.09 } else { 0.04 });
+            }
+        }
+    }
+
+    #[test]
+    fn moving_controls_follow_gear_flaps_brake_sensor_and_weapon_state() {
+        for kind in [Type::F18, Type::Su27] {
+            let initial = Hands::default();
+            let mut base = Mesh::new();
+            moving_controls(&mut base, kind, &initial);
+            for changed in [
+                Hands {
+                    gear: 1.0,
+                    ..initial
+                },
+                Hands {
+                    flaps: 1.0,
+                    ..initial
+                },
+                Hands {
+                    airbrake: 1.0,
+                    ..initial
+                },
+                Hands {
+                    weapon_mode: 2,
+                    ..initial
+                },
+            ] {
+                let mut m = Mesh::new();
+                moving_controls(&mut m, kind, &changed);
+                assert_ne!(m.v, base.v, "unresponsive control {kind:?}");
+                assert!(m.v.iter().all(|v| v.is_finite()));
+            }
+            let mut sensor = Mesh::new();
+            moving_controls(
+                &mut sensor,
+                kind,
+                &Hands {
+                    irst: true,
+                    ..initial
+                },
+            );
+            assert_eq!(
+                sensor.v == base.v,
+                kind == Type::F18,
+                "IRST selector on wrong aircraft"
+            );
+        }
+    }
+
+    #[test]
+    fn active_instrument_and_console_atlas_regions_do_not_overlap() {
+        for kind in [Type::F18, Type::Su27] {
+            let mut rects: Vec<_> = layout(kind).iter().map(|i| i.rect).collect();
+            rects.push(R_MIRROR);
+            for side in [-1.0, 1.0] {
+                for row in 0..6 {
+                    rects.push(console_rect(side, row));
+                }
+            }
+            for (i, a) in rects.iter().enumerate() {
+                assert!(
+                    a.x >= 0.0 && a.y >= 0.0 && a.x + a.w <= AW as f32 && a.y + a.h <= A as f32
+                );
+                for b in &rects[i + 1..] {
+                    // Identical tiles can be reused (the Hornet caution eyebrows).
+                    if a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h {
+                        continue;
+                    }
+                    assert!(
+                        a.x + a.w <= b.x
+                            || b.x + b.w <= a.x
+                            || a.y + a.h <= b.y
+                            || b.y + b.h <= a.y,
+                        "atlas faces overlap in {kind:?}: {},{} and {},{}",
+                        a.x,
+                        a.y,
+                        b.x,
+                        b.y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn instrument_images_keep_their_native_pixel_aspect() {
+        for kind in [Type::F18, Type::Su27] {
+            for item in layout(kind) {
+                let (w, h) = face_size(&item);
+                assert!(
+                    (w / h - item.rect.w as f64 / item.rect.h as f64).abs() < 1e-9,
+                    "stretched face {kind:?} at {},{}",
+                    item.x,
+                    item.y
+                );
+                assert!(w <= item.w + 1e-9 && h <= item.h + 1e-9);
             }
         }
     }
@@ -723,12 +1237,14 @@ mod tests {
                 assert!(f.x.dot(f.y).abs() < 1e-8 && (f.z.len() - 1.0).abs() < 1e-8);
                 let (w, h, depth) = match item.shape {
                     Shape::Dial => (item.w, item.h, 0.0135),
-                    Shape::Display(buttons) => (
-                        item.w * if buttons { 0.69 } else { 0.91 },
-                        item.h * if buttons { 0.69 } else { 0.91 },
-                        0.006,
-                    ),
-                    Shape::Label => (item.w, item.h, 0.0085),
+                    Shape::Display(_) => {
+                        let (w, h) = face_size(item);
+                        (w, h, 0.006)
+                    }
+                    Shape::Label => {
+                        let (w, h) = face_size(item);
+                        (w, h, 0.0085)
+                    }
                 };
                 for x in [-0.7, 0.0, 0.7] {
                     for y in [-0.7, 0.0, 0.7] {

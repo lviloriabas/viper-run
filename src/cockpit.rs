@@ -254,6 +254,10 @@ pub struct Hands {
     /// Landing gear handle, 0 up to 1 down, and its warning light.
     pub gear: f64,
     pub gear_warn: bool,
+    pub flaps: f64,
+    pub airbrake: f64,
+    pub irst: bool,
+    pub weapon_mode: u8,
 }
 
 #[repr(C)]
@@ -515,11 +519,16 @@ impl Cockpit {
 
         self.dynamic.clear();
         if kind == crate::sim::Type::F18 {
-            pilot::build_dynamic_center(&mut self.dynamic,hands,false);
+            pilot::build_dynamic_twin(&mut self.dynamic,hands,false);
+        } else if kind==crate::sim::Type::Su27 {
+            pilot::build_dynamic_twin(&mut self.dynamic,hands,true);
         } else if kind.russian() {
             pilot::build_dynamic_mig(&mut self.dynamic, hands);
         } else {
             pilot::build_dynamic(&mut self.dynamic, hands);
+        }
+        if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {
+            modern::moving_controls(&mut self.dynamic,kind,hands);
         }
         let n = self.dynamic.count().min(self.dyn_cap);
         ctx.buffer_update(self.dyn_bind.vertex_buffers[0], BufferSource::slice(&self.dynamic.v[..n * crate::mesh::STRIDE]));
@@ -1477,7 +1486,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
         mig::draw(cv, a, &ad, m, c);
     }
     if a.kind==crate::sim::Type::F18{modern::hornet_instruments(cv,a,&ad,m,time,c);}
-    if a.kind==crate::sim::Type::Su27{modern::flanker_instruments(cv);}
+    if a.kind==crate::sim::Type::Su27{modern::flanker_instruments(cv,a,c);}
 }
 
 /// Analogue heading indicator in the centre stack of the reference cockpit.

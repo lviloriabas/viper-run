@@ -7,6 +7,8 @@
 - (ninguna)
 
 ## Completadas
+- [x] Afinar las plantas, motores, estabilizadores, cabinas y detalles exteriores del F/A-18C y Su-27SK con referencias 3D y ortográficas; conservar el estilo del F-16 y MiG-29.
+- [x] Corregir la proporción de pantallas y placas, añadir indicaciones activas y animar los mandos de ambas cabinas con las teclas y el mando existentes.
 - [x] Reconstruir los exteriores del F/A-18C y Su-27SK usando modelos 3D de FlightGear y vistas ortográficas como referencia, con geometrías propias, superficies móviles, aerofrenos dorsales, camuflaje y detalles en tercera persona.
 - [x] Sustituir los espejos del F-18 por dos paneles rectangulares grandes sobre soportes propios; ajustar los arcos y raíles de ambas cabinas al exterior.
 - [x] Eliminar superposiciones de botones, textos y paneles en los menús; comprobar las cuatro aeronaves, configuraciones, resultados, tutoriales y salas con teclado y mando.

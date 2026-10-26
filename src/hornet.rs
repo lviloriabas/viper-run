@@ -9,7 +9,7 @@ use crate::mesh::{Frame, Mesh, Rgb};
 use crate::sim::Type;
 
 pub const EYE: V3 = v3(0.0, 1.35, -3.8);
-pub const NOZZLES: [V3; 2] = [v3(-0.72, -0.15, 7.62), v3(0.72, -0.15, 7.62)];
+pub const NOZZLES: [V3; 2] = [v3(-0.72, -0.14, 7.54), v3(0.72, -0.14, 7.54)];
 pub const STAB_PIVOT: V3 = v3(1.05, 0.10, 6.05);
 pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
     (v3(0.0, -0.3, -3.0), V3::X, -95.0 * DEG),
@@ -41,10 +41,10 @@ const MARK_LIGHT: Rgb = Rgb(0.88, 0.90, 0.89);
 /// last 0.25 m of the 12.2 m span quoted by the game.
 const WING_ROOT_X: f64 = 1.42;
 const WING_TIP_X: f64 = 5.72;
-const WING_ROOT_LE: f64 = 0.24;
-const WING_TIP_LE: f64 = 2.16;
-const WING_ROOT_TE: f64 = 4.54;
-const WING_TIP_TE: f64 = 4.32;
+const WING_ROOT_LE: f64 = -0.35;
+const WING_TIP_LE: f64 = 1.60;
+const WING_ROOT_TE: f64 = 3.58;
+const WING_TIP_TE: f64 = 3.22;
 /// Chord of the moving trailing-edge flap.
 const FLAP_CHORD: f64 = 0.90;
 /// Legacy Hornet dorsal speedbrake, between the tails. The panel is hinged at
@@ -147,9 +147,16 @@ pub(crate) fn canopy_bow(flanker: bool) -> f64 {
         -4.78
     }
 }
+pub(crate) fn canopy_aft(flanker: bool) -> f64 {
+    if flanker {
+        crate::su27::canopy_aft()
+    } else {
+        CANOPY.last().unwrap()[0]
+    }
+}
 pub(crate) fn brake_hinge(flanker: bool) -> V3 {
     if flanker {
-        crate::su27::BRAKE_HINGE
+        crate::su27::brake_hinge()
     } else {
         v3(0.0, BRAKE_Y0, BRAKE_Z0)
     }
@@ -448,15 +455,15 @@ fn lex_surface(m: &mut Mesh, side: f64) {
 /// Intake/nacelle stations: z, centre x, centre y, half width, half
 /// height, superellipse exponent.
 const NACELLE: &[[f64; 6]] = &[
-    [-2.72, 0.80, -0.28, 0.34, 0.25, 4.6],
-    [-2.55, 0.80, -0.27, 0.36, 0.27, 4.4],
-    [-2.10, 0.79, -0.25, 0.375, 0.285, 3.8],
-    [-1.20, 0.78, -0.23, 0.38, 0.295, 3.2],
-    [0.40, 0.76, -0.20, 0.375, 0.30, 2.8],
-    [2.30, 0.74, -0.17, 0.36, 0.295, 2.5],
-    [4.30, 0.73, -0.15, 0.34, 0.28, 2.3],
-    [5.90, 0.72, -0.14, 0.30, 0.25, 2.1],
-    [7.20, 0.72, -0.14, 0.255, 0.215, 2.0],
+    [-2.7200, 0.8000, -0.2800, 0.4590, 0.4125, 4.6000],
+    [-2.5500, 0.8000, -0.2700, 0.4860, 0.4455, 4.4000],
+    [-2.1000, 0.7900, -0.2500, 0.5063, 0.4702, 3.8000],
+    [-1.2000, 0.7800, -0.2300, 0.5130, 0.4867, 3.2000],
+    [0.4000, 0.7600, -0.2000, 0.5063, 0.4950, 2.8000],
+    [2.3000, 0.7400, -0.1700, 0.4860, 0.4867, 2.5000],
+    [4.3000, 0.7300, -0.1500, 0.4590, 0.4620, 2.3000],
+    [5.9000, 0.7200, -0.1400, 0.4050, 0.4125, 2.1000],
+    [7.2000, 0.7200, -0.1400, 0.4300, 0.4000, 2.0000],
 ];
 
 fn nacelle(m: &mut Mesh, side: f64) {
@@ -493,8 +500,8 @@ fn nacelle(m: &mut Mesh, side: f64) {
     let mouth = |k: usize, inset: f64| {
         let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][k];
         v3(
-            side * 0.80 + sx * (0.335 - inset * 0.10),
-            -0.28 + sy * (0.245 - inset * 0.075) - inset * 0.06,
+            side * 0.80 + sx * (0.415 - inset * 0.10),
+            -0.28 + sy * (0.365 - inset * 0.075) - inset * 0.06,
             -2.70 + inset * 0.95 - sy * 0.12,
         )
     };
@@ -520,7 +527,7 @@ fn nacelle(m: &mut Mesh, side: f64) {
     face(
         m,
         &(0..4).map(|k| mouth(k, 0.84)).collect::<Vec<_>>(),
-        V3::Z,
+        -V3::Z,
         BLACK,
     );
     // The LEX underside rolls down into the intake shoulder. Without this
@@ -559,16 +566,37 @@ fn nacelle(m: &mut Mesh, side: f64) {
     m.lathe(
         n - V3::Z * 0.35,
         V3::Z,
-        &[(0.0, 0.27), (0.30, 0.255), (0.52, 0.235)],
+        &[(0.0, 0.45), (0.30, 0.43), (0.52, 0.405)],
         22,
         BARE,
     );
     for j in 0..22 {
         let ph = j as f64 * TAU / 22.0;
         let dir = v3(ph.cos(), ph.sin(), 0.0);
+        let edge = |k: f64, z: f64, radius: f64| {
+            let angle = k * TAU / 22.0;
+            n + v3(angle.cos() * radius, angle.sin() * radius, z)
+        };
+        let centre_angle = (j as f64 + 0.5) * TAU / 22.0;
+        face(
+            m,
+            &[
+                edge(j as f64, 0.0, 0.43),
+                edge(j as f64 + 1.0, 0.0, 0.43),
+                edge(j as f64 + 1.0, 0.33, 0.425),
+                edge(j as f64, 0.33, 0.425),
+            ],
+            v3(centre_angle.cos(), centre_angle.sin(), 0.0),
+            if j % 2 == 0 {
+                BARE.scale(1.08)
+            } else {
+                BARE.scale(0.90)
+            },
+        );
+
         m.capsule(
-            n + dir * 0.225,
-            n + V3::Z * 0.33 + dir * 0.245,
+            n + dir * 0.395,
+            n + V3::Z * 0.33 + dir * 0.425,
             0.010,
             0.012,
             Rgb(0.52, 0.50, 0.46),
@@ -578,14 +606,14 @@ fn nacelle(m: &mut Mesh, side: f64) {
     m.lathe(
         n + V3::Z * 0.31,
         V3::Z,
-        &[(0.0, 0.245), (0.02, 0.205)],
+        &[(0.0, 0.425), (0.02, 0.375)],
         22,
         METAL,
     );
     m.lathe(
         n + V3::Z * 0.33,
         V3::Z,
-        &[(0.0, 0.20), (0.01, 0.0)],
+        &[(0.0, 0.37), (0.01, 0.0)],
         22,
         BLACK,
     );
@@ -665,6 +693,59 @@ fn star_and_bar(m: &mut Mesh, c: V3, n: V3, r: f64, fill: Rgb) {
 }
 
 // ------------------------------------------------------------------ model
+/// Panel joints, access covers and fasteners are actual shallow geometry.
+fn surface_details(m: &mut Mesh) {
+    for z in [-6.2, -5.35, -2.6, -1.35, 0.3, 3.35, 5.85] {
+        for k in 0..32 {
+            let at = |angle: f64| {
+                let p = fuselage_point(z, angle);
+                let centre = v3(0.0, section(FUSE, z)[2], z);
+                p + (p - centre).norm() * 0.004
+            };
+            m.capsule(
+                at(k as f64 * TAU / 32.0),
+                at((k + 1) as f64 * TAU / 32.0),
+                0.003,
+                0.003,
+                SKIN.scale(0.67),
+                4,
+            );
+        }
+    }
+    for side in [-1.0, 1.0] {
+        // Small flush access-cover rectangles on the forward cheeks.
+        let theta = if side > 0.0 { 0.28 } else { PI - 0.28 };
+        for (z0, z1) in [(-6.0, -5.55), (-3.0, -2.55)] {
+            for (a, b) in [
+                (v3(z0, theta - 0.14, 0.0), v3(z1, theta - 0.14, 0.0)),
+                (v3(z1, theta - 0.14, 0.0), v3(z1, theta + 0.14, 0.0)),
+                (v3(z1, theta + 0.14, 0.0), v3(z0, theta + 0.14, 0.0)),
+                (v3(z0, theta + 0.14, 0.0), v3(z0, theta - 0.14, 0.0)),
+            ] {
+                let point = |q: V3| {
+                    let p = fuselage_point(q.x, q.y);
+                    p + (p - v3(0.0, section(FUSE, q.x)[2], q.x)).norm() * 0.005
+                };
+                m.capsule(point(a), point(b), 0.003, 0.003, SKIN.scale(0.62), 4);
+            }
+        }
+        // Louvered ventilation grilles lie on the upper LEX shoulder.
+        for k in 0..7 {
+            let z = -2.1 + k as f64 * 0.065;
+            let [_, inner, outer, top, _] = section(LEX, z);
+            let x = mix(inner, outer, 0.60);
+            m.capsule(
+                v3(side * (x - 0.075), top + 0.015, z),
+                v3(side * (x + 0.075), top + 0.015, z),
+                0.006,
+                0.006,
+                BLACK,
+                4,
+            );
+        }
+    }
+}
+
 fn build_hornet() -> Airframe {
     let mut body = Mesh::new();
     let (z0, z1) = (FUSE[0][0], FUSE.last().unwrap()[0]);
@@ -676,8 +757,6 @@ fn build_hornet() -> Airframe {
         } else if p.z < -5.45 && p.z > -6.35 && p.y > 0.54 && p.x.abs() < 0.30 {
             // Matte anti-glare panel ahead of the windscreen.
             Rgb(0.15, 0.16, 0.17)
-        } else if (p.z * 2.35).sin() > 0.995 || (p.z * 1.17 + 0.3).fract().abs() < 0.018 {
-            SKIN.scale(0.91)
         } else {
             SKIN
         }
@@ -759,7 +838,7 @@ fn build_hornet() -> Airframe {
         lex_surface(&mut body, side);
         nacelle(&mut body, side);
         root_glove(
-            &mut body, side, 1.00, 1.435, 0.16, 4.56, 0.14, 0.13, SKIN, BELLY,
+            &mut body, side, 1.00, 1.435, -0.38, 3.60, 0.14, 0.13, SKIN, BELLY,
         );
 
         let panel = |_x: f64, p: V3| v3(side * p.x, p.y, p.z);
@@ -873,16 +952,16 @@ fn build_hornet() -> Airframe {
         );
         // Wingtip launch rail.
         body.capsule(
-            v3(side * 6.02, 0.24, 2.25),
-            v3(side * 6.02, 0.24, 4.15),
+            v3(side * 5.98, 0.24, 1.12),
+            v3(side * 5.98, 0.24, 3.95),
             0.050,
             0.050,
             METAL.scale(0.78),
             6,
         );
         body.capsule(
-            v3(side * 6.04, 0.27, 2.28),
-            v3(side * 6.04, 0.27, 3.98),
+            v3(side * 6.00, 0.27, 1.15),
+            v3(side * 6.00, 0.27, 3.78),
             0.030,
             0.030,
             Rgb(0.14, 0.15, 0.16),
@@ -912,7 +991,7 @@ fn build_hornet() -> Airframe {
             v[1] = (wing_surface(x, t).y + 0.008) as f32;
         }
         body.ellipsoid(
-            v3(side * 6.04, 0.24, 3.40),
+            v3(side * 6.00, 0.24, 2.85),
             v3(0.035, 0.035, 0.085),
             if side < 0.0 {
                 Rgb(0.82, 0.07, 0.04)
@@ -924,9 +1003,9 @@ fn build_hornet() -> Airframe {
         );
 
         fin(&mut body, side);
-        let stab_root_le = v3(side * 0.72, 0.10, 5.05);
-        let stab_tip_le = v3(side * 3.72, -0.05, 6.42);
-        let stab_tip_te = v3(side * 3.72, -0.05, 7.26);
+        let stab_root_le = v3(side * 0.72, 0.10, 4.70);
+        let stab_tip_le = v3(side * 3.22, -0.05, 6.74);
+        let stab_tip_te = v3(side * 3.22, -0.05, 7.66);
         let stab_root_te = v3(side * 0.72, 0.10, 7.18);
         wing_panel(
             &mut stabs[i],
@@ -1178,6 +1257,7 @@ fn build_hornet() -> Airframe {
         );
     }
 
+    surface_details(&mut body);
     let gear = gear_legs(Type::F18);
     Airframe {
         body,
@@ -1291,7 +1371,7 @@ pub fn store_shift(at: V3) -> V3 {
     let x = at.x.abs();
     let side = at.x.signum();
     let (from, to) = if x > 4.6 {
-        (v3(4.8, 0.30, 0.55), v3(6.00, 0.22, 3.30))
+        (v3(4.8, 0.30, 0.55), v3(5.98, 0.22, 2.50))
     } else if x > 3.8 {
         (v3(4.15, -0.06, 1.0), v3(4.05, -0.30, 1.62))
     } else if x > 2.9 {
@@ -1321,6 +1401,43 @@ mod tests {
             }
         }
         (lo, hi)
+    }
+
+    #[test]
+    fn outboard_wing_chords_match_the_orthographic_reference_envelopes() {
+        // Independent samples traced in metres from the three-view drawings.
+        // These catch an overlong trailing edge even when total span/length fit.
+        for (kind, x, tolerance, expected_le, expected_te) in [
+            (Type::F18, 4.40, 0.035, 1.00, 3.33),
+            (Type::Su27, 5.75, 0.060, 2.20, 5.15),
+        ] {
+            let a = if kind == Type::F18 {
+                build()
+            } else {
+                crate::su27::build()
+            };
+            for side in [-1.0, 1.0] {
+                let mut lo = f64::INFINITY;
+                let mut hi = f64::NEG_INFINITY;
+                for m in [&a.body, &a.flaps[0], &a.flaps[1]] {
+                    for v in m.v.chunks(STRIDE) {
+                        if (v[0] as f64 - side * x).abs() < tolerance && v[1] > -0.02 && v[1] < 0.40
+                        {
+                            lo = lo.min(v[2] as f64);
+                            hi = hi.max(v[2] as f64);
+                        }
+                    }
+                }
+                assert!(
+                    (lo - expected_le).abs() < 0.18,
+                    "{kind:?} leading edge {lo}"
+                );
+                assert!(
+                    (hi - expected_te).abs() < 0.18,
+                    "{kind:?} trailing edge {hi}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1415,7 +1532,7 @@ mod tests {
             } else {
                 build()
             };
-            let z = if flanker { -4.60 } else { -3.80 };
+            let z = if flanker { crate::su27::EYE.z } else { EYE.z };
             for phi in [0.0, PI] {
                 let sill = canopy_point(flanker, z, phi);
                 let nearest = a

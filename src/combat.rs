@@ -1596,13 +1596,18 @@ impl Combat {
     /// track is dropped as the sensors change over.
     pub fn toggle_irst(&mut self, a: &Aircraft) {
         let text = if !a.kind.has_irst() {
-            "NO IRST ON THE F-16C"
+            if a.kind==Type::F18 { "NO IRST ON THE F/A-18C" } else { "NO IRST ON THE F-16C" }
         } else {
             self.irst = !self.irst;
             self.lock = None;
             self.acquiring = None;
             self.shoot = false;
-            if self.irst { "IRST // OEPS-29 SEARCH" } else { "RADAR // N019M SEARCH" }
+            match (a.kind,self.irst) {
+                (Type::Su27,true)=>"IRST // OEPS-27 SEARCH",
+                (Type::Su27,false)=>"RADAR // N001 SEARCH",
+                (_,true)=>"IRST // OEPS-29 SEARCH",
+                (_,false)=>"RADAR // N019M SEARCH",
+            }
         };
         self.events.push(Event::Lock { text: text.to_string() });
     }
@@ -2996,6 +3001,26 @@ mod tests {
         let mut f = Combat::new(MissionKind::Dogfight, &mut Mission::new());
         f.toggle_irst(&spawn(v3(0.0, 4000.0, 0.0), 0.0, 230.0));
         assert!(!f.irst);
+    }
+
+    #[test]
+    fn sensor_annunciations_identify_the_selected_airframe() {
+        for (kind,irst_name,radar_name) in [(Type::Mig29,"OEPS-29","N019M"),(Type::Su27,"OEPS-27","N001")] {
+            let a=spawn_type(kind,v3(0.0,4000.0,0.0),0.0,230.0);
+            let mut c=Combat::new(MissionKind::Free,&mut Mission::new());
+            c.lock=Some(Who::Bandit(0));
+            c.toggle_irst(&a);
+            assert!(c.irst && c.lock.is_none());
+            assert!(matches!(c.events.last(),Some(Event::Lock{text}) if text.contains(irst_name)));
+            c.toggle_irst(&a);
+            assert!(!c.irst);
+            assert!(matches!(c.events.last(),Some(Event::Lock{text}) if text.contains(radar_name)));
+        }
+        let a=spawn_type(Type::F18,v3(0.0,4000.0,0.0),0.0,230.0);
+        let mut c=Combat::new(MissionKind::Free,&mut Mission::new());
+        c.toggle_irst(&a);
+        assert!(!c.irst);
+        assert!(matches!(c.events.last(),Some(Event::Lock{text}) if text.contains("F/A-18C")));
     }
 
     /// Launch rules by seeker: a Sparrow is not fired without a lock; an

@@ -176,3 +176,57 @@ sets, two rows of switch hardware, rotary controls and guarded switches. Narrow
 outboard strips beside the throttle retain the full lever and hand travel.
 Console labels identify control groups; decorative switches do not add a new
 interactive systems simulation.
+
+## Detailed exterior and live-cockpit revision
+
+The following pass compares the exterior with the downloaded FlightGear component
+meshes and with orthographic drawings, including the
+[NASA legacy Hornet three-view](https://www.nasa.gov/wp-content/uploads/2015/03/A_New_Twist_in_Flight_Research1.pdf#page=170)
+and the [Su-27 orthographic drawing](https://commons.wikimedia.org/wiki/File:Sukhoi_Su-27_3-view_line_drawing.svg).
+The station measurements below are approximate traces used for visual regression,
+not surveyed manufacturing dimensions. Body axes are x right and z aft, in metres.
+
+| Aircraft | Sample span position x | Leading edge z | Trailing edge z |
+| --- | ---: | ---: | ---: |
+| F/A-18C | 4.40 | 1.00 | 3.33 |
+| Su-27SK | 5.75 | 2.20 | 5.15 |
+
+Mesh regression tests check both sides against those independent samples with an
+18 cm envelope. This catches the former excessive wing chord even when overall
+length and span still match. The Hornet's clipped stabilators and launch-rail
+positions have also been adjusted. Both models have larger engine nacelles and
+exhaust apertures, individual metal nozzle petals, recessed intakes with correctly
+oriented back walls, access-cover outlines, panel joints and shoulder ventilation
+grilles. These details use mesh primitives and vertex colours in the same visual
+style as the F-16 and MiG-29.
+
+The Flanker cockpit and its external canopy move forward together. Its rear
+fairing and dorsal spine meet the canopy, and the 3.10 m speedbrake begins behind
+the cockpit. Its hinge is derived from the closed door surface, so relocation and
+curvature do not leave the animation pivot detached from the skin.
+
+### Live faces and controls
+
+Every rectangular instrument face preserves its atlas pixel aspect. An aperture
+fits the complete image inside its bezel rather than stretching or cropping it.
+The Hornet UFCD and IFEI have their own appropriately proportioned tiles. The
+Flanker has dedicated weapon/sensor, system and warning tiles instead of squeezing
+large MiG placards into thin strips. Active face allocations are tested for partial
+overlap; identical caution tiles can deliberately be reused on both eyebrows.
+
+The Hornet's added RWR uses the live emitter picture. IFEI oil pressure and nozzle
+position now use the flight model values. The Flanker weapon panel follows the
+selected weapon, radar/IRST selection and lock state; its system and warning lamps
+follow gear, flaps, speedbrake, fire, fuel, oil and AoA. The
+[Eagle Dynamics Su-27 manual](https://www.digitalcombatsimulator.com/upload/iblock/ed7/Su-27%20DCS%20Flaming%20Cliffs%20Flight%20Manual%20EN.pdf),
+pages 22-23, identifies the N001 radar and OEPS-27 system, which are now named
+correctly in the sensor indications.
+
+The gear handle, flap lever, throttle speedbrake rocker, weapon selector and
+Flanker sensor switch animate from the existing keyboard/controller commands.
+The two aircraft have their own gear-lever mounts while the MiG-29 retains its
+original one. No mouse-click cockpit control mode is added. Existing stick,
+throttle and pedal animations, HUD, DDI pages, flight gauges and rear-view mirrors
+continue to use the game systems. Decorative panels are not a complete simulation
+of every real aircraft system; the twin engine readouts still share the model's
+common engine state.

@@ -111,3 +111,42 @@ python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output 
 Run the second command on native Windows. Reports and captures stay under the
 ignored `target/model-review/` directory. FlightGear reference models, their
 hashes and variant differences are documented in HORNET-FLANKER-MODELS.md.
+
+## Detailed exterior and live cockpit pass (26 October 2026)
+
+Final validation passes 276 game tests and 6 standalone server tests, with no
+failures or ignored tests. The added checks cover independent outboard wing-chord
+reference samples, native image aspect in every instrument aperture, active atlas
+allocation boundaries, separate moving gear/flap/brake/weapon/sensor controls and
+aircraft-specific sensor annunciations. All previous sightline, HUD, canopy,
+structural, flight, gear, networking and weapon tests still pass.
+
+`./build.sh` rebuilt Linux and Windows. The expanded airframe matrix ran against
+the final Linux build and native Windows distribution, producing 34 captures per
+platform. All 68 captures were visually reviewed. In addition to the existing
+exterior/cockpit/gear views, the matrix now includes gear, flaps and speedbrake
+commands together, Hornet weapon selection and Flanker IRST selection. Snapshot
+commands also update their mechanical cockpit levers, so the inside and outside
+views represent the same command state.
+
+The tested Linux build is byte-identical to the Linux distribution file, and both
+distribution files match their final target build outputs. Distribution SHA-256:
+
+- Linux game: `c451ac32934b6b1b20aaa1e1ac007df09363dcd0b79081da9a8c9ba075932752`.
+- Windows game: `b8d62f86c3e4ad00e63a0f80f926b219c3a3705a45fef5393df66676f4cf09f7`.
+
+Reproduce with:
+
+```sh
+cargo test --release
+./build.sh
+python3 tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/detailed-final
+python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/detailed-final-windows
+```
+
+Run the Windows command on native Windows. The ignored output directories contain
+`captures.json`, full-resolution PNGs and reviewed contact sheets. The Linux
+folder also contains `overview.png` with both exteriors and forward cockpits.
+The exterior reference measurements and cockpit modelling limits are recorded in
+HORNET-FLANKER-MODELS.md. Controls remain on the existing keyboard and controller
+bindings.

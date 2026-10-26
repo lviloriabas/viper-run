@@ -432,7 +432,7 @@ void main() {
     // From the seat, the cockpit model replaces the skin inside the canopy.
     // The MiG-29 box is mig29::CUTOUT.
     if (u_cutout > 3.5) {
-        if (v_local.z > -6.1 && v_local.z < -2.8 && abs(v_local.x) < 0.62 && v_local.y > 0.35) discard;
+        if (v_local.z > -7.7 && v_local.z < -3.5 && abs(v_local.x) < 0.62 && v_local.y > 0.35) discard;
     } else if (u_cutout > 2.5) {
         if (v_local.z > -5.3 && v_local.z < -2.1 && abs(v_local.x) < 0.58 && v_local.y > 0.30) discard;
     } else if (u_cutout > 1.5) {

@@ -12,15 +12,19 @@ use crate::math::*;
 use crate::mesh::{Mesh, Rgb};
 use crate::sim::Type;
 
-pub const EYE: V3 = v3(0.0, 1.48, -4.60);
-pub const NOZZLES: [V3; 2] = [v3(-1.35, -0.20, 9.86), v3(1.35, -0.20, 9.86)];
+pub const EYE: V3 = v3(0.0, 1.48, -5.85);
+pub const NOZZLES: [V3; 2] = [v3(-1.35, -0.24, 9.94), v3(1.35, -0.24, 9.94)];
 pub const STAB_PIVOT: V3 = v3(1.85, 0.15, 8.50);
 pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
     (v3(0.0, -0.4, -3.4), V3::X, -95.0 * DEG),
     (v3(-1.5, -0.3, 1.3), V3::Z, -90.0 * DEG),
     (v3(1.5, -0.3, 1.3), V3::Z, 90.0 * DEG),
 ];
-pub(crate) const BRAKE_HINGE: V3 = v3(0.0, 1.06, 0.55);
+const BRAKE_FRONT: f64 = -2.0;
+const BRAKE_LENGTH: f64 = 3.10;
+pub(crate) fn brake_hinge() -> V3 {
+    brake_point(0.0, 0.5)
+}
 
 const LIGHT: Rgb = Rgb(0.69, 0.72, 0.73);
 const BELLY: Rgb = Rgb(0.76, 0.80, 0.82);
@@ -34,10 +38,10 @@ const WHITE: Rgb = Rgb(0.90, 0.90, 0.87);
 
 const ROOT_X: f64 = 2.0;
 const TIP_X: f64 = 7.35;
-const ROOT_LE: f64 = -0.30;
-const TIP_LE: f64 = 4.28;
-const ROOT_TE: f64 = 5.10;
-const TIP_TE: f64 = 6.12;
+const ROOT_LE: f64 = -0.95;
+const TIP_LE: f64 = 3.55;
+const ROOT_TE: f64 = 3.40;
+const TIP_TE: f64 = 5.90;
 const FLAP_CHORD: f64 = 1.20;
 
 pub fn build() -> Airframe {
@@ -47,18 +51,18 @@ pub fn build() -> Airframe {
 // ---------------------------------------------------------------- canopy
 // z, half width, sill and crown.
 const CANOPY: &[[f64; 4]] = &[
-    [-6.55, 0.18, 0.99, 1.08],
-    [-6.22, 0.33, 1.00, 1.40],
-    [-5.96, 0.41, 1.01, 1.68],
-    [-5.78, 0.45, 1.015, 1.82],
-    [-5.40, 0.48, 1.02, 1.94],
-    [-4.95, 0.505, 1.02, 2.02],
-    [-4.40, 0.515, 1.015, 2.05],
-    [-3.82, 0.50, 1.005, 1.99],
-    [-3.28, 0.45, 0.995, 1.83],
-    [-2.84, 0.36, 0.985, 1.55],
-    [-2.52, 0.24, 0.98, 1.18],
-    [-2.38, 0.15, 0.975, 1.04],
+    [-7.8000, 0.18, 0.99, 1.08],
+    [-7.4700, 0.33, 1.00, 1.40],
+    [-7.2100, 0.41, 1.01, 1.68],
+    [-7.0300, 0.45, 1.015, 1.82],
+    [-6.6500, 0.48, 1.02, 1.94],
+    [-6.2000, 0.505, 1.02, 2.02],
+    [-5.6500, 0.515, 1.015, 2.05],
+    [-5.0700, 0.50, 1.005, 1.99],
+    [-4.5300, 0.45, 0.995, 1.83],
+    [-4.0900, 0.36, 0.985, 1.55],
+    [-3.7700, 0.24, 0.98, 1.18],
+    [-3.6300, 0.15, 0.975, 1.04],
 ];
 
 pub(crate) fn canopy_point(z: f64, phi: f64) -> V3 {
@@ -70,7 +74,10 @@ pub(crate) fn canopy_point(z: f64, phi: f64) -> V3 {
     )
 }
 pub(crate) fn canopy_bow() -> f64 {
-    -5.78
+    -7.03
+}
+pub(crate) fn canopy_aft() -> f64 {
+    CANOPY.last().unwrap()[0]
 }
 
 // --------------------------------------------------------------- fuselage
@@ -106,14 +113,14 @@ const FUSE: &[[f64; 7]] = &[
 fn spine(z: f64) -> (f64, f64) {
     let [_, h, w] = section(
         &[
-            [-3.60, 0.00, 0.32],
-            [-2.90, 0.18, 0.37],
-            [-2.10, 0.32, 0.41],
-            [-1.10, 0.42, 0.44],
-            [0.20, 0.43, 0.44],
-            [1.50, 0.35, 0.41],
-            [2.80, 0.21, 0.36],
-            [4.10, 0.07, 0.31],
+            [-4.30, 0.00, 0.32],
+            [-3.60, 0.08, 0.37],
+            [-2.60, 0.15, 0.41],
+            [-1.10, 0.26, 0.44],
+            [0.20, 0.29, 0.44],
+            [1.50, 0.24, 0.41],
+            [2.80, 0.14, 0.36],
+            [4.10, 0.05, 0.31],
             [5.10, 0.00, 0.28],
         ],
         z,
@@ -220,16 +227,16 @@ fn lex_surface(m: &mut Mesh, side: f64) {
 /// AL-31F intake/nacelle stations: z, centre x, centre y, half width, half
 /// height, superellipse exponent.
 const NACELLE: &[[f64; 6]] = &[
-    [-3.78, 1.30, -0.34, 0.40, 0.31, 4.6],
-    [-3.56, 1.30, -0.33, 0.43, 0.34, 4.2],
-    [-3.05, 1.29, -0.32, 0.45, 0.36, 3.5],
-    [-1.80, 1.28, -0.31, 0.46, 0.37, 2.9],
-    [0.20, 1.29, -0.29, 0.465, 0.375, 2.6],
-    [2.30, 1.31, -0.28, 0.455, 0.365, 2.45],
-    [4.60, 1.33, -0.27, 0.425, 0.345, 2.35],
-    [6.70, 1.34, -0.26, 0.385, 0.315, 2.25],
-    [8.35, 1.35, -0.25, 0.335, 0.285, 2.15],
-    [9.55, 1.35, -0.24, 0.290, 0.255, 2.1],
+    [-3.7800, 1.3000, -0.3400, 0.5320, 0.4650, 4.6000],
+    [-3.5600, 1.3000, -0.3300, 0.5719, 0.5100, 4.2000],
+    [-3.0500, 1.2900, -0.3200, 0.5985, 0.5400, 3.5000],
+    [-1.8000, 1.2800, -0.3100, 0.6118, 0.5550, 2.9000],
+    [0.2000, 1.2900, -0.2900, 0.6185, 0.5625, 2.6000],
+    [2.3000, 1.3100, -0.2800, 0.6052, 0.5475, 2.4500],
+    [4.6000, 1.3300, -0.2700, 0.5653, 0.5175, 2.3500],
+    [6.7000, 1.3400, -0.2600, 0.5121, 0.4725, 2.2500],
+    [8.3500, 1.3500, -0.2500, 0.4456, 0.4275, 2.1500],
+    [9.5500, 1.3500, -0.2400, 0.4600, 0.4300, 2.1000],
 ];
 
 fn nacelle(m: &mut Mesh, side: f64) {
@@ -266,8 +273,8 @@ fn nacelle(m: &mut Mesh, side: f64) {
     let mouth = |k: usize, inset: f64| {
         let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][k];
         v3(
-            side * 1.30 + sx * (0.40 - inset * 0.10),
-            -0.34 + sy * (0.31 - inset * 0.075) - inset * 0.04,
+            side * 1.30 + sx * (0.53 - inset * 0.10),
+            -0.34 + sy * (0.46 - inset * 0.075) - inset * 0.04,
             -3.76 + inset * 0.90 - sy * 0.16,
         )
     };
@@ -293,7 +300,7 @@ fn nacelle(m: &mut Mesh, side: f64) {
     face(
         m,
         &(0..4).map(|k| mouth(k, 0.86)).collect::<Vec<_>>(),
-        V3::Z,
+        -V3::Z,
         BLACK,
     );
     for j in 0..6 {
@@ -341,16 +348,37 @@ fn nacelle(m: &mut Mesh, side: f64) {
     m.lathe(
         n - V3::Z * 0.35,
         V3::Z,
-        &[(0.0, 0.29), (0.30, 0.275), (0.55, 0.255)],
+        &[(0.0, 0.48), (0.30, 0.46), (0.55, 0.445)],
         24,
         BARE,
     );
     for j in 0..24 {
         let ph = j as f64 * TAU / 24.0;
         let dir = v3(ph.cos(), ph.sin(), 0.0);
+        let edge = |k: f64, z: f64, radius: f64| {
+            let angle = k * TAU / 24.0;
+            n + v3(angle.cos() * radius, angle.sin() * radius, z)
+        };
+        let centre_angle = (j as f64 + 0.5) * TAU / 24.0;
+        face(
+            m,
+            &[
+                edge(j as f64, 0.0, 0.46),
+                edge(j as f64 + 1.0, 0.0, 0.46),
+                edge(j as f64 + 1.0, 0.38, 0.465),
+                edge(j as f64, 0.38, 0.465),
+            ],
+            v3(centre_angle.cos(), centre_angle.sin(), 0.0),
+            if j % 2 == 0 {
+                BARE.scale(1.08)
+            } else {
+                BARE.scale(0.90)
+            },
+        );
+
         m.capsule(
-            n + dir * 0.250,
-            n + V3::Z * 0.38 + dir * 0.268,
+            n + dir * 0.435,
+            n + V3::Z * 0.38 + dir * 0.465,
             0.010,
             0.012,
             Rgb(0.50, 0.48, 0.45),
@@ -360,14 +388,14 @@ fn nacelle(m: &mut Mesh, side: f64) {
     m.lathe(
         n + V3::Z * 0.36,
         V3::Z,
-        &[(0.0, 0.268), (0.02, 0.225)],
+        &[(0.0, 0.465), (0.02, 0.415)],
         24,
         METAL,
     );
     m.lathe(
         n + V3::Z * 0.38,
         V3::Z,
-        &[(0.0, 0.22), (0.01, 0.0)],
+        &[(0.0, 0.41), (0.01, 0.0)],
         24,
         BLACK,
     );
@@ -471,12 +499,65 @@ fn flag_camo(m: &mut Mesh) {
 
 /// Mid-surface of the closed dorsal door, just above the curved spine.
 fn brake_point(u: f64, v: f64) -> V3 {
-    let z = BRAKE_HINGE.z + u * 1.75;
+    let z = BRAKE_FRONT + u * BRAKE_LENGTH;
     let x = (2.0 * v - 1.0) * mix(0.46, 0.38, u);
     let [_, _, yc, hu, ..] = section(FUSE, z);
     let (h, w) = spine(z);
     let y = yc + hu + h * (1.0 - (x / w).powi(2)).max(0.0).powf(1.6);
     v3(x, y + 0.011, z)
+}
+
+/// Panel joints, access covers and fasteners are actual shallow geometry.
+fn surface_details(m: &mut Mesh) {
+    for z in [-9.0, -7.35, -3.9, -1.7, 2.8, 5.7, 8.2] {
+        for k in 0..32 {
+            let at = |angle: f64| {
+                let p = fuselage_point(z, angle);
+                let centre = v3(0.0, section(FUSE, z)[2], z);
+                p + (p - centre).norm() * 0.004
+            };
+            m.capsule(
+                at(k as f64 * TAU / 32.0),
+                at((k + 1) as f64 * TAU / 32.0),
+                0.003,
+                0.003,
+                LIGHT.scale(0.67),
+                4,
+            );
+        }
+    }
+    for side in [-1.0, 1.0] {
+        // Small flush access-cover rectangles on the forward cheeks.
+        let theta = if side > 0.0 { 0.28 } else { PI - 0.28 };
+        for (z0, z1) in [(-6.0, -5.55), (-3.0, -2.55)] {
+            for (a, b) in [
+                (v3(z0, theta - 0.14, 0.0), v3(z1, theta - 0.14, 0.0)),
+                (v3(z1, theta - 0.14, 0.0), v3(z1, theta + 0.14, 0.0)),
+                (v3(z1, theta + 0.14, 0.0), v3(z0, theta + 0.14, 0.0)),
+                (v3(z0, theta + 0.14, 0.0), v3(z0, theta - 0.14, 0.0)),
+            ] {
+                let point = |q: V3| {
+                    let p = fuselage_point(q.x, q.y);
+                    p + (p - v3(0.0, section(FUSE, q.x)[2], q.x)).norm() * 0.005
+                };
+                m.capsule(point(a), point(b), 0.003, 0.003, LIGHT.scale(0.62), 4);
+            }
+        }
+        // Louvered ventilation grilles lie on the upper LEX shoulder.
+        for k in 0..7 {
+            let z = -2.1 + k as f64 * 0.065;
+            let [_, inner, outer, top, _] = section(LEX, z);
+            let x = mix(inner, outer, 0.60);
+            m.capsule(
+                v3(side * (x - 0.075), top + 0.015, z),
+                v3(side * (x + 0.075), top + 0.015, z),
+                0.006,
+                0.006,
+                BLACK,
+                4,
+            );
+        }
+    }
 }
 
 fn build_flanker() -> Airframe {
@@ -516,13 +597,13 @@ fn build_flanker() -> Airframe {
         6,
     );
     body.ellipsoid(
-        v3(0.0, 1.10, -6.78),
+        v3(0.0, 1.00, -8.02),
         v3(0.145, 0.145, 0.19),
         Rgb(0.16, 0.25, 0.28),
         8,
         14,
     );
-    body.ellipsoid(v3(0.0, 1.10, -6.78), v3(0.075, 0.075, 0.105), BLACK, 5, 10);
+    body.ellipsoid(v3(0.0, 1.00, -8.02), v3(0.075, 0.075, 0.105), BLACK, 5, 10);
     for side in [-1.0, 1.0] {
         body.capsule(
             v3(side * 0.31, 0.38, -8.55),
@@ -535,7 +616,7 @@ fn build_flanker() -> Airframe {
     }
     // Gun bay and the starboard cannon blast panel.
     body.block(
-        &frame(v3(0.30, 0.71, -7.55)),
+        &frame(v3(0.73, 0.72, -4.90)),
         v3(0.075, 0.035, 0.30),
         LIGHT.scale(0.9),
     );
@@ -555,7 +636,7 @@ fn build_flanker() -> Airframe {
         lex_surface(&mut body, side);
         nacelle(&mut body, side);
         root_glove(
-            &mut body, side, 1.48, 2.015, -0.24, 5.12, 0.10, 0.18, LIGHT, BELLY,
+            &mut body, side, 1.48, 2.015, -0.98, 3.42, 0.10, 0.18, LIGHT, BELLY,
         );
 
         let panel = |p: V3| v3(side * p.x, p.y, p.z);
@@ -673,10 +754,10 @@ fn build_flanker() -> Airframe {
 
         fin(&mut body, side);
         // Stabilator with a broad root and clipped, swept tip.
-        let root_le = v3(side * 1.05, 0.16, 6.62);
-        let tip_le = v3(side * 5.02, -0.02, 8.00);
-        let tip_te = v3(side * 5.02, -0.02, 9.27);
-        let root_te = v3(side * 1.05, 0.16, 9.02);
+        let root_le = v3(side * 1.80, 0.16, 6.30);
+        let tip_le = v3(side * 4.70, -0.02, 8.32);
+        let tip_te = v3(side * 4.22, -0.02, 9.05);
+        let root_te = v3(side * 1.80, 0.16, 9.02);
         wing_panel(
             &mut stabs[i],
             root_le,
@@ -781,7 +862,7 @@ fn build_flanker() -> Airframe {
             );
         }
     }
-    body.ellipsoid(v3(0.0, 0.99, -2.35), v3(0.34, 0.24, 0.54), LIGHT, 5, 10);
+    body.ellipsoid(v3(0.0, 0.99, -3.60), v3(0.34, 0.115, 0.42), LIGHT, 5, 10);
 
     // Dorsal airbrake, closed on the spine.
     let mut brake = Mesh::new();
@@ -874,6 +955,7 @@ fn build_flanker() -> Airframe {
         );
     }
 
+    surface_details(&mut body);
     flag_camo(&mut body);
     for m in flaps
         .iter_mut()
@@ -961,7 +1043,7 @@ mod tests {
     fn baseline_flanker_has_no_canards_or_outboard_foreplanes() {
         let f = build();
         for v in f.body.v.chunks(STRIDE) {
-            if v[2] < -0.75 {
+            if (v[2] as f64) < ROOT_LE - 0.05 {
                 assert!(v[0].abs() < 2.20, "foreplane ahead of wing: {v:?}");
             }
         }
