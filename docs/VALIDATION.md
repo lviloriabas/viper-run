@@ -1,5 +1,46 @@
 # Validation
 
+## FlightGear model integration, 26 October 2026
+
+This revision supersedes the earlier Hornet/Flanker geometry checks below.
+The final source passes 269 game tests and 6 standalone server tests in both
+debug and release profiles. All 6 Python importer tests pass, including upstream
+source hashes and pixel-for-pixel cockpit texture preservation. The bundled
+AC3D/XML sources were unpacked and the embedded assets regenerated offline.
+
+The final Linux and native Windows release binaries each completed the expanded
+42-view airframe matrix at 1440x900. All 84 captures were visually reviewed.
+Views include forward/panel/console sightlines, rear cockpit closure, exterior
+profiles, mounted weapons, gear, rudders, speedbrakes and detached landing gear.
+The Windows external capture/overlay compatibility check also passed.
+Linux Blender produced eight orthographic/three-quarter exterior renders and
+editable review scenes. Modeling sources and remaining simulation approximations
+are documented in [HORNET-FLANKER-MODELS.md](HORNET-FLANKER-MODELS.md).
+
+Reproduce the model checks from the repository root:
+
+```sh
+cargo test --quiet
+cargo test --release --quiet
+python -m unittest discover -s tools -p test_flightgear_import.py -v
+python tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/linux
+python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/windows
+python tools/check_windows_capture.py dist/viper-run-windows-x86_64.exe
+```
+
+Run each executable on its native platform. Capture directories contain
+`captures.json` and `binary.sha256`, tying the completed matrix to its binary.
+Final release SHA-256:
+
+| Executable | SHA-256 |
+| --- | --- |
+| Linux game | `e395c68ad8916910c91949d3ed94e00943c07001623cc55054d5105bee62ef84` |
+| Windows game | `25b194b96b0acc8fabb4190d8044e2b5b07c9fe87bcd805fd221f977dec70721` |
+| Linux server | `8c9a53339387b381012746bad45e40f4b687a726ddac055935a08d8f592c95af` |
+| Windows server | `3834289a9ec0caac9d67c03be60812b5b0eab0ca24b9fcab2ac544fae8b055e6` |
+
+## Earlier validation history
+
 The delivered source and release executables were checked with:
 
 - cargo test --release: 258 game tests and 6 standalone server tests, no failures.

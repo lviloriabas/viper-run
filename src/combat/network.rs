@@ -401,7 +401,7 @@ impl Combat {
         }
         host.stores_mass = self.loadout.mass();
         host.stores_drag = self.loadout.drag();
-        host.wing_stores = self.loadout.wing_mass();
+        host.wing_stores = self.loadout.wing_mass(host.kind);
         let lost = host.crashed || host.lost.any() || p.eject_clock >= 0.5;
         if p.eject_clock >= 0.5 {
             host.ejected = true;
@@ -724,7 +724,7 @@ impl ActorState {
             })
             .collect();
         a.stores_mass = l.mass();
-        a.wing_stores = l.wing_mass();
+        a.wing_stores = l.wing_mass(a.kind);
         a.stores_drag = l.drag();
         a.mass = kind.empty_mass() + a.fuel + a.stores_mass;
     }

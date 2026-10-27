@@ -11,28 +11,13 @@ const FLANKER_WEAPONS: R = r(1024.0, 1840.0, 448.0, 64.0);
 const FLANKER_SYSTEMS: R = r(1472.0, 1840.0, 192.0, 64.0);
 const FLANKER_WARN: R = r(1024.0, 640.0, 96.0, 320.0);
 
-/// The outer cheeks toe toward the seat, while the central board stays flat.
-fn instrument(kind: Type, x: f64, y: f64) -> Frame {
-    let tilt = if kind == Type::Su27 { 12.0 } else { 8.5 } * DEG;
-    let p = Frame {
-        o: v3(0.0, 0.64, -4.40),
-        x: V3::X,
-        y: v3(0.0, tilt.cos(), -tilt.sin()),
-        z: v3(0.0, tilt.sin(), tilt.cos()),
-    };
-    let cant = if kind == Type::Su27 { 18.0 } else { 10.0 } * DEG;
-    let hinge = if kind == Type::Su27 { 0.29 } else { 0.40 };
-    let side = x.signum();
-    if x.abs() <= hinge {
-        return p.at(x, (y - 0.64) / tilt.cos(), 0.0);
-    }
-    let across = p.x * cant.cos() + p.z * (side * cant.sin());
-    Frame {
-        o: p.p(side * hinge, (y - 0.64) / tilt.cos(), 0.0) + across * (x - side * hinge),
-        x: across,
-        y: p.y,
-        z: across.cross(p.y),
-    }
+/// Native board tilt and eye position, shared by bezels and their live faces.
+fn instrument(kind:Type,x:f64,y:f64)->Frame {
+    let (o,tilt)=if kind==Type::Su27 {
+        (crate::flightgear::cockpit_point(kind,v3(4.64,0.92,0.0)),20.5*DEG)
+    } else {(v3(0.0,0.64,-4.10),8.5*DEG)};
+    let f=Frame{o,x:V3::X,y:v3(0.0,tilt.cos(),-tilt.sin()),z:v3(0.0,tilt.sin(),tilt.cos())};
+    f.at(x,(y-o.y)/tilt.cos(),0.0)
 }
 #[derive(Clone, Copy)]
 enum Shape {
@@ -93,32 +78,32 @@ fn face_size(item: &Instrument) -> (f64, f64) {
 // Dense groups and proportions reconstructed from the supplied cockpit photos.
 fn layout(kind: Type) -> Vec<Instrument> {
     if kind == Type::Su27 {
+        let sc=14.7/15.25;
+        let y=|z:f64|crate::flightgear::cockpit_point(kind,v3(4.64,0.920+z*(20.0*DEG).cos(),0.0)).y;
         vec![
-            dial(-0.085, 0.805, 0.058, mig::R_ADI),
-            dial(-0.085, 0.650, 0.058, mig::R_HSI),
-            dial(-0.235, 0.805, 0.048, mig::R_ASI),
-            dial(-0.235, 0.650, 0.048, mig::R_ALT),
-            dial(-0.370, 0.805, 0.046, mig::R_UUAP),
-            dial(-0.370, 0.650, 0.046, mig::R_RADALT),
-            dial(0.060, 0.805, 0.044, mig::R_VVI),
-            dial(0.195, 0.805, 0.048, mig::R_RPM),
-            dial(0.080, 0.650, 0.035, mig::R_EGT),
-            dial(0.195, 0.650, 0.035, mig::R_EGT_R),
-            dial(-0.370, 0.505, 0.037, mig::R_CLOCK),
-            display_face(0.355, 0.980, 0.185, 0.165, mig::R_TV, false),
-            dial(0.390, 0.650, 0.047, mig::R_SPO),
-            label(0.335, 0.505, 0.180, 0.055, mig::R_HYD),
-            label(0.292, 0.725, 0.060, 0.200, mig::R_FUEL),
-            label(-0.250, 0.505, 0.065, 0.070, mig::R_GEAR),
-            label(-0.080, 0.915, 0.300, 0.045, FLANKER_WEAPONS),
-            label(-0.025, 1.035, 0.235, 0.090, HUD_CONTROL),
-            label(-0.305, 0.950, 0.100, 0.050, FLANKER_SYSTEMS),
-            label(0.075, 0.505, 0.105, 0.105, mig::R_EKRAN),
-            label(0.452, 0.530, 0.035, 0.120, FLANKER_WARN),
+            dial(-0.085*sc,y(0.080),0.040*sc,mig::R_ADI),
+            dial(-0.085*sc,y(-0.050),0.040*sc,mig::R_HSI),
+            dial(-0.194*sc,y(0.082),0.032*sc,mig::R_ASI),
+            dial(-0.198*sc,y(0.000),0.031*sc,mig::R_ALT),
+            dial(-0.281*sc,y(0.084),0.032*sc,mig::R_UUAP),
+            dial(-0.281*sc,y(0.000),0.030*sc,mig::R_RADALT),
+            dial(0.018*sc,y(0.075),0.032*sc,mig::R_VVI),
+            dial(0.110*sc,y(0.060),0.034*sc,mig::R_RPM),
+            dial(0.082*sc,y(-0.020),0.025*sc,mig::R_EGT),
+            dial(0.148*sc,y(-0.020),0.025*sc,mig::R_EGT_R),
+            dial(-0.275*sc,y(-0.090),0.028*sc,mig::R_CLOCK),
+            display_face(0.250*sc,0.935,0.142,0.142,mig::R_TV,false),
+            dial(0.370*sc,y(-0.110),0.039*sc,mig::R_SPO),
+            label(0.220*sc,y(0.0000),0.044,0.098,mig::R_FUEL),
+            label(0.300*sc,y(0.010),0.055,0.100,mig::R_EKRAN),
+            label(-0.345*sc,y(-0.090),0.050,0.054,mig::R_GEAR),
+            label(0.0,1.110,0.190,0.030,FLANKER_WEAPONS),
+            label(-0.370*sc,y(-0.030),0.046,0.035,FLANKER_SYSTEMS),
+            label(0.420*sc,y(-0.006),0.021,0.095,FLANKER_WARN),
         ]
     } else {
         // The first supplied photo has the upgraded UFCD, not a keypad UFC.
-        vec![
+        let mut v=vec![
             display_face(-0.250, 0.885, 0.245, 0.245, R_MFD_L, true),
             display_face(0.250, 0.885, 0.245, 0.245, R_MFD_R, true),
             display_face(0.0, 1.005, 0.215, 0.240, UFC, true),
@@ -127,38 +112,42 @@ fn layout(kind: Type) -> Vec<Instrument> {
             label(-0.265, 0.595, 0.215, 0.150, IFEI),
             dial(0.200, 0.650, 0.041, R_DIALS[2]),
             dial(0.335, 0.650, 0.041, R_DIALS[0]),
-            dial(0.190, 0.515, 0.031, R_DIALS[1]),
-            dial(0.300, 0.515, 0.031, R_DIALS[3]),
-            dial(0.410, 0.515, 0.031, R_VVI),
+            dial(0.180, 0.515, 0.031, R_DIALS[1]),
+            dial(0.255, 0.515, 0.031, R_DIALS[3]),
+            dial(0.330, 0.515, 0.031, R_VVI),
             dial(-0.432, 0.690, 0.029, R_RWR),
             label(-0.432, 0.880, 0.040, 0.170, R_ARM),
             label(-0.420, 1.035, 0.034, 0.075, R_AOA),
             label(-0.270, 1.065, 0.150, 0.050, R_CAUTION),
             label(0.270, 1.065, 0.150, 0.050, R_CAUTION),
-        ]
+        ];
+        for i in &mut v {i.x*=0.82;i.w*=0.82;i.h*=0.82;}
+        v
     }
 }
 /// Physical aperture used both by the mesh and HUD clipping.
-pub(super) fn hud_glass(kind: Type) -> [V3; 4] {
-    if kind == Type::Su27 {
-        [
-            v3(-0.150, 1.115, -4.36),
-            v3(0.150, 1.115, -4.36),
-            v3(0.175, 1.445, -4.43),
-            v3(-0.175, 1.445, -4.43),
-        ]
-    } else {
-        [
-            v3(-0.145, 1.180, -4.42),
-            v3(0.145, 1.180, -4.42),
-            v3(0.155, 1.445, -4.47),
-            v3(-0.155, 1.445, -4.47),
-        ]
+pub(super) fn hud_glass(kind:Type)->[V3;4] {
+    if kind==Type::Su27 {
+        let offset=crate::airframe::EYE-kind.eye();
+        [v3(-0.073519279,1.272033713,-6.303307884),v3(0.092537705,1.272030734,-6.303317319),
+         v3(0.092711213,1.494010153,-6.192297851),v3(-0.073683148,1.494010153,-6.192297851)].map(|p|p+offset)
+    }else{
+        [v3(-0.123,1.180,-4.09),v3(0.123,1.180,-4.09),v3(0.132,1.445,-4.14),v3(-0.132,1.445,-4.14)]
     }
 }
 // Projector controls are on the front of its housing, above the main board.
 fn mount(kind: Type, item: &Instrument) -> Frame {
     let mut f = instrument(kind, item.x, item.y);
+    if kind==Type::Su27 && item.rect.x==FLANKER_WEAPONS.x && item.rect.y==FLANKER_WEAPONS.y {
+        f.o.z=-3.55;
+    }
+    if kind==Type::Su27 && item.rect.x==mig::R_TV.x && item.rect.y==mig::R_TV.y {
+        // Raised monitor case sits aft of the coaming and HUD's side wall.
+        f.o.z+=0.11;
+    }
+    if kind == Type::F18 && ((item.rect.x == UFC.x && item.rect.y == UFC.y) || (item.rect.x == HUD_CONTROL.x && item.rect.y == HUD_CONTROL.y)) {
+        f.o.z += 0.17;
+    }
     if kind == Type::Su27 && item.rect.x == HUD_CONTROL.x && item.rect.y == HUD_CONTROL.y {
         f.o.z += 0.17;
     }
@@ -445,366 +434,110 @@ fn draw_consoles(cv: &mut Canvas, russian: bool) {
         }
     }
 }
-pub fn build(kind: Type) -> Mesh {
-    let mut m = Mesh::new();
-    let russian = kind == Type::Su27;
-    let panel = if russian {
-        Rgb(0.37, 0.62, 0.66)
-    } else {
-        Rgb(0.19, 0.21, 0.22)
-    };
-    let wall = panel.scale(0.77);
-    let plain = |at| Frame {
-        o: at,
-        x: V3::X,
-        y: V3::Y,
-        z: V3::Z,
-    };
-    // Floor beneath the boots and pedals, parallel console inboard edges
-    // outside the seat bucket, and an open central stick/leg volume.
-    m.block(&plain(v3(0.0, 0.125, -3.65)), v3(0.50, 0.025, 0.90), wall);
-    for side in [-1.0, 1.0] {
-        m.block(
-            &plain(v3(side * 0.515, 0.52, -3.42)),
-            v3(0.018, 0.38, 1.09),
-            wall,
-        );
-        let c = |x: f64, z: f64| v3(side * x, 0.62 + (x - 0.262) * 0.14, z);
-        let (inner, outer, zf, za) = (0.262, 0.49, -3.94, -2.72);
-        m.quad(
-            c(inner, zf),
-            c(outer, zf),
-            c(outer, za),
-            c(inner, za),
-            panel,
-        );
-        m.quad(
-            c(inner, zf),
-            c(inner, za),
-            v3(side * inner, 0.15, za),
-            v3(side * inner, 0.15, zf),
-            wall,
-        );
-        // Sloped joining cheeks outboard of the knees, not a transverse block.
-        let f = instrument(kind, side * 0.49, 0.30);
-        m.quad(
-            c(inner, zf),
-            c(outer, zf),
-            f.o,
-            instrument(kind, side * inner, 0.30).o,
-            panel.scale(0.8),
-        );
-        for (row, z) in [-3.83, -3.65, -3.47, -3.29, -3.11, -2.93]
-            .into_iter()
-            .enumerate()
-        {
-            // Leave the whole throttle slot and hand travel clear.
-            let narrow = side < 0.0 && z > -3.74 && z < -3.23;
-            let x = side * if narrow { 0.445 } else { 0.375 };
-            let across = v3(1.0, side * 0.14, 0.0).norm();
-            let cf = Frame {
-                o: c(x.abs(), z) + V3::Y * 0.005,
-                x: across,
-                y: -V3::Z,
-                z: across.cross(-V3::Z),
-            };
-            m.block(
-                &cf,
-                v3(if narrow { 0.040 } else { 0.098 }, 0.073, 0.004),
-                DARK.scale(1.7),
-            );
-            let rect = console_rect(side, row);
-            let width = if narrow { 0.080 } else { 0.196 };
-            let height = (width * rect.h as f64 / rect.w as f64).min(0.146);
-            let width = height * rect.w as f64 / rect.h as f64;
-            screen(&mut m, &cf.at(0.0, 0.0, 0.0045), width, height, rect);
-            for k in 0..2 {
-                for j in 0..if narrow { 2 } else { 4 } {
-                    if j == 0 && k == 0 && (row == 0 || side > 0.0 && row == 2) {
-                        continue;
-                    }
-                    let at = cf.p(
-                        if narrow {
-                            -0.022 + j as f64 * 0.044
-                        } else {
-                            -0.072 + j as f64 * 0.047
-                        },
-                        if k == 0 { 0.024 } else { -0.034 },
-                        0.006,
-                    );
-                    if (row + j + k) % 4 == 0 {
-                        m.capsule(at, at + cf.z * 0.015, 0.008, 0.007, DARK, 10);
-                        m.capsule(
-                            at + cf.z * 0.016,
-                            at + cf.z * 0.016 + cf.y * 0.005,
-                            0.001,
-                            0.001,
-                            METALC,
-                            4,
-                        );
-                    } else if russian && side > 0.0 && row == 5 || row == 4 && j == 0 {
-                        m.block(
-                            &Frame {
-                                o: at + cf.z * 0.008,
-                                ..cf
-                            },
-                            v3(0.006, 0.012, 0.009),
-                            Rgb(0.65, 0.10, 0.06),
-                        );
-                    } else {
-                        m.capsule(
-                            at,
-                            at + cf.z * 0.017 - cf.y * 0.005,
-                            0.0028,
-                            0.0018,
-                            METALC,
-                            6,
-                        );
-                    }
-                }
-            }
-            for x in if narrow {
-                [-0.033, 0.033]
-            } else {
-                [-0.087, 0.087]
-            } {
-                m.block(&cf.at(x, 0.058, 0.006), v3(0.002, 0.002, 0.001), METALC);
-            }
+pub fn build(kind:Type)->Mesh {
+    let russian=kind==Type::Su27;
+    let panel=if russian{Rgb(0.32,0.53,0.56)}else{Rgb(0.19,0.21,0.22)};
+    let wall=panel.scale(0.65);
+    let plain=|o|Frame{o,x:V3::X,y:V3::Y,z:V3::Z};
+    let mut m=crate::flightgear::cockpit_mesh(kind,"cockpit");
+    m.v.extend(crate::flightgear::cockpit_mesh(kind,"frame").v);
+    let offset=crate::airframe::EYE-kind.eye();
+    let native=|z:f64,phi:f64|crate::hornet::canopy_point(russian,z,phi)+offset;
+    let (front,aft)=crate::flightgear::canopy_range(kind);
+    // Continuous walls from the original canopy sills to the floor.
+    let (front,aft)=(front+0.008,aft-0.008);
+    let floor=0.12;
+    let outer=if russian{0.68}else{0.43};
+    let mut widest:f64=outer;
+    for k in 0..32 {
+        let z0=mix(front,aft,k as f64/32.0);let z1=mix(front,aft,(k+1) as f64/32.0);
+        for phi in [0.0,PI] {
+            let a=native(z0,phi);let b=native(z1,phi);
+            widest=widest.max(a.x.abs()).max(b.x.abs());
+            let side=phi.cos();
+            let c=v3(side*outer,0.55,a.z);let d=v3(side*outer,0.55,b.z);
+            m.quad(a,b,d,c,wall);
+            m.quad(c,d,v3(d.x,floor,d.z),v3(c.x,floor,c.z),wall);
         }
     }
-    // Correct twin-throttle quadrant beneath the moving common controls.
-    m.block(
-        &plain(v3(-0.315, 0.637, -3.465)),
-        v3(0.041, 0.018, 0.205),
-        DARK,
-    );
-    m.block(
-        &plain(v3(-0.315, 0.656, -3.465)),
-        v3(0.022, 0.001, 0.184),
-        Rgb(0.02, 0.02, 0.02),
-    );
-    // Board assembled around two open knee wells and a narrow centre pedestal.
-    // A piecewise board avoids fanning triangles over the concave knee recess.
-    for (x0, x1, y0, y1) in [
-        (-0.47, 0.47, 0.63, if russian { 0.90 } else { 0.97 }),
-        (-0.47, -0.145, 0.43, 0.63),
-        (0.145, 0.47, 0.43, 0.63),
-        (-0.145, 0.145, 0.36, 0.63),
-    ] {
-        let mut xs = vec![x0];
-        let hinge = if kind == Type::Su27 { 0.29 } else { 0.40 };
-        for fold in [-hinge, hinge] {
-            if fold > x0 && fold < x1 {
-                xs.push(fold);
-            }
-        }
-        xs.push(x1);
+    m.block(&plain(v3(0.0,floor-0.015,(front+aft)*0.5+offset.z)),v3(widest+0.02,0.015,(aft-front)*0.5+0.02),wall);
+    for z in [front,aft] {
+        let a=native(z,0.0);let b=native(z,PI);
+        let c=v3(-outer,0.55,b.z);let d=v3(outer,0.55,a.z);
+        m.quad(a,b,c,d,wall);
+        m.quad(d,c,v3(-outer,floor,b.z),v3(outer,floor,a.z),wall);
+    }
+    if !russian {
+        let top=|x:f64|if x.abs()<0.12{1.15}else if x.abs()<0.30{1.11}else{mix(1.11,0.94,(x.abs()-0.30)/0.09)};
+        let xs=[-0.39,-0.30,-0.12,0.0,0.12,0.30,0.39];
         for pair in xs.windows(2) {
-            let (l, r) = (pair[0], pair[1]);
-            m.quad(
-                instrument(kind, l, y0).p(0.0, 0.0, -0.018),
-                instrument(kind, r, y0).p(0.0, 0.0, -0.018),
-                instrument(kind, r, y1).p(0.0, 0.0, -0.018),
-                instrument(kind, l, y1).p(0.0, 0.0, -0.018),
-                panel,
-            );
+            let (a,b)=(pair[0],pair[1]);
+            let (p,q)=(instrument(kind,a,top(a)).o,instrument(kind,b,top(b)).o);
+            m.quad(instrument(kind,a,0.40).o-V3::Z*0.025,instrument(kind,b,0.40).o-V3::Z*0.025,q-V3::Z*0.025,p-V3::Z*0.025,panel);
+            m.quad(p,q,q-v3(0.0,0.055,0.30),p-v3(0.0,0.055,0.30),DARK);
+            m.capsule(p,q,0.012,0.012,DARK,6);
         }
-    }
-    let top = |x: f64| {
-        let x = x.abs();
-        if russian {
-            if x <= 0.16 {
-                1.10
-            } else if x <= 0.29 {
-                mix(1.10, 1.00, (x - 0.16) / 0.13)
-            } else {
-                mix(1.00, 0.90, (x - 0.29) / 0.18)
+        for side in [-1.0,1.0] {
+            let a=instrument(kind,side*0.39,0.40).o;let b=instrument(kind,side*0.39,0.94).o;
+            let sill=native(-3.55,if side>0.0{0.0}else{PI});
+            m.quad(a,b,sill,v3(sill.x,0.40,sill.z),wall);
+            let c=|x:f64,z:f64|v3(side*x,0.62+(x-0.262)*0.24,z);
+            m.quad(c(0.262,-3.96),c(0.395,-3.96),c(0.395,-2.74),c(0.262,-2.74),panel);
+            m.quad(c(0.262,-3.96),c(0.262,-2.74),v3(side*0.262,floor,-2.74),v3(side*0.262,floor,-3.96),wall);
+            for row in 0..6 {
+                let z=-3.84+row as f64*0.183;
+                let f=Frame{o:c(0.337,z)+V3::Y*0.006,x:v3(1.0,side*0.24,0.0).norm(),y:-V3::Z,z:v3(-side*0.24,1.0,0.0).norm()};
+                m.block(&f,v3(0.060,0.077,0.004),DARK);
+                let rect=console_rect(side,row);let h=0.118*rect.h as f64/rect.w as f64;
+                screen(&mut m,&f.at(0.0,0.0,0.0045),0.118,h,rect);
+                for j in 0..3 {
+                    let at=f.p(-0.040+j as f64*0.04,-0.025,0.009);
+                    if (row+j)%3==0 {m.lathe(at,f.z,&[(0.0,0.007),(0.014,0.007)],8,DARK);}
+                    else {m.capsule(at,at+f.z*0.02+f.y*0.007,0.0025,0.002,METALC,6);}
+                }
+                for x in [-0.052,0.052]{m.block(&f.at(x,0.066,0.006),v3(0.002,0.002,0.001),METALC);}
             }
-        } else if x < 0.13 {
-            1.15
-        } else if x < 0.37 {
-            1.11
-        } else {
-            mix(1.11, 0.97, (x - 0.37) / 0.10)
         }
-    };
-    let xs = [
-        -0.47, -0.40, -0.37, -0.29, -0.16, -0.13, 0.0, 0.13, 0.16, 0.29, 0.37, 0.40, 0.47,
-    ];
-    for pair in xs.windows(2) {
-        let (l, r) = (pair[0], pair[1]);
-        let (a, b) = (
-            instrument(kind, l, top(l)).p(0.0, 0.0, -0.018),
-            instrument(kind, r, top(r)).p(0.0, 0.0, -0.018),
-        );
-        m.quad(
-            instrument(kind, l, if russian { 0.90 } else { 0.97 }).p(0.0, 0.0, -0.018),
-            instrument(kind, r, if russian { 0.90 } else { 0.97 }).p(0.0, 0.0, -0.018),
-            b,
-            a,
-            panel,
-        );
-        m.quad(
-            a + V3::Z * 0.025,
-            b + V3::Z * 0.025,
-            b - V3::Z * 0.16 + V3::Y * 0.015,
-            a - V3::Z * 0.16 + V3::Y * 0.015,
-            DARK,
-        );
-    }
-    // Close the tub to the panel sides; the forward board must not float
-    // above the external fuselage visible through an open side triangle.
-    for side in [-1.0, 1.0] {
-        m.quad(
-            instrument(kind, side * 0.47, 0.43).p(0.0, 0.0, -0.02),
-            instrument(kind, side * 0.47, top(0.47)).p(0.0, 0.0, -0.02),
-            v3(side * 0.515, 0.90, -3.94),
-            v3(side * 0.515, 0.43, -3.94),
-            wall,
-        );
     }
     for item in layout(kind) {
-        let f = mount(kind, &item);
-        let (face_w, face_h) = face_size(&item);
+        let f=mount(kind,&item);let(w,h)=face_size(&item);
         match item.shape {
-            Shape::Dial => gauge_mount(&mut m, &f, item.w * 0.5, item.rect, 0.008),
-            Shape::Display(buttons) => display(
-                &mut m, &f, item.w, item.h, face_w, face_h, item.rect, buttons,
-            ),
-            Shape::Label => plate(&mut m, &f, face_w, face_h, item.rect),
-        }
-    }
-    // Recessed radar hood and deep projector housing reproduce their silhouettes.
-    if russian {
-        let f = instrument(kind, 0.355, 0.980);
-        for side in [-1.0, 1.0] {
-            m.block(
-                &f.at(side * 0.100, 0.010, 0.016),
-                v3(0.008, 0.096, 0.030),
-                DARK,
-            );
-        }
-        m.block(&f.at(0.0, 0.103, 0.016), v3(0.108, 0.008, 0.030), DARK);
-    }
-    let glass = hud_glass(kind);
-    let foot = (glass[0] + glass[1]) * 0.5;
-    m.block(
-        &plain(foot - v3(0.0, 0.038, 0.075)),
-        v3(0.130, 0.033, 0.105),
-        DARK,
-    );
-    for (a, b) in [(glass[0], glass[3]), (glass[1], glass[2])] {
-        m.capsule(a, b, if russian { 0.014 } else { 0.008 }, 0.011, DARK, 8);
-    }
-    if russian {
-        m.capsule(glass[3], glass[2], 0.018, 0.018, DARK, 8);
-        for k in 0..12 {
-            let p = |t: f64| {
-                v3(
-                    -0.16 - 0.09 * t,
-                    1.08 + 0.08 * (PI * t).sin(),
-                    -4.45 + 0.04 * t,
-                )
-            };
-            m.capsule(
-                p(k as f64 / 12.0),
-                p((k + 1) as f64 / 12.0),
-                0.015,
-                0.015,
-                DARK,
-                6,
-            );
-        }
-    } else {
-        for side in [-1.0, 1.0] {
-            let f = instrument(kind, side * 0.466, 0.78);
-            m.capsule(
-                f.p(0.0, -0.075, 0.03),
-                f.p(0.0, 0.075, 0.03),
-                0.009,
-                0.009,
-                Rgb(0.92, 0.68, 0.10),
-                8,
-            );
-            for j in 0..5 {
-                let at = f.p(0.0, -0.06 + j as f64 * 0.03, 0.031);
-                m.capsule(at - f.y * 0.004, at + f.y * 0.004, 0.0095, 0.0095, DARK, 8);
-            }
-        }
-    }
-    // Native canopy geometry carried into the common eye frame. Sills,
-    // windscreen bow, mirrors and rear bulkhead all meet the exterior.
-    let offset = crate::airframe::EYE - kind.eye();
-    let native = |z: f64, phi: f64| crate::hornet::canopy_point(russian, z, phi) + offset;
-    let bow = crate::hornet::canopy_bow(russian);
-    let aft = crate::hornet::canopy_aft(russian);
-    for k in 0..24 {
-        let (a, b) = (
-            native(bow, k as f64 * PI / 24.0),
-            native(bow, (k + 1) as f64 * PI / 24.0),
-        );
-        m.capsule(a, b, 0.024, 0.024, if russian { panel } else { DARK }, 8);
-    }
-    for edge in [0.0, PI] {
-        for k in 0..16 {
-            let (z0, z1) = (
-                mix(bow, aft, k as f64 / 16.0),
-                mix(bow, aft, (k + 1) as f64 / 16.0),
-            );
-            m.capsule(native(z0, edge), native(z1, edge), 0.025, 0.025, DARK, 6);
+            Shape::Dial=>gauge_mount(&mut m,&f,item.w*0.5,item.rect,0.008),
+            Shape::Display(buttons)=>display(&mut m,&f,item.w,item.h,w,h,item.rect,buttons),
+            Shape::Label=>plate(&mut m,&f,w,h,item.rect),
         }
     }
     if russian {
-        // MiG-style three-pane installation: small centre panorama and two
-        // angled shoulder panes on the canopy bow.
-        for phi in [0.88, PI / 2.0, PI - 0.88] {
-            let at = native(bow, phi);
-            let tangent = v3(phi.sin(), -phi.cos(), 0.0);
-            let radial = v3(phi.cos(), phi.sin(), 0.0);
-            curved_mirror(
-                &mut m,
-                if phi == PI / 2.0 { 0.095 } else { 0.086 },
-                0.035,
-                &|x, y, d| at + tangent * x + radial * (y - 0.038) + V3::Z * (0.045 + d),
-                DARK,
-                -0.01,
-            );
+        let item=layout(kind).into_iter().find(|i|i.rect.x==mig::R_TV.x && i.rect.y==mig::R_TV.y).unwrap();
+        let f=mount(kind,&item);
+        for side in [-1.0,1.0] {
+            m.block(&f.at(side*(item.w*0.5+0.006),0.0,-0.085),v3(0.006,item.h*0.5+0.012,0.085),DARK);
         }
-    } else {
-        // The Hornet carries two large rectangular panes, one either side of
-        // the centreline, on short brackets under the windscreen bow. They
-        // are deliberately much larger than the Flanker/MiG shoulder panes.
-        for (i, phi) in [0.74, PI - 0.74].into_iter().enumerate() {
-            let at = native(bow, phi);
-            let tangent = v3(phi.sin(), -phi.cos(), 0.0);
-            let radial = v3(phi.cos(), phi.sin(), 0.0);
-            let centre = at + radial * -0.058 + V3::Z * 0.050;
-            m.capsule(
-                at + V3::Z * 0.035,
-                centre + radial * 0.036 + V3::Z * 0.035,
-                0.009,
-                0.009,
-                DARK,
-                6,
-            );
-            curved_mirror(
-                &mut m,
-                0.156,
-                0.070,
-                &|x, y, d| at + tangent * x + radial * (y - 0.058) + V3::Z * (0.050 + d),
-                DARK,
-                if i == 0 { -0.42 } else { 0.42 },
-            );
-        }
+        m.block(&f.at(0.0,item.h*0.5+0.006,-0.085),v3(item.w*0.5+0.012,0.006,0.085),DARK);
     }
-    let back_z = -2.70;
-    m.block(&plain(v3(0.0, 0.63, back_z)), v3(0.49, 0.47, 0.025), wall);
+    if !russian {
+        let glass=hud_glass(kind);let foot=(glass[0]+glass[1])*0.5;
+        m.block(&plain(foot-v3(0.0,0.066,0.075)),v3(0.110,0.080,0.140),DARK);
+        for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {m.capsule(a,b,0.008,0.008,DARK,8);}
+    }
+    // Mirrors are attached to the source windscreen bow.
+    let bow=crate::hornet::canopy_bow(russian);
+    let angles=if russian{vec![0.88,PI/2.0,PI-0.88]}else{vec![0.74,PI-0.74]};
+    for (i,phi) in angles.into_iter().enumerate() {
+        let at=native(bow,phi);let tangent=v3(phi.sin(),-phi.cos(),0.0);let radial=v3(phi.cos(),phi.sin(),0.0);
+        let (w,h)=if russian{(0.086,0.035)}else{(0.136,0.060)};
+        m.capsule(at,at-radial*0.04+V3::Z*0.04,0.008,0.008,DARK,6);
+        curved_mirror(&mut m,w,h,&|x,y,d|at+tangent*x+radial*(y-0.045)+V3::Z*(0.045+d),DARK,
+            if russian{-0.01}else if i==0{-0.42}else{0.42});
+    }
+    let back=native(aft,PI/2.0);
+    m.block(&plain(v3(0.0,0.60,back.z+0.02)),v3(widest,0.48,0.025),wall);
     pilot::build_static_mig(&mut m);
     m
 }
 /// Main levers and selector respond to the same commands as the flight model.
 pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
-    let f = instrument(kind, -0.438, 0.555);
+    let f = instrument(kind, if kind==Type::F18{-0.340}else{-0.405}, if kind==Type::F18{0.555}else{0.655});
     m.block(&f.at(0.0, 0.0, 0.012), v3(0.018, 0.048, 0.012), DARK);
     let base = f.p(0.0, mix(0.030, -0.030, h.gear), 0.024);
     let tip = base + f.z * 0.065;
@@ -827,7 +560,7 @@ pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
         m.capsule(at, to, 0.0027, 0.0027, METALC, 6);
         m.ellipsoid(to, v3(0.005, 0.005, 0.008), col, 4, 8);
     };
-    switch(m, v3(-0.447, 0.650, -3.805), h.flaps, DARK);
+    switch(m, v3(if kind==Type::F18{-0.337}else{-0.447}, 0.650, -3.805), h.flaps, DARK);
     // Speedbrake rocker on the outboard side of the moving throttle grip.
     let throttle = v3(-0.355, 0.747, -3.40 - h.throttle * 0.22);
     switch(m, throttle, h.airbrake, Rgb(0.50, 0.51, 0.48));
@@ -840,7 +573,7 @@ pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
         );
     }
     let f = Frame {
-        o: v3(0.445, 0.653, -3.485),
+        o: v3(if kind==Type::F18{0.337}else{0.445}, 0.653, -3.485),
         x: V3::X,
         y: -V3::Z,
         z: V3::Y,
@@ -1229,9 +962,16 @@ mod tests {
     #[test]
     fn instrument_faces_are_visible_and_do_not_overlap() {
         for kind in [Type::F18, Type::Su27] {
-            let m = build(kind);
+            let mut m = build(kind);
+            let offset=crate::airframe::EYE-kind.eye();
+            for t in crate::flightgear::textures(kind) {
+                let mut v=t.mesh.v.clone();
+                for p in v.chunks_mut(crate::mesh::STRIDE){p[0]+=offset.x as f32;p[1]+=offset.y as f32;p[2]+=offset.z as f32;}
+                m.v.extend(v);
+            }
             assert!(m.count() > 1000 && m.v.iter().all(|x| x.is_finite()));
             let items = layout(kind);
+            let mut hidden=Vec::new();
             for (i, item) in items.iter().enumerate() {
                 let f = mount(kind, &item);
                 assert!(f.x.dot(f.y).abs() < 1e-8 && (f.z.len() - 1.0).abs() < 1e-8);
@@ -1252,7 +992,7 @@ mod tests {
                         let hit =
                             m.v.chunks(crate::mesh::STRIDE * 3)
                                 .find(|tri| blocked(crate::airframe::EYE, target, tri));
-                        assert!(hit.is_none(),"{kind:?}: face {i} hidden at {x},{y}, target {target:?}, obstruction {hit:?}");
+                        if hit.is_some(){hidden.push((i,x,y,target,hit.map(|t|t[..6].to_vec())));}
                     }
                 }
                 for next in &items[i + 1..] {
@@ -1266,6 +1006,21 @@ mod tests {
                         next.x,
                         next.y
                     );
+                }
+            }
+            assert!(hidden.is_empty(),"hidden faces in {kind:?}: {hidden:?}");
+        }
+    }
+    #[test]
+    fn cockpit_tub_is_opaque_below_the_sills_in_every_direction() {
+        for kind in [Type::F18,Type::Su27] {
+            let m=build(kind);
+            for k in 0..72 {
+                let a=k as f64*TAU/72.0;
+                for radius in [0.65,0.85] {
+                    let target=crate::airframe::EYE+v3(a.sin()*radius,-1.24,a.cos()*radius);
+                    assert!(m.v.chunks(crate::mesh::STRIDE*3).any(|t|blocked(crate::airframe::EYE,target,t)),
+                        "open tub in {kind:?}, angle {k}, target {target:?}");
                 }
             }
         }

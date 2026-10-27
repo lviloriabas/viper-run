@@ -1,232 +1,107 @@
-# Hornet and Flanker model reconstruction
+# Hornet and Flanker geometry adaptation
 
-Revised 26 October 2026. The models retain the game's procedural, faceted art
-style. As with the F-16 and MiG-29, the process uses aircraft-specific stations,
-cross sections, planforms and visual references, followed by cockpit clearance
-tests and screenshots. Dimensions inside the cockpit are visual estimates,
-not surveyed production drawings.
+Revised 26 October 2026. Actual editable FlightGear meshes replace the earlier
+procedural exterior reconstruction. Both aircraft retain Viper Run's faceted
+rendering, live avionics and keyboard/controller input.
 
-## User reference revision
+## Geometry and references
 
-The follow-up photographs supplied on 25 October 2026 are the primary visual
-reference for this revision. The first Hornet photograph shows a tall central
-UFCD display, two side DDIs and a lower MPCD. The second shows another cockpit
-configuration and supplies the canopy-arch, mirror and console proportions.
-The implemented legacy Hornet uses the first photograph's UFCD arrangement.
-Its radio/menu labels are illustrative; this change does not implement a
-complete UFCD avionics system.
+The legacy Hornet uses Fabrice Kauffmann's FGAddon mesh. The Flanker uses the
+Su-27SK from xcvb85/Su-27 at commit
+`30f1cb45c87d4f2443de198d7577a3a9b6b0455a`. A Su-33 mesh is no longer the basis
+of the Flanker. Inputs, original credits, GPL licences and hashes are bundled in
+[assets/models](../assets/models/README.md).
 
-For the baseline Su-27, the annotated analogue panel and the in-flight cockpit
-photograph determine the dial groups, raised projector control housing,
-right-hand hooded display, fuel tape and warning receiver. The photograph
-with three large modern displays depicts a different instrument arrangement;
-the model consistently uses the analogue reference. Exterior side views guide
-the pointed radome, canopy and tail, and the Su-27 has no canards. Integrated
-leading-edge strakes blend into the main wing without the old broad lobes.
+Independent dimensional references are the legacy Hornet three-view in
+[NASA, A New Twist in Flight Research](https://www.nasa.gov/wp-content/uploads/2015/03/A_New_Twist_in_Flight_Research1.pdf),
+[NAVAIR's A-D Hornet reference](https://www.navair.navy.mil/product/FA-18-D-Hornet),
+and the general-arrangement and cockpit material in the
+[Eagle Dynamics Su-27 manual](https://www.digitalcombatsimulator.com/upload/iblock/ed7/Su-27%20DCS%20Flaming%20Cliffs%20Flight%20Manual%20EN.pdf).
+The supplied UFCD and analogue-panel photographs remain cockpit layout references.
+They are not redistributed as textures.
 
-## Earlier technical references
+| Structural envelope | Legacy Hornet | Su-27SK |
+| --- | --- | --- |
+| Span, excluding stores | 11.43 m | 14.70 m |
+| Length | 17.10 m | 21.90 m |
+| Canopy crown above model datum | 1.371 m | 1.638 m |
+| Pilot eye above model datum | 1.004 m | 1.369 m |
 
-- F/A-18A/B/C/D NATOPS, A1-F18AC-NFM-000, February 2000 with changes:
-  [public reference copy](https://server.3rd-wing.net/public/Bureau_4thMEG/VMFA-232/Documentation/Support/A1-F18AC-NFM-000_-_NATOPS_Flight_Manual_-_February_2000.pdf).
-  Figure FO-5, FO-19, is the single-seat C/D front panel for aircraft 163985
-  and later. It locates the two DDIs, central UFC and HUD controls, low MPCD,
-  IFEI on the left and standby instruments on the right.
-- [NASA, A New Twist in Flight Research](https://www.nasa.gov/wp-content/uploads/2015/03/A_New_Twist_in_Flight_Research1.pdf),
-  appendix 2 three-view. The drawing supplies legacy Hornet proportions,
-  not the larger Super Hornet geometry. The long HARV research nose boom
-  is not part of the production Hornet model.
-- [NAVAIR, F/A-18 A-D Hornet](https://www.navair.navy.mil/product/FA-18-D-Hornet).
-- [Eagle Dynamics, Su-27 reference manual](https://www.digitalcombatsimulator.com/upload/iblock/ed7/Su-27%20DCS%20Flaming%20Cliffs%20Flight%20Manual%20EN.pdf).
-  Figure 16, page 20, shows the blended lifting body and separated nacelles;
-  Figure 20, page 23, shows a real single-seat Su-27P cockpit; page 24 lists
-  the 21.9 m length and 14.7 m span. The game represents the related Su-27SK;
-  the photograph guides the analogue layout and proportions.
+AC3D axes (aft, up, left) become game axes (right, up, aft). Hornet transverse/
+vertical scale is 1.035; longitudinal scale is 17.1/15.39131 with a 0.15 m
+datum adjustment. Su-27 transverse/vertical scale is 14.7/15.25; longitudinal
+scale is 21.9/22.07678 with a -10.95587 m datum adjustment. Geometry, cockpit,
+nozzles, gear and weapons share these transforms.
 
-References are used to reconstruct geometry. Their photographs and drawings
-are not redistributed or used as in-game textures.
+Source topology supplies radomes, curved LEX, wings, tails, nacelles and canopies.
+This restores the Hornet's rounded inlet outlines and removes the inflated
+canopy profiles. The baseline Flanker has no canards. Its common upstream gear
+is adapted to one 680 x 260 mm nose wheel; extra outboard weapon alternatives
+are omitted from the game's ten-station configuration.
 
-## FlightGear geometry reference revision, 26 October 2026
-
-The `test` branch completes the exterior work started in OpenCode. Two downloaded
-AC3D models from FlightGear FGAddon were inspected as 3D references, including
-component bounds and orthographic silhouettes:
-
-- [Legacy F-18 model, f18.ac](https://sourceforge.net/p/flightgear/fgaddon/HEAD/tree/trunk/Aircraft/f18/Models/f18.ac).
-  Download SHA-256: `358c8e35a4484e899715e2917d91e6a95c15d51721a79d95dd0c986eb20c76ec`.
-- [Su-33 model, su33.ac](https://sourceforge.net/p/flightgear/fgaddon/HEAD/tree/trunk/Aircraft/Sukhoi-Su-33/Models/su33.ac).
-  Download SHA-256: `ab06f1096c6571ab299d0186fda602bcc48804a57b2ff6d63ff0bd246dccee22`.
-
-The Flanker reference supplies family proportions; the game remains a baseline
-Su-27SK with no canards, folding-wing hardware or naval arresting hook. The Hornet
-remains the legacy F/A-18C, including its dorsal speedbrake between the fins.
-The production drawings and cockpit photographs described above resolve details
-that differ between variants. FlightGear meshes and textures are reference-only;
-the executable continues to generate its geometry from aircraft-specific station
-tables and mesh primitives. Reference downloads stay outside the tracked assets.
-
-The rebuilt models have separate fuselage, LEX, intake and nozzle profiles, wing
-planforms, stabilators, rudders, pylons and launch rails. The Flanker uses a
-separate blue-grey camouflage palette selected only by its own mesh marker.
-Windscreen divisions and sill rails follow the same canopy surface in the exterior
-and cockpit; the clear bubble has no intermediate transverse frames. The Hornet's
-fixed fins stop at the rudder hinges. The Flanker's IRST sits above the forebody,
-its insignia have five points, and its closed speedbrake follows the curved spine.
-
-The shared rendering change only handles the Flanker's new paint marker. The
-F-16 and MiG-29 models and cockpit layouts are unchanged by this revision.
-
-## Exterior
-
-Each aircraft has its own smoothly interpolated longitudinal stations. The
-Hornet has a compact, squared twin-engine aft fuselage, narrow pointed
-radome, curved LEX, moderately swept wings, strongly canted swept fins,
-wing fold seams, twin nose wheels, launch bar and stowed arresting hook.
-The Flanker has a longer drooped radome and pitot, central IRST, broad
-shallow lifting body, wider spaced square-to-round AL-31 nacelles,
-swept twin fins, ventral fins and central tail sting.
-
-The wings and stabilators use cosine-spaced NACA thickness sections rather
-than extruded flat plates. Intake lips open onto recessed ducts; the engine
-bays, exhaust tunnels and individual nozzle petals are separate features.
-Flaps, rudders, stabilators, speedbrake and gear remain articulated.
-The Flanker's dorsal speedbrake has its own position and hinge height.
-Tyre radii locate the axles above the same contact points as the ground
-simulation. The canopy is described by width, sill and crown stations;
-the first-person bow and rails use precisely that same surface.
+Object matrices and parent transforms are retained. Concave polygons are
+triangulated without filling their recesses. The Hornet speedbrake samples the
+imported spine in both directions, closing within 8 mm of its surface.
 
 ## Cockpit
 
-The design eye is normalised to the existing F-16 cockpit coordinate space.
-The exterior eye remains aircraft-specific. This preserves the established
-pilot, centre stick, two-lever throttle and pedal positions.
+The Su-27SK contributes panel meshes, coaming, individual console panels,
+switches, HUD projector housing and canopy frame. Its monitor fits a separate
+opening clear of the HUD side wall. A continuous tub follows actual canopy
+sills and flares below them to enclose the consoles. Floor, walls and bulkheads
+close the gaps previously visible from the seat.
 
-The Hornet now uses the supplied photograph's central UFCD and four-display
-arrangement. HUD controls sit beneath the UFCD; the low MPCD, left IFEI,
-right standby group and shoulder warnings have separate mounts. Yellow
-striped jettison handles flank the main panel. The Su-27 has an attitude director above the HSI, airspeed and
-altitude to the left, engine and vertical-speed instruments to the right,
-and an upper-right radar display with the SPO-15 below it.
+The Hornet retains the requested central UFCD, side DDIs, lower MPCD, left
+engine/fuel display and right standby instruments. Panel, central support,
+coaming and projector overlap as solid pieces. Old narrow inner walls are
+removed from the interior copy of the canopy frame to clear the new board.
 
-Both boards have tilted, orthonormal instrument frames, folded outer
-cheeks, continuous shaped coamings and separate knee wells. The console
-inboard edges stay outside the seat bucket, the floor is below the boots,
-and the left console leaves the full throttle and hand travel clear.
-Native canopy bows replace the generic arch. The Hornet has two larger
-rectangular rear-view panes on short brackets; the Flanker retains three
-small panes.
-The bows sit farther forward, and the side mirrors follow the arch tangent.
-The Su-27 tub and bow use the reference blue-green finish. The main boards
-are denser and farther forward, with closed joins to the cockpit sidewalls.
+Live faces share their mounting frames with the bezels and preserve pixel
+aspect ratio. Native Su-27 panel images retain every original pixel. Unfinished
+white construction guides on the upstream main panel are replaced with panel
+material. Exterior atlases copy source pixels without resampling. QOI packaging
+is lossless. Instrument faces are rendered sharply with hardware and pilot depth
+occlusion.
 
-Each model has its own physical HUD aperture, supports and projector; its
-clipping polygon uses that same aperture. Fixed HUD readouts fit the smaller
-fields while conformal flight-path, horizon and weapon directions retain their
-original angular projection. The radar/navigation pages and pilot body still
-share existing game systems. Engine readouts use the flight
-model's common engine state for both engines. Decorative controls and UFC
-options are not a complete interactive avionics simulation.
+Flight instruments, radar, HUD, weapon state, gear/flap/brake indicators and
+mirrors remain live. Existing keyboard/controller commands also move the visual
+levers. The game retains its avionics and flight model; it does not run
+FlightGear's cockpit scripts or implement every original switch.
 
-## Torn-off landing gear
+## Stores, gear and collisions
 
-A broken leg disappears from the attached assembly and becomes a separate
-wheel-and-strut mesh. It starts at its current articulation, including a
-partially extended or bent pose. Velocity includes aircraft translation,
-angular motion and a separation impulse; the debris then spins, experiences
-drag and falls under gravity. Gear debris produces a metal impact rather
-than a burning-fuel trail. A leg is emitted once and does not return when
-the gear handle is moved. Individual missing legs are replicated in network
-actor flags; the local emission marker resets on a repaired/respawned actor.
+`Station::position` maps canonical loadout stations onto native hardpoints,
+accounts for missile nose origins and retains bomb centre origins. TER and
+tandem offsets remain distinct. The R-27's asymmetric source origin is included.
+`Station::mounted` adds the same wing deflection for drawing, launch, jettison
+and CCIP prediction.
 
-The --break-gear screenshot/test option detaches all three legs at the start.
-Combine with --sim 0.15 --chase to show separation.
+Hornet stores use wingtip rails, two underwing pylon pairs and cheek stations
+below the intakes. The Su-27 uses wingtip, outer/inner wing, nacelle and centreline
+stations. Fuselage stores remain with the fuselage after wing loss and are
+excluded from underwing flutter mass.
+
+Tyre contact points match the simulated wheels. Gear pivots and surface axes
+follow the source references; Su-27 gear retracts forward. The single-rigid-part
+gear animation approximates the full multi-link mechanism. Damage volumes and
+ground contacts follow the visible envelope. Dry braking is calibrated for the
+new wheelbase; takeoff, approach and stopping tests remain required.
 
 ## Verification
 
-Regression tests cover finite meshes, external dimensions, canopy eye and
-helmet clearance, tyre contact height, readable instrument sightlines,
-non-overlapping instrument faces, orthonormal mounting frames and pilot
-clearance. Physical tests cover all four aircraft, exact release poses,
-one-shot emission, ballistic motion and per-leg network replication.
+Rust checks cover native dimensions, finite geometry, normals, part sides,
+wheel contact, Su-27 nose-wheel dimensions, weapon origins and rack separation.
+Cockpit checks test every active face against procedural and imported hardware,
+pixel aspect, mirrors and opaque closure below the sills in 72 directions.
 
-Screenshots are reviewed from the forward seat, down toward the panels and
-consoles, and from frontal, overhead and rear exterior angles. Temporary
-reference documents and captures stay under ignored target/model-review.
+Python checks cover nested object matrices, concave outlines, UV-preserving cuts,
+lossless image coding, source hashes and pixel-for-pixel preservation of every
+embedded cockpit image. Bundled sources can be restored and regenerated offline.
 
+Linux Blender review scenes show top, side, head-on and three-quarter views.
+The release is inspected inside the game on Linux and Windows, including
+forward view, panel, consoles, stores, gear, rudders and speedbrakes.
+See [VALIDATION.md](VALIDATION.md) for final release checks.
 
-The completed review used 22 Linux captures from the reproducible
-tools/check_airframe_views.py matrix and Windows captures of both forward
-cockpits. It caught and corrected blocked displays, an incorrectly placed HUD
-projector, console joining shelves in front of low gauges, open coaming gaps
-and inverted normals on sloping wing panels. Regression tests preserve those
-geometry fixes. Final release verification also includes the independent
-menu-layout and pilot-harness changes coordinated in the same checkout.
-
-## Additional regression coverage
-
-The fixed wing and moving flap now sample the same airfoil with continuous
-spanwise thickness. Their shared hinge vertices coincide when stowed, and the
-flap end caps never project ahead of the hinge. Tests cover both conditions,
-end-cap normal orientation, the absence of outboard Su-27 foreplanes, and the
-fit of fixed readouts inside both model-specific HUD apertures. Existing
-instrument ray tests still require every sampled face to be visible.
-
-The follow-up matrix adds straight-ahead canopy, side profile and head-on views
-for both aircraft (28 captures total). Console panels now have separate legend
-sets, two rows of switch hardware, rotary controls and guarded switches. Narrow
-outboard strips beside the throttle retain the full lever and hand travel.
-Console labels identify control groups; decorative switches do not add a new
-interactive systems simulation.
-
-## Detailed exterior and live-cockpit revision
-
-The following pass compares the exterior with the downloaded FlightGear component
-meshes and with orthographic drawings, including the
-[NASA legacy Hornet three-view](https://www.nasa.gov/wp-content/uploads/2015/03/A_New_Twist_in_Flight_Research1.pdf#page=170)
-and the [Su-27 orthographic drawing](https://commons.wikimedia.org/wiki/File:Sukhoi_Su-27_3-view_line_drawing.svg).
-The station measurements below are approximate traces used for visual regression,
-not surveyed manufacturing dimensions. Body axes are x right and z aft, in metres.
-
-| Aircraft | Sample span position x | Leading edge z | Trailing edge z |
-| --- | ---: | ---: | ---: |
-| F/A-18C | 4.40 | 1.00 | 3.33 |
-| Su-27SK | 5.75 | 2.20 | 5.15 |
-
-Mesh regression tests check both sides against those independent samples with an
-18 cm envelope. This catches the former excessive wing chord even when overall
-length and span still match. The Hornet's clipped stabilators and launch-rail
-positions have also been adjusted. Both models have larger engine nacelles and
-exhaust apertures, individual metal nozzle petals, recessed intakes with correctly
-oriented back walls, access-cover outlines, panel joints and shoulder ventilation
-grilles. These details use mesh primitives and vertex colours in the same visual
-style as the F-16 and MiG-29.
-
-The Flanker cockpit and its external canopy move forward together. Its rear
-fairing and dorsal spine meet the canopy, and the 3.10 m speedbrake begins behind
-the cockpit. Its hinge is derived from the closed door surface, so relocation and
-curvature do not leave the animation pivot detached from the skin.
-
-### Live faces and controls
-
-Every rectangular instrument face preserves its atlas pixel aspect. An aperture
-fits the complete image inside its bezel rather than stretching or cropping it.
-The Hornet UFCD and IFEI have their own appropriately proportioned tiles. The
-Flanker has dedicated weapon/sensor, system and warning tiles instead of squeezing
-large MiG placards into thin strips. Active face allocations are tested for partial
-overlap; identical caution tiles can deliberately be reused on both eyebrows.
-
-The Hornet's added RWR uses the live emitter picture. IFEI oil pressure and nozzle
-position now use the flight model values. The Flanker weapon panel follows the
-selected weapon, radar/IRST selection and lock state; its system and warning lamps
-follow gear, flaps, speedbrake, fire, fuel, oil and AoA. The
-[Eagle Dynamics Su-27 manual](https://www.digitalcombatsimulator.com/upload/iblock/ed7/Su-27%20DCS%20Flaming%20Cliffs%20Flight%20Manual%20EN.pdf),
-pages 22-23, identifies the N001 radar and OEPS-27 system, which are now named
-correctly in the sensor indications.
-
-The gear handle, flap lever, throttle speedbrake rocker, weapon selector and
-Flanker sensor switch animate from the existing keyboard/controller commands.
-The two aircraft have their own gear-lever mounts while the MiG-29 retains its
-original one. No mouse-click cockpit control mode is added. Existing stick,
-throttle and pedal animations, HUD, DDI pages, flight gauges and rear-view mirrors
-continue to use the game systems. Decorative panels are not a complete simulation
-of every real aircraft system; the twin engine readouts still share the model's
-common engine state.
+These adapted simulation assets are calibrated to public references. They are
+not manufacturer CAD or surveyed production geometry.

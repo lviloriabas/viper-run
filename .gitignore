@@ -4,3 +4,8 @@ node_modules/
 /target/
 *.png
 /AGENTS.MD
+
+# Corresponding editable sources of the embedded FlightGear models.
+!/assets/models/source/**/*.png
+
+__pycache__/

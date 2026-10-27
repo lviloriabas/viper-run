@@ -13,9 +13,11 @@ The game is a single native executable, written in Rust:
 | Windows 10/11 x64 | `dist/viper-run-windows-x86_64.exe` | OpenGL 3.1 driver (any GPU from the last decade) |
 | Linux x86_64 | `dist/viper-run-linux-x86_64` | X11 or XWayland, `libGL`, glibc 2.17+; PulseAudio, PipeWire or ALSA for sound |
 
-No installer, runtime, game engine or asset files. Everything, including the
-terrain, models, instrument pages, font and engine sounds, is generated procedurally
-at start-up. Original synthesised warning clips are embedded in the executable.
+No installer, separate runtime, game engine or external asset files are needed.
+Terrain, F-16/MiG-29 models, instrument pages, font and engine sounds are generated
+procedurally. Adapted FlightGear Hornet/Su-27 meshes, native material images and
+original synthesised warning clips are embedded in the executable. Model sources,
+credits and licences are included in [assets/models](assets/models/README.md).
 
 ## Flight school, aircraft and online rooms
 

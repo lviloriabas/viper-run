@@ -1,0 +1,426 @@
+[
+  {
+    "path": "f18/f18.ac",
+    "sha256": "358c8e35a4484e899715e2917d91e6a95c15d51721a79d95dd0c986eb20c76ec"
+  },
+  {
+    "path": "f18/f18tail.rgb",
+    "sha256": "1a4d06f02509b706cb06a5578c6f497eb7ef49f271b59e93d839f94cd55e1138"
+  },
+  {
+    "path": "f18/f18top.rgb",
+    "sha256": "4ec192af73ed0c1ee44e1232ed73224b93756ae754739dba0f306c6498a0871f"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/base.png",
+    "sha256": "a52fddbdb75bdd6a78fc95344e224a193d9b8e0a424929a3cc54c16f1a0ca7c4"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch1.ac",
+    "sha256": "8afe7b7c7f8493828390a3b25ff4ef05a2f0b42d5706dd7775d924f5e58f674a"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch1.png",
+    "sha256": "59e5b73082b6883aaf92ebb0e303862215cc063067bdad668cb4b7e86258a5df"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch2.ac",
+    "sha256": "0de89644a87d8035aafa69954d040a8f6c4536df57b7ac65c94a5e26c22f1072"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch2.png",
+    "sha256": "996f017770b7a3ca6a70187a7982522de87f21b71ffa6b32803492fcccdbaa29"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch3.ac",
+    "sha256": "4cdaec40aace8baafae85397f1d815681d58491c89aea5fb03568a759608146f"
+  },
+  {
+    "path": "su27/Models/CockpitParts/Switches/switch3.png",
+    "sha256": "6ac1d5d283691fca1004284dff1842442d79b3021ed146d87aa030e874dec98e"
+  },
+  {
+    "path": "su27/Models/Gear.ac",
+    "sha256": "1b62edf841a4537df59524130fee23da0b1d5642eda70fb4717781d5a7c056a7"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Instruments/HUD/Su-27SK-HUD.ac",
+    "sha256": "503cfb30532077a0362172e7303daa50c1e588cd35524058b16f55352eae2bb9"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Instruments/HUD/Su-27SK-HUD.xml",
+    "sha256": "db796b5a805d4ebcc9868d04e6ceb8f9600e108278e0d64498642d226281cfa6"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Instruments/HUD/hud.png",
+    "sha256": "d74666926c516aa1959059e6a134d41d3b99b35ede4c7e81f4100974b615bd66"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels.xml",
+    "sha256": "e073f98bbd68b3403ffa6ebecd80374cd21ef3cf54aa2f3f6e2f8352d3548fa9"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/AC-Limiters-panel/AC-Limiters-panel.ac",
+    "sha256": "c4260e650ef5c52212c8d74b80971f42d86bcd3d347e0f16937249ca7c1f6e64"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/AC-Limiters-panel/AC-Limiters-panel.xml",
+    "sha256": "054444959de1f13e827d1d8ca7b014e003eeb661fabdc06cface38358025c556"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/AC-Limiters-panel/AC-panel-UV-layout-tex-Cycles.png",
+    "sha256": "14a9d7c55e4123a6756b0460c09d090b1aa31fbeee4d43fd524326d9110d956c"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/ACS-Control-panel/SU-27-FCS.ACS-LeftPanel.png",
+    "sha256": "ff93751598a2a152582c331fcc9477daecc369c8ecc9ab9bad1b3570f1d44090"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/ACS-Control-panel/acs-panel.ac",
+    "sha256": "c7750acb19e4e173f1f34f8f289f8e771bcfb223fefde795c535f24b9c523e4e"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/ACS-Control-panel/acs-panel.xml",
+    "sha256": "de7f959c4fb14e399c9d895b1a31ca332c2912b8ea776f01d292554470d05bad"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Engines-Fire-emergency-panel/Engine-Fire-emergency-panel.png",
+    "sha256": "0f7ebe2e67c3a2fd03ca37181dc6e3bd282f714724ff10a2ad261f84e45fc7eb"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Engines-Fire-emergency-panel/Engines-Fire-emergency-panel.ac",
+    "sha256": "abbf79fb268f9406a88eab8762b79a6681d5be2a5a00d8880ee98de7bf42a69b"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Engines-Fire-emergency-panel/Engines-Fire-emergency-panel.xml",
+    "sha256": "581b532b4a68363ec1ee3254bdf4b8b233e539e511203d681674ce6334292dac"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/N001-Radar-panel/Radar-N001-panel-render.png",
+    "sha256": "ef178cc71b049f5f64fa3b786e41040be4f012694e53bcf800d53ae1b4ba2299"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/N001-Radar-panel/Radar-N001-panel.ac",
+    "sha256": "a6efa3b9fcd35aa0321de60789489199d74a00787b7e5d33b3cfa96e71b4cc1d"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/N001-Radar-panel/Radar-N001-panel.xml",
+    "sha256": "58bc5382221b61f869c4fc16ef616ef1317f6191e1c4829dfa5480d94282c8c8"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/Comms-G6-16-panel.ac",
+    "sha256": "585b81d8ea22e95a620d4437dcea96fae6e604ce5c187fc2dddc0fccb7360cad"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/Comms-G6-16-panel.xml",
+    "sha256": "885c955af8d5e7e5650f9dde5a12454469d904201f36276b9d120527d8be6d1a"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/Left-Power-distribution-panel.ac",
+    "sha256": "47cf4c7caf8c8a3eb2f74bdaafbf701bfd00cea3fbd178c764484574d4bb7501"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/Left-Power-switches-panel.xml",
+    "sha256": "9b89174b1ae02e71338c3225f5788eadd69ab37c572fc50cd47cbb4e7fb9c817"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/fuel-ctrl-panel.ac",
+    "sha256": "4c4756b4778838bd78c42d4344a437cc66594d2fb79c641b73d73dd07720409c"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/fuel-ctrl-panel.xml",
+    "sha256": "939063f59dea505ccd9cde4f44ea34955cc919c3cc403993d9e13967c596bf54"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/panels1.png",
+    "sha256": "beee2ff1b8b205e55a11e98f3b298cdb75e558bad4b6ef9964bb13b3c69dfe98"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/SDU-panel/SDU-10-panel-tex.png",
+    "sha256": "a92ccae4f4d5fc6c64f5c8547dcc4e0c1a74f64c67cd00bb993a6a2d4c102be5"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/SDU-panel/SDU-10-panel.ac",
+    "sha256": "661687ccf58bdd759fb090452b98f98f603b17d1d5413e9ae9f9374a5c501cb8"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/SDU-panel/SDU-panel.xml",
+    "sha256": "c89d8716656f58238b276973ca3e39d788e88d886d857d3dedb92255425f9e13"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/VHF-UHF-panel.ac",
+    "sha256": "a31a767adeeaf0280845679bcb53170d782de82231a7e5e9a1cfdbc174e541d1"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/VHF-UHF-panel.xml",
+    "sha256": "8b2f276c4d18a851de3b8bb082731c42f7d4233460519b2c6a27c82408bf4f4d"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/vhf-uhf-panel-Render.png",
+    "sha256": "4cb84f056d330378c646673cbf3d2160b6ee187ef233c0eed4f43980349a1d69"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/vhf-uhf-panel-tex2.png",
+    "sha256": "3c4372cc2d55679b9e8ed44112fbcdc5e029dea8a0dfeb45f02d9205c950d8be"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/WCS-panel/SU-27-WCS-LeftPanel.png",
+    "sha256": "8667c8778e72f29e0ebecdf59e205243d3a78a28c50cf21ef422fb99796f9fc6"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/WCS-panel/wcs-panel.ac",
+    "sha256": "cd8fad30a9a1ff95c3855a3ff94fd92d0f9e0350de27ca3fe3072fd3396ef844"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/LeftPanels/WCS-panel/wcs-panel.xml",
+    "sha256": "2695475b02e3a6cc1c304450722bb6f0f2e65d819656be4abcb07a6235c160a8"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/AoA-pitot-panel/AoA-pitot-panel.ac",
+    "sha256": "89abb790efce3cee39e10938b1fea5aadc918ad6dff99fddc31ec5c767a41c88"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/AoA-pitot-panel/AoA-pitot-panel.xml",
+    "sha256": "b6d55add460abd057010e6abfe3b55330b3d02cd33761ed78a55b3e74a0a359e"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/AoA-pitot-panel/pitot-heat-panel-tex.png",
+    "sha256": "657bd39d500d8fc20f67304a3484182890384492e7d069c3a71000ad87eed2a2"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel-1.png",
+    "sha256": "6b70622e8acb5ac3904254bae60c618ad546fa232a131a4e54b5c4e0aa8f1751"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel.ac",
+    "sha256": "7b05fb9099bc6ca4b42f4f3fbd7497427e84a98a30c18b59fd85d05efeed87ab"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel.xml",
+    "sha256": "6c19486b4e76a62affb8e1dc3f5ab8151e26f20c660a9654604541325242a7cb"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel4.png",
+    "sha256": "9fb7b3a5bc9ae4ee0cd34f1b222e8c1f48cc57809e3826e20bf9330a4461fbb0"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Battery1.xml",
+    "sha256": "6b3df8fcd93779a2a8dbf23a1aa30792b0f8caf9207bcc07f8f69a36d1676fae"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Battery2.xml",
+    "sha256": "c5c0075495bbfacaaa8d7f23f31a1ca22599aaccca54382028d5606cce563b3a"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Engines-Power-CP.ac",
+    "sha256": "a552fb4c1c70e3e8a1c59f3035261867c6ec32cb723cdb4b12268de0e0b628c7"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Engines-power-CP-rend.png",
+    "sha256": "c369215659d9aaafb765ea10a80bbe1a017e430228c1f2f153057d75b609d69c"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Engines-power-CP.xml",
+    "sha256": "de221d2a33ab2fa01c3caeb7931f779b16451b08788b2132eb6a57641f2178c4"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Generator1.xml",
+    "sha256": "9afafe80ebbe30a7f60e7480d88d77a2100a41acbf660f99ab0344771c177bae"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Generator2.xml",
+    "sha256": "ae206eafbaa9efcfec275a80a66db1f164bd80485c6f78eddb9485d949e7c866"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/GroundPower.xml",
+    "sha256": "c758e9ed0fa8e2108256aff675262b4bc280ede9ec7847b954ee29a88329a7f4"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Inverter1.xml",
+    "sha256": "4ca239d73bfb8a895b10f3f8dc9324abe8150b4cde75fef98b5f13b0b56fd433"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Inverter2.xml",
+    "sha256": "047f6e934c36e484ec6b2415f2b3afe87962e0824d86488ae86e5b886ffe4ace"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Starter1.xml",
+    "sha256": "7593624943b33559647b89a4b6c4a22886bc142055f7d8d05ffa93549a0101c3"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Starter2.xml",
+    "sha256": "b443727a78db4f655b6251de4511e4e2b09001faa5fc2a109b02f8b5c12c3d6e"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Flares-Chaff-IFF-panel/Flares-chaffs-IFF-cp-render-FG-Ready.png",
+    "sha256": "9d8befe46e84c5f5ebdf9bcf2802711134d74c1233d0b228001d04340ad3cd14"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Flares-Chaff-IFF-panel/Flares-chaffs-IFF-cp.ac",
+    "sha256": "0b1db8778666529dc39df0b3ab49fb55c9e929c4b2225ec78e856694a4743eb0"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Flares-Chaff-IFF-panel/Flares-chaffs-IFF-cp.xml",
+    "sha256": "7a8da689cae104c6f806cf71e95e68943ee11c5d7166b5d9eadbe86c1207410d"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Jammer-rwr-panel/rwr-Jammer-panel-R1.png",
+    "sha256": "41b6c07b11732f804fc9f3e60755561beab3e62aaa73da072fb54abe333f93c0"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Jammer-rwr-panel/rwr-jammer-CP.ac",
+    "sha256": "5caace23082e33667a8ecd345b63ca093b6be2e353fc284dac3a16411e67190d"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Jammer-rwr-panel/rwr-jammer-CP.xml",
+    "sha256": "7254b2e8bc229ca2ec778f8f1ea42c9e5bcab979ddf6a85a38634eca8343a911"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Lighting-panel/Lighting-panel-render-tex.png",
+    "sha256": "e20feca87857ad67507b4247b2076cdce0c1760482a3984c5f390481a2714339"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Lighting-panel/Lighting-panel.ac",
+    "sha256": "ad7c24ad6d207f55a3cb939b17d53272900a4854561d29d63be1cf80301915c0"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Lighting-panel/Lighting-panel.xml",
+    "sha256": "c3553b437f03a6dc42b77058c4b4931e82e3da865d402a0c4a59d1e3b72eba51"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/PU-184-ARC-Layout1.png",
+    "sha256": "60ea12a06bdb3a14d6e2af89514b199651f30a977ddbf59d1d221676b0114380"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/PU-184-Radio-Panel.ac",
+    "sha256": "65c5a72defa2869017355470f86be4a593c88a6080b1a2704847b9a7f0f1921f"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/PU-184-Radio-Panel.xml",
+    "sha256": "f1ba909d92d96faf1749b65fd86046777b7461f9b4601e7e0e08317ff9489f0c"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/digs.png",
+    "sha256": "2931d34b21cacfc9d45de4676e509765c10dbd50699d12b620b624d065381162"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/OC-RSBN-Panel-TEX.png",
+    "sha256": "0dc6c626e92846df0fda12604457581df59c631a19bb67c27b4776c187935db5"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/OC-Radio-panel.ac",
+    "sha256": "b167f9278692940933f8ebc7f19433db57eae21b5ad5a2be5fab036a6c984311"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/OC-Radio-panel.xml",
+    "sha256": "f0ff2c4dad76c7c317e7164d7812984693c8cdc4c37a991e40d7c659a4f6a305"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/PPM-Digits-Canvas.png",
+    "sha256": "eeb9b015be9c9420147c0b067d7d210262284f5c41a3c3d60d5499e4cc98e8ec"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/PNK-panel/P3-188-1-panel-tex-render.png",
+    "sha256": "f0063013e4109e44c4ce32731c2e86641e115f1cb563c0f7f7920ff2f8ef65fb"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/PNK-panel/PNK-panel.ac",
+    "sha256": "8c99598be6ffb1ef835159da25e8059a8bd26d663fe212343fc6d5beea271eac"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/PNK-panel/PNK-panel.xml",
+    "sha256": "3ca17d8a68c48a8940346da0c872999dce64d1c3ecb746f3256a0fb45171a083"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Ekran.xml",
+    "sha256": "6b5e53c6fdc74025f47f9f176b0da8cd57ab3d8b8872e7cf35c6c15980ab476f"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/IFF.xml",
+    "sha256": "6a73283fd6ca5c7bf2786d5b2dd622768d71544130ca3300bd7840e25906d3e9"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Instruments.xml",
+    "sha256": "ba1b65ded9439a7d3063debae97997f53ea85addaffb7ce782818db46bac8674"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Power-switches-panel.ac",
+    "sha256": "972e73d83857d402f6b5079638931477741cc483d5503c656060a1ef68c150e0"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Power-switches-panel.xml",
+    "sha256": "0daaa3396f25934aea437d722e2f6edc61fb818a2d90d6b24994003515993053"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/RadioHF.xml",
+    "sha256": "96b452eefe1e414337736fad8c2a2b357239aef6b1165eb6bbd609fc10145549"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/RadioVHF.xml",
+    "sha256": "5ca53c7ff974997e6d03951e0d8e10fcf3bb073871218d5a380e62b8865a30e2"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Right-power-switches-render-fg3.png",
+    "sha256": "ecd7026bd79a9924ba9926661b09360729afbe8fed8bb14dde04209fed304a16"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Weapons.xml",
+    "sha256": "2aaee685902ddd8b36502208d5fc6f6a70b2613fbd5163fd139bbc890f5966e6"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/TargetDistribution-panel/TargetDistribution-panel.xml",
+    "sha256": "c0c361637bfd93afd11267913af42766095eb0ffd9dbdc6a8d59040b56a2c4f8"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/TargetDistribution-panel/fleet-tgts-panel.ac",
+    "sha256": "3ce4faa4a9900e40f06fd5729f837a64593321fa3d1bfe6e2fd0539558206717"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels/TargetDistribution-panel/tgt-fleet-pnl-tex.png",
+    "sha256": "1bb8679ead360265e2c26eb029d8a5f416655be3561f5d0216c108dbbab0de9f"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels1.xml",
+    "sha256": "7d6b3d954c99f9986108913fa70f9342883a6ddb2d948d7f60e1bbe6be9b3eac"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/RightPanels2.xml",
+    "sha256": "17451fb57f9616f38bc738ea11cb24682cc0b11471acc79dea96424a9bb38549"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Su-27-Cockpit.ac",
+    "sha256": "0f94e8dac26686f53435c4f309a6f1e0a79d84285c805e239073072fa3c4e73f"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Su-27SK-Cockpit.xml",
+    "sha256": "624ee468e01c6addcd8e540a9899101a4226cf558f6546a22d13141f8ca6d2d5"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Su-27SK-Instruments.xml",
+    "sha256": "24f68e3612dbaeae8162df845e4de00c8240ca3bdd80fb5e3c76f7892d7290b3"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Su-27SK-Panels.ac",
+    "sha256": "36fadaf2684807428e611ccd5c7c10df5b3df6ded857d34b99d262fca2ab179a"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/Su-27SK-Panels.xml",
+    "sha256": "13c8307a9a301497fad8879c50d9f948a5a7ad012d0c2fac3ad302e49bf3cc84"
+  },
+  {
+    "path": "su27/Models/Su-27-Cockpit/panel.wcs.png",
+    "sha256": "d8704e4385fcbfa5b4e1621ca8f55b8160c9ff59b1b37659a1b3b6fdb9c5c1ea"
+  },
+  {
+    "path": "su27/Models/Su-27.ac",
+    "sha256": "1c51aa43388c4b80faeb73cbf3e0fcc0c6ba19e5562ea9961c8b06b8ae5d12cd"
+  },
+  {
+    "path": "su27/Models/USSR177IAP.png",
+    "sha256": "2b7540cd3ba95ffad413edee521a70e6060c141f46161d16075730703df8b3c5"
+  },
+  {
+    "path": "su27/Models/fabric.png",
+    "sha256": "f63fecfb45bae88e3853e4bf6cba7d7afb0b3efd546125b6127b21146a99fdd6"
+  }
+]

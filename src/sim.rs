@@ -426,14 +426,14 @@ pub const WHEELS: [Wheel; 3] = [
 ];
 
 const F18_WHEELS: [Wheel; 3] = [
-    Wheel { name: "nose gear", local: v3(0.0,-1.65,-3.5), k:2.2e5,d:2.3e4,stroke:0.40,limit:3.2e5,brakes:false,steers:true },
-    Wheel { name: "left main gear", local:v3(-1.55,-1.65,1.35),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
-    Wheel { name: "right main gear", local:v3(1.55,-1.65,1.35),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
+    Wheel { name: "nose gear", local: v3(-0.0056727,-1.8446153,-3.1114279), k:2.2e5,d:2.3e4,stroke:0.40,limit:3.2e5,brakes:false,steers:true },
+    Wheel { name: "left main gear", local:v3(-1.5398181,-1.8486083,2.5867815),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
+    Wheel { name: "right main gear", local:v3(1.535349,-1.8486083,2.5867815),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false },
 ];
 const SU27_WHEELS: [Wheel; 3] = [
-    Wheel { name: "nose gear",local:v3(0.0,-2.0,-4.0),k:3.0e5,d:3.2e4,stroke:0.38,limit:4.0e5,brakes:false,steers:true },
-    Wheel { name: "left main gear",local:v3(-2.2,-2.0,1.5),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
-    Wheel { name: "right main gear",local:v3(2.2,-2.0,1.5),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
+    Wheel { name: "nose gear",local:v3(0.0,-2.215131,-3.2156601),k:3.0e5,d:3.2e4,stroke:0.38,limit:4.0e5,brakes:false,steers:true },
+    Wheel { name: "left main gear",local:v3(-2.1034784,-2.4314668,2.5654837),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
+    Wheel { name: "right main gear",local:v3(2.1034784,-2.4314668,2.5654837),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
 ];
 
 /// Stiffening of the oleo's gas spring at the end of the stroke, and the
@@ -488,19 +488,20 @@ pub const MIG_COLLISION_POINTS: [ContactPoint; 14] = [
     cp("right fin", v3(2.05, 3.18, 6.78), 0.10, true),
     cp("left stabilator", v3(-3.82, 0.36, 7.70), 0.06, false),
     cp("right stabilator", v3(3.82, 0.36, 7.70), 0.06, false),
-];const F18_CONTACTS: [ContactPoint; 10] = [
-    cp("nose",v3(0.0,0.2,-8.0),0.1,false),cp("canopy",v3(0.0,1.7,-3.5),0.1,true),
-    cp("left wing",v3(-5.72,0.2,2.4),0.08,false),cp("right wing",v3(5.72,0.2,2.4),0.08,false),
-    cp("left intake",v3(-0.95,-0.55,-1.2),0.08,false),cp("right intake",v3(0.95,-0.55,-1.2),0.08,false),
-    cp("left fin",v3(-1.7,3.1,6.4),0.1,true),cp("right fin",v3(1.7,3.1,6.4),0.1,true),
-    cp("left stabilator",v3(-3.3,0.1,7.1),0.07,false),cp("right stabilator",v3(3.3,0.1,7.1),0.07,false),
 ];
-const SU27_CONTACTS: [ContactPoint; 10] = [
-    cp("nose",v3(0.0,0.3,-10.2),0.1,false),cp("canopy",v3(0.0,1.8,-4.6),0.1,true),
-    cp("left wing",v3(-7.35,0.3,5.3),0.08,false),cp("right wing",v3(7.35,0.3,5.3),0.08,false),
-    cp("left intake",v3(-1.4,-0.7,-1.9),0.08,false),cp("right intake",v3(1.4,-0.7,-1.9),0.08,false),
-    cp("left fin",v3(-2.1,3.8,8.5),0.1,true),cp("right fin",v3(2.1,3.8,8.5),0.1,true),
-    cp("left stabilator",v3(-4.8,0.15,10.3),0.07,false),cp("right stabilator",v3(4.8,0.15,10.3),0.07,false),
+const F18_CONTACTS:[ContactPoint;10]=[
+    cp("nose",v3(0.0,-0.24,-8.737),0.1,false),cp("canopy",v3(0.0,1.371,-3.539),0.1,true),
+    cp("left wing",v3(-5.713,0.419,3.481),0.08,false),cp("right wing",v3(5.713,0.419,3.481),0.08,false),
+    cp("left intake",v3(-0.95,-0.64,1.4),0.08,false),cp("right intake",v3(0.95,-0.64,1.4),0.08,false),
+    cp("left fin",v3(-1.728,2.796,5.666),0.1,true),cp("right fin",v3(1.728,2.796,5.666),0.1,true),
+    cp("left stabilator",v3(-3.541,-0.140,7.660),0.07,false),cp("right stabilator",v3(3.541,-0.140,7.660),0.07,false),
+];
+const SU27_CONTACTS:[ContactPoint;10]=[
+    cp("nose",v3(0.0,-0.108,-10.950),0.1,false),cp("canopy",v3(0.0,1.638,-5.878),0.1,true),
+    cp("left wing",v3(-7.35,0.377,5.716),0.08,false),cp("right wing",v3(7.35,0.377,5.716),0.08,false),
+    cp("left intake",v3(-1.15,-0.752,-0.860),0.08,false),cp("right intake",v3(1.15,-0.752,-0.860),0.08,false),
+    cp("left fin",v3(-2.129,3.646,6.520),0.1,true),cp("right fin",v3(2.129,3.646,6.520),0.1,true),
+    cp("left stabilator",v3(-4.819,-0.286,8.085),0.07,false),cp("right stabilator",v3(4.819,-0.286,8.085),0.07,false),
 ];
 
 
@@ -1366,7 +1367,7 @@ impl Aircraft {
             let fw = v3(fwd.x, 0.0, fwd.z).norm();
             let side = fw.cross(V3::Y).norm();
             let (v_long, v_lat) = (v.dot(fw), v.dot(side));
-            let mu = 0.015 + if wh.brakes { 0.55 * self.wheel_brake } else { 0.0 };
+            let mu = 0.015 + if wh.brakes { (if matches!(self.kind,Type::F18|Type::Su27){0.65}else{0.55}) * self.wheel_brake } else { 0.0 };
             let f_long = -clamp(v_long * 8.0, -1.0, 1.0) * mu * normal;
             let f_lat = -clamp(v_lat * 2.0, -1.0, 1.0) * 0.75 * normal;
             add(V3::Y * normal + fw * f_long + side * f_lat, wh.local, self.q);

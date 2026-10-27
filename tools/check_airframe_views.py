@@ -6,6 +6,7 @@ Images are intentionally ignored by Git. Review the images as well as running
 cargo test; a successful process alone does not prove correct visual geometry.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,13 @@ def main():
                       "--chase", "--look", "145,-10", "--zoom", zoom]),
             ("brake", ["--input", "brake", "--sim", "1", "--chase",
                        "--look", "145,20", "--zoom", zoom]),
+            ("stores-front", ["--mission", "dogfight", "--chase",
+                              "--look", "145,10", "--zoom", zoom]),
+            ("stores-bottom", ["--mission", "dogfight", "--chase",
+                               "--look", "170,-25", "--zoom", zoom]),
+            ("stores-profile", ["--mission", "dogfight", "--chase",
+                                "--look", "90,0", "--zoom", zoom]),
+            ("rear-cockpit", ["--look", "160,-15"]),
         ]:
             cases.append((jet, view, options))
     cases.append(("f18", "weapons", ["--mission", "dogfight", "--weapon", "aim120", "--sim", "0.25"]))
@@ -66,6 +74,7 @@ def main():
         report.append({"jet": jet, "view": view, "image": str(output)})
         print(f"Captured {jet} {view}", flush=True)
     (args.output / "captures.json").write_text(json.dumps(report, indent=2) + "\n")
+    (args.output / "binary.sha256").write_text(hashlib.sha256(executable.read_bytes()).hexdigest() + "\n")
     print(f"{len(report)} screenshots ready for visual inspection.")
 
 if __name__ == "__main__":

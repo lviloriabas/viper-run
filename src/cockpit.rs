@@ -405,6 +405,7 @@ pub struct Cockpit {
     /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
     mig: [Part; 3],
     extra: [[Part;3];2],
+    source: [Vec<Part>;2],
     hud_glass: [Part; 4],
     pub atlas: gfx::Target,
     atlas_pass: RenderPass,
@@ -466,6 +467,15 @@ impl Cockpit {
             for v in shifted.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
             [world::part(ctx,&m),world::part(ctx,&self::faces(&m)),world::part(ctx,&shifted)].map(|mut p|{p.bind.images=vec![atlas_tex];p})
         });
+        let source=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
+            crate::flightgear::textures(kind).iter().map(|t|{
+                let mut mesh=Mesh{v:t.mesh.v.clone()};let offset=EYE-kind.eye();
+                for v in mesh.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
+                let(w,h,rgba)=crate::flightgear::image(t.image);
+                let texture=ctx.new_texture_from_data_and_format(&rgba,TextureParams{width:w,height:h,format:TextureFormat::RGBA8,min_filter:FilterMode::Linear,mag_filter:FilterMode::Linear,..Default::default()});
+                let mut p=world::part(ctx,&mesh);p.bind.images=vec![texture];p
+            }).collect()
+        });
         let hud_glass = [crate::sim::Type::F16,crate::sim::Type::Mig29,crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind| {
             let g = glass_points(kind);
             let mut glass=Mesh::new();
@@ -474,7 +484,7 @@ impl Cockpit {
             part.bind.images=vec![atlas_tex];
             part
         });
-        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, source, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -516,6 +526,10 @@ impl Cockpit {
         ctx.apply_bindings(&statics.bind);
         ctx.apply_uniforms(UniformsSource::table(&u));
         ctx.draw(0, statics.count, 1);
+        if let Some(i)=match kind{crate::sim::Type::F18=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+            for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
+        }
+
 
         self.dynamic.clear();
         if kind == crate::sim::Type::F18 {
@@ -574,6 +588,10 @@ impl Cockpit {
         ctx.apply_bindings(&self.dyn_bind);
         ctx.draw(0, self.dyn_count as i32, 1);
         ctx.apply_pipeline(&self.face_pip);
+        ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
+        if let Some(i)=match kind{crate::sim::Type::F18=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+            for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
+        }
         ctx.apply_bindings(&faces.bind);
         ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
         ctx.draw(0, faces.count, 1);

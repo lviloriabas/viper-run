@@ -158,23 +158,22 @@ impl Props for Scene<'_> {
         let (m, c, eye) = (self.models, self.combat, cam.eye);
         // The stations sit where the F-16 hangs them; a MiG carries them on
         // its own pylons. Either way they ride the wing as it bends.
-        let shift = |a: &Aircraft, at: V3| {
-            let d = a.kind.store_shift(at);
-            d + V3::Y * a.flex_lift(at + d)
+        let shift = |a: &Aircraft, st: &crate::combat::Station| {
+            st.mounted(a) - st.at
         };
         // What hung under a wing that broke off went with it.
-        let kept = |a: &Aircraft, at: V3| !a.lost.wing[(at.x > 0.0) as usize] || at.x.abs() < a.kind.break_station();
+        let kept = |a: &Aircraft, st: &crate::combat::Station| {let at=st.position(a.kind);!a.lost.wing[(at.x>0.0) as usize] || at.x.abs()<a.kind.break_station()};
         if let Some(a) = self.player {
             for (i, st) in c.loadout.stations.iter().enumerate().filter(|(_, s)| s.loaded) {
-                if !kept(a, st.at) {
+                if !kept(a, st) {
                     continue;
                 }
                 if st.tip && a.kind==Type::F16 {
-                    w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st.at), eye), NONE);
+                    w.draw_prop(ctx, vp, &m.tips[i.min(1)], jet_model(a, shift(a, st), eye), NONE);
                     continue;
                 }
                 let (part, across, along) = store_shape(m, st.store);
-                w.draw_prop(ctx, vp, part, stretch(jet_model(a, st.at + shift(a, st.at), eye), across, along), NONE);
+                w.draw_prop(ctx, vp, part, stretch(jet_model(a, st.at + shift(a, st), eye), across, along), NONE);
             }
         }
         for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
@@ -183,9 +182,9 @@ impl Props for Scene<'_> {
             }
             // Aggressor paint: the F-16s take the 64th's schemes in turn.
             w.draw_jet(ctx, vp, cam, &b.jet, [i as f32, 0.0, 0.0, 1.0]);
-            for st in b.stores.stations.iter().filter(|s| s.loaded && kept(&b.jet, s.at)) {
+            for st in b.stores.stations.iter().filter(|s| s.loaded && kept(&b.jet, s)) {
                 let (part, across, along) = store_shape(m, st.store);
-                w.draw_prop(ctx, vp, part, stretch(jet_model(&b.jet, st.at + shift(&b.jet, st.at), eye), across, along), NONE);
+                w.draw_prop(ctx, vp, part, stretch(jet_model(&b.jet, st.at + shift(&b.jet, st), eye), across, along), NONE);
             }
         }
         for wr in &c.wrecks {

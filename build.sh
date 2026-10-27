@@ -22,4 +22,7 @@ cp target/x86_64-unknown-linux-gnu/release/viper-run dist/viper-run-linux-x86_64
 cp target/x86_64-pc-windows-gnu/release/viper-run.exe dist/viper-run-windows-x86_64.exe
 cp target/x86_64-unknown-linux-gnu/release/viper-server dist/viper-server-linux-x86_64
 cp target/x86_64-pc-windows-gnu/release/viper-server.exe dist/viper-server-windows-x86_64.exe
+mkdir -p dist/model-licenses
+cp assets/models/licenses/*.txt dist/model-licenses/
+cp assets/models/NOTICE.txt dist/MODEL-LICENSES.txt
 ls -l dist

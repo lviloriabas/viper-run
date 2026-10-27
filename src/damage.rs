@@ -82,7 +82,7 @@ const MIG29: [Module; 14] = [
     m(Part::Structure, v3(0.0, 0.50, -0.30), v3(0.75, 0.60, 7.00), 55.0, 0.0, "AIRFRAME"),
 ];
 
-/// Approximate system volumes follow the new procedural geometry. Internal
+/// Approximate system volumes follow the imported exterior geometry. Internal
 /// tank/line boundaries are game abstractions, not maintenance drawings.
 const fn twin_modules(sx:f64,sy:f64,sz:f64,eye:V3,flanker:bool)->[Module;14]{
     let mut out=MIG29;let mut i=0;
@@ -95,7 +95,7 @@ const fn twin_modules(sx:f64,sy:f64,sz:f64,eye:V3,flanker:bool)->[Module;14]{
     let mut side=0;
     while side<2{
         let sign=if side==0{-1.0}else{1.0};
-        out[5+side].at=if flanker{v3(sign*1.4,-0.2,5.0)}else{v3(sign*0.72,-0.15,4.0)};
+        out[5+side].at=if flanker{v3(sign*1.27,-0.19,5.0)}else{v3(sign*0.68,-0.001,4.0)};
         out[5+side].half=if flanker{v3(0.58,0.58,3.0)}else{v3(0.45,0.45,2.5)};
         out[8+side].at=if flanker{v3(sign*4.6,0.32,2.5)}else{v3(sign*3.5,0.3,1.5)};
         out[8+side].half=if flanker{v3(2.8,0.12,3.1)}else{v3(2.25,0.12,2.1)};

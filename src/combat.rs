@@ -577,6 +577,35 @@ fn tips(store: Store) -> [Station; 2] {
     [-1.0, 1.0].map(|s| Station { store, at: v3(s * t.x, t.y, t.z - ahead), loaded: true, tip: true })
 }
 
+impl Station {
+    /// Shared render/release origin. Imported hardpoints locate the centre
+    /// of a store; missile meshes and guidance bodies use the nose as origin.
+    pub fn position(&self,kind:Type)->V3 {
+        if !matches!(kind,Type::F18|Type::Su27){return self.at+kind.store_shift(self.at)}
+        let mut p=self.at+kind.store_shift(self.at);
+        if !self.tip && self.at.x.abs()>0.1 {
+            let x=self.at.x.abs();
+            let base=[4.15_f64,3.50,2.30].into_iter().min_by(|a,b|(x-a).abs().total_cmp(&(x-b).abs())).unwrap();
+            let (y,z)=match self.store {
+                Store::Aim9|Store::Aim9x|Store::R60m|Store::R73=>(-0.03,base*0.5-0.83),
+                Store::Aim120|Store::Aim120d|Store::R77=>(-0.06,base*0.5-1.23),
+                Store::Aim7|Store::R27r|Store::R27t=>(-0.08,base*0.5-1.43),
+                Store::Fab500=>(-0.12,base*0.4+0.93),
+                _=>(-0.08,base*0.4+0.93),
+            };
+            p+=v3(self.at.x.signum()*(x-base),self.at.y-y,self.at.z-z);
+        }
+        if kind==Type::Su27 {
+            // R-27R1's source origin is 156 mm aft of its geometric centre.
+            p.z-=match self.store {Store::R27r|Store::R27t=>0.15613,Store::R73=>0.005,_=>0.0}*(21.9/22.07678);
+        }
+        if let Some(spec)=self.store.missile(){p.z-=spec.length*0.5;}
+        p
+    }
+    pub fn mounted(&self,a:&Aircraft)->V3 {
+        let p=self.position(a.kind);p+V3::Y*a.flex_lift(p)
+    }
+}
 impl Loadout {
     pub fn for_mission(kind: MissionKind) -> Loadout {
         Loadout::configure(&Config::for_mission(kind))
@@ -656,8 +685,8 @@ impl Loadout {
     }
 
     /// Mass hung on the underwing pylons, which lowers the flutter speed.
-    pub fn wing_mass(&self) -> f64 {
-        self.stations.iter().filter(|s| s.loaded && !s.tip).map(|s| s.store.mass()).sum()
+    pub fn wing_mass(&self, kind:Type) -> f64 {
+        self.stations.iter().filter(|s| s.loaded && !s.tip && s.position(kind).x.abs()>=kind.break_station()).map(|s| s.store.mass()).sum()
     }
 
     pub fn drag(&self) -> f64 {
@@ -1005,7 +1034,7 @@ pub fn spawn_type(kind: Type, pos: V3, heading: f64, speed: f64) -> Aircraft {
 /// and drag, so a loaded start flies hands-off like the clean one.
 pub fn load(a: &mut Aircraft, l: &Loadout) {
     a.stores_mass = l.mass();
-    a.wing_stores = l.wing_mass();
+    a.wing_stores = l.wing_mass(a.kind);
     a.stores_drag = l.drag();
     a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
     if a.kind == Type::F16 && a.stores_drag == 0.0 && (a.stores_mass - STORES_MASS).abs() < 1e-9 && a.fuel == crate::sim::spec::FUEL_MAX {
@@ -1344,7 +1373,7 @@ impl Combat {
             a.gear_shed = [false; 3];
             a.fuel = a.fuel.max(a.kind.fuel_max() * self.cfg.fuel);
             a.stores_mass = self.loadout.mass();
-            a.wing_stores = self.loadout.wing_mass();
+            a.wing_stores = self.loadout.wing_mass(a.kind);
             a.stores_drag = self.loadout.drag();
             a.mass = a.kind.empty_mass() + a.stores_mass + a.fuel;
             self.events.push(Event::Toast("REARMED, REFUELLED AND REPAIRED".to_string()));
@@ -1440,7 +1469,7 @@ impl Combat {
         };
         let st = self.loadout.stations[i];
         self.loadout.stations[i].loaded = false;
-        self.events.push(Event::Release { pos: a.pos + a.q.rotate(st.at + a.kind.store_shift(st.at)) });
+        self.events.push(Event::Release { pos: a.pos + a.q.rotate(st.mounted(a)) });
         self.events.push(Event::Toast(format!("JETTISON // {}", st.store.name())));
         self.seeker = None;
         self.shoot = false;
@@ -1682,13 +1711,13 @@ impl Combat {
             self.player_weapons(dt, a, trigger, pressed);
         }
         a.stores_mass = self.loadout.mass();
-        a.wing_stores = self.loadout.wing_mass();
+        a.wing_stores = self.loadout.wing_mass(a.kind);
         a.stores_drag = self.loadout.drag();
         self.sight.step(dt, a);
         self.ccip = match (self.mode, self.station()) {
             (Mode::Ccip, Some(i)) => {
                 let st = self.loadout.stations[i];
-                st.store.bomb().and_then(|b| ccip(b, a, st.at + a.kind.store_shift(st.at), &terrain::floor))
+                st.store.bomb().and_then(|b| ccip(b, a, st.mounted(a), &terrain::floor))
             }
             (Mode::Strf, _) => gun_ccip(a, &terrain::floor),
             _ => None,
@@ -1787,7 +1816,7 @@ impl Combat {
                 if let Some(i) = self.station() {
                     let st = self.loadout.stations[i];
                     self.loadout.stations[i].loaded = false;
-                    let b = Bomb::release(st.store.bomb().unwrap_or(&MK82), a, st.at + a.kind.store_shift(st.at));
+                    let b = Bomb::release(st.store.bomb().unwrap_or(&MK82), a, st.mounted(a));
                     self.events.push(Event::Release { pos: b.pos });
                     self.bombs.push(b);
                 }
@@ -1842,7 +1871,7 @@ impl Combat {
         }
         self.loadout.stations[i].loaded = false;
         let kick = if spec.drop > 0.0 { 3.0 } else { 0.0 };
-        let pos = a.pos + a.q.rotate(st.at + a.kind.store_shift(st.at));
+        let pos = a.pos + a.q.rotate(st.mounted(a));
         let vel = a.vel - a.q.axes().up * kick;
         self.events.push(Event::Launch { pos, from: Who::Player, name: spec.call });
         self.fire_missile(Missile::launch(spec, pos, vel, Who::Player, target));
@@ -2127,8 +2156,8 @@ impl Combat {
                     b.weapon_clock = 0.0;
                     b.jet.stores_mass = b.stores.mass();
                     b.jet.stores_drag = b.stores.drag();
-                    b.jet.wing_stores = b.stores.wing_mass();
-                    let at = station.at + b.jet.kind.store_shift(station.at);
+                    b.jet.wing_stores = b.stores.wing_mass(b.jet.kind);
+                    let at = station.mounted(&b.jet);
                     let pos = b.jet.pos + b.jet.q.rotate(at);
                     let spec = station.store.missile().unwrap();
                     let vel = b.jet.vel;

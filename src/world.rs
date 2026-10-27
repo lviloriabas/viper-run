@@ -432,9 +432,9 @@ void main() {
     // From the seat, the cockpit model replaces the skin inside the canopy.
     // The MiG-29 box is mig29::CUTOUT.
     if (u_cutout > 3.5) {
-        if (v_local.z > -7.7 && v_local.z < -3.5 && abs(v_local.x) < 0.62 && v_local.y > 0.35) discard;
+        if (v_local.z > -7.15 && v_local.z < -4.55 && abs(v_local.x) < 0.48 && v_local.y > 0.45) discard;
     } else if (u_cutout > 2.5) {
-        if (v_local.z > -5.3 && v_local.z < -2.1 && abs(v_local.x) < 0.58 && v_local.y > 0.30) discard;
+        if (v_local.z > -5.15 && v_local.z < -1.95 && abs(v_local.x) < 0.43 && v_local.y > 0.40) discard;
     } else if (u_cutout > 1.5) {
         if (abs(v_local.x) < 0.44 && v_local.y > 0.55 && v_local.z > -4.78 && v_local.z < -2.0) discard;
     } else if (u_cutout > 0.5 && v_local.z > -4.70 && v_local.z < -1.35 && abs(v_local.x) < 0.50 && v_local.y > 0.30) discard;
@@ -886,13 +886,17 @@ impl World {
         let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
         let mig_canopy = skinned(&fulcrum.canopy);
         let mig_brakes = [skinned(&fulcrum.brakes[0]), skinned(&fulcrum.brakes[1])];
-        let twins=[crate::hornet::build(),crate::su27::build()].map(|m|TwinParts {
-            body:skinned(&m.body),canopy:skinned(&m.canopy),
-            stabs:m.stabs.map(|m|skinned(&m)),flaps:m.flaps.map(|m|skinned(&m)),
-            rudders:m.rudders.map(|m|skinned(&m)),brake:skinned(&m.brake),
-            gear:m.gear.map(|m|skinned(&m)),
-        });
         let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
+        let twins=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
+            let m=if kind==Type::F18{crate::hornet::build()}else{crate::su27::build()};
+            let bytes=if kind==Type::F18{include_bytes!("../assets/models/f18-skin.qoi").as_slice()}else{include_bytes!("../assets/models/su27-skin.qoi").as_slice()};
+            let(w,h,px)=crate::flightgear::image(bytes);
+            let tex=ctx.new_texture_from_data_and_format(&px,TextureParams{width:w,height:h,format:TextureFormat::RGBA8,min_filter:FilterMode::Linear,mag_filter:FilterMode::Linear,..Default::default()});
+            let mut native=|mesh:&Mesh|{let mut p=part(ctx,mesh);p.bind.images=vec![tex];p};
+            TwinParts {body:native(&m.body),canopy:native(&m.canopy),
+                stabs:m.stabs.map(|m|native(&m)),flaps:m.flaps.map(|m|native(&m)),
+                rudders:m.rudders.map(|m|native(&m)),brake:native(&m.brake),gear:m.gear.map(|m|native(&m))}
+        });
         World {
             post_bind: fullscreen.clone(),
             fullscreen,

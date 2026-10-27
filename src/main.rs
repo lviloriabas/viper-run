@@ -25,6 +25,7 @@ mod math;
 mod mesh;
 mod mig29;
 mod hornet;
+mod flightgear;
 mod su27;
 mod physio;
 mod performance;
