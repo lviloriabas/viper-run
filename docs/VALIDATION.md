@@ -1,5 +1,55 @@
 # Validation
 
+## Multiplayer server browser and TCP relay, 27 October 2026
+
+The rework passes 288 game tests and 12 standalone server tests in release mode.
+Coverage includes concurrent host/client startup, encrypted fragmented state,
+voice forwarding, no UDP listener on TCP players, filtering, pagination beyond
+four rooms, private-room visibility, started-room removal, disconnects, malformed
+TCP frames, bounded queues, browser response timeout and saved preferences.
+
+Real game processes completed all six modes on Linux through both direct UDP
+and the TCP relay (12 cases). Native Windows processes completed all six modes
+through TCP. Checks require replicated state, received controls, remote gun
+ammunition consumption and microphone inactivity.
+
+The graphical input check passed on Linux and Windows: a real public room is
+discovered in SERVERS, selected with the controller, joined, marked ready,
+launched and left through the live UI handlers. Existing private LAN hosting
+and flight school checks also pass. The menu audit passes 96 multiplayer layouts
+on each platform at 640x360, 1280x720 and 1920x1080 with keyboard/controller
+prompts. Browser, create, invitation, LAN, empty/error states, eight-pilot lobby,
+voice and all six create-mode briefings are included. Browser/create/lobby
+captures were visually inspected. The Windows capture/overlay check passes.
+
+Windows loopback tests must run with local networking available. The restricted
+automation sandbox denies these connections; running the same checks with
+normal network access passes. No Windows security settings were changed.
+
+The Windows game and relay received local Microsoft Defender custom scans with
+no threats found. Real-time protection and antivirus were enabled, with
+signatures 1.461.224.0 (updated 26 October 2026). The scan script records the
+exact final hashes and output in target/multiplayer-review/defender-scan.json.
+This is a local result, not a guarantee for other PCs. The earlier reported
+detection occurred on another PC and its exact threat name is unavailable.
+
+Reproduce with:
+
+~~~sh
+cargo test --release --quiet
+./build.sh
+python3 tools/check_multiplayer.py --transport both
+python3 tools/check_menu_layout.py --exe dist/viper-run-linux-x86_64 --out target/multiplayer-review/layout-linux --full --filter network
+dist/viper-run-linux-x86_64 --future-ui-check --screen menu --shot target/multiplayer-review/future-ui.png --frames 400
+~~~
+
+On Windows run the same Python commands with the Windows executable; use
+--transport tcp for the Windows multiplayer matrix, and run
+python tools/check_windows_defender.py.
+Distribution hashes are in dist/SHA256SUMS.txt. Separate-network Internet
+acceptance still requires an actually deployed relay; loopback tests do not
+establish Internet reachability. Physical microphone hardware is not exercised.
+
 ## Cockpit closure, compass and pilot animation, 27 October 2026
 
 This revision supersedes the earlier Hornet/Flanker geometry checks below.

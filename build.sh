@@ -22,7 +22,11 @@ cp target/x86_64-unknown-linux-gnu/release/viper-run dist/viper-run-linux-x86_64
 cp target/x86_64-pc-windows-gnu/release/viper-run.exe dist/viper-run-windows-x86_64.exe
 cp target/x86_64-unknown-linux-gnu/release/viper-server dist/viper-server-linux-x86_64
 cp target/x86_64-pc-windows-gnu/release/viper-server.exe dist/viper-server-windows-x86_64.exe
+cp docs/MULTIPLAYER-ES.md dist/INSTRUCCIONES-MULTIJUGADOR.md
+cp docs/MULTIPLAYER.md dist/MULTIPLAYER.md
+cp docs/MULTIPLAYER-MISSIONS.md docs/VOICE-CHAT.md dist/
 mkdir -p dist/model-licenses
 cp assets/models/licenses/*.txt dist/model-licenses/
 cp assets/models/NOTICE.txt dist/MODEL-LICENSES.txt
+(cd dist && sha256sum viper-run-linux-x86_64 viper-run-windows-x86_64.exe viper-server-linux-x86_64 viper-server-windows-x86_64.exe > SHA256SUMS.txt)
 ls -l dist

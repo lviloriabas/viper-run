@@ -9,6 +9,7 @@ parser.add_argument("--game",default=str(ROOT/"dist"/("viper-run-"+suffix)))
 parser.add_argument("--server",default=str(ROOT/"dist"/("viper-server-"+suffix)))
 parser.add_argument("--output",type=Path)
 parser.add_argument("--modes",nargs="+",choices=["dogfight","teams","combat","strike","escort","defense"],default=["dogfight","teams","combat","strike","escort","defense"])
+parser.add_argument("--transport",choices=["direct","tcp","both"],default="both")
 args=parser.parse_args()
 temporary=tempfile.TemporaryDirectory(prefix="viper-multiplayer-") if args.output is None else None
 OUT=args.output or Path(temporary.name)
@@ -17,14 +18,26 @@ EXE=str(Path(args.game).resolve())
 SERVER=str(Path(args.server).resolve())
 env={**os.environ,'DISPLAY':':0','LIBGL_ALWAYS_SOFTWARE':'1'}
 def run_case(mode,relay=False):
-    stem=mode+('-relay' if relay else '-direct')
+    stem=mode+('-tcp-relay' if relay else '-direct')
     inv=OUT/(stem+'.invite'); inv.unlink(missing_ok=True)
     hreport=OUT/(stem+'-host.txt');creport=OUT/(stem+'-client.txt')
     hreport.unlink(missing_ok=True);creport.unlink(missing_ok=True)
     hub=None;hubarg=[]
     if relay:
-        probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
+        probe=socket.socket(socket.AF_INET,socket.SOCK_STREAM);probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
         hub=subprocess.Popen([SERVER,f'127.0.0.1:{port}'],cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=env)
+        try:
+            deadline=time.monotonic()+4
+            while time.monotonic()<deadline:
+                try:
+                    with socket.create_connection(('127.0.0.1',port),timeout=.2): break
+                except OSError:
+                    assert hub.poll() is None, 'relay server failed to start'
+                    time.sleep(.05)
+            else: raise AssertionError('relay server did not listen on TCP')
+        except BaseException:
+            hub.terminate();hub.wait(timeout=3)
+            raise
         hubarg=['--directory',f'127.0.0.1:{port}']
     common=['--size','640x360','--no-performance','--weapon','gun','--input','fire']
     with (OUT/(stem+'-host.log')).open('w') as hl,(OUT/(stem+'-client.log')).open('w') as cl:
@@ -35,6 +48,7 @@ def run_case(mode,relay=False):
             while not inv.exists() and time.monotonic()<deadline and host.poll() is None: time.sleep(.1)
             assert inv.exists(),f'{stem}: invitation not written'
             invite=inv.read_text().strip()
+            assert invite.startswith('relay+tcp:') if relay else not invite.startswith('relay'), invite
             client=subprocess.Popen([EXE,'--join',invite,'--callsign','Wing','--jet','su27','--ready','--net-report',str(creport),'--exit-after','9',*common],cwd=ROOT,env=env,stdout=cl,stderr=cl)
             assert client.wait(timeout=22)==0,f'{stem}: client exited abnormally'
             assert host.wait(timeout=12)==0,f'{stem}: host exited abnormally'
@@ -55,5 +69,6 @@ def run_case(mode,relay=False):
     assert h['mic_capturing']==c['mic_capturing']=='false',(stem,'unexpected microphone capture')
     print('PASS',stem,'host commands',h['commands'],'client frames',c['frames'],'rounds',c['rounds'],'objective',c['objective'],flush=True)
 for mode in args.modes:
-    run_case(mode,relay=mode=='teams')
+    if args.transport in ('direct','both'): run_case(mode,relay=False)
+    if args.transport in ('tcp','both'): run_case(mode,relay=True)
 print('PASS all requested real-process multiplayer modes',flush=True)

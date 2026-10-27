@@ -3,45 +3,101 @@
 Open ONLINE from the main menu. The flight school and normal local missions
 remain available without a network connection.
 
-## Direct play on a local network
+## Server browser and Internet play
 
-1. Choose a callsign and aircraft. The host selects a mode and room capacity.
-2. Leave DIRECTORY blank, choose a UDP port (42860 by default), then HOST.
-3. COPY INVITE copies the complete address and random invitation key.
-4. Other pilots paste the invitation with Ctrl+V into INVITATION and choose JOIN.
-5. Each pilot marks READY. The host launches when at least two pilots are ready.
+Use the current build of both the game and viper-server. ONLINE opens SERVERS.
+Set CALLSIGN and aircraft, enter a running relay's address in RELAY SERVER and
+choose REFRESH. A hostname without a port uses TCP 42861. The callsign and last
+server address are remembered; invitation keys are never saved.
 
-The host's firewall must allow the chosen UDP port. A direct invitation uses
-the host's local interface address. For direct Internet play, substitute the
-public address and forwarded UDP port before the #, preserving the key.
+The browser refreshes every three seconds and shows six rooms per page, with
+ALL MODES / mode filtering and PREV / NEXT pages. It displays room host, mode,
+pilot count and FULL / JOIN. Select an open room to connect to its lobby.
+Full rooms remain visible. A failed connection clears stale results and gives
+a reason; REFRESH retries.
 
-## Internet directory and relay
+CREATE ROOM uses the same relay address. Choose mode, capacity and PUBLIC or
+PRIVATE, then create. Wait for ROOM ONLINE, TCP RELAY. Public rooms appear in
+the browser; private rooms require COPY INVITE. Guests use JOIN INVITE, paste
+the entire invitation with Ctrl+V, press Enter and select JOIN ROOM. Relay
+invitations already contain the server address.
 
-Run the included server on a machine reachable by every pilot:
+Clicking a text field selects its contents for replacement. Ctrl+A selects
+all, Backspace deletes and Esc cancels the edit. In the lobby, guests select
+READY / WAIT. The host starts ready and selects LAUNCH once at least two
+pilots are present and everyone is ready.
+
+## Run the browser/relay server
+
+There is no bundled or automatically deployed public relay. Run the included
+server on a machine reachable by all players, or ask its operator for an address:
 
 ~~~sh
 ./dist/viper-server-linux-x86_64 0.0.0.0:42861
 ~~~
 
-On Windows run viper-server-windows-x86_64.exe with the same bind argument.
-Permit inbound UDP 42861 on that machine. This is the directory/relay service;
-the player who creates a room remains the simulation host.
+On Windows launch dist/viper-server-windows-x86_64.exe. The same bind address
+is the default. Permit incoming TCP 42861 on the server machine only.
+For Internet play use a VPS with a public IP, or forward TCP 42861 in the
+server's router. Every player enters that public IP or DNS name.
+Starting the server on your PC alone does not make it Internet-reachable.
 
-Enter that machine's address and port in DIRECTORY before hosting. The
-invitation then starts with relay: and routes encrypted game and voice packets
-through the server. The host does not need an inbound forwarded game port.
-The directory never needs the key for a private room.
+For a same-PC check use 127.0.0.1:42861. For a LAN, run the server once and
+give the other PCs that machine's LAN IP. Do not give other PCs 127.0.0.1:
+it always refers to the PC on which it is entered.
 
-PRIVATE rooms require their full invitation. PUBLIC rooms publish their
-invitation through BROWSE. Choose a listed room or QUICK MATCH to join an open
-room matching the selected mode. Public invitations are available to everyone
-who can browse that directory. A running sortie stops advertising its room.
+Players, including the simulation host, use outbound TCP connections for
+discovery, encrypted game state and voice. They bind no UDP socket and accept
+no inbound connections on this path. Under the default Windows outbound
+policy they need no inbound firewall exception or router port forwarding.
+Network policies can still deny outbound traffic. Only the relay listens
+for incoming connections. TCP can add delay when packets are lost; use a
+nearby server.
 
-Direct rooms use peer UDP. Directory-backed rooms use the relay explicitly;
-there is no claim of automatic NAT traversal, a hosted default service,
-accounts, ranked matchmaking or dedicated authoritative physics servers.
-Deploying the supplied directory on an Internet-reachable host is required
-for Internet relay play. Direct invitations can be used without a directory.
+The service also accepts the previous UDP relay protocol on the same port.
+New browser/host connections use TCP and invitations start with relay+tcp:.
+Do not mix game versions with different simulation formats.
+
+## Direct LAN option
+
+LAN DIRECT needs no relay:
+
+1. Choose callsign, aircraft, mode, capacity and UDP port (42860).
+2. Select HOST LAN ROOM. The host allows incoming UDP on its private network.
+3. COPY INVITE; guests paste it in JOIN INVITE and select JOIN ROOM.
+4. Guests mark READY / WAIT; the host selects LAUNCH.
+
+Direct rooms are invitation-only and are not listed in the relay browser.
+Windows can ask to allow the host on private networks. For direct Internet
+invitations replace the address before # with the public address and forwarded
+UDP port, preserving the key. Prefer the TCP relay for Internet games.
+
+## Windows Defender, firewall and SmartScreen
+
+The relay path removes the game's need for an inbound listener. It does not
+alter firewall rules, antivirus settings or exclusions, and does not request
+administrator access. The separate viper-server still needs its inbound TCP port.
+
+A malware detection and a SmartScreen reputation warning differ from a firewall
+prompt. These executables are unsigned: a source change cannot guarantee
+SmartScreen or Defender will trust every build. Use a trusted release, verify
+its SHA-256 and retain the exact warning. Publishers should sign releases
+with a trusted Authenticode certificate and submit suspected false positives
+to Microsoft. Do not disable protection to troubleshoot multiplayer.
+
+Scan rebuilt Windows binaries without changing security settings:
+
+~~~powershell
+python tools/check_windows_defender.py
+~~~
+
+The JSON report includes SHA-256, scanner path, timestamp and scan result.
+A successful local scan is evidence for those files and signatures; it does
+not guarantee the result on another PC or identify an earlier unknown detection.
+
+References: [Windows firewall rules](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules),
+[SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation),
+[Microsoft file submission](https://www.microsoft.com/en-us/wdsi/filesubmission).
 
 ## Play, objectives and voice
 
@@ -90,8 +146,8 @@ leaves a PVP room, the host ends the sortie. Internet relay adds network delay;
 high latency and loss can produce visible prediction corrections. This
 implementation does not promise competitive anti-cheat against room members.
 
-The directory is an intentionally small service, capped at 128 live rooms.
-BROWSE returns up to four public rooms per response. Room, peer and
+The TCP directory supports 128 live rooms and 256 connections, with six rooms
+per page. Legacy UDP browsing returns up to four rooms. Room, peer and
 per-source request limits bound memory and traffic. Use a trusted directory;
 public room discovery is not an authenticated identity service.
 
@@ -107,11 +163,12 @@ cargo test --release
 python3 tools/check_multiplayer.py
 ~~~
 
-The Python check launches actual game processes for all six modes. It checks
+The Python check launches actual game processes for all six modes through
+both direct UDP and the new TCP relay. It checks
 control reception, replicated frames and selected airframe, remote ammunition
-use and microphone inactivity; the Teams case uses the real directory/relay
+use and microphone inactivity; every relay case uses the real server
 process. A graphical OpenGL session is required. Use --game and --server to
-select custom builds, --modes to narrow a diagnostic run, and --output to retain
+select custom builds, --modes and --transport direct|tcp|both to narrow a diagnostic run, and --output to retain
 reports. All connections are loopback. The report switches deliberately use
 scripted controls even when the QA windows are in the background and never
 save user settings.

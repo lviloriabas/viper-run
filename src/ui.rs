@@ -29,8 +29,9 @@ const HUD: Col = rgba(0xa9, 0xff, 0xb2, 1.0);
 pub enum Action {
     Start,
     School,
+    NetTab(crate::multiplayer::Panel), NetFilter, NetPage(bool),
     Online, NetEdit(crate::multiplayer::Field), NetMode, NetCapacity, NetPublic,
-    NetHost, NetJoin, NetBrowse, NetRoom(u8), NetQuick, NetCopy, NetReady, NetLaunch, NetLeave, NetResume,
+    NetHost, NetJoin, NetBrowse, NetRoom(u8), NetCopy, NetReady, NetLaunch, NetLeave, NetResume,
     VoiceMode, VoiceMute, VoiceDeafen, VoiceInput(bool), VoiceOutput(bool), VoiceThreshold(bool), VoicePeer(u64), VoicePeerGain(u64),
     Lesson(crate::tutorial::Lesson),
     Restart,
@@ -452,29 +453,91 @@ impl<'a> Ui<'a> {
     pub fn online_controls_button(&mut self) {
         self.button("ONLINE / VOICE", "", 12.0*self.s, self.h-30.0*self.s, false, Action::Online);
     }
+    fn server_browser(&mut self,mp:&crate::multiplayer::Multiplayer,jet:crate::sim::Type) {
+        use crate::multiplayer::{Field,Panel};
+        let s=self.s;let sm=(s-1.0).max(1.0);
+        let pw=(self.w-20.0*s).min(610.0*s);let ph=320.0*s;
+        let (x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);
+        let left=x+12.0*s;let width=pw-24.0*s;
+        self.frame(x,y,pw,ph);
+        self.cv.text("MULTIPLAYER",left,y+16.0*s,2.0*s,GREEN,Align::Left);
+        let menu=&mp.menu;
+        let mut bx=left;
+        for (label,panel) in [("SERVERS",Panel::Browser),("CREATE ROOM",Panel::Create),("JOIN INVITE",Panel::Invite),("LAN DIRECT",Panel::Lan)] {
+            bx+=self.button(label,"",bx,y+32.0*s,menu.panel==panel,Action::NetTab(panel))+5.0*s;
+        }
+        let half=(width-8.0*s)/2.0;
+        self.network_field("CALLSIGN",&menu.name,Field::Name,menu.editing==Some(Field::Name),true,left,y+57.0*s,half);
+        self.button(&format!("JET: {}",["F-16C","MIG-29S","F/A-18C","SU-27SK"][jet.index()]),"",left+half+8.0*s,y+60.0*s,false,Action::Jet);
+        match menu.panel {
+            Panel::Browser => {
+                self.network_field("RELAY SERVER (HOST OR HOST:PORT)",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+84.0*s,width);
+                let mut bx=left;
+                bx+=self.button("REFRESH","",bx,y+112.0*s,false,Action::NetBrowse)+5.0*s;
+                self.button(menu.filter.map_or("ALL MODES",|m|m.name()),"",bx,y+112.0*s,false,Action::NetFilter);
+                self.cv.text("ROOM / MODE",left,y+143.0*s,sm,DIM,Align::Left);
+                self.cv.text("PILOTS",left+width-62.0*s,y+143.0*s,sm,DIM,Align::Left);
+                if let Some(browser)=&menu.browser {
+                    for(i,room)in browser.rooms.iter().enumerate() {
+                        let yy=y+(151.0+i as f32*18.0)*s;
+                        let label=format!("{} / {}",room.title,room.mode.name());
+                        self.key_cap(&label,left,yy,width-70.0*s,false,Action::NetRoom(i as u8));
+                        self.cv.text(&format!("{}/{} {}",room.players,room.capacity,if room.players>=room.capacity{"FULL"}else{"JOIN"}),left+width-62.0*s,yy+6.0*s,sm,if room.players>=room.capacity{DIM}else{ACID},Align::Left);
+                    }
+                    let bx=left+self.button("PREV","",left,y+264.0*s,false,Action::NetPage(false))+5.0*s;
+                    let bx=bx+self.button("NEXT","",bx,y+264.0*s,false,Action::NetPage(true))+8.0*s;
+                    self.cv.text(&format!("PAGE {} / {}",browser.page+1,browser.pages),bx,y+272.0*s,sm,DIM,Align::Left);
+                    if browser.rooms.is_empty() {
+                        self.cv.paragraph(&browser.status(),left,y+172.0*s,width,sm,1.5,CREAM);
+                    }
+                } else {
+                    self.cv.paragraph("Enter the address of a running viper-server. Everyone uses the same server. Refresh, then select a room to join.",left,y+163.0*s,width,sm,1.6,CREAM);
+                    self.cv.paragraph("Internet rooms use outbound TCP. No port forwarding is needed on players' PCs.",left,y+211.0*s,width,sm,1.6,DIM);
+                }
+            }
+            Panel::Create | Panel::Lan => {
+                let lan=menu.panel==Panel::Lan;
+                if lan { self.network_field("HOST UDP PORT",&menu.port,Field::Port,menu.editing==Some(Field::Port),true,left,y+84.0*s,width); }
+                else { self.network_field("RELAY SERVER (SAME ADDRESS AS OTHER PILOTS)",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+84.0*s,width); }
+                let mut bx=left;
+                bx+=self.button(menu.rules.mode.name(),"",bx,y+116.0*s,false,Action::NetMode)+5.0*s;
+                bx+=self.button(&format!("SLOTS {}",menu.rules.capacity),"",bx,y+116.0*s,false,Action::NetCapacity)+5.0*s;
+                if !lan { self.button(if menu.public{"PUBLIC"}else{"PRIVATE"},"",bx,y+116.0*s,false,Action::NetPublic); }
+                self.cv.paragraph(menu.rules.mode.brief(),left,y+151.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph(if lan{"Direct LAN hosting accepts incoming UDP. Windows may ask to allow the game on your private network. Share COPY INVITE with your friends."}else if menu.public{"Public rooms appear in the server browser. Create the room, wait for pilots to join, then launch when everyone is ready."}else{"Private rooms stay out of the browser. Create the room, choose COPY INVITE, and share it with your friends."},left,y+196.0*s,width,sm,1.6,DIM);
+                self.button(if lan{"HOST LAN ROOM"}else{"CREATE ROOM"},"",left,y+253.0*s,true,Action::NetHost);
+            }
+            Panel::Invite => {
+                self.network_field("INVITATION (CTRL+V TO PASTE)",&menu.invite,Field::Invite,menu.editing==Some(Field::Invite),true,left,y+84.0*s,width);
+                self.cv.paragraph("Ask the host for COPY INVITE. Select this field and paste the full invitation with Ctrl+V, press Enter, then join.",left,y+133.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph("Relay invitations include the server address. You do not need to configure it separately.",left,y+187.0*s,width,sm,1.6,DIM);
+                self.button("JOIN ROOM","",left,y+245.0*s,true,Action::NetJoin);
+            }
+        }
+        let max=(width/(6.0*sm))as usize;
+        self.cv.text(&menu.status.chars().take(max).collect::<String>(),left,y+296.0*s,sm,AMBER,Align::Left);
+        self.button("MAIN MENU","ESC",left,y+303.0*s,false,Action::Menu);
+        self.legend(&[("ESC","BACK")]);
+    }
     pub fn network_screen(&mut self,mp:&crate::multiplayer::Multiplayer,jet:crate::sim::Type,keys:&crate::keymap::Keymap) {
         use crate::multiplayer::Field;
+        if mp.session.is_none() { self.server_browser(mp,jet); return; }
         let s=self.s;let sm=(s-1.0).max(1.0);
         let(pw,ph)=((self.w-20.0*s).min(610.0*s),(self.h-30.0*s).min(320.0*s));
         let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let cw=(pw-38.0*s)*0.49;let rx=x+cw+24.0*s;
         self.frame(x,y,pw,ph);
         self.cv.text("MULTIPLAYER",x+12.0*s,y+16.0*s,2.0*s,GREEN,Align::Left);
-        self.cv.text("DIRECT P2P OR INTERNET RELAY. THE HOST RUNS THE SIMULATION.",x+12.0*s,y+34.0*s,sm,DIM,Align::Left);
-        let menu=&mp.menu;let fields=[("CALLSIGN",Field::Name),("INVITATION (CTRL+V TO PASTE)",Field::Invite),
-            ("DIRECTORY HOST:PORT (OPTIONAL FOR DIRECT)",Field::Server),("HOST UDP PORT",Field::Port)];
-        for(i,(label,f))in fields.into_iter().enumerate(){self.network_field(label,menu.text(f),f,menu.editing==Some(f),mp.session.is_none(),x+12.0*s,y+(46.0+i as f32*25.0)*s,cw);}
-        if mp.session.is_none(){
-            let mut bx=x+12.0*s;let by=y+149.0*s;
-            for(label,act)in[("HOST",Action::NetHost),("JOIN",Action::NetJoin),("BROWSE",Action::NetBrowse)]{bx+=self.button(label,"",bx,by,false,act)+4.0*s;}
-            self.button(menu.rules.mode.name(),"",x+12.0*s,y+169.0*s,false,Action::NetMode);
-            let w=self.button(&format!("SLOTS {}",menu.rules.capacity),"",x+12.0*s,y+189.0*s,false,Action::NetCapacity);
-            self.button(if menu.public{"PUBLIC"}else{"PRIVATE"},"",x+18.0*s+w,y+189.0*s,false,Action::NetPublic);
-        }else{
-            let sref=mp.session.as_ref().unwrap();
-            self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy);
-            self.cv.text(sref.rules.mode.name(),x+12.0*s,y+174.0*s,s,AMBER,Align::Left);
-            self.cv.text(&sref.status,x+12.0*s,y+191.0*s,sm,CREAM,Align::Left);
-        }
+        self.cv.text("ROOM LOBBY. READY UP, THEN THE HOST LAUNCHES.",x+12.0*s,y+34.0*s,sm,DIM,Align::Left);
+        let menu=&mp.menu;
+        let session=mp.session.as_ref().unwrap();
+        self.cv.text(if session.host{"YOUR ROOM"}else{"JOINED ROOM"},x+12.0*s,y+53.0*s,s,ACID,Align::Left);
+        self.network_field("INVITATION", &session.invitation(),Field::Invite,false,false,x+12.0*s,y+67.0*s,cw);
+        let ready=session.members.iter().filter(|m|m.ready).count();
+        self.cv.text(&format!("PILOTS {} / {}, READY {}",session.members.len(),session.rules.capacity,ready),x+12.0*s,y+103.0*s,sm,CREAM,Align::Left);
+        self.cv.paragraph(if session.host{"Wait for at least two pilots to be ready, then launch."}else{"Select READY when you want to fly. The host launches."},x+12.0*s,y+118.0*s,cw,sm,1.4,DIM);
+        self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy);
+        self.cv.text(session.rules.mode.name(),x+12.0*s,y+174.0*s,s,AMBER,Align::Left);
+        self.cv.text(&session.status,x+12.0*s,y+191.0*s,sm,CREAM,Align::Left);
         self.cv.text(&format!("AIRFRAME: {}",jet.name()),rx,y+49.0*s,sm,AMBER,Align::Left);
         if !mp.active(){self.button("CHANGE JET","",rx,y+57.0*s,false,Action::Jet);}
         else {self.cv.text("AIRFRAME FIXED FOR THIS SORTIE",rx,y+65.0*s,sm,DIM,Align::Left);}
@@ -493,15 +556,7 @@ impl<'a> Ui<'a> {
                     self.key_cap(&format!("{:.0}%",menu.gains.get(&m.id).copied().unwrap_or(1.0)*100.0),bx+54.0*s,yy-4.0*sm,38.0*s,false,Action::VoicePeerGain(m.id));
                 }
             }
-        }else if let Some(browser)=&menu.browser{
-            self.cv.text("PUBLIC ROOMS",rx,y+84.0*s,sm,DIM,Align::Left);
-            for(i,r)in browser.rooms.iter().enumerate(){
-                let yy=y+(95.0+i as f32*22.0)*s;
-                self.button(&format!("{} {}/{}",r.title,r.players,r.capacity),"",rx,yy,false,Action::NetRoom(i as u8));
-                self.cv.text(r.mode.name(),rx,y+(113.0+i as f32*22.0)*s,sm,DIM,Align::Left);
-            }
-            self.button("QUICK MATCH","",rx,y+189.0*s,false,Action::NetQuick);
-        }else{self.cv.paragraph(menu.rules.mode.brief(),rx,y+91.0*s,pw-cw-40.0*s,sm,1.5,CREAM);}
+        }
         let vs=mp.settings();let voice_label=match vs.mode{crate::voice::VoiceMode::Disabled=>"MIC OFF",crate::voice::VoiceMode::PushToTalk=>"PUSH TO TALK",crate::voice::VoiceMode::VoiceActivation=>"VOICE DETECTION"};
         let mut bx=x+12.0*s;let vy=y+213.0*s;
         for(label,act)in[(voice_label,Action::VoiceMode),(if vs.muted{"UNMUTE MIC"}else{"MUTE MIC"},Action::VoiceMute),(if vs.deafened{"UNDEAFEN"}else{"DEAFEN"},Action::VoiceDeafen)]{

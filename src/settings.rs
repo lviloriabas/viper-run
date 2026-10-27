@@ -165,3 +165,34 @@ mod migration_tests {
         assert_eq!(saved.tutorial_completed,31);
     }
 }
+
+/// Non-secret multiplayer preferences. Room invitation keys are never persisted.
+pub fn load_online() -> (String, String) {
+    let text = dir().and_then(|d|std::fs::read_to_string(d.join("online.txt")).ok()).unwrap_or_default();
+    parse_online(&text)
+}
+fn parse_online(text: &str) -> (String, String) {
+    let mut name = "Pilot".to_string();
+    let mut server = String::new();
+    for line in text.lines() {
+        if let Some((k,v)) = line.split_once('=') {
+            if k == "callsign" && crate::net::valid_name(v) { name=v.into(); }
+            if k == "server" && v.len() <= 160 && v.bytes().all(|b|b.is_ascii_graphic()) { server=v.into(); }
+        }
+    }
+    (name,server)
+}
+pub fn save_online(name: &str, server: &str) {
+    let Some(d) = dir() else { return; };
+    let (name,server)=parse_online(&format!("callsign={name}\nserver={server}\n"));
+    if std::fs::create_dir_all(&d).is_ok() { let _=std::fs::write(d.join("online.txt"),format!("callsign={name}\nserver={server}\n")); }
+}
+#[cfg(test)]
+mod online_tests {
+    use super::*;
+    #[test]
+    fn online_preferences_validate_names_and_do_not_restore_room_credentials() {
+        assert_eq!(parse_online("callsign=Wing_2\nserver=localhost:42861\ninvite=secret"),("Wing_2".into(),"localhost:42861".into()));
+        assert_eq!(parse_online("callsign=invalid/name\nserver=bad address"),("Pilot".into(),String::new()));
+    }
+}

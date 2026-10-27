@@ -32,16 +32,18 @@ polars, engine ratings, gear, flap schedules and weapon stations.
 [New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
 variant data, calibration and shared game approximations.
 
-ONLINE provides private invitations, public directory browsing and quick
-matching by mode. Choose a callsign, airframe, mode and capacity; join or host,
-mark ready, then the host launches. The microphone starts off. Push to talk,
-voice detection, mute, deafen and participant volume are in the room panel.
-The default PTT key is U, remappable in configuration; controller View/Back is
-PTT online and Start opens configuration.
+ONLINE opens a server browser with mode filters, pilot counts and pages.
+Select an open room to join, or use CREATE ROOM for a public/private lobby.
+Guests mark READY; the host launches. The relay path uses outbound TCP for
+gameplay and voice, so players do not need inbound firewall exceptions or
+port forwarding. LAN DIRECT offers invitation-only UDP games.
 
-The optional viper-server executable supplies directory and relay service on
-UDP 42861. Internet relay requires a reachable server running that binary;
-direct LAN rooms need no directory. See [multiplayer setup and verification](docs/MULTIPLAYER.md),
+Run viper-server on a reachable machine (TCP 42861), then enter its address
+in ONLINE. There is no automatically deployed public relay. The address and
+callsign are remembered. The microphone starts off.
+
+See [instrucciones en español](docs/MULTIPLAYER-ES.md),
+[setup, Defender distinctions and verification](docs/MULTIPLAYER.md),
 [mission rules](docs/MULTIPLAYER-MISSIONS.md) and [voice chat](docs/VOICE-CHAT.md).
 
 ## Fly

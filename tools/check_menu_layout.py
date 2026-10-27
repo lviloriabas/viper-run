@@ -27,7 +27,7 @@ def cases(full=False):
                 yield f'training-{lesson}-{stage}',['--tutorial',lesson,'--layout-scene',f'training-{stage}']
     yield 'school',['--screen','school']
     yield 'school-passed',['--screen','school','--layout-scene','school-passed']
-    for scene in ['', 'fields','browser','lobby','lobby-client','lobby-voice']:
+    for scene in ['', 'fields','browser','lobby','lobby-client','lobby-voice','create','lan','browser-empty','server-error']:
         yield 'network-'+(scene or 'setup'),['--screen','network']+(['--layout-scene',scene] if scene else [])
     for scene in ['keys','mouse','classic-invert','rebind']:
         yield 'config-'+scene,['--screen','menu','--controls','--layout-scene',scene]

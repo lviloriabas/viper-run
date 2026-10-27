@@ -1,4 +1,4 @@
-//! Encrypted UDP peer sessions and an optional rendezvous/relay directory.
+//! Encrypted direct UDP sessions and an outbound TCP directory/relay.
 //! All receive work, packet sizes, reassembly memory and peer counts are bounded.
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -10,6 +10,9 @@ use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 
+#[path = "net_tcp.rs"]
+mod tcp;
+pub const BROWSER_PAGE: usize = 6;
 pub const PORT: u16 = 42860;
 #[allow(dead_code)]
 pub const HUB_PORT: u16 = 42861;
@@ -168,9 +171,23 @@ fn err(s: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, s)
 }
 pub fn resolve(s: &str) -> io::Result<SocketAddr> {
-    s.to_socket_addrs()?
-        .next()
+    let addresses: Vec<_> = s.to_socket_addrs()?.collect();
+    addresses
+        .iter()
+        .find(|a| a.is_ipv4())
+        .copied()
+        .or_else(|| addresses.first().copied())
         .ok_or_else(|| err("address has no IP"))
+}
+pub fn server_address(s: &str) -> io::Result<SocketAddr> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(err("enter the relay server address"));
+    }
+    if let Ok(ip) = s.parse::<std::net::IpAddr>() {
+        return Ok(SocketAddr::new(ip, HUB_PORT));
+    }
+    resolve(s).or_else(|_| resolve(&format!("{s}:{HUB_PORT}")))
 }
 fn random<const N: usize>() -> io::Result<[u8; N]> {
     let mut a = [0; N];
@@ -196,6 +213,7 @@ pub struct Invite {
     pub endpoint: SocketAddr,
     pub key: [u8; 32],
     pub relay: bool,
+    pub tcp: bool,
 }
 impl Invite {
     pub fn parse(s: &str) -> io::Result<Self> {
@@ -203,6 +221,10 @@ impl Invite {
             .trim()
             .split_once('#')
             .ok_or_else(|| err("use address:port#invitation-key"))?;
+        let (tcp, address) = address
+            .strip_prefix("relay+tcp:")
+            .map(|s| (true, s))
+            .unwrap_or((false, address));
         let (relay, address) = address
             .strip_prefix("relay:")
             .map(|s| (true, s))
@@ -210,13 +232,20 @@ impl Invite {
         Ok(Self {
             endpoint: resolve(address)?,
             key: unhex(key)?,
-            relay,
+            relay: relay || tcp,
+            tcp,
         })
     }
     pub fn text(&self) -> String {
         format!(
             "{}{}#{}",
-            if self.relay { "relay:" } else { "" },
+            if self.tcp {
+                "relay+tcp:"
+            } else if self.relay {
+                "relay:"
+            } else {
+                ""
+            },
             self.endpoint,
             hex(&self.key)
         )
@@ -234,6 +263,13 @@ pub struct Advert {
     pub mode: GameMode,
     pub players: u8,
     pub capacity: u8,
+}
+impl Advert {
+    fn valid(&self) -> bool {
+        valid_name(&self.title)
+            && (2..=8).contains(&self.capacity)
+            && (1..=self.capacity).contains(&self.players)
+    }
 }
 #[derive(Serialize, Deserialize)]
 enum Hub {
@@ -261,6 +297,20 @@ enum Hub {
         target: u64,
         bytes: Vec<u8>,
     },
+    BrowsePage {
+        nonce: u64,
+        mode: Option<GameMode>,
+        page: u8,
+    },
+    Page {
+        nonce: u64,
+        page: u8,
+        pages: u8,
+        rooms: Vec<Advert>,
+    },
+    Registered,
+    Failure(String),
+    RoomMissing,
 }
 #[cfg_attr(not(test), allow(dead_code))]
 struct DirectoryRoom {
@@ -272,6 +322,7 @@ struct DirectoryRoom {
 }
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct Directory {
+    tcp: tcp::Relay,
     socket: UdpSocket,
     rooms: BTreeMap<[u8; 8], DirectoryRoom>,
     requests: BTreeMap<std::net::IpAddr, (Instant, u16)>,
@@ -281,7 +332,9 @@ impl Directory {
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let socket = UdpSocket::bind(addr)?;
         socket.set_nonblocking(true)?;
+        let tcp = tcp::Relay::bind(socket.local_addr()?)?;
         Ok(Self {
+            tcp,
             socket,
             rooms: BTreeMap::new(),
             requests: BTreeMap::new(),
@@ -291,6 +344,7 @@ impl Directory {
         self.socket.local_addr()
     }
     pub fn poll(&mut self) -> io::Result<()> {
+        self.tcp.poll()?;
         let now = Instant::now();
         self.rooms
             .retain(|_, r| now.duration_since(r.seen) < Duration::from_secs(20));
@@ -459,63 +513,119 @@ fn send_hub(socket: &UdpSocket, to: SocketAddr, msg: &Hub) -> io::Result<()> {
     socket.send_to(&bytes, to)?;
     Ok(())
 }
+fn connect_relay(server: SocketAddr) -> std::sync::mpsc::Receiver<io::Result<tcp::Connection>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(tcp::Connection::connect(server));
+    });
+    rx
+}
 pub struct Browser {
     pub mode: Option<GameMode>,
-    socket: UdpSocket,
-    server: SocketAddr,
+    connection: Option<tcp::Connection>,
+    connecting: Option<std::sync::mpsc::Receiver<io::Result<tcp::Connection>>>,
+    pub server: SocketAddr,
     nonce: u64,
     sent: Instant,
+    received: Option<Instant>,
+    requested: Instant,
     pub rooms: Vec<Advert>,
+    pub page: u8,
+    pub pages: u8,
+    pub latency_ms: u128,
 }
 impl Browser {
     pub fn new(server: SocketAddr) -> io::Result<Self> {
-        let socket = UdpSocket::bind(if server.is_ipv6() {
-            "[::]:0"
-        } else {
-            "0.0.0.0:0"
-        })?;
-        socket.set_nonblocking(true)?;
         Ok(Self {
             mode: None,
-            socket,
+            connection: None,
+            connecting: Some(connect_relay(server)),
             server,
             nonce: u64::from_le_bytes(random()?),
             sent: Instant::now() - Duration::from_secs(4),
+            received: None,
+            requested: Instant::now(),
             rooms: Vec::new(),
+            page: 0,
+            pages: 1,
+            latency_ms: 0,
         })
     }
+    pub fn refresh(&mut self) {
+        self.rooms.clear();
+        self.received = None;
+        self.requested = Instant::now();
+        self.nonce = self.nonce.wrapping_add(1);
+        self.sent = Instant::now() - Duration::from_secs(4);
+    }
+    pub fn turn_page(&mut self, next: bool) {
+        self.page = if next {
+            (self.page + 1).min(self.pages - 1)
+        } else {
+            self.page.saturating_sub(1)
+        };
+        self.refresh();
+    }
+    pub fn status(&self) -> String {
+        if self.connecting.is_some() {
+            "CONNECTING TO SERVER...".into()
+        } else if self.received.is_none() {
+            "REQUESTING SERVER LIST...".into()
+        } else if self.rooms.is_empty() {
+            "SERVER ONLINE. NO ROOMS FOUND. CREATE A ROOM.".into()
+        } else {
+            format!(
+                "SERVER ONLINE, {} MS. SELECT AN OPEN ROOM TO JOIN.",
+                self.latency_ms
+            )
+        }
+    }
     pub fn poll(&mut self) -> io::Result<()> {
+        if let Some(rx) = &self.connecting {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.connection = Some(result?);
+                    self.connecting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(_) => return Err(err("server connection failed")),
+            }
+        }
+        let Some(connection) = &mut self.connection else {
+            return Ok(());
+        };
         if self.sent.elapsed() > Duration::from_secs(3) {
-            send_hub(
-                &self.socket,
-                self.server,
-                &Hub::Browse {
-                    nonce: self.nonce,
-                    mode: self.mode,
-                    padding: vec![0; 512],
-                },
-            )?;
+            self.nonce = self.nonce.wrapping_add(1);
+            connection.send(&Hub::BrowsePage {
+                nonce: self.nonce,
+                mode: self.mode,
+                page: self.page,
+            })?;
             self.sent = Instant::now();
         }
-        let mut buf = [0; MTU];
-        for _ in 0..8 {
-            match self.socket.recv_from(&mut buf) {
-                Ok((n, from)) if from == self.server && n > 4 && &buf[..4] == b"VPH3" => {
-                    if let Ok(Hub::Listings { nonce, rooms }) = postcard::from_bytes(&buf[4..n]) {
-                        if nonce == self.nonce && rooms.len() <= 4 {
-                            self.rooms = rooms
-                                .into_iter()
-                                .filter(|a| {
-                                    valid_name(&a.title) && a.capacity <= 8 && a.players <= 8
-                                })
-                                .collect();
-                        }
-                    }
+        for message in connection.poll()? {
+            if let Hub::Page {
+                nonce,
+                page,
+                pages,
+                rooms,
+            } = message
+            {
+                if nonce == self.nonce
+                    && rooms.len() <= BROWSER_PAGE
+                    && (1..=22).contains(&pages)
+                    && page < pages
+                {
+                    self.rooms = rooms.into_iter().filter(Advert::valid).collect();
+                    self.page = page;
+                    self.pages = pages;
+                    self.latency_ms = self.sent.elapsed().as_millis();
+                    self.received = Some(Instant::now());
                 }
-                Ok(_) => {}
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e),
             }
+        }
+        if self.received.unwrap_or(self.requested).elapsed() > Duration::from_secs(8) {
+            return Err(err("server not responding; check address and TCP port"));
         }
         Ok(())
     }
@@ -576,7 +686,9 @@ pub enum Event {
     Disconnected(u64),
 }
 pub struct Session {
-    socket: UdpSocket,
+    socket: Option<UdpSocket>,
+    tcp: Option<tcp::Connection>,
+    connecting: Option<std::sync::mpsc::Receiver<io::Result<tcp::Connection>>>,
     pub host: bool,
     pub id: u64,
     key: [u8; 32],
@@ -613,9 +725,17 @@ impl Session {
         if !valid_name(name) || jet >= 4 || !rules.valid() {
             return Err(err("invalid room setup"));
         }
-        let socket = UdpSocket::bind(bind)?;
-        socket.set_nonblocking(true)?;
-        let mut endpoint = socket.local_addr()?;
+        let socket = if hub.is_none() {
+            let socket = UdpSocket::bind(bind)?;
+            socket.set_nonblocking(true)?;
+            Some(socket)
+        } else {
+            None
+        };
+        let mut endpoint = match &socket {
+            Some(s) => s.local_addr()?,
+            None => hub.unwrap(),
+        };
         if endpoint.ip().is_unspecified() {
             let probe = UdpSocket::bind(if endpoint.is_ipv6() {
                 "[::]:0"
@@ -639,6 +759,7 @@ impl Session {
             endpoint: hub.unwrap_or(endpoint),
             key: random()?,
             relay: hub.is_some(),
+            tcp: hub.is_some(),
         };
         let mut s = Self::new(socket, true, 0, invite, hub, name, jet)?;
         s.public = public;
@@ -656,18 +777,23 @@ impl Session {
         if !valid_name(name) || jet >= 4 {
             return Err(err("invalid callsign or aircraft"));
         }
-        let socket = UdpSocket::bind(if invite.endpoint.is_ipv6() {
-            "[::]:0"
+        let socket = if invite.tcp {
+            None
         } else {
-            "0.0.0.0:0"
-        })?;
-        socket.set_nonblocking(true)?;
+            let socket = UdpSocket::bind(if invite.endpoint.is_ipv6() {
+                "[::]:0"
+            } else {
+                "0.0.0.0:0"
+            })?;
+            socket.set_nonblocking(true)?;
+            Some(socket)
+        };
         let hub = invite.relay.then_some(invite.endpoint);
         let id = u64::from_le_bytes(random()?).max(1);
         Self::new(socket, false, id, invite, hub, name, jet)
     }
     fn new(
-        socket: UdpSocket,
+        socket: Option<UdpSocket>,
         host: bool,
         id: u64,
         invite: Invite,
@@ -690,6 +816,8 @@ impl Session {
         }
         Ok(Self {
             socket,
+            tcp: None,
+            connecting: invite.tcp.then(|| connect_relay(invite.endpoint)),
             host,
             id,
             key: invite.key,
@@ -706,7 +834,14 @@ impl Session {
             assemblies: BTreeMap::new(),
             members: Vec::new(),
             rules: Rules::default(),
-            status: if host { "ROOM OPEN" } else { "CONNECTING" }.into(),
+            status: if hub.is_some() {
+                "CONNECTING TO RELAY"
+            } else if host {
+                "LAN ROOM OPEN"
+            } else {
+                "CONNECTING"
+            }
+            .into(),
             last_hello: now - Duration::from_secs(2),
             last_lobby: now - Duration::from_secs(2),
             last_ping: now,
@@ -722,7 +857,22 @@ impl Session {
         self.invite.text()
     }
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.socket.local_addr()
+        if let Some(tcp) = &self.tcp {
+            tcp.local_addr()
+        } else if let Some(socket) = &self.socket {
+            socket.local_addr()
+        } else {
+            Ok(self.invite.endpoint)
+        }
+    }
+    fn send_directory(&mut self, message: &Hub) -> io::Result<()> {
+        if let Some(tcp) = &mut self.tcp {
+            tcp.send(message)
+        } else if let (Some(socket), Some(hub)) = (&self.socket, self.hub) {
+            send_hub(socket, hub, message)
+        } else {
+            Ok(())
+        }
     }
     pub fn send(&mut self, to: u64, msg: &Message) -> io::Result<()> {
         if !msg.valid() {
@@ -767,18 +917,16 @@ impl Session {
                 .map_err(|_| err("packet encryption failed"))?;
             header.extend(encrypted);
             if direct {
-                self.socket.send_to(&header, endpoint)?;
-            } else if let Some(hub) = self.hub {
-                send_hub(
-                    &self.socket,
-                    hub,
-                    &Hub::Relay {
-                        room: self.room,
-                        peer: self.id,
-                        target: to,
-                        bytes: header,
-                    },
-                )?;
+                if let Some(socket) = &self.socket {
+                    socket.send_to(&header, endpoint)?;
+                }
+            } else if self.hub.is_some() {
+                self.send_directory(&Hub::Relay {
+                    room: self.room,
+                    peer: self.id,
+                    target: to,
+                    bytes: header,
+                })?;
             }
         }
         Ok(())
@@ -813,11 +961,58 @@ impl Session {
     }
     pub fn poll(&mut self) -> io::Result<Vec<Event>> {
         let now = Instant::now();
+        if let Some(rx) = &self.connecting {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.tcp = Some(result?);
+                    self.connecting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(Vec::new()),
+                Err(_) => return Err(err("relay connection failed")),
+            }
+        }
+        if let Some(tcp) = &mut self.tcp {
+            let messages = tcp.poll()?;
+            for message in messages {
+                match message {
+                    Hub::Relay {
+                        room,
+                        target,
+                        bytes,
+                        ..
+                    } if room == self.room && target == self.id => {
+                        self.receive(self.invite.endpoint, &bytes, false, now);
+                    }
+                    Hub::Registered if self.host => self.status = "ROOM ONLINE, TCP RELAY".into(),
+                    Hub::RoomMissing
+                        if !self.host
+                            && self.members.is_empty()
+                            && self.started.elapsed() < TIMEOUT =>
+                    {
+                        self.last_hello = now - Duration::from_millis(450);
+                        self.status = "WAITING FOR HOST TO REGISTER".into();
+                    }
+                    Hub::RoomMissing => return Err(err("room closed; refresh server browser")),
+                    Hub::Failure(message) => return Err(err(&message)),
+                    _ => {}
+                }
+            }
+        }
+        if self.invite.tcp
+            && self.host
+            && self.status == "CONNECTING TO RELAY"
+            && self.started.elapsed() > Duration::from_secs(8)
+        {
+            return Err(err("relay did not confirm the room; update viper-server"));
+        }
         let mut buf = [0; MTU];
         self.assemblies
             .retain(|_, a| now.duration_since(a.at) < Duration::from_secs(1));
         for _ in 0..192 {
-            let (n, from) = match self.socket.recv_from(&mut buf) {
+            let Some(socket) = &self.socket else {
+                break;
+            };
+            let (n, from) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                 Err(e) => return Err(e),
@@ -862,7 +1057,9 @@ impl Session {
             self.send(0, &self.hello.clone())?;
             self.last_hello = now;
             if self.started.elapsed() > TIMEOUT {
-                self.status = "CONNECTION TIMED OUT".into();
+                return Err(err(
+                    "connection timed out; check invitation, host and firewall",
+                ));
             }
         }
         if self.host && self.last_lobby.elapsed() > Duration::from_millis(500) {
@@ -870,7 +1067,7 @@ impl Session {
                 rules: self.rules.clone(),
                 members: self.members.clone(),
             })?;
-            if let Some(hub) = self.hub {
+            if self.hub.is_some() {
                 let public = (self.public && !self.rules.started).then(|| Advert {
                     title: self.title.clone(),
                     endpoint: self.local_addr().unwrap(),
@@ -879,15 +1076,11 @@ impl Session {
                     players: self.members.len() as u8,
                     capacity: self.rules.capacity,
                 });
-                send_hub(
-                    &self.socket,
-                    hub,
-                    &Hub::Register {
-                        room: self.room,
-                        lease: self.lease,
-                        public,
-                    },
-                )?;
+                self.send_directory(&Hub::Register {
+                    room: self.room,
+                    lease: self.lease,
+                    public,
+                })?;
             }
             self.last_lobby = now;
         }
@@ -1055,15 +1248,11 @@ impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.broadcast(&Message::Leave);
         if self.host {
-            if let Some(hub) = self.hub {
-                let _ = send_hub(
-                    &self.socket,
-                    hub,
-                    &Hub::Unregister {
-                        room: self.room,
-                        lease: self.lease,
-                    },
-                );
+            if self.hub.is_some() {
+                let _ = self.send_directory(&Hub::Unregister {
+                    room: self.room,
+                    lease: self.lease,
+                });
             }
         }
     }
@@ -1161,7 +1350,8 @@ mod tests {
         hub.poll().unwrap();
         let mut client =
             Session::join(Invite::parse(&host.invitation()).unwrap(), "Wing", 1).unwrap();
-        for _ in 0..15 {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while client.members.len() < 2 && Instant::now() < deadline {
             client.poll().unwrap();
             hub.poll().unwrap();
             host.poll().unwrap();
@@ -1193,11 +1383,16 @@ mod discovery_tests {
             },
         )
         .unwrap();
-        host.poll().unwrap();
-        directory.poll().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while host.status != "ROOM ONLINE, TCP RELAY" && Instant::now() < deadline {
+            host.poll().unwrap();
+            directory.poll().unwrap();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(host.status, "ROOM ONLINE, TCP RELAY");
         let mut browser = Browser::new(server).unwrap();
         browser.mode = Some(GameMode::Strike);
-        for _ in 0..5 {
+        for _ in 0..30 {
             browser.poll().unwrap();
             directory.poll().unwrap();
             std::thread::sleep(Duration::from_millis(2));
@@ -1207,7 +1402,7 @@ mod discovery_tests {
         assert_eq!(browser.rooms[0].key, host.key);
         let mut other = Browser::new(server).unwrap();
         other.mode = Some(GameMode::Teams);
-        for _ in 0..5 {
+        for _ in 0..30 {
             other.poll().unwrap();
             directory.poll().unwrap();
             std::thread::sleep(Duration::from_millis(2));
@@ -1267,5 +1462,184 @@ mod full_room_tests {
                 .iter()
                 .any(|e| matches!(e,Event::Data(0,Message::Frame{tick:30,bytes:b})if *b==bytes)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tcp_browser_tests {
+    use super::*;
+    fn pump(hub: &mut Directory, hosts: &mut [Session], browser: &mut Browser) {
+        let until = Instant::now() + Duration::from_millis(120);
+        while Instant::now() < until {
+            for host in hosts.iter_mut() {
+                host.poll().unwrap();
+            }
+            hub.poll().unwrap();
+            browser.poll().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn tcp_hosts_use_no_udp_listener_and_browser_pages_filter_and_hide_private_rooms() {
+        let mut hub = Directory::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let server = hub.local_addr().unwrap();
+        let occupied = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut hosts = (0..9)
+            .map(|i| {
+                Session::host(
+                    occupied.local_addr().unwrap(),
+                    Some(server),
+                    i != 8,
+                    &format!("Room{i}"),
+                    0,
+                    Rules {
+                        mode: if i == 7 {
+                            GameMode::Strike
+                        } else {
+                            GameMode::Combat
+                        },
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(hosts.iter().all(|h| h.socket.is_none()));
+        assert!(hosts
+            .iter()
+            .all(|h| h.invitation().starts_with("relay+tcp:")));
+        let mut browser = Browser::new(server).unwrap();
+        pump(&mut hub, &mut hosts, &mut browser);
+        browser.refresh();
+        pump(&mut hub, &mut hosts, &mut browser);
+        assert_eq!(browser.pages, 2);
+        assert_eq!(browser.rooms.len(), BROWSER_PAGE);
+        let mut names = browser
+            .rooms
+            .iter()
+            .map(|a| a.title.clone())
+            .collect::<Vec<_>>();
+        browser.turn_page(true);
+        pump(&mut hub, &mut hosts, &mut browser);
+        assert_eq!(browser.page, 1);
+        assert_eq!(browser.rooms.len(), 2);
+        names.extend(browser.rooms.iter().map(|a| a.title.clone()));
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 8);
+        assert!(!names.iter().any(|n| n == "Room8"));
+        browser.mode = Some(GameMode::Strike);
+        browser.refresh();
+        pump(&mut hub, &mut hosts, &mut browser);
+        assert_eq!(browser.pages, 1);
+        assert_eq!(browser.page, 0);
+        assert_eq!(browser.rooms.len(), 1);
+        assert_eq!(browser.rooms[0].title, "Room7");
+        // Starting a sortie removes it from subsequent listings.
+        hosts[7].rules.started = true;
+        hosts[7].last_lobby = Instant::now() - Duration::from_secs(1);
+        pump(&mut hub, &mut hosts, &mut browser);
+        browser.refresh();
+        pump(&mut hub, &mut hosts, &mut browser);
+        assert!(browser.rooms.is_empty());
+    }
+    #[test]
+    fn tcp_relay_delivers_large_frames_voice_and_disconnects() {
+        let mut hub = Directory::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut host = Session::host(
+            "127.0.0.1:0".parse().unwrap(),
+            Some(hub.local_addr().unwrap()),
+            true,
+            "Lead",
+            0,
+            Rules::default(),
+        )
+        .unwrap();
+        let mut wing =
+            Session::join(Invite::parse(&host.invitation()).unwrap(), "Wing", 3).unwrap();
+        let end = Instant::now() + Duration::from_secs(2);
+        while wing.members.len() < 2 && Instant::now() < end {
+            host.poll().unwrap();
+            hub.poll().unwrap();
+            wing.poll().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(wing.members.len(), 2);
+        assert!(host.socket.is_none() && wing.socket.is_none());
+        wing.set_ready(true, 3).unwrap();
+        let payload = vec![0x5a; 16000];
+        host.send(
+            wing.id,
+            &Message::Frame {
+                tick: 42,
+                bytes: payload.clone(),
+            },
+        )
+        .unwrap();
+        wing.send(
+            0,
+            &Message::Voice {
+                speaker: wing.id,
+                sequence: 1,
+                data: vec![12; 320],
+            },
+        )
+        .unwrap();
+        let (mut frame, mut voice) = (false, false);
+        let end = Instant::now() + Duration::from_secs(2);
+        while (!frame || !voice) && Instant::now() < end {
+            hub.poll().unwrap();
+            for e in host.poll().unwrap() {
+                if matches!(e, Event::Data(_, Message::Voice { sequence: 1, .. })) {
+                    voice = true;
+                }
+            }
+            for e in wing.poll().unwrap() {
+                if matches!(e,Event::Data(0,Message::Frame{tick:42,bytes})if bytes==payload) {
+                    frame = true;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(frame && voice);
+        assert!(host.members.iter().find(|m| m.id == wing.id).unwrap().ready);
+        host.launch().unwrap();
+        drop(hub);
+        let end = Instant::now() + Duration::from_secs(2);
+        while host.poll().is_ok() {
+            assert!(Instant::now() < end, "host did not detect relay shutdown");
+        }
+        while wing.poll().is_ok() {
+            assert!(Instant::now() < end, "client did not detect relay shutdown");
+        }
+    }
+    #[test]
+    fn addresses_and_new_and_legacy_invites_round_trip() {
+        assert_eq!(server_address("127.0.0.1").unwrap().port(), HUB_PORT);
+        assert_eq!(
+            server_address("::1").unwrap().ip(),
+            std::net::Ipv6Addr::LOCALHOST
+        );
+        assert!(server_address("").is_err());
+        for prefix in ["", "relay:", "relay+tcp:"] {
+            let text = format!("{prefix}127.0.0.1:42861#{}", "ab".repeat(32));
+            let invite = Invite::parse(&text).unwrap();
+            assert_eq!(invite.text(), text);
+            assert_eq!(invite.tcp, prefix == "relay+tcp:");
+        }
+    }
+    #[test]
+    fn browser_expires_an_unanswered_list_instead_of_spinning_forever() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut browser = Browser::new(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let end = Instant::now() + Duration::from_secs(2);
+        while browser.connecting.is_some() && Instant::now() < end {
+            browser.poll().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        browser.requested = Instant::now() - Duration::from_secs(9);
+        assert!(browser.poll().is_err());
+        drop(stream);
     }
 }

@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel { Browser, Create, Invite, Lan }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Name,
     Invite,
@@ -14,12 +16,15 @@ pub enum Field {
     Port,
 }
 pub struct Menu {
+    pub panel: Panel,
+    pub filter: Option<net::GameMode>,
     pub name: String,
     pub invite: String,
     pub server: String,
     pub port: String,
     pub editing: Option<Field>,
     before: String,
+    pub replace_text: bool,
     pub rules: net::Rules,
     pub public: bool,
     pub status: String,
@@ -30,15 +35,18 @@ pub struct Menu {
 impl Default for Menu {
     fn default() -> Self {
         Self {
+            panel: Panel::Browser,
+            filter: None,
             name: "Pilot".into(),
             invite: String::new(),
             server: String::new(),
             port: net::PORT.to_string(),
             editing: None,
             before: String::new(),
+            replace_text: false,
             rules: net::Rules::default(),
-            public: false,
-            status: "HOST A ROOM OR PASTE AN INVITATION".into(),
+            public: true,
+            status: "ENTER YOUR RELAY SERVER ADDRESS, THEN REFRESH.".into(),
             browser: None,
             muted: BTreeSet::new(),
             gains: BTreeMap::new(),
@@ -65,6 +73,7 @@ impl Menu {
     pub fn edit(&mut self, f: Field) {
         self.before = self.text(f).into();
         self.editing = Some(f);
+        self.replace_text = true;
     }
     pub fn character(&mut self, ch: char) {
         if let Some(f) = self.editing {
@@ -78,6 +87,7 @@ impl Menu {
                 Field::Port => 5,
                 _ => 160,
             };
+            if allowed && self.replace_text { self.text_mut(f).clear(); self.replace_text = false; }
             if allowed && self.text(f).len() < limit {
                 self.text_mut(f).push(ch);
             }
@@ -85,11 +95,12 @@ impl Menu {
     }
     pub fn backspace(&mut self) {
         if let Some(f) = self.editing {
-            self.text_mut(f).pop();
+            if self.replace_text { self.text_mut(f).clear(); self.replace_text = false; } else { self.text_mut(f).pop(); }
         }
     }
     pub fn finish(&mut self, cancel: bool) {
         if let Some(f) = self.editing.take() {
+            if !cancel && f == Field::Server && self.before != self.server { self.browser = None; }
             if cancel {
                 *self.text_mut(f) = self.before.clone();
             }
@@ -239,7 +250,21 @@ impl App {
                     self.state = State::Network;
                     self.selected = 0;
                     self.grab(false);
+                    if self.multiplayer.session.is_none() && self.multiplayer.menu.browser.is_none() && !self.multiplayer.menu.server.is_empty() {
+                        self.network_action(Action::NetBrowse);
+                    }
                 }
+                Action::NetTab(panel) => {
+                    self.multiplayer.menu.finish(false);
+                    self.multiplayer.menu.panel = panel;
+                    self.selected = 0;
+                }
+                Action::NetFilter => {
+                    let menu = &mut self.multiplayer.menu;
+                    menu.filter = match menu.filter { None => Some(net::GameMode::ALL[0]), Some(net::GameMode::Defense) => None, Some(m) => Some(m.next()) };
+                    if let Some(browser) = &mut menu.browser { browser.mode = menu.filter; browser.page = 0; browser.refresh(); }
+                }
+                Action::NetPage(next) => { if let Some(b) = &mut self.multiplayer.menu.browser { b.turn_page(next); } }
                 Action::NetEdit(f) => {
                     if self.multiplayer.session.is_none() {
                         self.multiplayer.menu.edit(f);
@@ -248,7 +273,6 @@ impl App {
                 Action::NetMode => {
                     if self.multiplayer.session.is_none() {
                         self.multiplayer.menu.rules.mode = self.multiplayer.menu.rules.mode.next();
-                        self.multiplayer.menu.browser = None;
                     }
                 }
                 Action::NetCapacity => {
@@ -261,16 +285,14 @@ impl App {
                         return Ok(());
                     }
                     let menu = &self.multiplayer.menu;
-                    let port = menu
+                    let port = if menu.panel != Panel::Lan { 0 } else { menu
                         .port
                         .parse::<u16>()
                         .ok()
                         .filter(|p| *p > 0)
-                        .ok_or("ENTER A VALID UDP PORT")?;
-                    let hub = if menu.server.trim().is_empty() {
-                        None
-                    } else {
-                        Some(net::resolve(menu.server.trim()).map_err(|e| e.to_string())?)
+                        .ok_or("ENTER A VALID UDP PORT")? };
+                    let hub = if menu.panel == Panel::Lan { None } else {
+                        Some(net::server_address(menu.server.trim()).map_err(|_| "ENTER YOUR RELAY SERVER ADDRESS FIRST")?)
                     };
                     let mut rules = menu.rules.clone();
                     rules.started = false;
@@ -289,8 +311,10 @@ impl App {
                     )
                     .map_err(|e| e.to_string())?;
                     self.multiplayer.menu.invite = s.invitation();
-                    self.multiplayer.menu.status = "ROOM OPEN. SHARE THE FULL INVITATION.".into();
+                    self.multiplayer.menu.status = if hub.is_some() { "CONNECTING TO RELAY. WAIT FOR ROOM ONLINE." } else { "LAN ROOM OPEN. ALLOW THE GAME ON YOUR PRIVATE NETWORK." }.into();
+                    self.multiplayer.menu.browser = None;
                     self.multiplayer.session = Some(s);
+                    self.save();
                 }
                 Action::NetJoin => {
                     if self.multiplayer.session.is_some() {
@@ -298,18 +322,18 @@ impl App {
                     }
                     let menu = &self.multiplayer.menu;
                     let invite = net::Invite::parse(&menu.invite).map_err(|e| e.to_string())?;
-                    self.multiplayer.session = Some(
-                        net::Session::join(invite, &menu.name, self.config.jet.index() as u8)
-                            .map_err(|e| e.to_string())?,
-                    );
+                    let session = net::Session::join(invite, &menu.name, self.config.jet.index() as u8).map_err(|e| e.to_string())?;
+                    self.multiplayer.menu.browser = None;
+                    self.multiplayer.session = Some(session);
                 }
                 Action::NetBrowse => {
-                    let server = net::resolve(self.multiplayer.menu.server.trim())
-                        .map_err(|_| "ENTER DIRECTORY HOST:PORT FIRST")?;
+                    let server = net::server_address(self.multiplayer.menu.server.trim())
+                        .map_err(|_| "ENTER RELAY HOST OR HOST:PORT FIRST")?;
                     let mut browser = net::Browser::new(server).map_err(|e| e.to_string())?;
-                    browser.mode = Some(self.multiplayer.menu.rules.mode);
+                    browser.mode = self.multiplayer.menu.filter;
                     self.multiplayer.menu.browser = Some(browser);
-                    self.multiplayer.menu.status = "SEARCHING FOR PUBLIC ROOMS".into();
+                    self.multiplayer.menu.status = "CONNECTING TO SERVER...".into();
+                    self.save();
                 }
                 Action::NetRoom(index) => {
                     let menu = &self.multiplayer.menu;
@@ -319,27 +343,16 @@ impl App {
                         .and_then(|b| b.rooms.get(index as usize))
                         .cloned()
                     {
-                        let endpoint = net::resolve(&menu.server).map_err(|e| e.to_string())?;
+                        if advert.players >= advert.capacity { return Err("ROOM FULL. CHOOSE ANOTHER ROOM.".into()); }
+                        let endpoint = menu.browser.as_ref().unwrap().server;
                         self.multiplayer.menu.invite = net::Invite {
                             endpoint,
                             key: advert.key,
                             relay: true,
+                            tcp: true,
                         }
                         .text();
                         self.network_action(Action::NetJoin);
-                    }
-                }
-                Action::NetQuick => {
-                    let candidate = self.multiplayer.menu.browser.as_ref().and_then(|b| {
-                        b.rooms.iter().position(|r| {
-                            r.mode == self.multiplayer.menu.rules.mode && r.players < r.capacity
-                        })
-                    });
-                    if let Some(i) = candidate {
-                        self.network_action(Action::NetRoom(i as u8));
-                    } else {
-                        self.multiplayer.menu.status =
-                            "NO MATCHING OPEN ROOM. REFRESH OR HOST ONE.".into();
                     }
                 }
                 Action::NetCopy => {
@@ -377,6 +390,7 @@ impl App {
                     self.controls_open = false;
                     self.controls_was_flying = false;
                     self.multiplayer.disconnect(&self.audio);
+                    self.multiplayer.menu.status = "LEFT ROOM. REFRESH TO FIND ANOTHER.".into();
                     self.state = State::Network;
                     self.grab(false);
                 }
@@ -509,8 +523,12 @@ impl App {
     }
     pub(super) fn network_poll(&mut self) {
         if let Some(browser) = &mut self.multiplayer.menu.browser {
-            if let Err(e) = browser.poll() {
-                self.multiplayer.menu.status = e.to_string();
+            match browser.poll() {
+                Ok(()) => self.multiplayer.menu.status = browser.status(),
+                Err(e) => {
+                    self.multiplayer.menu.status = format!("SERVER UNREACHABLE: {e}. CHECK ADDRESS / TCP PORT, THEN REFRESH.");
+                    self.multiplayer.menu.browser = None;
+                }
             }
         }
         let Some(mut session) = self.multiplayer.session.take() else {
@@ -519,8 +537,11 @@ impl App {
         let events = match session.poll() {
             Ok(e) => e,
             Err(e) => {
-                self.multiplayer.menu.status = e.to_string();
-                Vec::new()
+                self.multiplayer.menu.status = format!("CONNECTION LOST: {e}. REFRESH OR JOIN AGAIN.");
+                self.multiplayer.disconnect(&self.audio);
+                self.state = State::Network;
+                self.grab(false);
+                return;
             }
         };
         for event in events {
@@ -1159,5 +1180,22 @@ impl App {
             self.flash_color = color;
             self.flash = self.flash.max(0.3);
         }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+    #[test]
+    fn editing_replaces_old_text_and_escape_restores_it() {
+        let mut menu=Menu::default();
+        menu.edit(Field::Name);
+        for c in "Wing".chars(){menu.character(c);}
+        assert_eq!(menu.name,"Wing");
+        menu.finish(true);assert_eq!(menu.name,"Pilot");
+        menu.edit(Field::Server);
+        for c in "127.0.0.1:42861".chars(){menu.character(c);}
+        menu.finish(false);assert_eq!(menu.server,"127.0.0.1:42861");
+        menu.edit(Field::Server);menu.backspace();assert!(menu.server.is_empty());
     }
 }

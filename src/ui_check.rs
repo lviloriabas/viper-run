@@ -78,11 +78,19 @@ pub(super) fn step(app: &mut App, frame: u32) -> bool {
 
 // Hold the loopback peer only for the native UI integration check.
 thread_local! {
+    static FUTURE_HUB:std::cell::RefCell<Option<crate::net::Directory>>=const{std::cell::RefCell::new(None)};
+    static FUTURE_HOST:std::cell::RefCell<Option<crate::net::Session>>=const{std::cell::RefCell::new(None)};
     static FUTURE_PEER:std::cell::RefCell<Option<crate::net::Session>>=const{std::cell::RefCell::new(None)};
     static FUTURE_DELAY:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};
     static FUTURE_JOINED:std::cell::RefCell<Option<std::time::Instant>>=const{std::cell::RefCell::new(None)};
 }
 pub(super) fn future_step(app:&mut App,frame:u32)->bool{
+    FUTURE_HUB.with(|hub| { if let Some(hub)=hub.borrow_mut().as_mut() {
+        hub.poll().unwrap();
+        FUTURE_HOST.with(|host| { if let Some(host)=host.borrow_mut().as_mut() { host.poll().unwrap(); } });
+        hub.poll().unwrap();
+    }});
+
     fn bounds(app:&App){
         for b in &app.buttons{
             assert!(b.x>=0.0&&b.y>=0.0&&b.x+b.w<=app.win.0+0.5&&b.y+b.h<=app.win.1+0.5,"button {:?} outside {:?}",b.action,app.win);
@@ -124,6 +132,7 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             let probe=std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
             app.multiplayer.menu.port=probe.local_addr().unwrap().port().to_string();
             drop(probe);
+            select(app,Action::NetTab(crate::multiplayer::Panel::Lan),0);
         }
         2=>select(app,Action::NetHost,0),
         3=>{
@@ -175,6 +184,62 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             FUTURE_PEER.with(|p|{p.borrow_mut().take();});
             key(app,KeyCode::Escape);assert_eq!(app.state,State::Attract);
         }
+        23=>{
+            let hub=crate::net::Directory::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            app.multiplayer.menu.server=hub.local_addr().unwrap().to_string();
+            let host=crate::net::Session::host("127.0.0.1:0".parse().unwrap(),Some(hub.local_addr().unwrap()),true,"BrowserHost",2,crate::net::Rules::default()).unwrap();
+            FUTURE_HUB.with(|h|*h.borrow_mut()=Some(hub));
+            FUTURE_HOST.with(|h|*h.borrow_mut()=Some(host));
+            FUTURE_JOINED.with(|t|*t.borrow_mut()=Some(std::time::Instant::now()));
+        }
+        24=>{
+            let registered=FUTURE_HOST.with(|h|h.borrow().as_ref().unwrap().status=="ROOM ONLINE, TCP RELAY");
+            if !registered {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0));
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            app.multiplayer.menu.panel=crate::multiplayer::Panel::Browser;
+            select(app,Action::Online,2);
+        }
+        25=>{
+            let found=app.multiplayer.menu.browser.as_ref().is_some_and(|b|b.rooms.len()==1);
+            if !found {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0),"browser did not discover public room");
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            bounds(app);
+            select(app,Action::NetRoom(0),1);
+        }
+        26=>{
+            if app.multiplayer.session.as_ref().unwrap().members.len()!=2 {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0));
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            bounds(app);select(app,Action::NetReady,2);
+        }
+        27=>{
+            let ready=FUTURE_HOST.with(|h|h.borrow().as_ref().unwrap().members.iter().all(|m|m.ready));
+            if !ready {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0));
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            FUTURE_HOST.with(|h|h.borrow_mut().as_mut().unwrap().launch().unwrap());
+        }
+        28=>{
+            if !app.multiplayer.active() {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0));
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            assert!(!app.multiplayer.voice.capturing());key(app,KeyCode::Escape);
+        }
+        29=>select(app,Action::Online,0),
+        30=>select(app,Action::NetLeave,1),
+        31=>{
+            assert!(app.multiplayer.session.is_none());
+            FUTURE_HOST.with(|h|h.borrow_mut().take());FUTURE_HUB.with(|h|h.borrow_mut().take());
+            key(app,KeyCode::Escape);assert_eq!(app.state,State::Attract);
+            println!("PASS public server browser, controller join, TCP lobby ready, launch and leave");
+        }
         _=>{
             println!("PASS flight school lessons through click, Enter and controller A");
             println!("PASS online fields, private hosting, launch gating, leaving and microphone disabled");
@@ -187,9 +252,12 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
 /// Rendering these never calls voice tick or starts microphone capture.
 pub(super) fn layout_scene(app:&mut App,scene:&str) {
     use crate::{net,settings,voice,tutorial};
-    let known=matches!(scene,"keys"|"mouse"|"classic-invert"|"rebind"|"school-passed"|"fuel-min"|"lesson-passed"|"lesson-failed"|"lobby"|"lobby-client"|"lobby-voice"|"browser"|"fields")
+    let known=matches!(scene,"keys"|"mouse"|"classic-invert"|"rebind"|"school-passed"|"fuel-min"|"lesson-passed"|"lesson-failed"|"lobby"|"lobby-client"|"lobby-voice"|"browser"|"fields"|"create"|"lan"|"browser-empty"|"server-error")
         ||scene.starts_with("training-")||scene.starts_with("threats-")||scene.starts_with("network-");
     assert!(known,"unknown layout scene: {scene}");
+    if scene=="create"||scene.starts_with("network-") { app.multiplayer.menu.panel=crate::multiplayer::Panel::Create; }
+    if scene=="lan" { app.multiplayer.menu.panel=crate::multiplayer::Panel::Lan; }
+    if scene=="server-error" { app.multiplayer.menu.status="SERVER UNREACHABLE: CONNECTION REFUSED. CHECK ADDRESS / TCP PORT, THEN REFRESH.".into(); }
     if let Some(mode)=scene.strip_prefix("network-") {
         app.multiplayer.menu.rules.mode=net::GameMode::parse(mode).expect("known multiplayer layout mode");
     }
@@ -223,12 +291,13 @@ pub(super) fn layout_scene(app:&mut App,scene:&str) {
         if scene=="lobby-client" {session.host=false;}
         app.multiplayer.session=Some(session);
     }
-    if scene=="browser" {
+    if scene=="browser" || scene=="browser-empty" {
         let mut browser=net::Browser::new("127.0.0.1:9".parse().unwrap()).unwrap();
-        for i in 0..4 {browser.rooms.push(net::Advert{title:"Longest-Callsign".into(),endpoint:"127.0.0.1:9".parse().unwrap(),key:[0;32],mode:net::GameMode::ALL[i],players:8,capacity:8});}
+        for i in 0..if scene=="browser"{6}else{0} {browser.rooms.push(net::Advert{title:"Longest-Callsign".into(),endpoint:"127.0.0.1:9".parse().unwrap(),key:[0;32],mode:net::GameMode::ALL[i],players:8,capacity:8});}
         app.multiplayer.menu.browser=Some(browser);
     }
     if scene=="fields" {
+        app.multiplayer.menu.panel=crate::multiplayer::Panel::Invite;
         app.multiplayer.menu.name="Longest-Callsign".into();
         app.multiplayer.menu.invite="0123456789ABCDEF".repeat(10);
         app.multiplayer.menu.server="long-directory-hostname.example.invalid:42861".into();

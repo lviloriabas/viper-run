@@ -533,6 +533,11 @@ impl App {
         };
         app.performance.set_enabled(app.settings.performance_overlay);
         app.apply_test_options();
+        if !app.opts.ui_check && !app.opts.future_ui_check && !app.opts.layout_check && app.opts.net_report.is_none() {
+            let (name,server)=settings::load_online();
+            app.multiplayer.menu.name=name;
+            app.multiplayer.menu.server=server;
+        }
         app.network_options();
         app
     }
@@ -837,7 +842,7 @@ impl App {
     }
 
     fn save(&self) {
-        if !self.opts.ui_check && !self.opts.future_ui_check && !self.opts.layout_check && self.opts.net_report.is_none() { settings::save(&self.settings, &self.best); }
+        if !self.opts.ui_check && !self.opts.future_ui_check && !self.opts.layout_check && self.opts.net_report.is_none() { settings::save(&self.settings, &self.best); settings::save_online(&self.multiplayer.menu.name, &self.multiplayer.menu.server); }
     }
 
     fn act(&mut self, a: Action) {
@@ -2361,7 +2366,8 @@ impl EventHandler for App {
         if self.state==State::Network && self.multiplayer.menu.editing.is_some() {
             match key {
                 KeyCode::Escape=>self.multiplayer.menu.finish(true),
-                KeyCode::Enter | KeyCode::KpEnter=>self.multiplayer.menu.finish(false),
+                KeyCode::Enter | KeyCode::KpEnter=>{self.multiplayer.menu.finish(false);self.save();},
+                KeyCode::A if mods.ctrl=>self.multiplayer.menu.replace_text=true,
                 KeyCode::Backspace=>self.multiplayer.menu.backspace(),
                 KeyCode::V if mods.ctrl=>{if let Some(text)=window::clipboard_get(){for ch in text.chars(){self.multiplayer.menu.character(ch);}}},
                 _=>{}
