@@ -125,8 +125,8 @@ const R_AOAI: R = r(896.0, 320.0, 128.0, 128.0);
 /// The rear-view picture (see `mirror_camera`), for the cockpits with mirrors
 /// (the MiG-29; the F-16 has none).
 const R_MIRROR: R = r(1024.0, 1280.0, 512.0, 160.0);
-/// Vertical field of view of the rear-view camera; its picture is 512 by 160.
-pub const MIRROR_SIZE: (u32, u32) = (512, 160);
+/// Rear-view render size. Mirrors sample this texture directly at full resolution.
+pub const MIRROR_SIZE: (u32, u32) = (1536, 480);
 const MIRROR_FOV: f64 = 40.0 * DEG;
 /// Warning lights on the right eyebrow.
 const R_CAUTION: R = r(0.0, 448.0, 256.0, 128.0);
@@ -452,6 +452,38 @@ fn faces(m: &Mesh) -> Mesh {
     out
 }
 
+/// Keep the atlas rectangle as a geometry tag, then normalize its UVs for
+/// the dedicated high-resolution reflection texture. Its pixels never pass
+/// through the small instrument-atlas slot.
+fn mirror_triangle(tri:&[f32])->bool {
+    tri.chunks(crate::mesh::STRIDE).all(|v|{
+        let (x,y)=(v[9] as f64*AW,(1.0-v[10] as f64)*A);
+        x>=R_MIRROR.x as f64-0.01 && x<=(R_MIRROR.x+R_MIRROR.w) as f64+0.01 &&
+        y>=R_MIRROR.y as f64-0.01 && y<=(R_MIRROR.y+R_MIRROR.h) as f64+0.01
+    })
+}
+fn blank_mirror_faces(m:&mut Mesh) {
+    for tri in m.v.chunks_mut(crate::mesh::STRIDE*3).filter(|t|mirror_triangle(t)) {
+        for v in tri.chunks_mut(crate::mesh::STRIDE) {
+            v[6..11].copy_from_slice(&[0.07,0.08,0.09,-1.0,-1.0]);
+        }
+    }
+}
+fn extract_mirror_faces(m:&Mesh)->Mesh {
+    let mut out=Mesh::new();
+    for tri in m.v.chunks(crate::mesh::STRIDE*3) {
+        if mirror_triangle(tri) {
+            for v in tri.chunks(crate::mesh::STRIDE) {
+                let mut v=v.to_vec();
+                v[9]=(v[9]*AW as f32-R_MIRROR.x)/R_MIRROR.w;
+                v[10]=(v[10]*A as f32-(A as f32-R_MIRROR.y-R_MIRROR.h))/R_MIRROR.h;
+                out.v.extend(v);
+            }
+        }
+    }
+    out
+}
+
 pub struct Cockpit {
     pip: Pipeline,
     glass_pip: Pipeline,
@@ -470,6 +502,7 @@ pub struct Cockpit {
     /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
     mig: [Part; 3],
     extra: [[Part;3];2],
+    mirror_faces: Vec<Part>,
     source: [Vec<Part>;2],
     hud_glass: [Part; 4],
     pub atlas: gfx::Target,
@@ -512,8 +545,11 @@ impl Cockpit {
         let dyn_face_bind = Bindings { vertex_buffers: vec![fvb], index_buffer: gfx::sequential_ib(ctx, DYN_FACE_CAP), images: vec![atlas_tex] };
         let mut canopy = world::part(ctx, canopy);
         canopy.bind.images = vec![atlas_tex];
+        let mut mirror_faces=Vec::new();
         let mut mm = Mesh::new();
         mig::build_static(&mut mm);
+        mirror_faces.push(world::part(ctx,&extract_mirror_faces(&mm)));
+        blank_mirror_faces(&mut mm);
         let mut shifted = Mesh { v: mig_canopy.v.clone() };
         for v in shifted.v.chunks_mut(crate::mesh::STRIDE) {
             v[0] += mig::OFFSET.x as f32;
@@ -525,7 +561,9 @@ impl Cockpit {
             p
         });
         let extra=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
-            let m=modern::build(kind);
+            let mut m=modern::build(kind);
+            mirror_faces.push(world::part(ctx,&extract_mirror_faces(&m)));
+            blank_mirror_faces(&mut m);
             let native=if kind==crate::sim::Type::F18{crate::hornet::build().canopy}else{crate::su27::build().canopy};
             let mut shifted=native;
             let offset=EYE-kind.eye();
@@ -549,7 +587,7 @@ impl Cockpit {
             part.bind.images=vec![atlas_tex];
             part
         });
-        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, source, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
+        Cockpit { pip, glass_pip, depth_pip, face_pip, statics, faces, dynamic: Mesh::new(), dyn_bind, dyn_cap, dyn_count: 0, dyn_face_bind, dyn_face_count: 0, canopy, mig, extra, mirror_faces, source, hud_glass, atlas, atlas_pass, atlas_clock: -1.0 }
     }
 
     /// Redraws every instrument page into the atlas (call outside any pass).
@@ -557,17 +595,6 @@ impl Cockpit {
         ctx.begin_pass(Some(self.atlas_pass), PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
         draw_instruments(cv, a, m, pages, time, c);
         cv.flush(ctx, AW as f32, A as f32);
-        ctx.end_render_pass();
-        ctx.texture_generate_mipmaps(self.atlas.color);
-    }
-
-    /// Copies the rear-view picture into the atlas, where the mirror glass
-    /// shows it, after `update_atlas` has redrawn the instruments.
-    pub fn blit_mirror(&self, ctx: &mut dyn RenderingBackend, world: &world::World, mirror: &gfx::Target) {
-        ctx.begin_pass(Some(self.atlas_pass), PassAction::Nothing);
-        let r = R_MIRROR;
-        ctx.apply_viewport(r.x as i32, (A - (r.y + r.h) as f64) as i32, r.w as i32, r.h as i32);
-        world.post(ctx, mirror, r.w, r.h, 0.0, 0.0);
         ctx.end_render_pass();
         ctx.texture_generate_mipmaps(self.atlas.color);
     }
@@ -638,7 +665,7 @@ impl Cockpit {
     /// their text stays sharp. The cockpit from the last `draw` first lays
     /// down depth only, so hands, arms and knees still cover them.
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
-    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, kind: crate::sim::Type) {
+    pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, kind: crate::sim::Type, mirror_texture:Option<TextureId>) {
         let (statics,faces)=match kind {
             crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][1]),
             crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][1]),
@@ -664,6 +691,14 @@ impl Cockpit {
         ctx.draw(0, faces.count, 1);
         ctx.apply_bindings(&self.dyn_face_bind);
         ctx.draw(0, self.dyn_face_count as i32, 1);
+        if let (Some(texture),Some(i))=(mirror_texture,match kind{
+            crate::sim::Type::Mig29=>Some(0),crate::sim::Type::F18=>Some(1),
+            crate::sim::Type::Su27=>Some(2),_=>None}) {
+            let part=&self.mirror_faces[i];
+            let bind=Bindings{images:vec![texture],..part.bind.clone()};
+            ctx.apply_bindings(&bind);
+            ctx.draw(0,part.count,1);
+        }
     }
 }
 
@@ -964,6 +999,31 @@ pub(super) fn blocked(eye: V3, target: V3, tri: &[f32]) -> bool {
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
+
+    #[test]
+    fn mirror_glass_uses_the_full_resolution_texture_and_keeps_its_geometry() {
+        for kind in [crate::sim::Type::Mig29,crate::sim::Type::F18,crate::sim::Type::Su27] {
+            let mesh=if kind==crate::sim::Type::Mig29{
+                let mut m=Mesh::new();mig::build_static(&mut m);m
+            }else{modern::build(kind)};
+            let glass=extract_mirror_faces(&mesh);
+            assert!(glass.count()>100 && glass.count()<mesh.count()/2);
+            assert!(glass.v.chunks(crate::mesh::STRIDE).all(|v|
+                v[9]>=0.0 && v[9]<=1.0 && v[10]>=0.0 && v[10]<=1.0));
+            assert!(glass.v.chunks(crate::mesh::STRIDE).all(|v|
+                mesh.v.chunks(crate::mesh::STRIDE).any(|p|p[..9]==v[..9])));
+            let mut blank=Mesh{v:mesh.v.clone()};blank_mirror_faces(&mut blank);
+            assert!(extract_mirror_faces(&blank).v.is_empty());
+            let count=mesh.v.chunks(crate::mesh::STRIDE*3).zip(blank.v.chunks(crate::mesh::STRIDE*3))
+                .filter(|(a,b)|{
+                    assert!(a.chunks(crate::mesh::STRIDE).zip(b.chunks(crate::mesh::STRIDE)).all(|(x,y)|x[..6]==y[..6]));
+                    a!=b
+                }).count();
+            assert_eq!(count*3,glass.count());
+        }
+        assert_eq!(MIRROR_SIZE.0 as f64/MIRROR_SIZE.1 as f64,R_MIRROR.w as f64/R_MIRROR.h as f64);
+        assert!(MIRROR_SIZE.0>=1536 && MIRROR_SIZE.1>=480);
+    }
 
     #[test]
     fn moving_pilot_and_ejection_handles_fit_the_gpu_buffer() {
@@ -2135,10 +2195,27 @@ pub fn mirror_camera(a: &Aircraft) -> Camera {
 /// A rear-view mirror `w` by `h` laid out by `place(x, y, depth)`: x along
 /// its width to the pilot's right, y up its face, depth toward the pilot.
 /// A rounded outline, the glass bulging forward like a car's wide-angle
-/// mirror and showing the whole rear picture left for right as a mirror
-/// does, in a shallow housing whose back closes in to a dome.
-fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, rear_offset: f64) {
-    let corners = rounded_rect(w, h, h * 0.25, 4);
+/// mirror, in a shallow housing whose back closes in to a dome. The MiG's
+/// legacy panorama placement and normal-based reflected-ray sampling share
+/// the same physical pane construction.
+#[derive(Clone,Copy)]
+enum MirrorSampling { Panorama(f64), Reflection }
+
+fn reflected_mirror_uv(p:V3, normal:V3)->(f64,f64) {
+    let incident=(p-EYE).norm();
+    let reflected=incident-normal*(2.0*incident.dot(normal));
+    let f=v3(0.0,(8.0*DEG).sin(),(8.0*DEG).cos());
+    let right=-V3::X;let up=right.cross(f);
+    let tan=(MIRROR_FOV*0.5).tan();
+    let x=reflected.dot(right)/(reflected.dot(f)*tan*(MIRROR_SIZE.0 as f64/MIRROR_SIZE.1 as f64));
+    let y=reflected.dot(up)/(reflected.dot(f)*tan);
+    ((R_MIRROR.x as f64+R_MIRROR.w as f64*(0.5+0.5*x))/AW,
+        1.0-(R_MIRROR.y as f64+R_MIRROR.h as f64*(0.5-0.5*y))/A)
+}
+
+fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, sampling: MirrorSampling) {
+    let rear_offset=match sampling{MirrorSampling::Panorama(x)=>x,MirrorSampling::Reflection=>0.0};
+    let corners = rounded_rect(w, h, w.min(h) * 0.25, 4);
     // Subdivide the long edges as well as the rounded corners: the panes
     // follow the canopy arch, so a single chord would flatten their rims.
     let mut outline = Vec::new();
@@ -2183,7 +2260,7 @@ fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> 
     let sample_half_width = (bounds.2 - bounds.0) * scale * 0.5;
     let tex_centre_x = rm.x as f64 + rm.w as f64 * 0.5 + rear_offset * (rm.w as f64 * 0.5 - sample_half_width);
     // A slight convex face in a shallow dark housing.
-    let bulge = h.min(w) * 0.02;
+    let bulge = h.min(w) * match sampling{MirrorSampling::Reflection=>0.002,MirrorSampling::Panorama(_)=>0.02};
     let e = 0.002;
     let at = |k: usize, t: f64| {
         let (x, y) = (outline[k % n].0 * t, outline[k % n].1 * t);
@@ -2193,7 +2270,12 @@ fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> 
         let (u, v) = project(p);
         let tex_x = tex_centre_x - (u - centre.0) * scale;
         let tex_y = rm.y as f64 + rm.h as f64 * 0.5 - (v - centre.1) * scale;
-        (p, normal, (clamp(tex_x, rm.x as f64 + 0.5, (rm.x + rm.w) as f64 - 0.5) / AW, 1.0 - clamp(tex_y, rm.y as f64 + 0.5, (rm.y + rm.h) as f64 - 0.5) / A))
+        let uv=match sampling {
+            MirrorSampling::Reflection=>reflected_mirror_uv(p,normal),
+            MirrorSampling::Panorama(_)=>(clamp(tex_x, rm.x as f64 + 0.5, (rm.x + rm.w) as f64 - 0.5) / AW,
+                1.0-clamp(tex_y, rm.y as f64 + 0.5, (rm.y + rm.h) as f64 - 0.5)/A),
+        };
+        (p,normal,uv)
     };
     let white = Rgb(1.0, 1.0, 1.0);
     let steps = [0.0, 0.45, 0.8, 1.0];

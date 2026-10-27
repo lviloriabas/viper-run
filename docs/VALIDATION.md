@@ -1,5 +1,43 @@
 # Validation
 
+## Mirror mounting and reflected view, 27 October 2026
+
+The Hornet side panes now stand nearly upright on the actual imported forward
+canopy bow; the old mounting station placed the panes and hinges ahead of it.
+Hinges follow the painted bow instead of ending in empty space. Flanker
+shoulder panes face the pilot on the aft side of the frame, and the crown
+clears the HUD hood. Surface normals and reflected sight rays determine
+sampling for each pane.
+
+The reflection is rendered at 1536x480 and sampled directly in the final
+cockpit pass, avoiding the previous 512x160 atlas copy. Reduced optical bulge
+removes the exaggerated curved horizon. Disabled mirrors retain dark glass
+instead of displaying unrelated instrument-atlas fragments. The MiG keeps
+its established placement and receives the sharper texture.
+
+Debug and release suites pass 293 game tests and 12 server tests. Added
+checks cover bow placement, upright Hornet panes, visibility against actual
+hardware, reflection direction, unclipped UVs, texture aspect, geometry/depth
+preservation and inactive glass. Native Linux and Windows each completed
+19 reviewed 1440x900 captures: frontal, crown, left/right, panel, bank and
+disabled views, plus MiG-29 and F-16 regression views. Blender inspection of
+the exported final geometry checks front, side and top placement.
+
+~~~sh
+cargo test --quiet
+cargo test --release --quiet
+./build.sh
+python tools/check_mirror_views.py dist/viper-run-linux-x86_64 --output target/model-review/mirrors-final-linux
+python tools/check_mirror_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/mirrors-final-windows
+dist/viper-run-linux-x86_64 --export-cockpit target/model-review/mirrors-final-blender
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/mirrors-final-blender --jet f18
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/mirrors-final-blender --jet su27
+~~~
+
+Run each executable on its native platform. Capture manifests record the
+binary hash; distribution hashes are in dist/SHA256SUMS.txt. One common rear
+camera still approximates parallax between mirror positions.
+
 ## Multiplayer server browser and TCP relay, 27 October 2026
 
 The rework passes 288 game tests and 12 standalone server tests in release mode.

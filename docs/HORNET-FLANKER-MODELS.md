@@ -75,6 +75,21 @@ Its simplified cockpit geometry alone is insufficient to establish those
 details; the supplied Hornet photographs and instrument references are used
 for the interior adaptation.
 
+The Hornet mirror hinges follow the actual imported forward canopy bow.
+Its side panes are nearly upright, with the tops leaning slightly outwards.
+The Flanker's shoulder panes follow its own bow, on the pilot-facing side of
+the painted frame, and the crown clears the HUD hood.
+
+Hornet/Flanker pane normals bisect the design-eye ray and the intended aft
+view. Each vertex samples the reflected ray, rather than fitting a cropped
+rear panorama independently to each pane. A dedicated 1536x480 texture is
+sampled directly in the final cockpit pass, preserving depth occlusion and
+avoiding the previous 512x160 atlas copy. Optical bulge is small enough to
+avoid the exaggerated curved horizon. The MiG keeps its existing panorama
+placement and also uses the sharper texture. A common rear camera remains
+a performance approximation, so near-field parallax between mirror positions
+is not simulated independently.
+
 The Su-27 and MiG-29 use a round KI-13-style compass bowl with a 3D spherical
 card, fixed lubber line, hood and bracket. The markings wrap around the sphere
 without changing their pixel proportions. The Hornet has its own compact

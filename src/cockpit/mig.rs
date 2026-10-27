@@ -348,7 +348,7 @@ pub fn build_static(m: &mut Mesh) {
         let mut mount = anchor + up * 0.012;
         mount.z = crate::mig29::CANOPY_Z[3] + OFFSET.z + 0.035;
         let smaller = |x: f64, y: f64, d: f64| mount + place(x * (0.78 * 0.70), y * (0.78 * 0.70), d * (0.78 * 0.70)) - centre;
-        super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), (mid - PI / 2.0).sin());
+        super::curved_mirror(m, (hi - lo) * radius, h, &smaller, COAMING.scale(1.8), super::MirrorSampling::Panorama((mid - PI / 2.0).sin()));
         for t in [-0.28, 0.28] {
             let x = t * (hi - lo) * radius;
             let phi = mid - x / radius;

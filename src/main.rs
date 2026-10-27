@@ -436,7 +436,7 @@ impl App {
         let (w, h) = window::screen_size();
         let (rw, rh) = render_size(w, h);
         let scene = gfx::Target::new(&mut *ctx, rw, rh, FilterMode::Nearest);
-        let mirror = gfx::Target::new(&mut *ctx, cockpit::MIRROR_SIZE.0, cockpit::MIRROR_SIZE.1, FilterMode::Nearest);
+        let mirror = gfx::Target::new(&mut *ctx, cockpit::MIRROR_SIZE.0, cockpit::MIRROR_SIZE.1, FilterMode::Linear);
         let (mut settings, best) = settings::load();
         if let Some(enabled) = opts.performance_overlay { settings.performance_overlay = enabled; }
         let audio = Audio::start();
@@ -1816,7 +1816,6 @@ impl App {
         let scene = props::Scene { models: &self.models, combat: &self.combat, player: Some(a), ejection: None, first_person: false };
         self.world.draw(&mut *self.ctx, &rear, m.w as f64 / m.h as f64, self.time, mission, Some(a), true, Some(&scene as &dyn world::Props));
         self.ctx.end_render_pass();
-        self.cockpit.blit_mirror(&mut *self.ctx, &self.world, m);
     }
 
     fn current_camera(&self) -> Camera {
@@ -2154,7 +2153,7 @@ impl EventHandler for App {
         if cockpit_view {
             let a = self.aircraft.as_ref().unwrap();
             let cam_b = cockpit::body_camera(&cam, a);
-            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32, a.kind);
+            self.cockpit.draw_faces(&mut *self.ctx, &cam_b, aspect, [w, h], gloc as f32, a.kind,(!self.opts.no_mirrors).then_some(self.mirror.color));
         }
 
         // 2D overlays at native resolution.
