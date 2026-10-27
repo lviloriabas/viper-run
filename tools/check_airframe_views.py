@@ -27,6 +27,11 @@ def main():
             ("profile", ["--chase", "--look", "90,0", "--zoom", zoom]),
             ("head-on", ["--chase", "--look", "180,0", "--zoom", zoom]),
             ("panel", ["--look", "0,-32"]),
+            ("footwells", ["--look", "0,-62"]),
+            ("mirror-crown", ["--look", "0,18"]),
+            ("windscreen-right", ["--look", "30,-5"]),
+            ("panel-left", ["--look", "-25,-32"]),
+            ("panel-right", ["--look", "25,-32"]),
             ("systems", ["--look", "0,-32", "--mach", "0.25", "--input",
                          "gear,flaps,brake", "--sim", "3"]),
             ("left-console", ["--look", "-60,-40"]),
@@ -51,6 +56,8 @@ def main():
             cases.append((jet, view, options))
     cases.append(("f18", "weapons", ["--mission", "dogfight", "--weapon", "aim120", "--sim", "0.25"]))
     cases.append(("su27", "irst", ["--mission", "dogfight", "--weapon", "aim9", "--input", "irst", "--sim", "0.25"]))
+    for view,look in [("compass","35,2"),("panel","0,-32"),("footwells","0,-62")]:
+        cases.append(("mig29",view,["--look",look]))
     for jet in ["f16", "mig29", "f18", "su27"]:
         cases.append((jet, "detached-gear", [
             "--break-gear", "--sim", "0.5", "--chase", "--look", "100,-10",

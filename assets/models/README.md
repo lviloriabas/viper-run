@@ -26,8 +26,8 @@ records SHA-256 hashes of the uncompressed upstream inputs.
 Viper Run adaptations include axis/datum conversion, dimensional calibration,
 flat shading, moving-part separation, game-compatible pylons, a single
 680 x 260 mm Su-27 nose wheel replacing the common model's naval twin wheels,
-cockpit closure, a monitor opening in the Su-27 coaming, and live instrument
-faces. Original cockpit programs are not run. Changes and references are
+cockpit closure, front-board and HUD reconstruction, pedal-tunnel and throttle
+quadrant openings, and live instrument faces. Original cockpit programs are not run. Changes and references are
 recorded in [HORNET-FLANKER-MODELS.md](../../docs/HORNET-FLANKER-MODELS.md).
 
 ## Rebuild without network access

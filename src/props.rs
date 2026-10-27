@@ -30,7 +30,8 @@ pub struct Models {
     /// booms out), the pilot seated and hanging, the main canopy and the
     /// cockpit canopy blown off.
     seat: [Part; 4],
-    pilot: [[Part; 2]; 4],
+    seat_stowed: [Part; 4],
+    deploying: [[[Part; 2]; crate::eject::DEPLOY_FRAMES]; 4],
     landed: [[[Part; 2]; crate::eject::LANDING_FRAMES]; 4],
     cord: Part,
     seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 4],
@@ -84,9 +85,10 @@ impl Models {
         let sites = KINDS.iter().map(|&k| part(&targets::mesh(k))).collect();
         use crate::eject;
         let mig = crate::mig29::build();
+        let seat_stowed=Type::ALL.map(|kind|part(&eject::seat_mesh(kind,false)));
         let seat=Type::ALL.map(|kind|part(&eject::seat_mesh(kind,kind.russian())));
-        let pilot = std::array::from_fn(|k| std::array::from_fn(|fp|
-            part(&eject::pilot_mesh(Type::ALL[k], true, fp != 0, 1.0))));
+        let deploying = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
+            part(&eject::deployment_mesh(Type::ALL[k], fp != 0, frame)))));
         let landed = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
             part(&eject::landed_mesh(Type::ALL[k], fp != 0, frame)))));
         let cord = part(&eject::cord_mesh());
@@ -97,7 +99,7 @@ impl Models {
             Type::ALL[k], frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
         let chute=Type::ALL.map(|kind|part(&eject::chute_mesh(eject::spec(kind))));
         let canopy=[part(&frame.canopy),part(&mig.canopy),part(&crate::hornet::build().canopy),part(&crate::su27::build().canopy)];
-        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, pilot, landed, cord, seated, handle, chute, canopy }
+        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, seat_stowed, deploying, landed, cord, seated, handle, chute, canopy }
     }
 }
 
@@ -201,7 +203,7 @@ impl Props for Scene<'_> {
             let hanging = matches!(e.phase, Phase::Chute | Phase::Landed);
             let frame = (e.handle_pull() * (crate::eject::HANDLE_FRAMES - 1) as f64).round() as usize;
             let pilot = if e.phase == Phase::Landed { &m.landed[k][e.landing_frame()][self.first_person as usize] }
-                else if hanging { &m.pilot[k][self.first_person as usize] } else { &m.seated[k][frame][self.first_person as usize] };
+                else if hanging { &m.deploying[k][e.deployment_frame()][self.first_person as usize] } else { &m.seated[k][frame][self.first_person as usize] };
             if e.phase != Phase::Canopy || !self.first_person {
                 w.draw_prop(ctx, vp, pilot, at(&e.pilot), NONE);
             }
@@ -211,7 +213,8 @@ impl Props for Scene<'_> {
                     w.draw_prop(ctx, vp, &m.handle[k][crate::eject::HANDLE_FRAMES - 1], at(seat), NONE);
                 }
                 None if e.phase != Phase::Canopy || !self.first_person => {
-                    w.draw_prop(ctx, vp, &m.seat[k], at(&e.pilot), NONE);
+                    let seat=if e.phase==Phase::Canopy{&m.seat_stowed[k]}else{&m.seat[k]};
+                    w.draw_prop(ctx, vp, seat, at(&e.pilot), NONE);
                     w.draw_prop(ctx, vp, &m.handle[k][frame], at(&e.pilot), NONE);
                 }
                 None => {}

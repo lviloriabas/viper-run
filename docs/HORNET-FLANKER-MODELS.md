@@ -1,6 +1,6 @@
 # Hornet and Flanker geometry adaptation
 
-Revised 26 October 2026. Actual editable FlightGear meshes replace the earlier
+Revised 27 October 2026. Actual editable FlightGear meshes replace the earlier
 procedural exterior reconstruction. Both aircraft retain Viper Run's faceted
 rendering, live avionics and keyboard/controller input.
 
@@ -45,28 +45,59 @@ imported spine in both directions, closing within 8 mm of its surface.
 
 ## Cockpit
 
-The Su-27SK contributes panel meshes, coaming, individual console panels,
-switches, HUD projector housing and canopy frame. Its monitor fits a separate
-opening clear of the HUD side wall. A continuous tub follows actual canopy
-sills and flares below them to enclose the consoles. Floor, walls and bulkheads
-close the gaps previously visible from the seat.
+The Su-27SK contributes detailed side-console meshes, switches and canopy
+frames. The main front board, optical projector and coaming are rebuilt as
+one game assembly, preserving the source combiner-glass coordinates. Obsolete
+front boards, the source ground plane and the unfinished sight diagram are
+removed from the interior import. The original front wall is opened for the
+pedal tunnels; a lower continuous floor closes the aircraft beneath them.
+
+The front instruments share an orthonormal mounting frame, including the
+depth of the raised screen cases. Full mounting flanges, rather than only
+round faces, are included in spacing checks. Every housing has solid backing.
+The Su-27's rounded projector cover, lens, combiner rails, top hood, grab handle,
+brightness/reticle controls and upper-left sighting panel have separate 3D
+geometry. Its throttle pair uses an outboard quadrant; source console panels
+are cut around that quadrant with their UVs preserved. Gear, flaps, speedbrake,
+sensor and weapon selectors retain their keyboard/controller commands.
 
 The Hornet retains the requested central UFCD, side DDIs, lower MPCD, left
-engine/fuel display and right standby instruments. Panel, central support,
-coaming and projector overlap as solid pieces. Old narrow inner walls are
-removed from the interior copy of the canopy frame to clear the new board.
+engine/fuel display and right standby instruments. A shallow optical base and
+transverse header replace the oversized block beneath the HUD. The UFCD case
+joins the board as a solid housing. The engine/fuel module and auxiliary gauges
+clear the consoles and knee tunnels. Main switches and the throttle quadrant
+are fixed to their console surfaces.
 
-Live faces share their mounting frames with the bezels and preserve pixel
-aspect ratio. Native Su-27 panel images retain every original pixel. Unfinished
-white construction guides on the upstream main panel are replaced with panel
-material. Exterior atlases copy source pixels without resampling. QOI packaging
-is lossless. Instrument faces are rendered sharply with hardware and pilot depth
-occlusion.
+Both cockpits have a horizontal crown mirror and two tall side mirrors, with
+live reflections, following the supplied references. The older FlightGear
+Hornet exterior does not provide a detailed production mirror assembly.
+Its simplified cockpit geometry alone is insufficient to establish those
+details; the supplied Hornet photographs and instrument references are used
+for the interior adaptation.
+
+The Su-27 and MiG-29 use a round KI-13-style compass bowl with a 3D spherical
+card, fixed lubber line, hood and bracket. The markings wrap around the sphere
+without changing their pixel proportions. The Hornet has its own compact
+housing with a horizontal reading window and curved heading scale. It does
+not reuse the Russian bowl. NATOPS A1-F18AC-NFM-000 section 2.12.9 and the
+[Eagle Dynamics Hornet manual](https://www.digitalcombatsimulator.com/upload/iblock/8d7/2s3e89jqknz7xmti8hrhe1bjt2uw1s3e/DCS%20FA-18C%20Early%20Access%20Guide%20EN.pdf)
+identify its standby magnetic compass on the right windshield arch.
+The adapted scale follows the game's heading reference; magnetic variation,
+dip and acceleration errors are not simulated.
+
+The pilot's twin-engine-aircraft leg pose and shorter pedal travel clear the
+front boards throughout rudder movement. Pedals have floor supports. The
+MiG-29 and F-16 retain their existing leg poses. Continuous sill seals, cheek
+returns, floor and bulkheads close the interior around these assemblies.
+
+Live faces preserve pixel aspect ratio. Native Su-27 console images retain
+every original pixel. Exterior atlases copy source pixels without resampling.
+QOI packaging is lossless. Instrument faces and compass markings are drawn
+sharply with hardware and pilot depth occlusion.
 
 Flight instruments, radar, HUD, weapon state, gear/flap/brake indicators and
-mirrors remain live. Existing keyboard/controller commands also move the visual
-levers. The game retains its avionics and flight model; it does not run
-FlightGear's cockpit scripts or implement every original switch.
+mirrors remain live. The game retains its avionics and flight model; it does
+not run FlightGear's cockpit scripts or implement every original switch.
 
 ## Stores, gear and collisions
 
@@ -92,13 +123,29 @@ new wheelbase; takeoff, approach and stopping tests remain required.
 Rust checks cover native dimensions, finite geometry, normals, part sides,
 wheel contact, Su-27 nose-wheel dimensions, weapon origins and rack separation.
 Cockpit checks test every active face against procedural and imported hardware,
-pixel aspect, mirrors and opaque closure below the sills in 72 directions.
+full flange separation, parallel mounting frames, housing backing, pixel aspect
+and mirror geometry. Lower perimeter rays cover 47 stations on both sides,
+four heights and three head positions. Leg-mesh edges are checked against
+imported and generated hardware at full left, neutral and full right rudder.
+Compass checks cover card geometry, heading and dynamic vertex-buffer capacity.
+Type-specific ejection handles and the complete pilot sequence are described in
+[PILOT-HARNESS.md](PILOT-HARNESS.md).
 
 Python checks cover nested object matrices, concave outlines, UV-preserving cuts,
 lossless image coding, source hashes and pixel-for-pixel preservation of every
 embedded cockpit image. Bundled sources can be restored and regenerated offline.
 
-Linux Blender review scenes show top, side, head-on and three-quarter views.
+Linux Blender exterior review scenes show top, side, head-on and three-quarter
+views. To inspect the assembled cockpit, including source consoles and the
+moving pilot, use:
+
+```sh
+cargo run -- --export-cockpit target/model-review/cockpit
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/cockpit
+```
+
+These workbench scenes focus on geometry and include a side cutaway of the
+leg wells. Native game captures verify the live textures and cockpit sightlines.
 The release is inspected inside the game on Linux and Windows, including
 forward view, panel, consoles, stores, gear, rudders and speedbrakes.
 See [VALIDATION.md](VALIDATION.md) for final release checks.

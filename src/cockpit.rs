@@ -14,10 +14,74 @@ use crate::world::{self, Camera, Part, MESH_ATTRS};
 use miniquad::*;
 
 mod consoles;
+mod compass;
 mod hud;
 mod mig;
 mod modern;
 mod pilot;
+
+/// Export the exact assembled cockpit and moving pilot for Blender inspection.
+pub fn export_review(path: &str) -> std::io::Result<()> {
+    use std::{fs, io::Write};
+    let root = std::path::Path::new(path);
+    fs::create_dir_all(root)?;
+    for kind in [crate::sim::Type::F18, crate::sim::Type::Su27,crate::sim::Type::Mig29] {
+        let name=match kind{crate::sim::Type::F18=>"f18",crate::sim::Type::Su27=>"su27",_=>"mig29"};
+        let mut hardware=Mesh::new();
+        if kind==crate::sim::Type::Mig29{mig::build_static(&mut hardware);}else{hardware=modern::build(kind);}
+        let mut parts = vec![("hardware".to_owned(), hardware)];
+        let offset = EYE - kind.eye();
+        for (i, t) in (if kind==crate::sim::Type::Mig29{&[][..]}else{crate::flightgear::textures(kind)}).iter().enumerate() {
+            let mut m = Mesh { v: t.mesh.v.clone() };
+            for p in m.v.chunks_mut(crate::mesh::STRIDE) {
+                p[0] += offset.x as f32; p[1] += offset.y as f32; p[2] += offset.z as f32;
+            }
+            parts.push((format!("source-{i}"), m));
+        }
+        let mut pilot = Mesh::new();
+        let hands = Hands { throttle: 0.5, ..Default::default() };
+        if kind==crate::sim::Type::Mig29{pilot::build_dynamic_mig(&mut pilot,&hands);}
+        else{pilot::build_dynamic_twin(&mut pilot, &hands, kind.russian());}
+        if kind!=crate::sim::Type::Mig29{modern::moving_controls(&mut pilot, kind, &hands);}
+        compass::dynamic(&mut pilot,kind,0.0,0.0,0.0);
+        parts.push(("pilot-controls".to_owned(), pilot));
+        let mut f = fs::File::create(root.join(format!("{name}-cockpit.vrm")))?;
+        f.write_all(b"VRM1")?;
+        f.write_all(&(parts.len() as u32).to_le_bytes())?;
+        for (name, m) in parts {
+            f.write_all(&(name.len() as u32).to_le_bytes())?;
+            f.write_all(name.as_bytes())?;
+            f.write_all(&(m.v.len() as u32).to_le_bytes())?;
+            for n in m.v { f.write_all(&n.to_le_bytes())?; }
+        }
+        f.write_all(&0u32.to_le_bytes())?;
+    }
+    let mut parts=Vec::new();
+    for kind in crate::sim::Type::ALL {
+        let jet=match kind{crate::sim::Type::F16=>"f16",crate::sim::Type::Mig29=>"mig29",
+            crate::sim::Type::F18=>"f18",_=>"su27"};
+        for (phase,pull,deploy) in [("rest",0.0,None),("pulled",1.0,None),
+            ("separating",1.0,Some(crate::eject::DEPLOY_FRAMES/2)),
+            ("hanging",1.0,Some(crate::eject::DEPLOY_FRAMES-1))] {
+            let pilot=if let Some(frame)=deploy{crate::eject::deployment_mesh(kind,false,frame)}
+                else{crate::eject::pilot_mesh(kind,false,false,pull)};
+            parts.push((format!("{jet}-{phase}-pilot"),pilot));
+            if deploy.is_none() {
+                parts.push((format!("{jet}-{phase}-seat"),crate::eject::seat_mesh(kind,false)));
+                parts.push((format!("{jet}-{phase}-handle"),crate::eject::handle_mesh(kind,pull)));
+            }
+        }
+    }
+    let mut f=fs::File::create(root.join("ejection.vrm"))?;
+    f.write_all(b"VRM1")?;f.write_all(&(parts.len() as u32).to_le_bytes())?;
+    for (name,m) in parts {
+        f.write_all(&(name.len() as u32).to_le_bytes())?;f.write_all(name.as_bytes())?;
+        f.write_all(&(m.v.len() as u32).to_le_bytes())?;
+        for n in m.v{f.write_all(&n.to_le_bytes())?;}
+    }
+    f.write_all(&0u32.to_le_bytes())?;
+    Ok(())
+}
 
 /// Atlas height; the instrument pages fill the left 1024 square and the
 /// console lightplates the right half.
@@ -374,7 +438,8 @@ void main() {
 }"#;
 
 /// Room for the textured faces of the moving geometry, in vertices.
-const DYN_FACE_CAP: usize = 600;
+const DYN_FACE_CAP: usize = 8192;
+const DYN_CAP: usize = 60000;
 
 /// The textured triangles of `m`: displays, gauge dials, placards.
 fn faces(m: &Mesh) -> Mesh {
@@ -440,7 +505,7 @@ impl Cockpit {
         statics.bind.images = vec![atlas_tex];
         let mut faces = world::part(ctx, &faces(&m));
         faces.bind.images = vec![atlas_tex];
-        let dyn_cap = 60000;
+        let dyn_cap = DYN_CAP;
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(dyn_cap * crate::mesh::STRIDE));
         let dyn_bind = Bindings { vertex_buffers: vec![vb], index_buffer: gfx::sequential_ib(ctx, dyn_cap), images: vec![atlas_tex] };
         let fvb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<f32>(DYN_FACE_CAP * crate::mesh::STRIDE));
@@ -509,7 +574,8 @@ impl Cockpit {
 
     /// Draws the cockpit into the current pass, the MiG's when `mig`.
     /// `cam_b` is the camera in cockpit space (see body_camera).
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, kind: crate::sim::Type, canopy_on: bool) {
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, sun_b: V3, hands: &Hands, aircraft: &Aircraft, canopy_on: bool) {
+        let kind=aircraft.kind;
         let mig=kind.russian();
         let (statics,canopy)=match kind {
             crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][2]),
@@ -544,6 +610,7 @@ impl Cockpit {
         if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {
             modern::moving_controls(&mut self.dynamic,kind,hands);
         }
+        compass::dynamic(&mut self.dynamic,kind,aircraft.heading,aircraft.pitch,aircraft.bank);
         let n = self.dynamic.count().min(self.dyn_cap);
         ctx.buffer_update(self.dyn_bind.vertex_buffers[0], BufferSource::slice(&self.dynamic.v[..n * crate::mesh::STRIDE]));
         ctx.apply_bindings(&self.dyn_bind);
@@ -897,6 +964,25 @@ pub(super) fn blocked(eye: V3, target: V3, tri: &[f32]) -> bool {
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
+
+    #[test]
+    fn moving_pilot_and_ejection_handles_fit_the_gpu_buffer() {
+        for kind in crate::sim::Type::ALL {
+            for i in 0..=12 {
+                let h=Hands{eject:i as f64/12.0,throttle:i as f64/12.0,
+                    pitch:if i%2==0{1.0}else{-1.0},roll:1.0,rudder:-1.0,..Default::default()};
+                let mut m=Mesh::new();
+                match kind {
+                    crate::sim::Type::F16=>pilot::build_dynamic(&mut m,&h),
+                    crate::sim::Type::Mig29=>pilot::build_dynamic_mig(&mut m,&h),
+                    _=>pilot::build_dynamic_twin(&mut m,&h,kind.russian()),
+                }
+                if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27){modern::moving_controls(&mut m,kind,&h);}
+                compass::dynamic(&mut m,kind,0.0,0.0,0.0);
+                assert!(m.count()<=DYN_CAP,"{kind:?}: {} vertices",m.count());
+            }
+        }
+    }
 
     #[test]
     fn gauge_face_and_ring_share_the_same_plane_without_visible_parallax() {
@@ -1505,6 +1591,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     }
     if a.kind==crate::sim::Type::F18{modern::hornet_instruments(cv,a,&ad,m,time,c);}
     if a.kind==crate::sim::Type::Su27{modern::flanker_instruments(cv,a,c);}
+    compass::draw(cv);
 }
 
 /// Analogue heading indicator in the centre stack of the reference cockpit.

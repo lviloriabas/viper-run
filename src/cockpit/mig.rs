@@ -59,7 +59,6 @@ pub(super) const R_WARN: R = r(736.0, 1472.0, 96.0, 320.0);
 pub(super) const R_GEAR: R = r(832.0, 1472.0, 192.0, 128.0);
 pub(super) const R_TV: R = r(0.0, 1664.0, 256.0, 208.0);
 pub(super) const R_LEFT: R = r(256.0, 1664.0, 224.0, 240.0);
-pub(super) const R_COMPASS: R = r(480.0, 1664.0, 128.0, 128.0);
 pub(super) const R_EGT_R: R = r(1024.0, 1472.0, 160.0, 160.0);
 pub(super) const R_WEAPON: R = r(1024.0, 1664.0, 224.0, 160.0);
 pub(super) const R_EKRAN: R = r(1248.0, 1664.0, 160.0, 160.0);
@@ -358,21 +357,23 @@ pub fn build_static(m: &mut Mesh) {
         }
     }
 
-    // KI-13 standby compass on its bracket at the top of the right
-    // windscreen post, the bowl's window turned to the pilot.
+    super::compass::housing(m,crate::sim::Type::Mig29);
+
+    crate::cockpit::pilot::build_static_mig(m);
+    m.facet();
+}
+
+pub(super) fn standby_compass_frame()->(V3,Frame) {
+    let (zw,za)=(crate::mig29::CANOPY_Z[0]+OFFSET.z,
+        (crate::mig29::CANOPY_Z[2]+crate::mig29::CANOPY_Z[3])*0.5+OFFSET.z);
+    let post=(crate::mig29::CANOPY_POST.0+crate::mig29::CANOPY_POST.1)*0.5;
     let (q, p) = (mix(zw, za, 0.9), post + 0.30);
     let mount = cp(q, p) - inward(cp(q, p), 0.03);
     let c = mount - inward(mount, 0.06) + V3::Z * 0.035;
     let n = (crate::airframe::EYE - c).norm();
     let x = V3::Y.cross(n).norm();
     let f = Frame { o: c, x, y: n.cross(x), z: n };
-    crate::cockpit::pilot::bar(m, mount, f.p(0.0, 0.0, -0.03), 0.008, 0.008, V3::Z, FRAME);
-    m.lathe(f.p(0.0, 0.0, -0.04), n, &[(0.0, 0.0), (0.0, 0.03), (0.01, 0.034), (0.04, 0.036), (0.04, 0.0)], 10, KNOB.scale(1.6));
-    m.ring(&f.at(0.0, 0.0, 0.003), 0.028, 0.036, 0.006, KNOB.scale(2.2), 12);
-    m.disc_uv(&f.at(0.0, 0.0, 0.002), 0.028, super::uv(R_COMPASS), 16);
-
-    crate::cockpit::pilot::build_static_mig(m);
-    m.facet();
+    (mount,f)
 }
 
 /// Offset `d` from the canopy surface point `p` toward the cockpit's axis.
@@ -624,34 +625,6 @@ pub(super) fn draw(cv: &mut Canvas, a: &Aircraft, ad: &AirData, m: &crate::sim::
     spoke(cv, x, y, ((t / 3600.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.8, 2.0, POINTER);
     spoke(cv, x, y, ((t / 60.0).fract() * 360.0 - 90.0) * DEG, 0.0, rad * 0.85, 1.0, RED);
 
-    // KI-13: the card turns under the lubber line, read through the bowl's
-    // window: 60 degrees of it across, ticks every 5, a figure every 30.
-    let (x, y, rad) = gauge_face(cv, R_COMPASS);
-    cv.rect(x - rad * 0.9, y - rad * 0.36, rad * 1.8, rad * 0.72, rgba(0x1c, 0x1b, 0x16, 1.0));
-    let per_deg = rad * 1.8 / 60.0;
-    let base = (a.heading / 5.0).round() * 5.0;
-    for k in -7..=7 {
-        let h = base + k as f64 * 5.0;
-        let dx = ((h - a.heading) * per_deg as f64) as f32;
-        if dx.abs() > rad * 0.86 {
-            continue;
-        }
-        let hh = (h.rem_euclid(360.0)).round() as i64;
-        let len = if hh % 10 == 0 { rad * 0.16 } else { rad * 0.09 };
-        cv.line(x + dx, y + rad * 0.34, x + dx, y + rad * 0.34 - len, 2.0, INK);
-        if hh % 30 == 0 {
-            let label = match hh {
-                0 => "N".to_string(),
-                90 => "E".to_string(),
-                180 => "S".to_string(),
-                270 => "W".to_string(),
-                _ => format!("{}", hh / 10),
-            };
-            cv.text(&label, x + dx, y - rad * 0.06, 1.0, INK, Align::Center);
-        }
-    }
-    cv.line(x, y - rad * 0.40, x, y + rad * 0.40, 2.0, rgba(0xf0, 0x90, 0x30, 1.0));
-
     let r = R_COUNTER;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x18, 0x1c, 0x1c, 1.0));
     cv.text("ЛТЦ / ДО", r.x + r.w * 0.5, r.y + 7.0, 1.0, INK, Align::Center);
@@ -896,8 +869,8 @@ mod tests {
     #[test]
     fn instrument_atlas_regions_do_not_overlap_each_other_or_the_mirrors() {
         let rects = [R_ADI, R_HSI, R_ASI, R_ALT, R_VVI, R_UUAP, R_RPM, R_EGT, R_EGT_R,
-            R_FUEL, R_HYD, R_CLOCK, R_WARN, R_GEAR, R_TV, R_LEFT, R_COMPASS,
-            R_WEAPON, R_EKRAN, R_SPO, R_RADALT, R_ASIMACH, R_COUNTER, crate::cockpit::R_MIRROR];
+            R_FUEL, R_HYD, R_CLOCK, R_WARN, R_GEAR, R_TV, R_LEFT,
+            R_WEAPON, R_EKRAN, R_SPO, R_RADALT, R_ASIMACH, R_COUNTER, crate::cockpit::R_MIRROR,super::super::compass::CARD];
         for (i, a) in rects.iter().enumerate() {
             assert!(a.x >= 0.0 && a.y >= 1280.0 && a.x + a.w <= 2048.0 && a.y + a.h <= 2048.0);
             for b in rects.iter().skip(i + 1) {

@@ -104,6 +104,7 @@ struct Opts {
     ready:bool, launch_ready:bool, invite_file:Option<String>, net_report:Option<String>, exit_after:Option<f64>, future_ui_check:bool,
 
     audio_demo: Option<String>,
+    cockpit_export: Option<String>,
     no_mirrors: bool,
     ui_check: bool,
     layout_check: bool,
@@ -158,6 +159,7 @@ fn parse_opts() -> Opts {
             args.get(*i).cloned().unwrap_or_default()
         };
         match args[i].as_str() {
+            "--export-cockpit" => o.cockpit_export = Some(next(&mut i)),
             "--host" => o.host=Some(next(&mut i)),
             "--join" => o.join=Some(next(&mut i)),
             "--directory" => o.directory=Some(next(&mut i)),
@@ -263,6 +265,7 @@ fn parse_opts() -> Opts {
                 println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
                 println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
                 println!("Online: --host ADDRESS:PORT | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
+                println!("Model review: --export-cockpit DIRECTORY exports the assembled meshes for Blender");
                 println!("Layout QA: --layout-check --shot FILE.png [--layout-scene NAME]");
                 println!("QA: --future-ui-check --screen menu --shot FILE.png --frames 200; --invite-file FILE --net-report FILE --exit-after SECONDS");
                 std::process::exit(0);
@@ -1732,10 +1735,8 @@ impl App {
             if e.phase == eject::Phase::Canopy {
                 return self.flight_camera(self.aircraft.as_ref().unwrap());
             }
-            let reach = if e.phase == eject::Phase::Seat { 1.0 - smoothstep(0.0, 0.45, e.away().unwrap_or(0.0)) }
-                else { 0.0 };
-            let pitch = mix(self.look.1, self.look.1.min(-55.0 * DEG), reach)
-                + if hanging { -25.0 * DEG } else { 0.0 };
+            let deploy=e.deployment_frame() as f64/(eject::DEPLOY_FRAMES-1) as f64;
+            let pitch=self.look.1-if hanging{25.0*DEG*deploy}else{0.0};
             let q = p.q.mul(Quat::axis_angle(V3::Y, -self.look.0)).mul(Quat::axis_angle(V3::X, pitch));
             let ax = q.axes();
             let eye = p.pos + p.q.rotate(v3(0.0, 0.52, 0.0));
@@ -2133,7 +2134,7 @@ impl EventHandler for App {
             let cam_b = cockpit::body_camera(&cam, a);
             let sun_b = a.q.conj().rotate(world::sun_dir());
             self.ctx.begin_pass(Some(self.scene.pass), PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
-            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a.kind, self.ejection.is_none());
+            self.cockpit.draw(&mut *self.ctx, &cam_b, aspect, sun_b, &self.hands, a, self.ejection.is_none());
             self.ctx.end_render_pass();
         }
 
@@ -2541,6 +2542,10 @@ impl EventHandler for App {
 
 fn main() {
     let opts = parse_opts();
+    if let Some(path) = &opts.cockpit_export {
+        cockpit::export_review(path).expect("export cockpit review");
+        return;
+    }
     if let Some(path) = &opts.audio_demo {
         audio::demo(path, opts.jet.unwrap_or_default()).expect("write audio demo");
         return;

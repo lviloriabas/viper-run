@@ -1,41 +1,52 @@
 # Validation
 
-## FlightGear model integration, 26 October 2026
+## Cockpit closure, compass and pilot animation, 27 October 2026
 
 This revision supersedes the earlier Hornet/Flanker geometry checks below.
-The final source passes 269 game tests and 6 standalone server tests in both
+The final source passes 280 game tests and 6 standalone server tests in both
 debug and release profiles. All 6 Python importer tests pass, including upstream
-source hashes and pixel-for-pixel cockpit texture preservation. The bundled
-AC3D/XML sources were unpacked and the embedded assets regenerated offline.
+source hashes, UV-preserving cuts and pixel-for-pixel cockpit texture preservation.
+The bundled AC3D/XML sources were unpacked and all six generated model assets
+and manifests matched the delivered files byte for byte after offline regeneration.
 
-The final Linux and native Windows release binaries each completed the expanded
-42-view airframe matrix at 1440x900. All 84 captures were visually reviewed.
-Views include forward/panel/console sightlines, rear cockpit closure, exterior
-profiles, mounted weapons, gear, rudders, speedbrakes and detached landing gear.
-The Windows external capture/overlay compatibility check also passed.
-Linux Blender produced eight orthographic/three-quarter exterior renders and
-editable review scenes. Modeling sources and remaining simulation approximations
-are documented in [HORNET-FLANKER-MODELS.md](HORNET-FLANKER-MODELS.md).
+The native Linux and Windows release binaries each completed 55 airframe/cockpit
+views and 48 pilot/control/ejection views at 1440x900. All 206 captures were
+visually reviewed. Views include panel/console sightlines, leg wells, the three
+mirrors, Hornet and Russian compass installations, rear cockpit closure,
+exterior profiles, mounted weapons, moving surfaces, detached landing gear,
+control extremes, handle reach/pull, canopy clearance, seat flight, separation,
+parachute grip and touchdown. The Windows external capture/overlay check passed.
 
-Reproduce the model checks from the repository root:
+Linux Blender rendered 15 cockpit views with editable scenes and eight seat/
+handle/pose comparisons from geometry exported by the final game binary.
+Earlier exterior orthographic review scenes remain available. Sources and
+simulation limits are documented in [HORNET-FLANKER-MODELS.md](HORNET-FLANKER-MODELS.md)
+and [PILOT-HARNESS.md](PILOT-HARNESS.md).
+
+Reproduce the checks from the repository root:
 
 ```sh
 cargo test --quiet
 cargo test --release --quiet
 python -m unittest discover -s tools -p test_flightgear_import.py -v
-python tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/linux
-python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/windows
+python tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/release-verified-linux/airframe
+python tools/check_airframe_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/release-verified-windows/airframe
+python tools/check_pilot_animation.py dist/viper-run-linux-x86_64 --output target/model-review/release-verified-linux/pilot
+python tools/check_pilot_animation.py dist/viper-run-windows-x86_64.exe --output target/model-review/release-verified-windows/pilot
 python tools/check_windows_capture.py dist/viper-run-windows-x86_64.exe
+dist/viper-run-linux-x86_64 --export-cockpit target/model-review/release-final-blender
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/release-final-blender
+blender --background -t 4 --python tools/review_ejection.py -- target/model-review/release-final-blender
 ```
 
 Run each executable on its native platform. Capture directories contain
-`captures.json` and `binary.sha256`, tying the completed matrix to its binary.
+`captures.json` and `binary.sha256`, tying the matrix to its binary.
 Final release SHA-256:
 
 | Executable | SHA-256 |
 | --- | --- |
-| Linux game | `e395c68ad8916910c91949d3ed94e00943c07001623cc55054d5105bee62ef84` |
-| Windows game | `25b194b96b0acc8fabb4190d8044e2b5b07c9fe87bcd805fd221f977dec70721` |
+| Linux game | `2c4b8d4236d40280af7f2bc8998b585dc3e5664b921874fdc26c5d27dcea7490` |
+| Windows game | `01a06d45c64665977b3019965c87a61dbff77007a4b702959714b7d3a5567e37` |
 | Linux server | `8c9a53339387b381012746bad45e40f4b687a726ddac055935a08d8f592c95af` |
 | Windows server | `3834289a9ec0caac9d67c03be60812b5b0eab0ca24b9fcab2ac544fae8b055e6` |
 

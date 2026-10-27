@@ -7,7 +7,7 @@ const DARK: Rgb = Rgb(0.075, 0.085, 0.09);
 const IFEI: R = r(0.0, 1872.0, 256.0, 176.0);
 const UFC: R = r(384.0, 1872.0, 160.0, 176.0);
 const HUD_CONTROL: R = r(704.0, 1872.0, 256.0, 96.0);
-const FLANKER_WEAPONS: R = r(1024.0, 1840.0, 448.0, 64.0);
+const FLANKER_SIGHT:R=r(1024.0,1840.0,448.0,128.0);
 const FLANKER_SYSTEMS: R = r(1472.0, 1840.0, 192.0, 64.0);
 const FLANKER_WARN: R = r(1024.0, 640.0, 96.0, 320.0);
 
@@ -75,49 +75,57 @@ fn face_size(item: &Instrument) -> (f64, f64) {
     (item.rect.w as f64 * scale, item.rect.h as f64 * scale)
 }
 
+#[cfg(test)]
+fn housing_size(item:&Instrument)->(f64,f64) {
+    match item.shape {
+        Shape::Dial=>(item.w+0.016,item.h+0.016),
+        Shape::Display(_)=>(item.w,item.h),
+        Shape::Label=>{let(w,h)=face_size(item);(w+0.012,h+0.012)}
+    }
+}
+
 // Dense groups and proportions reconstructed from the supplied cockpit photos.
 fn layout(kind: Type) -> Vec<Instrument> {
     if kind == Type::Su27 {
-        let sc=14.7/15.25;
-        let y=|z:f64|crate::flightgear::cockpit_point(kind,v3(4.64,0.920+z*(20.0*DEG).cos(),0.0)).y;
         vec![
-            dial(-0.085*sc,y(0.080),0.040*sc,mig::R_ADI),
-            dial(-0.085*sc,y(-0.050),0.040*sc,mig::R_HSI),
-            dial(-0.194*sc,y(0.082),0.032*sc,mig::R_ASI),
-            dial(-0.198*sc,y(0.000),0.031*sc,mig::R_ALT),
-            dial(-0.281*sc,y(0.084),0.032*sc,mig::R_UUAP),
-            dial(-0.281*sc,y(0.000),0.030*sc,mig::R_RADALT),
-            dial(0.018*sc,y(0.075),0.032*sc,mig::R_VVI),
-            dial(0.110*sc,y(0.060),0.034*sc,mig::R_RPM),
-            dial(0.082*sc,y(-0.020),0.025*sc,mig::R_EGT),
-            dial(0.148*sc,y(-0.020),0.025*sc,mig::R_EGT_R),
-            dial(-0.275*sc,y(-0.090),0.028*sc,mig::R_CLOCK),
-            display_face(0.250*sc,0.935,0.142,0.142,mig::R_TV,false),
-            dial(0.370*sc,y(-0.110),0.039*sc,mig::R_SPO),
-            label(0.220*sc,y(0.0000),0.044,0.098,mig::R_FUEL),
-            label(0.300*sc,y(0.010),0.055,0.100,mig::R_EKRAN),
-            label(-0.345*sc,y(-0.090),0.050,0.054,mig::R_GEAR),
-            label(0.0,1.110,0.190,0.030,FLANKER_WEAPONS),
-            label(-0.370*sc,y(-0.030),0.046,0.035,FLANKER_SYSTEMS),
-            label(0.420*sc,y(-0.006),0.021,0.095,FLANKER_WARN),
+            dial(-0.085,0.851,0.038,mig::R_ADI),
+            dial(-0.085,0.724,0.038,mig::R_HSI),
+            dial(-0.205,0.853,0.030,mig::R_ASI),
+            dial(-0.205,0.769,0.029,mig::R_ALT),
+            dial(-0.300,0.855,0.030,mig::R_UUAP),
+            dial(-0.300,0.769,0.028,mig::R_RADALT),
+            dial(0.030,0.847,0.030,mig::R_VVI),
+            dial(0.130,0.833,0.031,mig::R_RPM),
+            dial(0.092,0.754,0.021,mig::R_EGT),
+            dial(0.171,0.754,0.021,mig::R_EGT_R),
+            dial(-0.300,0.674,0.026,mig::R_CLOCK),
+            display_face(0.250,0.935,0.142,0.142,mig::R_TV,false),
+            dial(0.355,0.645,0.035,mig::R_SPO),
+            label(0.235,0.766,0.040,0.105,mig::R_FUEL),
+            label(0.306,0.765,0.056,0.080,mig::R_EKRAN),
+            label(-0.388,0.659,0.050,0.052,mig::R_GEAR),
+            label(-0.402,0.744,0.045,0.025,FLANKER_SYSTEMS),
+            label(0.407,0.760,0.020,0.100,FLANKER_WARN),
+            label(0.0095,1.072,0.174,0.060,HUD_CONTROL),
+            label(-0.235,0.960,0.225,0.070,FLANKER_SIGHT),
         ]
     } else {
         // The first supplied photo has the upgraded UFCD, not a keypad UFC.
         let mut v=vec![
-            display_face(-0.250, 0.885, 0.245, 0.245, R_MFD_L, true),
-            display_face(0.250, 0.885, 0.245, 0.245, R_MFD_R, true),
+            display_face(-0.262, 0.885, 0.245, 0.245, R_MFD_L, true),
+            display_face(0.262, 0.885, 0.245, 0.245, R_MFD_R, true),
             display_face(0.0, 1.005, 0.215, 0.240, UFC, true),
             label(0.0, 0.812, 0.210, 0.080, HUD_CONTROL),
-            display_face(0.0, 0.590, 0.225, 0.225, R_HSI, true),
-            label(-0.265, 0.595, 0.215, 0.150, IFEI),
+            display_face(0.0, 0.635, 0.225, 0.225, R_HSI, true),
+            label(-0.350, 0.660, 0.215, 0.150, IFEI),
             dial(0.200, 0.650, 0.041, R_DIALS[2]),
             dial(0.335, 0.650, 0.041, R_DIALS[0]),
-            dial(0.180, 0.515, 0.031, R_DIALS[1]),
-            dial(0.255, 0.515, 0.031, R_DIALS[3]),
-            dial(0.330, 0.515, 0.031, R_VVI),
-            dial(-0.432, 0.690, 0.029, R_RWR),
+            dial(0.180, 0.735, 0.027, R_DIALS[1]),
+            dial(0.300, 0.735, 0.027, R_DIALS[3]),
+            dial(0.400, 0.735, 0.025, R_VVI),
+            dial(-0.432, 0.770, 0.025, R_RWR),
             label(-0.432, 0.880, 0.040, 0.170, R_ARM),
-            label(-0.420, 1.035, 0.034, 0.075, R_AOA),
+            label(-0.378, 1.035, 0.034, 0.075, R_AOA),
             label(-0.270, 1.065, 0.150, 0.050, R_CAUTION),
             label(0.270, 1.065, 0.150, 0.050, R_CAUTION),
         ];
@@ -138,18 +146,15 @@ pub(super) fn hud_glass(kind:Type)->[V3;4] {
 // Projector controls are on the front of its housing, above the main board.
 fn mount(kind: Type, item: &Instrument) -> Frame {
     let mut f = instrument(kind, item.x, item.y);
-    if kind==Type::Su27 && item.rect.x==FLANKER_WEAPONS.x && item.rect.y==FLANKER_WEAPONS.y {
-        f.o.z=-3.55;
+    if kind==Type::F18 && item.rect.x==UFC.x && item.rect.y==UFC.y {
+        f.o += f.z*0.145;
+    }
+    if kind==Type::Su27 && item.rect.x==HUD_CONTROL.x && item.rect.y==HUD_CONTROL.y {
+        f.o.z=-3.700;
     }
     if kind==Type::Su27 && item.rect.x==mig::R_TV.x && item.rect.y==mig::R_TV.y {
         // Raised monitor case sits aft of the coaming and HUD's side wall.
-        f.o.z+=0.11;
-    }
-    if kind == Type::F18 && ((item.rect.x == UFC.x && item.rect.y == UFC.y) || (item.rect.x == HUD_CONTROL.x && item.rect.y == HUD_CONTROL.y)) {
-        f.o.z += 0.17;
-    }
-    if kind == Type::Su27 && item.rect.x == HUD_CONTROL.x && item.rect.y == HUD_CONTROL.y {
-        f.o.z += 0.17;
+        f.o += f.z*0.025;
     }
     f
 }
@@ -434,7 +439,51 @@ fn draw_consoles(cv: &mut Canvas, russian: bool) {
         }
     }
 }
+/// Solid front board and coaming, with two open knee/foot tunnels below.
+fn build_board(m:&mut Mesh, kind:Type, panel:Rgb, wall:Rgb) {
+    let russian=kind==Type::Su27;
+    let xs:Vec<f64>=if russian{vec![-0.43,-0.30,-0.25,0.0,0.25,0.30,0.43]}
+        else{vec![-0.39,-0.30,-0.235,-0.12,-0.105,0.105,0.12,0.235,0.30,0.39]};
+    let top=|x:f64|if russian{
+        if x.abs()<=0.30{1.025}else{mix(1.025,0.875,(x.abs()-0.30)/0.13)}
+    }else if x.abs()<=0.12{1.15}else if x.abs()<=0.30{
+        mix(1.15,1.11,(x.abs()-0.12)/0.18)
+    }else{mix(1.11,0.94,(x.abs()-0.30)/0.09)};
+    for pair in xs.windows(2) {
+        let (a,b)=(pair[0],pair[1]);let mid=(a+b)*0.5;
+        let bottom=if russian{if mid.abs()<0.25{0.66}else{0.58}}
+            else if mid.abs()<0.105{0.530}else if mid.abs()<0.235{0.59}else{0.40};
+        let front=[instrument(kind,a,bottom).o,instrument(kind,b,bottom).o,
+            instrument(kind,b,top(b)).o,instrument(kind,a,top(a)).o];
+        let depth=instrument(kind,0.0,0.8).z*0.032;
+        let back=front.map(|p|p-depth);
+        m.quad(front[0],front[1],front[2],front[3],panel);
+        m.quad(back[3],back[2],back[1],back[0],wall);
+        for i in 0..4 {let j=(i+1)%4;m.quad(front[i],back[i],back[j],front[j],wall);}
+        let (p,q)=(front[3],front[2]);
+        let (r,t)=(p-v3(0.0,0.075,0.38),q-v3(0.0,0.075,0.38));
+        m.quad(p,q,t,r,DARK);
+        m.quad(r,t,t-V3::Y*0.035,r-V3::Y*0.035,DARK);
+        m.capsule(p,q,0.010,0.010,DARK,6);
+    }
+    // The cheek panels join the front board to the tub with closed returns.
+    let outer=if russian{0.68}else{0.43};
+    for side in [-1.0,1.0] {
+        let edge=if russian{0.43}else{0.39};
+        let p=instrument(kind,side*edge,top(edge)).o;
+        let a=v3(side*outer,0.55,p.z+0.12);
+        let b=v3(side*outer,0.55,p.z-0.38);
+        m.quad(p,p-v3(0.0,0.075,0.38),b,a,wall);
+        m.quad(p,a,v3(a.x,0.08,a.z),instrument(kind,side*edge,0.08).o,wall);
+    }
+}
 pub fn build(kind:Type)->Mesh {
+    let mut m=hardware(kind);
+    pilot::build_static_mig(&mut m);
+    m
+}
+fn hardware(kind:Type)->Mesh {
+
     let russian=kind==Type::Su27;
     let panel=if russian{Rgb(0.32,0.53,0.56)}else{Rgb(0.19,0.21,0.22)};
     let wall=panel.scale(0.65);
@@ -445,8 +494,8 @@ pub fn build(kind:Type)->Mesh {
     let native=|z:f64,phi:f64|crate::hornet::canopy_point(russian,z,phi)+offset;
     let (front,aft)=crate::flightgear::canopy_range(kind);
     // Continuous walls from the original canopy sills to the floor.
-    let (front,aft)=(front+0.008,aft-0.008);
-    let floor=0.12;
+    let (front,aft)=(front+0.001,aft-0.001);
+    let floor=0.08;
     let outer=if russian{0.68}else{0.43};
     let mut widest:f64=outer;
     for k in 0..32 {
@@ -457,6 +506,7 @@ pub fn build(kind:Type)->Mesh {
             let side=phi.cos();
             let c=v3(side*outer,0.55,a.z);let d=v3(side*outer,0.55,b.z);
             m.quad(a,b,d,c,wall);
+            m.capsule(a,b,0.018,0.018,DARK,6);
             m.quad(c,d,v3(d.x,floor,d.z),v3(c.x,floor,c.z),wall);
         }
     }
@@ -467,24 +517,14 @@ pub fn build(kind:Type)->Mesh {
         m.quad(a,b,c,d,wall);
         m.quad(d,c,v3(-outer,floor,b.z),v3(outer,floor,a.z),wall);
     }
+    build_board(&mut m,kind,panel,wall);
     if !russian {
-        let top=|x:f64|if x.abs()<0.12{1.15}else if x.abs()<0.30{1.11}else{mix(1.11,0.94,(x.abs()-0.30)/0.09)};
-        let xs=[-0.39,-0.30,-0.12,0.0,0.12,0.30,0.39];
-        for pair in xs.windows(2) {
-            let (a,b)=(pair[0],pair[1]);
-            let (p,q)=(instrument(kind,a,top(a)).o,instrument(kind,b,top(b)).o);
-            m.quad(instrument(kind,a,0.40).o-V3::Z*0.025,instrument(kind,b,0.40).o-V3::Z*0.025,q-V3::Z*0.025,p-V3::Z*0.025,panel);
-            m.quad(p,q,q-v3(0.0,0.055,0.30),p-v3(0.0,0.055,0.30),DARK);
-            m.capsule(p,q,0.012,0.012,DARK,6);
-        }
         for side in [-1.0,1.0] {
-            let a=instrument(kind,side*0.39,0.40).o;let b=instrument(kind,side*0.39,0.94).o;
-            let sill=native(-3.55,if side>0.0{0.0}else{PI});
-            m.quad(a,b,sill,v3(sill.x,0.40,sill.z),wall);
             let c=|x:f64,z:f64|v3(side*x,0.62+(x-0.262)*0.24,z);
             m.quad(c(0.262,-3.96),c(0.395,-3.96),c(0.395,-2.74),c(0.262,-2.74),panel);
             m.quad(c(0.262,-3.96),c(0.262,-2.74),v3(side*0.262,floor,-2.74),v3(side*0.262,floor,-3.96),wall);
             for row in 0..6 {
+                if side<0.0 && (1..=3).contains(&row){continue;}
                 let z=-3.84+row as f64*0.183;
                 let f=Frame{o:c(0.337,z)+V3::Y*0.006,x:v3(1.0,side*0.24,0.0).norm(),y:-V3::Z,z:v3(-side*0.24,1.0,0.0).norm()};
                 m.block(&f,v3(0.060,0.077,0.004),DARK);
@@ -499,8 +539,26 @@ pub fn build(kind:Type)->Mesh {
             }
         }
     }
+    // Both throttle levers share a quadrant fixed to the left console.
+    let tx=if russian{-0.435}else{-0.315};
+    m.block(&plain(v3(tx,0.640,-3.465)),v3(0.058,0.015,0.200),DARK);
+    for dx in [-0.015,0.015] {
+        m.block(&plain(v3(tx+dx,0.656,-3.465)),v3(0.006,0.001,0.176),Rgb(0.025,0.025,0.025));
+    }
+    for z in [-3.645,-3.285] {
+        for dx in [-0.048,0.048] {m.ellipsoid(v3(tx+dx,0.657,z),v3(0.002,0.001,0.002),METALC,4,8);}
+    }
     for item in layout(kind) {
         let f=mount(kind,&item);let(w,h)=face_size(&item);
+        let base=instrument(kind,item.x,item.y);
+        let depth=if kind==Type::Su27 && item.rect.x==HUD_CONTROL.x && item.rect.y==HUD_CONTROL.y{
+            // A shallow control box rests on the solid projector pedestal.
+            0.030
+        }else{(f.o-base.o).dot(base.z)};
+        if depth>0.005 {
+            m.block(&f.at(0.0,0.0,-depth*0.5-0.006),
+                v3(item.w*0.5,item.h*0.5,depth*0.5+0.006),DARK);
+        }
         match item.shape {
             Shape::Dial=>gauge_mount(&mut m,&f,item.w*0.5,item.rect,0.008),
             Shape::Display(buttons)=>display(&mut m,&f,item.w,item.h,w,h,item.rect,buttons),
@@ -508,36 +566,64 @@ pub fn build(kind:Type)->Mesh {
         }
     }
     if russian {
-        let item=layout(kind).into_iter().find(|i|i.rect.x==mig::R_TV.x && i.rect.y==mig::R_TV.y).unwrap();
-        let f=mount(kind,&item);
-        for side in [-1.0,1.0] {
-            m.block(&f.at(side*(item.w*0.5+0.006),0.0,-0.085),v3(0.006,item.h*0.5+0.012,0.085),DARK);
+        let glass=hud_glass(kind);
+        let grab=[v3(-0.10,1.14,-3.82),v3(-0.18,1.14,-3.87),v3(-0.23,1.09,-3.89),
+            v3(-0.23,1.04,-3.87),v3(-0.16,1.04,-3.83)];
+        for pair in grab.windows(2){m.capsule(pair[0],pair[1],0.006,0.006,DARK,10);}
+        m.block(&plain(v3(0.0095,1.029,-3.79)),v3(0.090,0.020,0.150),DARK);
+        m.ellipsoid(v3(0.0095,1.132,-3.740),v3(0.068,0.022,0.028),DARK,12,24);
+        m.ellipsoid(v3(0.0095,1.155,-3.755),v3(0.070,0.004,0.052),Rgb(0.16,0.12,0.055),4,24);
+        for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {
+            let side=(a.x-0.0095).signum();
+            m.capsule(a-V3::Y*0.035,b+V3::Y*0.012,0.0055,0.0055,DARK,8);
+            let d=V3::X*(side*0.011)-V3::Z*0.008;
+            m.capsule(a+d,b+d,0.003,0.003,DARK,6);
+            for t in [0.1,0.45,0.80] {m.capsule(a.lerp(b,t),a.lerp(b,t)+d,0.003,0.003,METALC.scale(0.4),6);}
         }
-        m.block(&f.at(0.0,item.h*0.5+0.006,-0.085),v3(item.w*0.5+0.012,0.006,0.085),DARK);
+        let top=(glass[2]+glass[3])*0.5;
+        let hood:Vec<_>=(0..=12).map(|i|{
+            let x=-0.100+i as f64/12.0*0.200;
+            v3(top.x+x,top.y+0.012+0.016*(1.0-(x/0.100).powi(2)),top.z-0.006)
+        }).collect();
+        pilot::band(&mut m,&hood,0.018,0.003,V3::Y,DARK);
+        let item=layout(kind).into_iter().find(|i|i.rect.x==HUD_CONTROL.x && i.rect.y==HUD_CONTROL.y).unwrap();
+        let f=mount(kind,&item);
+        for x in [-0.054,0.054] {
+            m.lathe(f.p(x,-0.010,0.009),f.z,&[(0.0,0.007),(0.008,0.007),(0.010,0.006)],16,DARK);
+            m.capsule(f.p(x,-0.008,0.020),f.p(x+0.003,-0.004,0.020),0.0007,0.0007,METALC,4);
+        }
+        m.ellipsoid(f.p(0.0,-0.010,0.011),v3(0.0025,0.0025,0.0025),METALC.scale(0.6),4,8);
     }
     if !russian {
         let glass=hud_glass(kind);let foot=(glass[0]+glass[1])*0.5;
-        m.block(&plain(foot-v3(0.0,0.066,0.075)),v3(0.110,0.080,0.140),DARK);
+        m.block(&plain(foot-v3(0.0,0.026,0.055)),v3(0.120,0.025,0.105),DARK);
+        m.block(&plain(v3(0.0,1.125,-4.045)),v3(0.145,0.018,0.055),DARK);
+        m.ellipsoid(v3(0.0,1.180,-4.125),v3(0.070,0.003,0.052),Rgb(0.18,0.23,0.15),4,24);
+        m.ellipsoid(v3(0.0,1.196,-4.080),v3(0.018,0.026,0.021),DARK,8,12);
+        for side in [-1.0,1.0] {
+            m.ellipsoid(v3(side*0.127,1.126,-3.987),v3(0.003,0.003,0.002),METALC,4,8);
+        }
         for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {m.capsule(a,b,0.008,0.008,DARK,8);}
     }
     // Mirrors are attached to the source windscreen bow.
     let bow=crate::hornet::canopy_bow(russian);
-    let angles=if russian{vec![0.88,PI/2.0,PI-0.88]}else{vec![0.74,PI-0.74]};
-    for (i,phi) in angles.into_iter().enumerate() {
-        let at=native(bow,phi);let tangent=v3(phi.sin(),-phi.cos(),0.0);let radial=v3(phi.cos(),phi.sin(),0.0);
-        let (w,h)=if russian{(0.086,0.035)}else{(0.136,0.060)};
-        m.capsule(at,at-radial*0.04+V3::Z*0.04,0.008,0.008,DARK,6);
-        curved_mirror(&mut m,w,h,&|x,y,d|at+tangent*x+radial*(y-0.045)+V3::Z*(0.045+d),DARK,
-            if russian{-0.01}else if i==0{-0.42}else{0.42});
+    for (i,phi) in [0.42,PI/2.0,PI-0.42].into_iter().enumerate() {
+        let at=native(bow,phi);
+        let tangent=v3(phi.sin(),-phi.cos(),0.0);
+        let radial=v3(phi.cos(),phi.sin(),0.0);
+        let (w,h)=if i==1{(0.230,0.060)}else if russian{(0.225,0.067)}else{(0.235,0.070)};
+        m.capsule(at,at-radial*0.018+V3::Z*0.04,0.006,0.006,DARK,8);
+        curved_mirror(&mut m,w,h,&|x,y,d|at+tangent*x+radial*(y-0.018)+V3::Z*(0.045+d),DARK,
+            if i==1{0.0}else if i==0{-0.48}else{0.48});
     }
+    compass::housing(&mut m,kind);
     let back=native(aft,PI/2.0);
     m.block(&plain(v3(0.0,0.60,back.z+0.02)),v3(widest,0.48,0.025),wall);
-    pilot::build_static_mig(&mut m);
     m
 }
 /// Main levers and selector respond to the same commands as the flight model.
 pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
-    let f = instrument(kind, if kind==Type::F18{-0.340}else{-0.405}, if kind==Type::F18{0.555}else{0.655});
+    let f = instrument(kind, if kind==Type::F18{-0.340}else{-0.405}, if kind==Type::F18{0.475}else{0.580});
     m.block(&f.at(0.0, 0.0, 0.012), v3(0.018, 0.048, 0.012), DARK);
     let base = f.p(0.0, mix(0.030, -0.030, h.gear), 0.024);
     let tip = base + f.z * 0.065;
@@ -557,27 +643,36 @@ pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
     m.ellipsoid(tip + f.z * 0.010, v3(0.007, 0.007, 0.004), lamp, 4, 8);
     let switch = |m: &mut Mesh, at: V3, value: f64, col: Rgb| {
         let to = at + v3(0.0, 0.024, mix(-0.010, 0.010, value));
+        m.block(&Frame{o:at-V3::Y*0.003,x:V3::X,y:V3::Y,z:V3::Z},v3(0.008,0.003,0.010),DARK);
         m.capsule(at, to, 0.0027, 0.0027, METALC, 6);
         m.ellipsoid(to, v3(0.005, 0.005, 0.008), col, 4, 8);
     };
-    switch(m, v3(if kind==Type::F18{-0.337}else{-0.447}, 0.650, -3.805), h.flaps, DARK);
+    switch(m, v3(if kind==Type::F18{-0.337}else{-0.447}, if kind==Type::F18{0.644}else{0.633}, -3.805), h.flaps, DARK);
     // Speedbrake rocker on the outboard side of the moving throttle grip.
-    let throttle = v3(-0.355, 0.747, -3.40 - h.throttle * 0.22);
+    let throttle = v3(if kind==Type::Su27{-0.475}else{-0.355}, 0.747, -3.40 - h.throttle * 0.22);
     switch(m, throttle, h.airbrake, Rgb(0.50, 0.51, 0.48));
     if kind == Type::Su27 {
+        let selector=instrument(kind,-0.235,0.948);
+        for (x,value) in [(-0.080,if h.irst{1.0}else{0.0}),(0.0,h.weapon_mode as f64/4.0),(0.080,0.0)] {
+            let f=selector.at(x,0.0,0.009);
+            m.lathe(f.o,f.z,&[(0.0,0.0075),(0.008,0.0075),(0.010,0.006)],16,DARK);
+            let a=-0.7+value*1.4;
+            m.capsule(f.p(0.0,0.0,0.011),f.p(a.sin()*0.005,a.cos()*0.005,0.011),0.0007,0.0007,METALC,4);
+        }
         switch(
             m,
-            v3(0.445, 0.650, -3.805),
+            v3(0.445, 0.633, -3.805),
             if h.irst { 1.0 } else { 0.0 },
             DARK,
         );
     }
     let f = Frame {
-        o: v3(if kind==Type::F18{0.337}else{0.445}, 0.653, -3.485),
-        x: V3::X,
+        o: v3(if kind==Type::F18{0.337}else{0.445}, if kind==Type::F18{0.644}else{0.635}, -3.485),
+        x: v3(1.0,0.24,0.0).norm(),
         y: -V3::Z,
-        z: V3::Y,
+        z: v3(-0.24,1.0,0.0).norm(),
     };
+    m.block(&f.at(0.0,0.0,-0.004),v3(0.018,0.018,0.004),DARK);
     m.lathe(f.o, f.z, &[(0.0, 0.012), (0.012, 0.011)], 10, DARK);
     let angle = h.weapon_mode as f64 * 45.0 * DEG;
     m.capsule(
@@ -701,39 +796,17 @@ pub fn hornet_instruments(
     cv.text("BINGO", r.x + 211.0, r.y + 91.0, 1.0, DIM, Align::Center);
     cv.text("2000", r.x + 211.0, r.y + 116.0, 1.4, GREEN, Align::Center);
 }
-pub fn flanker_instruments(cv: &mut Canvas, a: &Aircraft, c: &Combat) {
+pub fn flanker_instruments(cv: &mut Canvas, a: &Aircraft, c:&Combat) {
     draw_consoles(cv, true);
-    let r = FLANKER_WEAPONS;
-    cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x36, 0x39, 1.0));
-    let weapon = symbology::weapon_line(c);
-    cv.text(
-        &weapon,
-        r.x + r.w * 0.5,
-        r.y + 19.0,
-        1.0,
-        GREEN,
-        Align::Center,
-    );
-    cv.text(
-        if c.irst {
-            "OEPS-27 / IRST"
-        } else {
-            "N001 / RLS"
-        },
-        r.x + 12.0,
-        r.y + 46.0,
-        1.0,
-        WHITE,
-        Align::Left,
-    );
-    cv.text(
-        if c.lock.is_some() { "ZAKHVAT" } else { "POISK" },
-        r.x + r.w - 12.0,
-        r.y + 46.0,
-        1.0,
-        GREEN,
-        Align::Right,
-    );
+    let r=FLANKER_SIGHT;
+    cv.rect(r.x,r.y,r.w,r.h,rgba(0x25,0x36,0x39,1.0));
+    cv.text(&symbology::weapon_line(c),r.x+r.w*0.5,r.y+19.0,1.0,GREEN,Align::Center);
+    for (i,label) in ["ПРИЦЕЛ","РЕЖИМ","СТРОБ"].into_iter().enumerate() {
+        let x=r.x+66.0+i as f32*158.0;
+        cv.text(label,x,r.y+49.0,1.0,WHITE,Align::Center);
+        cv.circle(x,r.y+88.0,15.0,2.0,DIM);
+        cv.line(x,r.y+88.0,x+4.0,r.y+73.0,2.0,WHITE);
+    }
     let r = FLANKER_SYSTEMS;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x32, 0x48, 0x4b, 1.0));
     for (i, (name, on)) in [
@@ -794,18 +867,16 @@ pub fn flanker_instruments(cv: &mut Canvas, a: &Aircraft, c: &Combat) {
     }
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x1b, 0x22, 0x22, 1.0));
-    for (i, name) in ["СЕТКА", "ЯРК", "НОЧЬ", "ДЕНЬ"].into_iter().enumerate() {
-        let x = r.x + 32.0 + i as f32 * 64.0;
-        cv.text(name, x, r.y + 18.0, 1.0, WHITE, Align::Center);
-        cv.circle(x, r.y + 56.0, 12.0, 2.0, DIM);
-        cv.line(x, r.y + 56.0, x + 4.0, r.y + 45.0, 2.0, WHITE);
+    for (i,name) in ["ЯРК","ТЕСТ","СЕТКА"].into_iter().enumerate() {
+        let x=r.x+40.0+i as f32*88.0;
+        cv.text(name,x,r.y+24.0,1.0,WHITE,Align::Center);
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn hornet_has_two_large_mirrors_while_flanker_keeps_three_small_panes() {
+    fn both_aircraft_have_a_crown_mirror_and_two_tall_side_mirrors() {
         for kind in [Type::F18, Type::Su27] {
             let m = build(kind);
             let glass: Vec<_> =
@@ -822,7 +893,7 @@ mod tests {
             assert!(glass.len() > 100);
             assert!(glass.iter().any(|v| v[0] < -0.20));
             assert!(glass.iter().any(|v| v[0] > 0.20));
-            assert_eq!(glass.iter().any(|v| v[0].abs() < 0.10), kind == Type::Su27);
+            assert!(glass.iter().any(|v| v[0].abs() < 0.10));
             let width = |side: f32| {
                 let mut lo = f32::INFINITY;
                 let mut hi = f32::NEG_INFINITY;
@@ -889,6 +960,7 @@ mod tests {
         for kind in [Type::F18, Type::Su27] {
             let mut rects: Vec<_> = layout(kind).iter().map(|i| i.rect).collect();
             rects.push(R_MIRROR);
+            rects.push(compass::CARD);
             for side in [-1.0, 1.0] {
                 for row in 0..6 {
                     rects.push(console_rect(side, row));
@@ -919,6 +991,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn instruments_follow_their_board_plane_and_have_solid_backing() {
+        for kind in [Type::F18,Type::Su27] {
+            let m=hardware(kind);
+            let board=instrument(kind,0.0,0.8);
+            for item in layout(kind) {
+                let f=mount(kind,&item);
+                assert!(f.x.dot(board.x)>0.999999 && f.y.dot(board.y)>0.999999
+                    && f.z.dot(board.z)>0.999999,"skew instrument on {kind:?}");
+                let(w,h)=housing_size(&item);
+                for x in [-0.75,0.0,0.75] {
+                    for y in [-0.75,0.0,0.75] {
+                        let a=f.p(x*w*0.5,y*h*0.5,-0.003);
+                        let b=a-f.z*0.18;
+                        assert!(m.v.chunks(crate::mesh::STRIDE*3).any(|t|blocked(a,b,t)),
+                            "unsupported housing on {kind:?}, {},{} at {x},{y}",item.x,item.y);
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn instrument_images_keep_their_native_pixel_aspect() {
         for kind in [Type::F18, Type::Su27] {
@@ -970,6 +1063,9 @@ mod tests {
                 m.v.extend(v);
             }
             assert!(m.count() > 1000 && m.v.iter().all(|x| x.is_finite()));
+            let mut controls=Mesh::new();
+            moving_controls(&mut controls,kind,&Hands::default());
+            m.v.extend(controls.v);
             let items = layout(kind);
             let mut hidden=Vec::new();
             for (i, item) in items.iter().enumerate() {
@@ -996,8 +1092,9 @@ mod tests {
                     }
                 }
                 for next in &items[i + 1..] {
-                    let gap_x = (item.x - next.x).abs() - (item.w + next.w) * 0.5;
-                    let gap_y = (item.y - next.y).abs() - (item.h + next.h) * 0.5;
+                    let (aw,ah)=housing_size(item);let(bw,bh)=housing_size(next);
+                    let gap_x = (item.x - next.x).abs() - (aw + bw) * 0.5;
+                    let gap_y = (item.y - next.y).abs() - (ah + bh) * 0.5;
                     assert!(
                         gap_x >= 0.008 || gap_y >= 0.008,
                         "{kind:?}: overlapping instruments at {},{} and {},{}",
@@ -1024,6 +1121,58 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn the_entire_lower_window_perimeter_is_sealed_from_the_head_box() {
+        for kind in [Type::F18,Type::Su27] {
+            let m=hardware(kind);let(offset,flanker)=(crate::airframe::EYE-kind.eye(),kind==Type::Su27);
+            let(front,aft)=crate::flightgear::canopy_range(kind);
+            for dx in [-0.035,0.0,0.035] {
+                let eye=crate::airframe::EYE+V3::X*dx;
+                for i in 1..48 {
+                    let z=mix(front,aft,i as f64/48.0);
+                    for phi in [0.0,PI] {
+                        let rim=crate::hornet::canopy_point(flanker,z,phi)+offset;
+                        for down in [0.025,0.10,0.30,0.65] {
+                            let boundary=rim-V3::Y*down;
+                            let target=eye+(boundary-eye)*3.0;
+                            assert!(m.v.chunks(crate::mesh::STRIDE*3).any(|t|blocked(eye,target,t)),
+                                "open lower perimeter in {kind:?}, station {i}, side {phi}, below {down}, head {dx}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn front_boards_and_controls_clear_both_legs_through_full_rudder_travel() {
+        for kind in [Type::F18,Type::Su27] {
+            let mut m=hardware(kind);
+            let offset=crate::airframe::EYE-kind.eye();
+            for t in crate::flightgear::textures(kind) {
+                let mut v=t.mesh.v.clone();
+                for p in v.chunks_mut(crate::mesh::STRIDE){p[0]+=offset.x as f32;p[1]+=offset.y as f32;p[2]+=offset.z as f32;}
+                m.v.extend(v);
+            }
+            let triangles:Vec<_>=m.v.chunks(crate::mesh::STRIDE*3).filter(|t|{
+                let ps=[vertex(t,0),vertex(t,1),vertex(t,2)];
+                ps.iter().any(|p|p.x.abs()<0.26 && p.y<0.66 && p.z < -3.65 && p.z > -4.65)
+            }).collect();
+            for rudder in [-1.0,0.0,1.0] {
+                let mut legs=Mesh::new();pilot::twin_legs(&mut legs,rudder);
+                for tri in legs.v.chunks(crate::mesh::STRIDE*3) {
+                    for (a,b) in [(0,1),(1,2),(2,0)] {
+                        let (a,b)=(vertex(tri,a),vertex(tri,b));
+                        let hit=triangles.iter().find(|t|blocked(a,b,t));
+                        assert!(hit.is_none(),
+                            "leg crosses hardware in {kind:?}, rudder {rudder}, {a:?} to {b:?}, triangle {:?}",hit.map(|t|[vertex(t,0),vertex(t,1),vertex(t,2)]));
+                    }
+                }
+            }
+        }
+    }
+    fn vertex(t:&[f32],i:usize)->V3 {
+        let p=&t[i*crate::mesh::STRIDE..];v3(p[0] as f64,p[1] as f64,p[2] as f64)
     }
     #[test]
     fn consoles_leave_the_pilot_and_throttle_envelopes_open() {

@@ -251,7 +251,18 @@ def generate(source,out):
                             tx,ty,tw,th=ext
                             uv=((tx+.5+uv[0]*(tw-1))/sw,(ty+.5+(1.-uv[1])*(th-1))/sh)
                         vertices.append((*ps[k],*n,*col,uv[0],1.-uv[1]) if tex else ((*ps[k],*n,*col,*uv) if ext else (*ps[k],*n,*col,-1.,-1.)))
-                    if kind=="su27" and part=="cockpit" and o.name.startswith("Panel.Cap"):
+                    if kind=="su27" and part=="cockpit" and "/LeftPanels/" in o.path.as_posix():
+                        for poly in without_rectangle(vertices,-.493,-.377,-6.198,-5.788):
+                            for j in range(1,len(poly)-1):
+                                for v in (poly[0],poly[j],poly[j+1]):arr.extend(v)
+                    elif kind=="su27" and part=="cockpit" and o.name=="Panel.Main.004":
+                        # The source front wall closes behind the new pedal
+                        # position. Open both foot tunnels; the continuous Rust
+                        # tub supplies their front firewall and lower floor.
+                        for poly in without_rectangle(vertices,-.275,.275,-7.5,-6.10):
+                            for j in range(1,len(poly)-1):
+                                for v in (poly[0],poly[j],poly[j+1]):arr.extend(v)
+                    elif kind=="su27" and part=="cockpit" and o.name.startswith("Panel.Cap"):
                         # The old coaming roof crosses the separate HDD. Open
                         # its case footprint; Rust supplies the continuous hood.
                         for poly in without_rectangle(vertices,.10,.36,-6.628,-6.138):
@@ -309,6 +320,13 @@ def generate(source,out):
                 if o.name in ("glass","HUD_Screen"):
                     if o.name=="HUD_Screen": print("HUD GLASS",[game(p,kind) for p in vs],flush=True)
                     continue
+                if o.path.name=="Su-27SK-HUD.ac" and o.name in ("hud","hudframe.005","InBoardDspl_L.knob","knob","text"):continue
+                # Replace the old front board, coaming and ground plane as one
+                # assembly in Rust. Keeping both creates intersecting panels,
+                # a diagram over the gauges and a floor through the pilot's feet.
+                if o.name in ("Panel.Main.Front", "Panel.Main.Front.001",
+                              "Panel.Main.Front.002", "Panel.Cap.left.001",
+                              "Panel.wcs", "Plane-cockpit-GND"):continue
                 emit(o,vs,"cockpit",True)
         data=bytearray(b"VRM1"+struct.pack("<I",len(parts)))
         for name,arr in parts.items():

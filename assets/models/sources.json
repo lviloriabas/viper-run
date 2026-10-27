@@ -52,10 +52,6 @@
     "sha256": "db796b5a805d4ebcc9868d04e6ceb8f9600e108278e0d64498642d226281cfa6"
   },
   {
-    "path": "su27/Models/Su-27-Cockpit/Instruments/HUD/hud.png",
-    "sha256": "d74666926c516aa1959059e6a134d41d3b99b35ede4c7e81f4100974b615bd66"
-  },
-  {
     "path": "su27/Models/Su-27-Cockpit/LeftPanels.xml",
     "sha256": "e073f98bbd68b3403ffa6ebecd80374cd21ef3cf54aa2f3f6e2f8352d3548fa9"
   },
@@ -406,10 +402,6 @@
   {
     "path": "su27/Models/Su-27-Cockpit/Su-27SK-Panels.xml",
     "sha256": "13c8307a9a301497fad8879c50d9f948a5a7ad012d0c2fac3ad302e49bf3cc84"
-  },
-  {
-    "path": "su27/Models/Su-27-Cockpit/panel.wcs.png",
-    "sha256": "d8704e4385fcbfa5b4e1621ca8f55b8160c9ff59b1b37659a1b3b6fdb9c5c1ea"
   },
   {
     "path": "su27/Models/Su-27.ac",

@@ -214,11 +214,14 @@ fn arm(m: &mut Mesh, shoulder: V3, wrist: V3, pole: V3, cuff: (f64, f64)) {
 }
 
 fn leg(m: &mut Mesh, s: f64, rudder: f64, pedal_tilt: f64) {
+    leg_pose(m,s,rudder,pedal_tilt,false);
+}
+fn leg_pose(m: &mut Mesh, s: f64, rudder: f64, pedal_tilt: f64, twin:bool) {
     // Right rudder pushes the right pedal forward and lets the left one back.
-    // The pedals travel 7 cm, far more than the real ones, so the knees
-    // visibly drop and rise with the yaw input.
-    let hip = v3(s * 0.10, 0.60, -3.48);
-    let ankle = v3(s * 0.165, 0.30, -4.30 - s * rudder * 0.07);
+    // The shared F-16/MiG pose retains its exaggerated 7 cm travel.
+    // The Hornet/Flanker foot wells use 2.5 cm, keeping the knees clear.
+    let hip = v3(s * 0.10, if twin{0.56}else{0.60}, -3.48);
+    let ankle = v3(s * 0.165, if twin{0.24}else{0.30}, (if twin{-4.34}else{-4.30}) - s * rudder * (if twin{0.025}else{0.07}));
     let knee = joint(hip, ankle, LEG, v3(s * 0.12, 1.0, -0.35));
     let thigh = (knee - hip).norm();
     let shin = (ankle - knee).norm();
@@ -271,6 +274,11 @@ fn leg(m: &mut Mesh, s: f64, rudder: f64, pedal_tilt: f64) {
     m.block(&Frame { o: foot(-0.07, 0.03), x: V3::X, y: rot.rotate(V3::Y), z: rot.rotate(V3::Z) }, v3(0.044, 0.034, 0.034), BOOT);
     bar(m, foot(-0.104, 0.06), foot(-0.094, -0.215), 0.054, 0.009, rot.rotate(V3::Y), SOLE);
     m.block(&Frame { o: foot(-0.125, -0.10), x: V3::X, y: rot.rotate(V3::Y), z: rot.rotate(V3::Z) }, v3(0.06, 0.012, 0.10), Rgb(0.24, 0.26, 0.26));
+    if twin {
+        let base=v3(s*0.165,0.086,ankle.z-0.10);
+        m.block(&Frame{o:base,x:V3::X,y:V3::Y,z:V3::Z},v3(0.045,0.006,0.080),METALC.scale(0.35));
+        bar(m,base+V3::Y*0.006,foot(-0.138,-0.10),0.018,0.012,V3::Z,METALC.scale(0.4));
+    }
 }
 
 /// Seat axes: reclined 30 degrees, `up` along the back, `fwd` out of it.
@@ -447,31 +455,25 @@ fn gear_handle(m: &mut Mesh, h: &Hands) {
     loft(m, &[St(tip + f.z * 0.012, 0.010, 0.010, lamp), St(tip + f.z * 0.016, 0.008, 0.008, lamp)], f.x, &OCT);
 }
 
-fn handle_base(mig: bool) -> V3 { v3(0.0, if mig { 0.580 } else { 0.615 }, -3.720) }
-
-fn ejection_handle(m: &mut Mesh, pull: f64, mig: bool) {
-    let lift = smoothstep(0.55, 1.0, pull) * 0.10;
-    let loops: &[f64] = if mig { &[-0.034, 0.034] } else { &[0.0] };
-    for &offset in loops {
-        for i in 0..12 {
-            let (t0, t1) = (i as f64 * TAU / 12.0, (i + 1) as f64 * TAU / 12.0);
-            let p = |t: f64| handle_base(mig) + v3(offset + (if mig { 0.029 } else { 0.060 }) * t.cos(),
-                lift + 0.045 + 0.032 * t.sin(), 0.0);
-            let col = if i % 2 == 0 { Rgb(0.85, 0.68, 0.16) } else { Rgb(0.08, 0.08, 0.06) };
-            bar(m, p(t0), p(t1), 0.007, 0.007, V3::Z, col);
-        }
-    }
+fn ejection_handle(m:&mut Mesh,pull:f64,kind:crate::sim::Type) {
+    let mut part=crate::eject::handle_mesh(kind,smoothstep(0.55,1.0,pull));
+    let offset=crate::eject::cockpit_harness_origin();
+    for v in part.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
+    m.v.extend(part.v);
 }
 
-fn handle_hand(m: &mut Mesh, side: f64, from: V3, pull: f64, mig: bool) {
-    let lift = smoothstep(0.55, 1.0, pull) * 0.10;
-    let target = handle_base(mig) + v3(side * 0.035, 0.033 + lift, 0.0);
+fn handle_hand(m: &mut Mesh, side: f64, from: V3, pull: f64, kind:crate::sim::Type) {
+    let travel=smoothstep(0.55,1.0,pull);
+    let target=crate::eject::cockpit_harness_origin()+crate::eject::handle_grip(kind,side,travel);
     let reach = smoothstep(0.0, 0.55, pull);
     // Reach forward before bringing the hands together, clear of the vest.
     let from = from + V3::Z * (-0.065 * (reach * PI).sin());
-    let k = Grip::new(from.lerp(target, smoothstep(0.0, 0.55, pull)), V3::X * side, side);
-    let wrist = fist(m, &k, 0.009, 0.009,
-        [k.p(-0.02, 0.0, 0.02), k.p(0.0, 0.015, 0.02), k.p(0.016, 0.020, 0.0), k.p(0.015, 0.006, -0.008)]);
+    let axis=(V3::X*side).lerp(crate::eject::handle_grip_axis(kind,side),reach).norm();
+    let offset=crate::eject::cockpit_harness_origin();
+    let mut glove=Mesh::new();
+    let wrist=crate::eject::closed_hand(&mut glove,side,from.lerp(target,reach)-offset,axis)+offset;
+    for v in glove.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
+    m.v.extend(glove.v);
     arm(m, v3(side * SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist,
         v3(side * 0.35, -0.45, -1.0), (0.026, 0.036));
 }
@@ -484,12 +486,12 @@ pub fn build_dynamic(m: &mut Mesh, h: &Hands) {
     }
     let (k, _) = stick_grip(h);
     sidestick(m, &k);
-    ejection_handle(m, h.eject, false);
+    ejection_handle(m,h.eject,crate::sim::Type::F16);
     if h.eject > 0.0 {
         // Keep the controls visible after the hands leave them.
         throttle(m, h);
-        handle_hand(m, 1.0, k.o, h.eject, false);
-        handle_hand(m, -1.0, palm(&throttle_grip(h)), h.eject, false);
+        handle_hand(m, 1.0, k.o, h.eject,crate::sim::Type::F16);
+        handle_hand(m, -1.0, palm(&throttle_grip(h)), h.eject,crate::sim::Type::F16);
         m.facet();
         return;
     }
@@ -538,18 +540,32 @@ fn mig_stick(m: &mut Mesh, k: &Grip) {
     bar(m, k.p(0.045, 0.03, 0.0), k.p(0.05, -0.05, 0.004), 0.010, 0.003, k.fwd, Rgb(0.07, 0.07, 0.07));
 }
 
-/// Throttle (RUD): two levers side by side in a quadrant on the left
-/// console, with a combined grip. It travels 22 cm, from 0.16 m ahead of
-/// the eye at idle.
+/// The Su-27's light-coloured grip, trigger and three crown controls.
+fn flanker_stick(m:&mut Mesh,k:&Grip) {
+    let c=|u:f64|MIG_STICK+k.g*u;
+    let paint=Rgb(0.46,0.66,0.69);
+    loft(m,&[St(MIG_STICK,0.055,0.055,RUBBER),St(c(0.06),0.040,0.040,RUBBER),
+        St(c(0.10),0.018,0.018,paint),St(c(0.34),0.019,0.021,paint)],V3::X,&OCT);
+    let p=|f:f64,u:f64|k.p(f,u,0.0);
+    loft(m,&[St(p(0.0,-0.065),0.019,0.020,paint),St(p(0.0,-0.020),0.022,0.025,paint),
+        St(p(0.0,0.035),0.025,0.029,paint),St(p(0.012,0.065),0.034,0.037,paint),
+        St(p(0.012,0.090),0.034,0.037,paint),St(p(0.006,0.108),0.025,0.028,paint)],V3::X,&OCT);
+    knob(m,k.p(0.034,0.080,-0.018),k.fwd,0.010,0.007,RED);
+    knob(m,k.p(0.036,0.080,0.013),k.fwd,0.009,0.006,GRIP);
+    knob(m,k.p(0.004,0.104,0.006),k.g,0.009,0.010,GRIP);
+    bar(m,k.p(0.048,0.025,0.018),k.p(0.043,-0.047,0.018),0.005,0.003,k.fwd,METALC.scale(0.6));
+}
+
 fn mig_throttle_grip(h: &Hands) -> V3 {
     v3(-0.315, 0.735, -3.40 - h.throttle * 0.22)
 }
 
-fn mig_throttle(m: &mut Mesh, h: &Hands) -> V3 {
-    let g = mig_throttle_grip(h);
+fn center_throttle(m: &mut Mesh, h: &Hands, flanker:bool) -> V3 {
+    let shift=if flanker{-0.120}else{0.0};
+    let g = mig_throttle_grip(h)+V3::X*shift;
     // Levers lean forward from their pivots in the quadrant slot.
     for x in [-0.330, -0.300] {
-        bar(m, v3(x, super::mig::QUADRANT_TOP, g.z + 0.09), v3(x, g.y - 0.02, g.z), 0.006, 0.01, V3::Z, Rgb(0.30, 0.32, 0.32));
+        bar(m, v3(x+shift, super::mig::QUADRANT_TOP, g.z + 0.09), v3(x+shift, g.y - 0.02, g.z), 0.006, 0.01, V3::Z, Rgb(0.30, 0.32, 0.32));
     }
     let f = Frame { o: g, x: V3::X, y: V3::Y, z: V3::Z };
     m.block(&f, v3(0.032, 0.024, 0.042), GRIP);
@@ -586,28 +602,32 @@ pub fn build_dynamic_mig(m:&mut Mesh,h:&Hands){build_dynamic_center(m,h,true);}
 pub fn build_dynamic_center(m: &mut Mesh, h: &Hands, russian:bool) {
     build_dynamic_center_inner(m,h,russian,true);
 }
+pub(super) fn twin_legs(m:&mut Mesh,rudder:f64) {
+    for side in [-1.0,1.0] {leg_pose(m,side,rudder,0.0,true);}
+}
 pub fn build_dynamic_twin(m:&mut Mesh,h:&Hands,russian:bool) {
     build_dynamic_center_inner(m,h,russian,false);
 }
 fn build_dynamic_center_inner(m: &mut Mesh, h: &Hands, russian:bool, gear:bool) {
     if gear { mig_gear_lever(m, h); }
-    for s in [-1.0, 1.0] {
-        leg(m, s, h.rudder, 0.0);
-    }
+    if gear {
+        for s in [-1.0,1.0] {leg(m,s,h.rudder,0.0);}
+    } else {twin_legs(m,h.rudder);}
     let k = mig_stick_grip(h);
-    mig_stick(m, &k);
-    ejection_handle(m, h.eject, russian);
+    if russian && !gear {flanker_stick(m,&k);}else{mig_stick(m,&k);}
+    let kind=if russian{if gear{crate::sim::Type::Mig29}else{crate::sim::Type::Su27}}else{crate::sim::Type::F18};
+    ejection_handle(m,h.eject,kind);
     if h.eject > 0.0 {
-        mig_throttle(m, h);
-        handle_hand(m, 1.0, k.o, h.eject, russian);
-        handle_hand(m, -1.0, mig_throttle_grip(h), h.eject, russian);
+        center_throttle(m,h,russian && !gear);
+        handle_hand(m, 1.0, k.o, h.eject,kind);
+        handle_hand(m, -1.0, mig_throttle_grip(h)+V3::X*(if russian && !gear{-0.120}else{0.0}), h.eject,kind);
         m.facet();
         return;
     }
     let (rx, rf) = (0.019, 0.025);
     let wrist = fist(m, &k, rx, rf, [k.p(-rf - 0.012, 0.004, -rx * 0.1), k.p(-rf - 0.008, 0.030, -rx * 0.75), k.p(-0.028, 0.054, -rx - 0.003), k.p(-0.020, 0.074, -0.016)]);
     arm(m, SHOULDER, wrist, pole(1.0), (0.026, 0.036));
-    let wrist = mig_throttle(m, h);
+    let wrist = center_throttle(m,h,russian && !gear);
     arm(m, v3(-SHOULDER.x, SHOULDER.y, SHOULDER.z), wrist, pole(-1.0), (0.034, 0.018));
     m.facet();
 }
