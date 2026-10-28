@@ -1,5 +1,61 @@
 # Validation
 
+## Unified model style, cockpit clearance and tactical units, 27 October 2026
+
+The Hornet/Flanker exterior palettes use 48 clean colours; source cockpit
+panels use 64, with reserved colours for insignia, warning lights and labels.
+Images retain aspect, UV layout and resolution up to 2048 pixels. QOI packaging
+is lossless after styling. Every original source hash still matches. Comparing
+the embedded meshes with the previous revision confirms that their geometry
+bytes are identical; painted simplification does not change aircraft dimensions.
+
+The Su-27 seat and eye move 12 cm aft and its centre stick moves 18 cm aft.
+Hands, legs, pedals, outside crew and ejection origin remain aligned. Fifteen
+full pitch/roll combinations check stick edges against both procedural and
+imported textured hardware. Reach tests retain the arm lengths. The fixed panel
+and console geometry is not moved.
+
+Hornet shoulder mirrors now follow the tangent of the mating bow. HUD details
+include slotted rails, diagonal feet, fasteners and an optical rim. The
+Hornet airbrake's outer-face winding is corrected and its UVs interpolate
+the underlying spine paint. Both tactical contact labels and locked-target
+HUD range stay in nautical miles, including close range.
+
+FlightGear reference measurements guide the wider D-section inlet and compact
+interrogator blades on the F-16, and the five sloped MiG auxiliary-intake leaves.
+Original overall-dimension and moving-surface checks still pass. See
+[COMPACT-MODEL-REFERENCES.md](COMPACT-MODEL-REFERENCES.md) for URLs, hashes,
+measurements and variant limits. Full reference models are not embedded.
+
+The final debug and release suites pass 303 game tests and 12 server tests.
+All eight Python importer/style checks pass. Linux and native Windows each
+complete 67 airframe/cockpit captures, 21 mirror captures and 12 Su-27 control
+and ejection captures. Blender inspection uses eight views per aircraft,
+including a close lateral cutaway of the stick and panel. Native captures
+verify the live textures; Blender's workbench faces focus on geometry.
+
+The Windows game is 34,840,576 bytes, down from 50,138,112 bytes (about 30.5%).
+The Linux game is 35,000,728 bytes, down from 50,297,072 bytes. Final distribution
+files match their target build outputs and the capture manifests' SHA-256.
+The native Windows executable also passes the local Defender custom scan;
+the ignored report records its exact hash and scanner output.
+
+~~~sh
+cargo test --quiet
+cargo test --release --quiet
+python -m unittest discover -s tools -p test_flightgear_import.py -v
+./build.sh
+python tools/check_airframe_views.py dist/viper-run-linux-x86_64 --output target/model-review/style-final-linux
+python tools/check_mirror_views.py dist/viper-run-linux-x86_64 --output target/model-review/style-final-linux/mirrors
+python tools/check_pilot_animation.py dist/viper-run-linux-x86_64 --output target/model-review/style-final-pilot-linux --jets su27
+dist/viper-run-linux-x86_64 --export-cockpit target/model-review/style-final-blender
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/style-final-blender --jet f18
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/style-final-blender --jet su27
+~~~
+
+Run the corresponding Windows executable with native Windows Python for its
+three capture matrices. Distribution hashes are in dist/SHA256SUMS.txt.
+
 ## Canopy joint, mirror seats and HUD lead, 27 October 2026
 
 This revision supersedes the mounting description in the earlier mirror pass.

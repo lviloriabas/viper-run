@@ -2167,15 +2167,19 @@ fn ils31(cv: &mut Canvas, a: &Aircraft, c: &Combat, cam: &Camera, world_dir: &dy
 
 /// Camera in body axes, for the cockpit pass and the combiner projection.
 /// The pilot's design eye in the jet's body axes.
+pub(crate) fn seat_offset(kind:crate::sim::Type)->V3 {
+    V3::Z*if kind==crate::sim::Type::Su27{0.12}else{0.0}
+}
+pub(super) fn cockpit_eye(kind:crate::sim::Type)->V3 {EYE+seat_offset(kind)}
 pub fn design_eye(a: &Aircraft) -> V3 {
-    a.kind.eye()
+    a.kind.eye()+seat_offset(a.kind)
 }
 
-/// The camera in cockpit space: body axes, shifted so the design eye sits
-/// at airframe::EYE, where both cockpits are built.
+/// Camera in the fixed cockpit geometry frame. Keep the type-specific seat
+/// setback in the camera position instead of subtracting it away.
 pub fn body_camera(cam: &Camera, a: &Aircraft) -> Camera {
     let inv = a.q.conj();
-    Camera { eye: inv.rotate(cam.eye - a.pos) - design_eye(a) + EYE, forward: inv.rotate(cam.forward), right: inv.rotate(cam.right), up: inv.rotate(cam.up), fov: cam.fov }
+    Camera { eye: inv.rotate(cam.eye - a.pos) - a.kind.eye() + EYE, forward: inv.rotate(cam.forward), right: inv.rotate(cam.right), up: inv.rotate(cam.up), fov: cam.fov }
 }
 
 pub fn eye_world(a: &Aircraft) -> V3 {
@@ -2199,10 +2203,10 @@ pub fn mirror_camera(a: &Aircraft) -> Camera {
 /// legacy panorama placement and normal-based reflected-ray sampling share
 /// the same physical pane construction.
 #[derive(Clone,Copy)]
-enum MirrorSampling { Panorama(f64), Reflection }
+enum MirrorSampling { Panorama(f64), Reflection(V3) }
 
-fn reflected_mirror_uv(p:V3, normal:V3)->(f64,f64) {
-    let incident=(p-EYE).norm();
+fn reflected_mirror_uv(p:V3, normal:V3,eye:V3)->(f64,f64) {
+    let incident=(p-eye).norm();
     let reflected=incident-normal*(2.0*incident.dot(normal));
     let f=v3(0.0,(8.0*DEG).sin(),(8.0*DEG).cos());
     let right=-V3::X;let up=right.cross(f);
@@ -2214,7 +2218,7 @@ fn reflected_mirror_uv(p:V3, normal:V3)->(f64,f64) {
 }
 
 fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, sampling: MirrorSampling) {
-    let rear_offset=match sampling{MirrorSampling::Panorama(x)=>x,MirrorSampling::Reflection=>0.0};
+    let rear_offset=match sampling{MirrorSampling::Panorama(x)=>x,MirrorSampling::Reflection(_)=>0.0};
     let corners = rounded_rect(w, h, w.min(h) * 0.25, 4);
     // Subdivide the long edges as well as the rounded corners: the panes
     // follow the canopy arch, so a single chord would flatten their rims.
@@ -2260,7 +2264,7 @@ fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> 
     let sample_half_width = (bounds.2 - bounds.0) * scale * 0.5;
     let tex_centre_x = rm.x as f64 + rm.w as f64 * 0.5 + rear_offset * (rm.w as f64 * 0.5 - sample_half_width);
     // A slight convex face in a shallow dark housing.
-    let bulge = h.min(w) * match sampling{MirrorSampling::Reflection=>0.002,MirrorSampling::Panorama(_)=>0.02};
+    let bulge = h.min(w) * match sampling{MirrorSampling::Reflection(_)=>0.002,MirrorSampling::Panorama(_)=>0.02};
     let e = 0.002;
     let at = |k: usize, t: f64| {
         let (x, y) = (outline[k % n].0 * t, outline[k % n].1 * t);
@@ -2271,7 +2275,7 @@ fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> 
         let tex_x = tex_centre_x - (u - centre.0) * scale;
         let tex_y = rm.y as f64 + rm.h as f64 * 0.5 - (v - centre.1) * scale;
         let uv=match sampling {
-            MirrorSampling::Reflection=>reflected_mirror_uv(p,normal),
+            MirrorSampling::Reflection(eye)=>reflected_mirror_uv(p,normal,eye),
             MirrorSampling::Panorama(_)=>(clamp(tex_x, rm.x as f64 + 0.5, (rm.x + rm.w) as f64 - 0.5) / AW,
                 1.0-clamp(tex_y, rm.y as f64 + 0.5, (rm.y + rm.h) as f64 - 0.5)/A),
         };

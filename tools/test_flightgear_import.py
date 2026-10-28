@@ -1,4 +1,4 @@
-"""Geometry and lossless asset-pipeline checks."""
+"""Geometry, flat-colour styling and lossless packaging checks."""
 import gzip, hashlib, io, json, math, struct, tempfile, unittest
 from pathlib import Path
 from PIL import Image, ImageChops
@@ -61,6 +61,28 @@ kids 0
         self.assertEqual(decoded.size,im.size)
         self.assertEqual(decoded.tobytes(),im.tobytes())
 
+    def test_style_keeps_coloured_markings_and_dimensions(self):
+        im=Image.new("RGB",(128,64),(115,140,155))
+        from PIL import ImageDraw
+        draw=ImageDraw.Draw(im);draw.rectangle((40,16,87,47),fill=(220,30,25))
+        image=fg.styled_texture(im)
+        self.assertEqual(image.size,im.size)
+        self.assertEqual(image.getpixel((64,32)),(220,30,25))
+        self.assertEqual(image.getpixel((8,8)),(115,140,155))
+        self.assertLessEqual(len(image.getcolors(128*64)),48)
+
+    def test_style_reserves_small_insignia_colours(self):
+        from PIL import ImageDraw
+        image=Image.new("RGB",(256,256))
+        image.putdata([(25+x//2,65+y//2,120+(x+y)//8) for y in range(256) for x in range(256)])
+        ImageDraw.Draw(image).rectangle((120,120,127,127),fill=(220,30,25))
+        styled=fg.styled_texture(image)
+        red=styled.getpixel((123,123))
+        self.assertGreater(red[0],180)
+        self.assertLess(red[1],65)
+        self.assertLess(red[2],65)
+        self.assertLessEqual(len(styled.getcolors(256*256)),48)
+
     def test_every_bundled_source_matches_its_original_hash(self):
         root=fg.ROOT/"assets/models"
         for entry in json.loads((root/"sources.json").read_text()):
@@ -68,7 +90,7 @@ kids 0
             data=gzip.decompress(Path(str(p)+".gz").read_bytes()) if p.suffix in (".ac",".xml") else p.read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(),entry["sha256"],entry["path"])
 
-    def test_embedded_cockpit_images_keep_all_original_pixels(self):
+    def test_embedded_cockpit_images_match_the_flat_style_without_warping(self):
         root=fg.ROOT/"assets/models";data=(root/"su27.vrm").read_bytes();at=4
         def u32():
             nonlocal at
@@ -81,8 +103,11 @@ kids 0
             n=u32();length=u32();at+=n*4
             image=Image.open(io.BytesIO(data[at:at+length])).convert("RGB");at+=length
             source=Image.open(root/"source"/entry["source"]).convert("RGB")
-            self.assertEqual(image.size,source.size)
-            self.assertIsNone(ImageChops.difference(image,source).getbbox(),entry["source"])
+            expected=fg.styled_texture(source,cockpit=True)
+            self.assertEqual(image.size,expected.size)
+            self.assertAlmostEqual(image.width/image.height,source.width/source.height,places=3)
+            self.assertLessEqual(len(image.getcolors(image.width*image.height)),64)
+            self.assertIsNone(ImageChops.difference(image,expected).getbbox(),entry["source"])
         self.assertEqual(at,len(data))
 
 if __name__=="__main__":unittest.main()

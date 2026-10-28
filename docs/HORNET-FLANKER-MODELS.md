@@ -63,7 +63,9 @@ sensor and weapon selectors retain their keyboard/controller commands.
 
 The Hornet retains the requested central UFCD, side DDIs, lower MPCD, left
 engine/fuel display and right standby instruments. A shallow optical base and
-transverse header replace the oversized block beneath the HUD. The UFCD case
+transverse header replace the oversized block beneath the HUD. Slotted side
+channels, diagonal feet, fastening hardware and a separate optical rim detail
+the HUD structure. The UFCD case
 joins the board as a solid housing. The engine/fuel module and auxiliary gauges
 clear the consoles and knee tunnels. Main switches and the throttle quadrant
 are fixed to their console surfaces.
@@ -75,8 +77,8 @@ Its simplified cockpit geometry alone is insufficient to establish those
 details; the supplied Hornet photographs and instrument references are used
 for the interior adaptation.
 
-The Hornet side panes are nearly upright, with the tops leaning slightly
-outwards, following the supplied cockpit photographs.
+The Hornet shoulder panes follow the tangent of the mating bow, following
+the same arrangement as the MiG mirrors.
 The mounting layout follows the MiG-29: one crown pane and two shoulder panes
 seated against the pilot-facing canopy joint. The Hornet's forward bow replaces
 the coarse triangular source cap with tapered posts, distinct shoulders and a
@@ -114,13 +116,19 @@ The adapted scale follows the game's heading reference; magnetic variation,
 dip and acceleration errors are not simulated.
 
 The pilot's twin-engine-aircraft leg pose and shorter pedal travel clear the
-front boards throughout rudder movement. Pedals have floor supports. The
+front boards throughout rudder movement. The Su-27 seat and design eye are
+12 cm aft of the original placement; its centre stick is 18 cm aft. The pilot,
+hands, pedals, exterior crew and ejection origin share that seating adjustment.
+The fixed panel and console datum remains unchanged. Full stick-travel tests
+include both procedural and imported textured hardware. Pedals have floor supports. The
 MiG-29 and F-16 retain their existing leg poses. Continuous sill seals, cheek
 returns, floor and bulkheads close the interior around these assemblies.
 
-Live faces preserve pixel aspect ratio. Native Su-27 console images retain
-every original pixel. Exterior atlases copy source pixels without resampling.
-QOI packaging is lossless. Instrument faces and compass markings are drawn
+Live faces preserve pixel aspect ratio. Source console panels use a cleaned
+64-colour palette, while exterior paint uses 48 colours with reserved colours
+for insignia, numbers and warnings. Source aspect, UVs and images up to 2048
+pixels are preserved. Original sources remain unchanged; QOI packages the styled
+pixels losslessly. Instrument faces and compass markings are drawn
 sharply with hardware and pilot depth occlusion.
 
 Flight instruments, radar, HUD, weapon state, gear/flap/brake indicators and

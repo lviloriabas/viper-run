@@ -450,14 +450,23 @@ pub fn build() -> Fulcrum {
             let out = move |p: V3| p - V3::Y * if upper { 1.0 } else { -1.0 };
             m.surface(24, 5, move |u, v| deck_point(side, deck_z(u), v, upper), |p, n| if upper { skin(p, n) } else { BELLY }, Some(&out));
         }
-        // Auxiliary intake louvres on top of the LERX, used on the ground.
+        // Five dimensioned auxiliary louvers, with painted leaves and
+        // shallow dark gaps. The legacy FG model locates these immediately
+        // behind the canopy, 0.60 m across and about 1.16 m along the LERX.
         for k in 0..5 {
-            let z0 = -1.60 + k as f64 * 0.25;
-            let q = |x: f64, z: f64| {
-                let s = (x - DECK_IN) / (spline(&DECK, z)[1] - DECK_IN);
-                deck_point(side, z, s, true) + V3::Y * 0.012
+            let z0=CANOPY_Z[9]+0.10+k as f64*0.235;
+            let q=|x:f64,z:f64|{
+                let s=(x-DECK_IN)/(spline(&DECK,z)[1]-DECK_IN);
+                deck_point(side,z,s,true)+V3::Y*0.010
             };
-            face(&mut m, &[q(0.62, z0), q(1.08, z0), q(1.08, z0 + 0.17), q(0.62, z0 + 0.17)], V3::Y, Rgb(0.22, 0.24, 0.24));
+            let (x0,x1)=(0.49,1.08);
+            face(&mut m,&[q(x0,z0),q(x1,z0),q(x1,z0+0.215),q(x0,z0+0.215)],V3::Y,DUCT);
+            let (a,b,c,d)=(q(x0,z0+0.035)+V3::Y*0.020,q(x1,z0+0.035)+V3::Y*0.020,
+                q(x1,z0+0.215),q(x0,z0+0.215));
+            face(&mut m,&[a,b,c,d],V3::Y,LIGHT);
+            for (p,r) in [(a,d),(b,c)] {
+                m.quad(p,r,r-V3::Y*0.012,p-V3::Y*0.012,METAL);
+            }
         }
         // Gun muzzle in the port LERX root.
         if side < 0.0 {
@@ -691,6 +700,17 @@ mod tests {
             }
         }
         (lo, hi)
+    }
+
+    #[test]
+    fn auxiliary_intakes_fit_the_lerx_and_match_the_reference_envelope() {
+        assert!(((1.08-0.49)-0.60_f64).abs()<0.02);
+        let front=CANOPY_Z[9]+0.10;
+        let aft=front+4.0*0.235+0.215;
+        assert!((aft-front-1.16).abs()<0.02);
+        for z in [front,aft] {
+            assert!(spline(&DECK,z)[1]>1.08);
+        }
     }
 
     #[test]

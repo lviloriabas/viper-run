@@ -62,6 +62,13 @@ def main():
         cases.append((jet, "detached-gear", [
             "--break-gear", "--sim", "0.5", "--chase", "--look", "100,-10",
             "--zoom", "1.3" if jet == "su27" else "1.1"]))
+    for jet in ("f16","mig29"):
+        for view,look in (("reference-front","145,20"),("reference-head-on","180,0"),
+                          ("reference-profile","90,0"),("reference-top","180,65"),
+                          ("reference-intake","180,-12")):
+            cases.append((jet,view,["--chase","--look",look,"--zoom","1.65" if view.endswith("top") else ".9" if view.endswith("intake") else "1.1"]))
+    for label,controls in (("stick-forward","push,left"),("stick-aft","pull,right")):
+        cases.append(("su27",label,["--look","0,-52","--input",controls,"--sim",".4"]))
     startup = None
     if os.name == "nt":
         startup = subprocess.STARTUPINFO()

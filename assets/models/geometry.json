@@ -625,189 +625,216 @@
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/ACS-Control-panel/SU-27-FCS.ACS-LeftPanel.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/SDU-panel/SDU-10-panel-tex.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/AC-Limiters-panel/AC-panel-UV-layout-tex-Cycles.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/Engines-Fire-emergency-panel/Engine-Fire-emergency-panel.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/vhf-uhf-panel-Render.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/VHF-UHF-Radios/vhf-uhf-panel-tex2.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/Panels1/panels1.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/LeftPanels/N001-Radar-panel/Radar-N001-panel-render.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/CockpitParts/Switches/base.png",
         "size": [
           256,
           256
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/CockpitParts/Switches/switch1.png",
         "size": [
           256,
           256
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/AoA-pitot-panel/pitot-heat-panel-tex.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/CockpitParts/Switches/switch2.png",
         "size": [
           256,
           256
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/TargetDistribution-panel/tgt-fleet-pnl-tex.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/PPM-Digits-Canvas.png",
         "size": [
           256,
           256
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/OC-Radio-panel/OC-RSBN-Panel-TEX.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/digs.png",
         "size": [
           64,
           512
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/NavRadio/PU-184-ARC-Layout1.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/PNK-panel/P3-188-1-panel-tex-render.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Jammer-rwr-panel/rwr-Jammer-panel-R1.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Lighting-panel/Lighting-panel-render-tex.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Engines-Start-power-sources/Engines-power-CP-rend.png",
         "size": [
           1024,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/CockpitParts/Switches/switch3.png",
         "size": [
           256,
           256
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Power-Switches-panel/Right-power-switches-render-fg3.png",
         "size": [
           2048,
           1024
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Flares-Chaff-IFF-panel/Flares-chaffs-IFF-cp-render-FG-Ready.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel4.png",
         "size": [
           1920,
           1080
-        ]
+        ],
+        "style": "flat-64"
       },
       {
         "source": "su27/Models/Su-27-Cockpit/RightPanels/Electricity-SDU-power-panel/Electricity-SDU-power-panel-1.png",
         "size": [
           1600,
           1200
-        ]
+        ],
+        "style": "flat-64"
       }
     ],
     "objects": [

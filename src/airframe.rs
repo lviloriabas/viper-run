@@ -48,8 +48,8 @@ const FUSE_NZ: usize = 26;
 const FUSE_NTH: usize = 12;
 // Ventral inlet duct, from the D-shaped mouth back into the lower fuselage.
 const INTAKE: [[f64; 7]; 8] = [
-    [-3.06, 0.50, -0.15, 0.27, 0.28, 4.0, 2.4],
-    [-2.49, 0.57, -0.12, 0.30, 0.31, 3.5, 2.4],
+    [-3.06, 0.62, -0.15, 0.27, 0.28, 5.0, 2.4],
+    [-2.49, 0.65, -0.12, 0.30, 0.31, 4.0, 2.4],
     [-1.09, 0.67, -0.06, 0.34, 0.37, 3.2, 2.6],
     [0.41, 0.73, 0.00, 0.36, 0.43, 3.2, 2.8],
     [1.91, 0.72, 0.05, 0.34, 0.46, 3.2, 2.8],
@@ -704,6 +704,21 @@ pub fn build() -> Airframe {
     let div = crate::mesh::Frame { o: v3(0.0, 0.10, mz + 0.30), x: V3::X, y: V3::Y, z: V3::Z };
     ext.block(&div, v3(0.02, 0.05, 0.34), Rgb(0.30, 0.31, 0.33));
 
+    // Four compact interrogator blades ahead of the windscreen, arranged
+    // like FlightGear's Link16Antennas. Their bases follow the local skin.
+    for x in [-0.155_f64,-0.055,0.055,0.155] {
+        let z=CANOPY_FRONT-0.48;
+        let sec=section(z);
+        let y=sec.yc+sec.hu*(1.0-(x.abs()/sec.w).powf(sec.nu)).max(0.0).powf(1.0/sec.nu);
+        let a=v3(x,y+0.003,z-0.12);let b=v3(x,y+0.003,z+0.10);
+        let c=v3(x,y+0.070,z+0.055);let d=v3(x,y+0.045,z-0.065);
+        for side in [-1.0,1.0] {
+            let dx=V3::X*(side*0.004);
+            ext.quad(a+dx,b+dx,c+dx,d+dx,Rgb(0.34,0.37,0.39));
+        }
+        ext.quad(d-V3::X*0.004,c-V3::X*0.004,c+V3::X*0.004,d+V3::X*0.004,Rgb(0.47,0.49,0.50));
+    }
+
     let nz = 8;
     for j in 0..nz {
         let (a, b) = (j as f64 * TAU / nz as f64, (j + 1) as f64 * TAU / nz as f64);
@@ -931,6 +946,19 @@ mod tests {
             hi = v3(hi.x.max(c[0] as f64), hi.y.max(c[1] as f64), hi.z.max(c[2] as f64));
         }
         (lo, hi)
+    }
+
+    #[test]
+    fn inlet_has_a_broad_d_section_and_a_continuous_trunk() {
+        let s=catmull(&INTAKE,INTAKE_Z.0);
+        assert!(2.0*s.w>1.20 && 2.0*s.w<1.30);
+        assert!((s.hu+s.hl)/(2.0*s.w)<0.46);
+        assert!(s.nu>4.0 && s.nl<3.0);
+        for k in 0..100 {
+            let z=mix(INTAKE_Z.0,-1.0,k as f64/99.0);
+            let s=catmull(&INTAKE,z);
+            assert!(s.w>=0.61 && s.w<0.72);
+        }
     }
 
     #[test]

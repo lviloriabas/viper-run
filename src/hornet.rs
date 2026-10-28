@@ -77,9 +77,9 @@ pub fn build() -> Airframe {
             let (u, v) = (i as f64 / 12.0, j as f64 / 8.0);
             a.brake.quad(
                 point(u, v),
-                point(u, v + 0.125),
-                point(u + 1.0 / 12.0, v + 0.125),
                 point(u + 1.0 / 12.0, v),
+                point(u + 1.0 / 12.0, v + 0.125),
+                point(u, v + 0.125),
                 Rgb(0.55, 0.60, 0.63),
             );
         }
@@ -110,10 +110,17 @@ pub fn build() -> Airframe {
             );
         }
     }
+    for v in a.brake.v.chunks_mut(crate::mesh::STRIDE) {
+        let (_,colour,uv)=skin_sample(&a.body,v[0] as f64,v[2] as f64);
+        v[6..9].copy_from_slice(&[colour.0 as f32,colour.1 as f32,colour.2 as f32]);
+        v[9]=uv.0 as f32;v[10]=uv.1 as f32;
+    }
     a
 }
-fn skin_top(m: &Mesh, x: f64, z: f64) -> f64 {
+fn skin_top(m:&Mesh,x:f64,z:f64)->f64 {skin_sample(m,x,z).0}
+fn skin_sample(m: &Mesh, x: f64, z: f64) -> (f64,Rgb,(f64,f64)) {
     let mut top = f64::NEG_INFINITY;
+    let mut sample=(Rgb(0.55,0.60,0.63),(-1.0,-1.0));
     for t in m.v.chunks(crate::mesh::STRIDE * 3) {
         let p = |k: usize| v3(t[k * 11] as f64, t[k * 11 + 1] as f64, t[k * 11 + 2] as f64);
         let a = p(0);
@@ -127,15 +134,31 @@ fn skin_top(m: &Mesh, x: f64, z: f64) -> f64 {
         let u = (q.x * c.z - c.x * q.z) / d;
         let v = (b.x * q.z - q.x * b.z) / d;
         if u >= -1e-7 && v >= -1e-7 && u + v <= 1.0000001 {
-            top = top.max(a.y + u * b.y + v * c.y);
+            let y=a.y+u*b.y+v*c.y;
+            if y>top {
+                top=y;
+                let at=|k:usize|t[k] as f64*(1.0-u-v)+t[11+k] as f64*u+t[22+k] as f64*v;
+                sample=(Rgb(at(6),at(7),at(8)),(at(9),at(10)));
+            }
         }
     }
     assert!(top.is_finite());
-    top
+    (top,sample.0,sample.1)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn airbrake_top_faces_up_and_uses_the_spine_paint() {
+        let a=build();let mut upper=0;
+        for v in a.brake.v.chunks(crate::mesh::STRIDE) {
+            assert!(v[9]>=0.0 && v[9]<=1.0 && v[10]>=0.0 && v[10]<=1.0,
+                "untextured airbrake");
+            if v[4]>0.5 {upper+=1;}
+        }
+        assert!(upper>400,"the outer door skin must face up");
+    }
+
     #[test]
     fn stowed_speedbrake_follows_the_imported_spine() {
         let a = build();

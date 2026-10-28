@@ -108,15 +108,11 @@ pub fn hud(cv: &mut Canvas, pen: &Pen, a: &Aircraft, c: &Combat, time: f64) {
         let closure = -(tv - a.vel).dot((tp - a.pos).norm()) * 1.94384;
         // An IRST track has a range only inside the laser's reach.
         let ranged = !c.irst || c.laser_range(a).is_some();
-        // The ILS-31 gives range in kilometres, the laser's ЛД.
+        // Tactical ranges use the game's nautical-mile convention on every jet.
         let text = if !ranged {
             if ru { "ЛД ---" } else { "LASER ---" }.to_string()
-        } else if ru {
-            format!("Д {:.1}", range / 1000.0)
-        } else if range < 3700.0 {
-            format!("{:.1} KFT", range * 3.28084 / 1000.0)
         } else {
-            format!("{:.1} NM", range / 1852.0)
+            contact_range(range)
         };
         pen.text(cv, &text, half, 94.0, pen.small, Align::Right);
         if matches!(c.lock, Some(Who::Bandit(_))) && ranged {
@@ -385,6 +381,24 @@ fn brackets(cv: &mut Canvas, x: f32, y: f32, s: f32, lw: f32, col: Col) {
     }
 }
 
+/// Tactical contact labels stay in nautical miles even at close range.
+fn contact_range(metres:f64)->String {
+    let nm=metres.max(0.0)/1852.0;
+    if nm<1.0 {format!("{nm:.2} NM")}else{format!("{nm:.1} NM")}
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    #[test]
+    fn contact_labels_keep_nautical_miles_at_every_range() {
+        for (metres,text) in [(0.0,"0.00 NM"),(185.2,"0.10 NM"),(926.0,"0.50 NM"),
+            (1851.0,"1.00 NM"),(1852.0,"1.0 NM"),(18520.0,"10.0 NM")] {
+            assert_eq!(contact_range(metres),text);
+        }
+    }
+}
+
 /// Target brackets with range, the stores line and the missile warning
 /// over the flight view. `chase` draws the outside view's fuller set.
 #[allow(clippy::too_many_arguments)]
@@ -402,7 +416,7 @@ pub fn overlay(cv: &mut Canvas, w: f32, h: f32, s: f32, a: &Aircraft, c: &Combat
             brackets(cv, x, y, size, 1.0, with_alpha(col, alpha * 0.85));
         }
         if (chase && detail) || locked {
-            let text = if d < 1852.0 { format!("{} M", d.round() as i64) } else { format!("{:.1} NM", d / 1852.0) };
+            let text = contact_range(d);
             cv.text(&text, x, y + size + 6.0 * sm, sm, with_alpha(if locked { AMBER } else { col }, alpha), Align::Center);
             if let Some(l) = label.filter(|_| chase) {
                 cv.text(l, x, y - size - 6.0 * sm, sm, with_alpha(col, alpha * 0.8), Align::Center);

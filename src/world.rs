@@ -891,7 +891,7 @@ impl World {
             let m=if kind==Type::F18{crate::hornet::build()}else{crate::su27::build()};
             let bytes=if kind==Type::F18{include_bytes!("../assets/models/f18-skin.qoi").as_slice()}else{include_bytes!("../assets/models/su27-skin.qoi").as_slice()};
             let(w,h,px)=crate::flightgear::image(bytes);
-            let tex=ctx.new_texture_from_data_and_format(&px,TextureParams{width:w,height:h,format:TextureFormat::RGBA8,min_filter:FilterMode::Linear,mag_filter:FilterMode::Linear,..Default::default()});
+            let tex=ctx.new_texture_from_data_and_format(&px,TextureParams{width:w,height:h,format:TextureFormat::RGBA8,min_filter:FilterMode::Nearest,mag_filter:FilterMode::Nearest,..Default::default()});
             let mut native=|mesh:&Mesh|{let mut p=part(ctx,mesh);p.bind.images=vec![tex];p};
             TwinParts {body:native(&m.body),canopy:native(&m.canopy),
                 stabs:m.stabs.map(|m|native(&m)),flaps:m.flaps.map(|m|native(&m)),
@@ -1093,8 +1093,8 @@ impl World {
             self.draw_gear(ctx, a, &base, &model);
             }
             if !cockpit && !a.ejected {
-                // The MiG's pilot sits under its own design eye.
-                let seat = basis(V3::X,V3::Y,V3::Z,a.kind.eye()-airframe::EYE);
+                // Crew placement follows the aircraft's actual seat and design eye.
+                let seat = basis(V3::X,V3::Y,V3::Z,crate::cockpit::design_eye(a)-airframe::EYE);
                 self.draw_part(ctx, &self.crew, &base, &mat_mul(&model, &seat));
             }
             // The flame sits between the plume's shock diamonds and its sheath.

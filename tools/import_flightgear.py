@@ -184,6 +184,40 @@ def without_rectangle(poly,x0,x1,z0,z1):
         if len(poly)<3:break
     return result
 
+def styled_texture(image, cockpit=False):
+    """Clean flat colours, preserved aspect and sharp source markings."""
+    from PIL import Image, ImageFilter
+    image=image.convert("RGB")
+    # Uniform scaling keeps UV shapes. Console legends keep their native grid.
+    limit=2048
+    scale=min(1.0,limit/max(image.size))
+    if scale<1.0:
+        image=image.resize(tuple(max(1,round(v*scale)) for v in image.size),Image.Resampling.LANCZOS)
+    # Suppress painted speckle without softening the outlines of small legends.
+    flat=image.filter(ImageFilter.MedianFilter(3))
+    count=64 if cockpit else 48
+    base=flat.quantize(colors=count-8,method=Image.Quantize.MEDIANCUT,dither=Image.Dither.NONE)
+    # Reserve colours for small insignia, numbers, warning lights and handles:
+    # an adaptive palette dominated by blue paint otherwise discards their red.
+    colours=flat.resize((min(512,flat.width),min(512,flat.height)),Image.Resampling.NEAREST).getcolors(512*512)
+    groups=[
+        lambda r,g,b:r>120 and r>g*1.5 and r>b*1.4,
+        lambda r,g,b:50<r<=120 and r>g*1.5 and r>b*1.4,
+        lambda r,g,b:min(r,g,b)>215,
+        lambda r,g,b:r>130 and g>90 and b<min(r,g)*0.65,
+        lambda r,g,b:max(r,g,b)<50,
+        lambda r,g,b:g>90 and g>r*1.25 and g>b*1.15,
+        lambda r,g,b:r>160 and 45<g<140 and b<65,
+        lambda r,g,b:150<min(r,g,b)<215 and max(r,g,b)-min(r,g,b)<25,
+    ]
+    defaults=[(210,30,28),(110,25,25),(240,240,230),(230,190,45),
+        (22,26,28),(60,150,65),(220,100,25),(185,185,180)]
+    accents=[max(((n,c) for n,c in colours if predicate(*c)),default=(0,fallback))[1]
+        for predicate,fallback in zip(groups,defaults)]
+    palette=base.getpalette()[:(count-8)*3]+[v for c in accents for v in c]
+    fixed=Image.new("P",(1,1));fixed.putpalette(palette+palette[:3]*((768-len(palette))//3))
+    return flat.quantize(palette=fixed,dither=Image.Dither.NONE).convert("RGB")
+
 def generate(source,out):
     from PIL import Image
     import shutil
@@ -197,14 +231,14 @@ def generate(source,out):
             matches=list((source/"su27").rglob(Path(o.texture).name))
             if len(matches)==1:p=matches[0]
             else:return None
-        if p not in textures:textures[p]=Image.open(p).convert("RGB"); USED.add(p)
+        if p not in textures:textures[p]=styled_texture(Image.open(p),cockpit=True); USED.add(p)
         return p
     for kind in ("f18","su27"):
         parts={n:[] for n in ("body","canopy","stab0","stab1","flap0","flap1","rudder0","rudder1","brake","gear0","gear1","gear2","cockpit","frame","nose_tyre")}
         texparts={}; objects=[]
-        # Native-resolution exterior atlas; texture rectangles are copied 1:1.
+        # Compact flat-colour exterior atlas; normalized UVs retain source shapes.
         skin_sources=[source/"f18/f18top.rgb",source/"f18/f18tail.rgb"] if kind=="f18" else [source/"su27/Models/USSR177IAP.png",source/"su27/Models/fabric.png"]
-        images=[Image.open(p).convert("RGB") for p in skin_sources]
+        images=[styled_texture(Image.open(p)) for p in skin_sources]
         for p in skin_sources:USED.add(p)
         sw=1
         while sw<sum(im.width for im in images):sw*=2
@@ -335,7 +369,7 @@ def generate(source,out):
         for tex,arr in texparts.items():
             img=qoi(textures[tex]);data.extend(struct.pack("<II",len(arr),len(img))+struct.pack("<"+"f"*len(arr),*arr)+img)
         (out/(kind+".vrm")).write_bytes(data)
-        report[kind]={"parts":{k:len(v)//33 for k,v in parts.items()},"textured_parts":len(texparts),"textures":[{"source":k.relative_to(source).as_posix(),"size":textures[k].size} for k in texparts],"objects":objects}
+        report[kind]={"parts":{k:len(v)//33 for k,v in parts.items()},"textured_parts":len(texparts),"textures":[{"source":k.relative_to(source).as_posix(),"size":textures[k].size,"style":"flat-64"} for k in texparts],"objects":objects}
         print(kind,report[kind]["parts"],"textures",len(texparts),"bytes",len(data),flush=True)
     (out/"geometry.json").write_text(json.dumps(report,indent=2)+"\n", newline="\n")
     manifest=[]

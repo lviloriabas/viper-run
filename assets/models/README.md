@@ -13,7 +13,7 @@ records SHA-256 hashes of the uncompressed upstream inputs.
   Retrieved model SHA-256:
   `358c8e35a4484e899715e2917d91e6a95c15d51721a79d95dd0c986eb20c76ec`.
   [FlightGear lists this aircraft as GPLv2+](https://wiki.flightgear.org/F18).
-  Its original Canadian anniversary paint is retained on the legacy airframe.
+  Its Canadian anniversary markings are retained in a simplified flat-colour paint.
   See `licenses/Hornet-GPL-2.0.txt` and `source/f18/f183d-set.xml`.
 - Su-27SK: [xcvb85/Su-27](https://github.com/xcvb85/Su-27), commit
   `30f1cb45c87d4f2443de198d7577a3a9b6b0455a`, GNU GPL version 3.
@@ -21,7 +21,7 @@ records SHA-256 hashes of the uncompressed upstream inputs.
   developers, and other FlightGear contributors. Per-file credits remain in
   the bundled sources. See `source/su27/README.md`, `source/su27/LICENSE`
   and `licenses/Su-27-GPL-3.0.txt`. The classic `USSR177IAP.png` livery
-  is retained at its original resolution.
+  is adapted to a compact flat-colour palette; the original image remains in source/.
 
 Viper Run adaptations include axis/datum conversion, dimensional calibration,
 flat shading, moving-part separation, game-compatible pylons, a single
@@ -43,9 +43,12 @@ cargo test
 ```
 
 `*.vrm` contains named flat-shaded triangle meshes and lossless QOI cockpit images.
-`*-skin.qoi` contains exterior material images copied into an atlas without
-resampling. Source UVs are retained with the vertical image-coordinate conversion
-needed by the renderer. No photograph is projected across the aircraft silhouette.
+`*-skin.qoi` contains cleaned exterior images in a 48-colour palette.
+Cockpit source panels use 64 colours. Small insignia and warning colours have
+reserved palette entries; source image aspect and UVs remain unchanged. Images
+up to 2048 pixels retain their resolution, and larger images scale uniformly.
+Median filtering removes painted speckle, and QOI packages the styled pixels
+losslessly. Functional instruments retain their live vector/canvas rendering.
 `geometry.json` inventories parts, used object bounds and native texture dimensions.
 
 To inspect the embedded exterior meshes in Linux Blender:

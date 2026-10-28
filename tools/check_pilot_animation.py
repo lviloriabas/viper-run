@@ -4,6 +4,7 @@ import argparse,hashlib,json,os,subprocess
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument("executable",type=Path);p.add_argument("--output",type=Path,default=Path("target/model-review/pilot"))
+p.add_argument("--jets",nargs="+",choices=["f16","mig29","f18","su27"],default=["f16","mig29","f18","su27"])
 a=p.parse_args();exe=a.executable.resolve();a.output.mkdir(parents=True,exist_ok=True)
 startup=None
 if os.name=="nt":
@@ -22,7 +23,7 @@ cases=[
 ("chute-body",["--input","eject","--sim","5","--look","0,-50"]),
 ("landed",["--input","eject","--sim","18","--chase","--look","65,-20","--zoom",".4"])]
 report=[]
-for jet in ["f16","mig29","f18","su27"]:
+for jet in a.jets:
     for name,base_opts in cases:
         opts=list(base_opts)
         if name=="separating":

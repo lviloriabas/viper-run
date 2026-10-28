@@ -479,7 +479,7 @@ fn build_board(m:&mut Mesh, kind:Type, panel:Rgb, wall:Rgb) {
 }
 pub fn build(kind:Type)->Mesh {
     let mut m=hardware(kind);
-    pilot::build_static_mig(&mut m);
+    pilot::build_static_twin(&mut m,kind);
     m
 }
 fn flanker_hud_body(m:&mut Mesh) {
@@ -498,6 +498,35 @@ fn flanker_hud_lead()->[V3;7] {
      v3(-0.18,1.140,-3.870),v3(-0.23,1.090,-3.890),
      v3(-0.23,1.040,-3.870),v3(-0.16,1.040,-3.830),
      v3(-0.075,1.035,-3.780)]
+}
+fn hornet_hud_structure(m:&mut Mesh) {
+    let g=hud_glass(Type::F18);
+    let foot=(g[0]+g[1])*0.5;
+    let plain=|o|Frame{o,x:V3::X,y:V3::Y,z:V3::Z};
+    m.block(&plain(foot-v3(0.0,0.026,0.055)),v3(0.120,0.025,0.105),DARK);
+    m.block(&plain(v3(0.0,1.125,-4.045)),v3(0.145,0.018,0.055),DARK);
+    // Optical aperture and boresight housing on the joined projector base.
+    m.lathe(v3(0.0,1.178,-4.125),V3::Y,&[(0.0,0.075),(0.006,0.075),(0.007,0.069)],32,DARK.scale(1.6));
+    m.ellipsoid(v3(0.0,1.185,-4.125),v3(0.069,0.002,0.052),Rgb(0.18,0.23,0.15),4,24);
+    m.ellipsoid(v3(0.0,1.196,-4.080),v3(0.018,0.026,0.021),DARK,8,12);
+    for (a,b) in [(g[0],g[3]),(g[1],g[2])] {
+        let side=a.x.signum();
+        let out=V3::X*(side*0.010);
+        // Slotted side channels, bonded glass edge and triangulated feet.
+        pilot::bar(m,a-V3::Y*0.020,b,0.006,0.006,V3::X,DARK);
+        pilot::bar(m,a+out-V3::Z*0.008,b+out-V3::Z*0.008,0.003,0.005,V3::X,DARK.scale(1.5));
+        let base=v3(side*0.118,1.149,-4.045);
+        pilot::bar(m,base,a+out,0.008,0.009,V3::X,DARK);
+        pilot::bar(m,base,a.lerp(b,0.28)+out,0.005,0.004,V3::X,DARK);
+        m.block(&plain(base),v3(0.014,0.006,0.030),DARK.scale(1.4));
+        for t in [0.05,0.38,0.78,0.98] {
+            let p=a.lerp(b,t);
+            m.capsule(p,p+out,0.003,0.003,METALC.scale(0.55),8);
+        }
+        for z in [-4.025,-4.066] {
+            m.ellipsoid(v3(side*0.127,1.156,z),v3(0.002,0.001,0.002),METALC.scale(0.6),4,8);
+        }
+    }
 }
 fn hardware(kind:Type)->Mesh {
 
@@ -612,24 +641,14 @@ fn hardware(kind:Type)->Mesh {
         }
         m.ellipsoid(f.p(0.0,-0.010,0.011),v3(0.0025,0.0025,0.0025),METALC.scale(0.6),4,8);
     }
-    if !russian {
-        let glass=hud_glass(kind);let foot=(glass[0]+glass[1])*0.5;
-        m.block(&plain(foot-v3(0.0,0.026,0.055)),v3(0.120,0.025,0.105),DARK);
-        m.block(&plain(v3(0.0,1.125,-4.045)),v3(0.145,0.018,0.055),DARK);
-        m.ellipsoid(v3(0.0,1.180,-4.125),v3(0.070,0.003,0.052),Rgb(0.18,0.23,0.15),4,24);
-        m.ellipsoid(v3(0.0,1.196,-4.080),v3(0.018,0.026,0.021),DARK,8,12);
-        for side in [-1.0,1.0] {
-            m.ellipsoid(v3(side*0.127,1.126,-3.987),v3(0.003,0.003,0.002),METALC,4,8);
-        }
-        for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {m.capsule(a,b,0.008,0.008,DARK,8);}
-    }
+    if !russian {hornet_hud_structure(&mut m);}
     for (i,mirror) in mirror_mounts(kind).into_iter().enumerate() {
         for t in [-0.28,0.28] {
             let (foot,hinge)=mirror_support(kind,i,&mirror,t);
             m.capsule(foot,hinge,0.005,0.005,DARK,8);
         }
         curved_mirror(&mut m,mirror.w,mirror.h,
-            &|x,y,d|mirror.frame.p(x,y,d),DARK,MirrorSampling::Reflection);
+            &|x,y,d|mirror.frame.p(x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)));
     }
     compass::housing(&mut m,kind);
     let back=native(aft,PI/2.0);
@@ -690,8 +709,8 @@ fn source_bow_support(kind:Type,point:V3)->V3 {
         .min_by(|a,b|(*a-point).dot(*a-point).total_cmp(&(*b-point).dot(*b-point)))
         .unwrap()
 }
-fn mirror_support(kind:Type,index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
-    let (x,y)=if kind==Type::F18 && index!=1 {(0.0,t*mirror.h)}else{(t*mirror.w,0.0)};
+fn mirror_support(kind:Type,_index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
+    let (x,y)=(t*mirror.w,0.0);
     let hinge=mirror.frame.p(x,y,-0.020);
     let foot=if kind==Type::F18 {nearest_on_bow(hinge)+V3::Z*0.042}
         else{source_bow_support(kind,hinge)};
@@ -707,8 +726,8 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
             let anchor=if crown{hornet_bow()[6]}
                 else{v3(side*0.320,1.020,-4.208)+offset};
             (anchor,if crown{V3::Y}else{V3::X*side},
-                if crown{V3::X}else{v3((7.0*DEG).cos(),-side*(7.0*DEG).sin(),0.0)},
-                if crown{0.230}else{0.070},if crown{0.055}else{0.215})
+                if crown{V3::X}else{v3(0.22,-side*0.975,0.0).norm()},
+                if crown{0.230}else{0.225},if crown{0.055}else{0.067})
         }else {
             let phi=if crown{PI/2.0}else if side>0.0{0.66}else{PI-0.66};
             let radial=v3(phi.cos(),phi.sin(),0.0);
@@ -722,7 +741,7 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let centre=anchor+radial*(if crown{if kind==Type::Su27{0.012}else{0.024}}else{0.008})
             +V3::Z*(if kind==Type::F18{0.055}else if crown{0.020}else{0.030});
         let rear=v3(if crown{0.0}else{side*0.38},0.12,1.0).norm();
-        let normal=((EYE-centre).norm()+rear).norm();
+        let normal=((cockpit_eye(kind)-centre).norm()+rear).norm();
         let x=(hint-normal*hint.dot(normal)).norm();
         let frame=Frame{o:centre,x,y:normal.cross(x).norm(),z:normal};
         MirrorMount{frame,#[cfg(test)]anchor,w,h,#[cfg(test)]rear}
@@ -987,13 +1006,13 @@ mod tests {
         for kind in [Type::F18,Type::Su27] {
             for mirror in mirror_mounts(kind) {
                 let f=mirror.frame;
-                let ray=(f.o-EYE).norm();
+                let ray=(f.o-cockpit_eye(kind)).norm();
                 let reflected=ray-f.z*(2.0*ray.dot(f.z));
                 assert!((reflected-mirror.rear).len()<1e-8);
-                assert!(f.z.dot((EYE-f.o).norm())>0.75);
+                assert!(f.z.dot((cockpit_eye(kind)-f.o).norm())>0.75);
                 assert!((f.o-mirror.anchor).len()<0.061);
                 let mut m=Mesh::new();
-                curved_mirror(&mut m,mirror.w,mirror.h,&|x,y,d|f.p(x,y,d),DARK,MirrorSampling::Reflection);
+                curved_mirror(&mut m,mirror.w,mirror.h,&|x,y,d|f.p(x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)));
                 let mut count=0;
                 for v in m.v.chunks(crate::mesh::STRIDE).filter(|v|v[9]>=0.0) {
                     let (x,y)=(v[9] as f64*AW,(1.0-v[10] as f64)*A);
@@ -1006,6 +1025,32 @@ mod tests {
                 assert!(count>100);
             }
         }
+    }
+
+    #[test]
+    fn flanker_stick_clears_the_panel_through_full_travel() {
+        let kind=Type::Su27;let mut fixed=hardware(kind);
+        let offset=EYE-kind.eye();
+        for t in crate::flightgear::textures(kind) {
+            let mut v=t.mesh.v.clone();
+            for p in v.chunks_mut(crate::mesh::STRIDE) {
+                p[0]+=offset.x as f32;p[1]+=offset.y as f32;p[2]+=offset.z as f32;
+            }
+            fixed.v.extend(v);
+        }
+        let fixed:Vec<_>=fixed.v.chunks(crate::mesh::STRIDE*3).filter(|tri|{
+            (0..3).any(|i|{let p=vertex(tri,i);p.x.abs()<0.16 && p.y>0.4 && p.y<0.9 && p.z > -3.95 && p.z < -3.30})
+        }).collect();
+        for pitch in [-1.0,-0.5,0.0,0.5,1.0] {for roll in [-1.0,0.0,1.0] {
+            let stick=pilot::flanker_stick_mesh(&Hands{pitch,roll,..Default::default()});
+            for tri in stick.v.chunks(crate::mesh::STRIDE*3) {
+                for (a,b) in [(0,1),(1,2),(2,0)] {
+                    let (a,b)=(vertex(tri,a),vertex(tri,b));
+                    assert!(!fixed.iter().any(|t|blocked(a,b,t)),
+                        "Su27 stick intersects hardware at pitch {pitch}, roll {roll}: {a:?} {b:?}");
+                }
+            }
+        }}
     }
 
     #[test]
@@ -1063,8 +1108,9 @@ mod tests {
 
     #[test]
     fn crown_cases_seat_on_the_joint_without_an_elevated_mast() {
-        let elevation=|p:V3|(p.y-EYE.y)/(EYE.z-p.z);
         for kind in [Type::F18,Type::Su27] {
+            let eye=cockpit_eye(kind);
+            let elevation=|p:V3|(p.y-eye.y)/(eye.z-p.z);
             let mirror=mirror_mounts(kind)[1];
             let bow=mirror.anchor+if kind==Type::F18{v3(0.0,0.022,0.042)}else{V3::ZERO};
             let rim=mirror.frame.p(0.0,-mirror.h*0.5-0.007,0.004);
@@ -1078,24 +1124,17 @@ mod tests {
     }
 
     #[test]
-    fn hornet_side_panes_are_upright_on_the_actual_forward_canopy_bow() {
-        let mirrors=mirror_mounts(Type::F18);
+    fn hornet_shoulder_panes_follow_the_mating_bow() {
         for i in [0,2] {
-            let mirror=mirrors[i];let side=if i==0{-1.0}else{1.0};
-            assert!(mirror.h>3.0*mirror.w);
-            assert!(mirror.frame.y.y>0.95 && side*mirror.frame.y.x>0.02);
-            let native=mirror.anchor-(EYE-Type::F18.eye());
-            assert!(native.z > -4.24 && native.z < -4.10);
-            assert!((native.x.abs()-0.320).abs()<0.001);
-            let mut glass=Mesh::new();
-            curved_mirror(&mut glass,mirror.w,mirror.h,&|x,y,d|mirror.frame.p(x,y,d),DARK,MirrorSampling::Reflection);
-            let top:Vec<_>=glass.v.chunks(crate::mesh::STRIDE).filter(|v|v[9]>=0.0)
-                .map(|v|v3(v[0] as f64,v[1] as f64,v[2] as f64)-mirror.frame.o)
-                .filter(|p|(p.dot(mirror.frame.y)-mirror.h*0.5).abs()<1e-5)
-                .map(|p|p.dot(mirror.frame.x)).collect();
-            let span=top.iter().copied().fold(f64::NEG_INFINITY,f64::max)
-                -top.iter().copied().fold(f64::INFINITY,f64::min);
-            assert!(span>0.025,"Hornet mirror must retain a flat crown between its rounded corners");
+            let mirror=mirror_mounts(Type::F18)[i];
+            let side=if i==0{-1.0}else{1.0};
+            assert!(mirror.w>3.0*mirror.h);
+            assert!(mirror.frame.x.dot(v3(0.22,-side*0.975,0.0).norm())>0.95);
+            for t in [-0.28,0.28] {
+                let (foot,hinge)=mirror_support(Type::F18,i,&mirror,t);
+                assert!((foot-hinge).len()<0.060,"detached shoulder mirror");
+                assert!((foot-nearest_on_bow(foot-V3::Z*0.042)-V3::Z*0.042).len()<1e-7);
+            }
         }
     }
 
@@ -1119,7 +1158,7 @@ mod tests {
             for mirror in mirror_mounts(kind) {
                 for x in [-0.85,-0.4,0.0,0.4,0.85] {for y in [-0.85,-0.4,0.0,0.4,0.85] {
                     let point=mirror.frame.p(x*mirror.w*0.5,y*mirror.h*0.5,0.006);
-                    if let Some(tri)=m.v.chunks(crate::mesh::STRIDE*3).find(|t|blocked(EYE,point,t)) {
+                    if let Some(tri)=m.v.chunks(crate::mesh::STRIDE*3).find(|t|blocked(cockpit_eye(kind),point,t)) {
                         let p=|i|v3(tri[i] as f64,tri[i+1] as f64,tri[i+2] as f64);
                         panic!("{kind:?}: mirror obscured at {point:?} by {:?} {:?} {:?}",p(0),p(11),p(22));
                     }
@@ -1160,7 +1199,7 @@ mod tests {
             for side in [-1.0,1.0] {
                 let (w,h)=bounds(side);
                 if kind==Type::F18 {
-                    assert!(w>0.055 && w<0.105 && h>0.200 && h>2.0*w);
+                    assert!(w>0.060 && w<0.150 && h>0.180 && h>1.5*w);
                 } else {assert!(w>0.04 && h>0.15);}
             }
         }
@@ -1416,7 +1455,7 @@ mod tests {
                 ps.iter().any(|p|p.x.abs()<0.26 && p.y<0.66 && p.z < -3.65 && p.z > -4.65)
             }).collect();
             for rudder in [-1.0,0.0,1.0] {
-                let mut legs=Mesh::new();pilot::twin_legs(&mut legs,rudder);
+                let mut legs=Mesh::new();pilot::twin_legs(&mut legs,rudder,kind==Type::Su27);
                 for tri in legs.v.chunks(crate::mesh::STRIDE*3) {
                     for (a,b) in [(0,1),(1,2),(2,0)] {
                         let (a,b)=(vertex(tri,a),vertex(tri,b));

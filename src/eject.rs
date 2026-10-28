@@ -171,7 +171,7 @@ pub struct Ejection {
 
 /// Seat pan above the jet's body origin, from where the pilot sits.
 fn seat_point(a: &Aircraft) -> V3 {
-    let eye = a.kind.eye();
+    let eye = crate::cockpit::design_eye(a);
     eye - V3::Y * 0.80
 }
 
@@ -732,7 +732,7 @@ mod tests {
                 let pull=frame as f64/(HANDLE_FRAMES-1) as f64;
                 let local=seat_point(&a)+V3::Y*HARNESS+handle_point(kind,pull);
                 let cockpit=cockpit_harness_origin()+handle_point(kind,pull)
-                    -crate::airframe::EYE+kind.eye();
+                    -crate::airframe::EYE+kind.eye()+crate::cockpit::seat_offset(kind);
                 assert!((local-cockpit).len()<1e-8);
             }
         }
