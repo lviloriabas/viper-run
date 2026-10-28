@@ -1,5 +1,47 @@
 # Validation
 
+## Canopy joint, mirror seats and HUD lead, 27 October 2026
+
+This revision supersedes the mounting description in the earlier mirror pass.
+The Hornet forward bow now has tapered posts, defined shoulders and a shallow
+crown, with a continuous mating lip. Its three mirror cases are seated on that
+joint in the same arrangement as the MiG-29. The old triangular bow is replaced
+rather than overlaid. The Flanker crown is lowered onto its imported mating bow,
+with short hinges, and its side hinges attach to the joint's rear face.
+
+Both ends of the Su-27 HUD lead now enter the solid projector through collars.
+A rounded cover connects the optical head, control case and foundation. The
+thin top lip clears the crown mirror without moving the original combiner glass.
+
+Debug and release suites pass 297 game tests and 12 server tests, with no
+failures or ignored tests. New checks cover the shallow bow crown, original
+sill contact, absence of duplicate bow geometry, crown rim contact in the
+pilot's projection, short hinges, embedded lead endpoints and uninterrupted
+projector cover. Mirror visibility is checked across a denser pane grid
+against the assembled hardware; optical direction and UV coverage still pass.
+
+Final native Linux and Windows executables each complete 21 captures, including
+forward, crown, left/right, panel, oblique HUD lead, bank and disabled mirrors.
+MiG-29 and F-16 views cover the shared rendering path. The final geometry is
+also inspected in Blender, with seven views per aircraft including close
+views of the bow and HUD lead. The saved scenes use the exact exported game
+triangles; their white display faces are workbench geometry previews, while
+the native captures verify the live textures.
+
+~~~sh
+cargo test --quiet
+cargo test --release --quiet
+./build.sh
+python3 tools/check_mirror_views.py dist/viper-run-linux-x86_64 --output target/model-review/bow-final-linux
+python tools/check_mirror_views.py dist/viper-run-windows-x86_64.exe --output target/model-review/bow-final-windows
+dist/viper-run-linux-x86_64 --export-cockpit target/model-review/bow-final-blender
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/bow-final-blender --jet f18
+blender --background -t 4 --python tools/review_cockpit.py -- target/model-review/bow-final-blender --jet su27
+~~~
+
+Run each executable on its native platform. Capture manifests identify the
+tested binary hash; distribution hashes are in dist/SHA256SUMS.txt.
+
 ## Mirror mounting and reflected view, 27 October 2026
 
 The Hornet side panes now stand nearly upright on the actual imported forward

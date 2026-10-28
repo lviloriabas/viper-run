@@ -75,10 +75,23 @@ Its simplified cockpit geometry alone is insufficient to establish those
 details; the supplied Hornet photographs and instrument references are used
 for the interior adaptation.
 
-The Hornet mirror hinges follow the actual imported forward canopy bow.
-Its side panes are nearly upright, with the tops leaning slightly outwards.
-The Flanker's shoulder panes follow its own bow, on the pilot-facing side of
-the painted frame, and the crown clears the HUD hood.
+The Hornet side panes are nearly upright, with the tops leaning slightly
+outwards, following the supplied cockpit photographs.
+The mounting layout follows the MiG-29: one crown pane and two shoulder panes
+seated against the pilot-facing canopy joint. The Hornet's forward bow replaces
+the coarse triangular source cap with tapered posts, distinct shoulders and a
+shallow crown. Its contiguous mating lip carries the mirror cases; the original
+sill and windshield rails still meet its feet. The Flanker's crown case rests
+directly against its imported bow, with short hinges instead of the elevated
+stalk. Shoulder hinges attach to the rear face of that same joint.
+
+The Su-27's thin HUD upper lip clears the lower crown rim without changing
+the original combiner glass. Both ends of the left HUD lead enter the solid
+projector housing through collars, closing the previously detached loop.
+The rounded cover joins the optical head, control case and foundation without
+leaving a gap beneath the lens.
+Blender review includes focused bow and HUD-lead views as well as the complete
+cockpit and leg wells.
 
 Hornet/Flanker pane normals bisect the design-eye ray and the intended aft
 view. Each vertex samples the reflected ray, rather than fitting a cropped

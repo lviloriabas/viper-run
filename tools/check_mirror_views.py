@@ -11,6 +11,7 @@ if os.name=="nt":
 views=[("forward",["--look","0,0"]),("crown",["--look","0,18"]),
        ("left",["--look","-30,10"]),("right",["--look","30,10"]),
        ("panel",["--look","0,-25"]),
+       ("hud-lead",["--look","-16,-7"]),
        ("bank",["--look","0,8","--input","right","--sim",".7"]),
        ("disabled",["--look","0,0","--no-mirrors"])]
 cases=[(jet,name,opts) for jet in ["f18","su27"] for name,opts in views]

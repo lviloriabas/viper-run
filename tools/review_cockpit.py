@@ -53,14 +53,16 @@ for kind in kinds:
     scene.collection.objects.link(cam);scene.camera=cam
     for name,pos,aim,ortho in [
         ("pilot",(0,3.24,1.25),(0,4.05,.77),False),
-        ("top",(0,3.65,4.0),(0,3.65,.5),True),
-        ("side",(3.8,3.8,.8),(0,3.8,.7),True),
-        ("front",(0,6.2,.95),(0,3.6,.7),True),
-        ("leg-clearance",(3.8,3.9,.65),(0,3.9,.65),True)]:
+        ("top",(0,3.65,4.0),(0,3.65,.5),2.5),
+        ("side",(3.8,3.8,.8),(0,3.8,.7),2.5),
+        ("front",(0,6.2,.95),(0,3.6,.7),2.5),
+        ("leg-clearance",(3.8,3.9,.65),(0,3.9,.65),2.5),
+        ("bow",(0,2.8,1.30),(0,3.8,1.30),1.25),
+        ("hud-lead",(-.35,3.30,1.42),(-.07,3.82,1.16),.66)]:
         for ob in originals:ob.hide_render=name=="leg-clearance"
         for ob in cutaways:ob.hide_render=name!="leg-clearance"
         camdata.type="ORTHO" if ortho else "PERSP"
-        camdata.ortho_scale=2.5;camdata.lens=20
+        camdata.ortho_scale=ortho if ortho else 2.5;camdata.lens=20
         cam.location=pos;cam.rotation_euler=(Vector(aim)-cam.location).to_track_quat("-Z","Y").to_euler()
         scene.render.filepath=str(out/(kind+"-"+name+".png"))
         bpy.ops.render.render(write_still=True)

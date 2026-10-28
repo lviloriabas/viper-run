@@ -482,6 +482,23 @@ pub fn build(kind:Type)->Mesh {
     pilot::build_static_mig(&mut m);
     m
 }
+fn flanker_hud_body(m:&mut Mesh) {
+    m.block(&Frame{o:v3(0.0095,1.029,-3.79),x:V3::X,y:V3::Y,z:V3::Z},
+        v3(0.090,0.020,0.150),DARK);
+    // Rounded cover overlaps the foundation, control case and optical
+    // head. The source-sized optical head alone left a gap beneath it.
+    m.ellipsoid(v3(0.0095,1.095,-3.797),v3(0.078,0.058,0.074),DARK,16,32);
+    m.ellipsoid(v3(0.0095,1.132,-3.740),v3(0.068,0.022,0.028),DARK,12,24);
+    m.ellipsoid(v3(0.0095,1.155,-3.755),v3(0.070,0.004,0.052),Rgb(0.16,0.12,0.055),4,24);
+}
+fn flanker_hud_lead()->[V3;7] {
+    // Both ends extend inside the solid projector, rather than stopping
+    // short of its left wall. The loop follows the supplied HUD reference.
+    [v3(-0.045,1.136,-3.740),v3(-0.10,1.140,-3.820),
+     v3(-0.18,1.140,-3.870),v3(-0.23,1.090,-3.890),
+     v3(-0.23,1.040,-3.870),v3(-0.16,1.040,-3.830),
+     v3(-0.075,1.035,-3.780)]
+}
 fn hardware(kind:Type)->Mesh {
 
     let russian=kind==Type::Su27;
@@ -489,7 +506,7 @@ fn hardware(kind:Type)->Mesh {
     let wall=panel.scale(0.65);
     let plain=|o|Frame{o,x:V3::X,y:V3::Y,z:V3::Z};
     let mut m=crate::flightgear::cockpit_mesh(kind,"cockpit");
-    m.v.extend(crate::flightgear::cockpit_mesh(kind,"frame").v);
+    m.v.extend(canopy_frame(kind).v);
     let offset=crate::airframe::EYE-kind.eye();
     let native=|z:f64,phi:f64|crate::hornet::canopy_point(russian,z,phi)+offset;
     let (front,aft)=crate::flightgear::canopy_range(kind);
@@ -567,15 +584,16 @@ fn hardware(kind:Type)->Mesh {
     }
     if russian {
         let glass=hud_glass(kind);
-        let grab=[v3(-0.10,1.14,-3.82),v3(-0.18,1.14,-3.87),v3(-0.23,1.09,-3.89),
-            v3(-0.23,1.04,-3.87),v3(-0.16,1.04,-3.83)];
-        for pair in grab.windows(2){m.capsule(pair[0],pair[1],0.006,0.006,DARK,10);}
-        m.block(&plain(v3(0.0095,1.029,-3.79)),v3(0.090,0.020,0.150),DARK);
-        m.ellipsoid(v3(0.0095,1.132,-3.740),v3(0.068,0.022,0.028),DARK,12,24);
-        m.ellipsoid(v3(0.0095,1.155,-3.755),v3(0.070,0.004,0.052),Rgb(0.16,0.12,0.055),4,24);
+        flanker_hud_body(&mut m);
+        let lead=flanker_hud_lead();
+        for pair in lead.windows(2){m.capsule(pair[0],pair[1],0.006,0.006,DARK,10);}
+        for (end,next) in [(lead[0],lead[1]),(lead[6],lead[5])] {
+            let axis=(next-end).norm();
+            m.capsule(end+axis*0.009,end+axis*0.027,0.008,0.008,DARK.scale(1.6),12);
+        }
         for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {
             let side=(a.x-0.0095).signum();
-            m.capsule(a-V3::Y*0.035,b+V3::Y*0.012,0.0055,0.0055,DARK,8);
+            m.capsule(a-V3::Y*0.035,b+V3::Y*0.004,0.0055,0.0055,DARK,8);
             let d=V3::X*(side*0.011)-V3::Z*0.008;
             m.capsule(a+d,b+d,0.003,0.003,DARK,6);
             for t in [0.1,0.45,0.80] {m.capsule(a.lerp(b,t),a.lerp(b,t)+d,0.003,0.003,METALC.scale(0.4),6);}
@@ -583,9 +601,9 @@ fn hardware(kind:Type)->Mesh {
         let top=(glass[2]+glass[3])*0.5;
         let hood:Vec<_>=(0..=12).map(|i|{
             let x=-0.100+i as f64/12.0*0.200;
-            v3(top.x+x,top.y+0.012+0.016*(1.0-(x/0.100).powi(2)),top.z-0.006)
+            v3(top.x+x,top.y+0.002+0.002*(1.0-(x/0.100).powi(2)),top.z-0.020)
         }).collect();
-        pilot::band(&mut m,&hood,0.018,0.003,V3::Y,DARK);
+        pilot::band(&mut m,&hood,0.004,0.003,V3::Y,DARK);
         let item=layout(kind).into_iter().find(|i|i.rect.x==HUD_CONTROL.x && i.rect.y==HUD_CONTROL.y).unwrap();
         let f=mount(kind,&item);
         for x in [-0.054,0.054] {
@@ -619,8 +637,51 @@ fn hardware(kind:Type)->Mesh {
     m
 }
 #[derive(Clone,Copy)]
-struct MirrorMount { frame:Frame, anchor:V3, w:f64, h:f64, #[cfg(test)] rear:V3 }
+struct MirrorMount { frame:Frame, #[cfg(test)] anchor:V3, w:f64, h:f64, #[cfg(test)] rear:V3 }
 
+// The Hornet's mating bow has tapered posts, distinct shoulders and a
+// shallow crown. It is not the triangular cap in the low-poly source.
+// Native coordinates keep its feet on the imported sill/glass joint.
+fn hornet_bow() -> Vec<V3> {
+    let half=[
+        v3(0.380,0.722,-4.142),v3(0.350,0.880,-4.178),
+        v3(0.320,1.020,-4.208),v3(0.285,1.130,-4.233),
+        v3(0.200,1.207,-4.250),v3(0.105,1.247,-4.258),
+        v3(0.000,1.253,-4.259),
+    ];
+    let offset=EYE-Type::F18.eye();
+    half.iter().map(|p|v3(-p.x,p.y,p.z)+offset)
+        .chain(half[..half.len()-1].iter().rev().map(|p|*p+offset)).collect()
+}
+fn nearest_on_bow(point:V3)->V3 {
+    hornet_bow().windows(2).map(|p|{
+        let d=p[1]-p[0];
+        p[0]+d*((point-p[0]).dot(d)/d.dot(d)).clamp(0.0,1.0)
+    }).min_by(|a,b|(*a-point).len().total_cmp(&(*b-point).len())).unwrap()
+}
+fn canopy_frame(kind:Type)->Mesh {
+    let mut frame=crate::flightgear::cockpit_mesh(kind,"frame");
+    if kind==Type::F18 {
+        let offset=EYE-kind.eye();
+        // Replace only the old forward bow. The windshield/sill rails
+        // terminate at its feet and remain connected to the new section.
+        frame.v=frame.v.chunks(crate::mesh::STRIDE*3).filter(|tri|
+            !tri.chunks(crate::mesh::STRIDE).all(|v|{
+                let z=v[2] as f64-offset.z;
+                z > -4.32 && z < -4.09
+            })).flatten().copied().collect();
+        let bow=hornet_bow();
+        pilot::band(&mut frame,&bow,0.019,0.036,V3::Z,DARK);
+        // Two contiguous lips and their narrow seal mark the actual
+        // windshield/canopy mating joint, including the mirror seats.
+        let lip:Vec<_>=bow.iter().map(|p|*p+V3::Z*0.038).collect();
+        pilot::band(&mut frame,&lip,0.022,0.004,V3::Z,DARK.scale(1.4));
+        for p in lip.iter().step_by(2) {
+            frame.ellipsoid(*p+V3::Z*0.0045,v3(0.002,0.002,0.001),METALC.scale(0.45),4,8);
+        }
+    }
+    frame
+}
 fn source_bow_support(kind:Type,point:V3)->V3 {
     let offset=EYE-kind.eye();
     let frame=crate::flightgear::part(kind,"frame");
@@ -629,27 +690,12 @@ fn source_bow_support(kind:Type,point:V3)->V3 {
         .min_by(|a,b|(*a-point).dot(*a-point).total_cmp(&(*b-point).dot(*b-point)))
         .unwrap()
 }
-
 fn mirror_support(kind:Type,index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
-    if kind==Type::F18 && index!=1 {
-        let side=if index==0{-1.0}else{1.0};
-        let along=t*mirror.h;
-        let bow_axis=v3(-side*0.10138,0.40748,-0.12898).norm();
-        (mirror.anchor+bow_axis*along,mirror.frame.p(0.0,along,-0.020))
-    }else if kind==Type::F18 {
-        let x=t*mirror.w;
-        (mirror.anchor+v3(x,-x.abs()*(0.16432/0.28852),0.0),
-            mirror.frame.p(x,0.0,-0.020))
-    }else{
-        let phi=if index==1{PI/2.0}else if index==0{PI-0.66}else{0.66};
-        let z=crate::hornet::canopy_bow(true);
-        let radius=(crate::hornet::canopy_point(true,z,phi+0.001)
-            -crate::hornet::canopy_point(true,z,phi-0.001)).len()/0.002;
-        let x=t*mirror.w;
-        let foot=crate::hornet::canopy_point(true,z,phi-x/radius)
-            +EYE-kind.eye()+V3::Z*0.055;
-        (source_bow_support(kind,foot),mirror.frame.p(x,0.0,-0.020))
-    }
+    let (x,y)=if kind==Type::F18 && index!=1 {(0.0,t*mirror.h)}else{(t*mirror.w,0.0)};
+    let hinge=mirror.frame.p(x,y,-0.020);
+    let foot=if kind==Type::F18 {nearest_on_bow(hinge)+V3::Z*0.042}
+        else{source_bow_support(kind,hinge)};
+    (foot,hinge)
 }
 
 fn mirror_mounts(kind:Type)->[MirrorMount;3] {
@@ -657,31 +703,29 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let side=if i==0{-1.0}else{1.0};
         let crown=i==1;
         let offset=EYE-kind.eye();
-        let (anchor,centre,hint,w,h)=if kind==Type::F18 {
-            // Sample the actual Canopy_default forward bow, rather than an
-            // ellipse at a separate windscreen station ahead of that bow.
-            let anchor=if crown{v3(-0.00339,1.29428,-4.23233)}
-                else{v3(side*0.38651,0.72248,-4.10335)
-                    .lerp(v3(side*0.28513,1.12996,-4.23233),0.58)}+offset;
-            if crown{(anchor,anchor+v3(0.0,-0.008,0.035),V3::X,0.230,0.060)}
-            else{(anchor,anchor+v3(-side*0.010,0.0,0.040),
-                v3((7.0*DEG).cos(),-side*(7.0*DEG).sin(),0.0),0.070,0.235)}
+        let (anchor,radial,hint,w,h)=if kind==Type::F18 {
+            let anchor=if crown{hornet_bow()[6]}
+                else{v3(side*0.320,1.020,-4.208)+offset};
+            (anchor,if crown{V3::Y}else{V3::X*side},
+                if crown{V3::X}else{v3((7.0*DEG).cos(),-side*(7.0*DEG).sin(),0.0)},
+                if crown{0.230}else{0.070},if crown{0.055}else{0.215})
         }else {
             let phi=if crown{PI/2.0}else if side>0.0{0.66}else{PI-0.66};
             let radial=v3(phi.cos(),phi.sin(),0.0);
-            // The painted bow extends aft of the glass-section station.
-            let anchor=crate::hornet::canopy_point(true,crate::hornet::canopy_bow(true),phi)+offset+V3::Z*0.055;
-            let hint=if crown{V3::X}else{v3(phi.sin(),-phi.cos(),0.0)};
-            (anchor,anchor-radial*0.012+V3::Z*0.040+V3::Y*(if crown{0.030}else{0.0}),hint,
-                if crown{0.230}else{0.225},if crown{0.060}else{0.067})
+            let reference=crate::hornet::canopy_point(true,crate::hornet::canopy_bow(true),phi)+offset;
+            let anchor=source_bow_support(kind,reference+V3::Z*(if crown{0.0}else{0.100}));
+            (anchor,radial,if crown{V3::X}else{v3(phi.sin(),-phi.cos(),0.0)},
+                if crown{0.230}else{0.225},if crown{0.045}else{0.067})
         };
-        // The bisector reflects the pilot's sightline over the shoulder on
-        // this side, while the centre pane looks above the spine.
+        // As on the MiG, the crown pane's lower rim rests on the bow and
+        // the shoulder panes sit on its pilot-facing lip. No elevated mast.
+        let centre=anchor+radial*(if crown{if kind==Type::Su27{0.012}else{0.024}}else{0.008})
+            +V3::Z*(if kind==Type::F18{0.055}else if crown{0.020}else{0.030});
         let rear=v3(if crown{0.0}else{side*0.38},0.12,1.0).norm();
         let normal=((EYE-centre).norm()+rear).norm();
         let x=(hint-normal*hint.dot(normal)).norm();
         let frame=Frame{o:centre,x,y:normal.cross(x).norm(),z:normal};
-        MirrorMount{frame,anchor,w,h,#[cfg(test)]rear}
+        MirrorMount{frame,#[cfg(test)]anchor,w,h,#[cfg(test)]rear}
     })
 }
 /// Main levers and selector respond to the same commands as the flight model.
@@ -947,7 +991,7 @@ mod tests {
                 let reflected=ray-f.z*(2.0*ray.dot(f.z));
                 assert!((reflected-mirror.rear).len()<1e-8);
                 assert!(f.z.dot((EYE-f.o).norm())>0.75);
-                assert!((f.o-mirror.anchor).len()<0.045);
+                assert!((f.o-mirror.anchor).len()<0.061);
                 let mut m=Mesh::new();
                 curved_mirror(&mut m,mirror.w,mirror.h,&|x,y,d|f.p(x,y,d),DARK,MirrorSampling::Reflection);
                 let mut count=0;
@@ -965,6 +1009,75 @@ mod tests {
     }
 
     #[test]
+    fn hud_projector_cover_connects_the_optical_head_to_its_foundation() {
+        let mut body=Mesh::new();flanker_hud_body(&mut body);
+        for k in 0..=20 {
+            let point=v3(0.0095,mix(1.040,1.135,k as f64/20.0),-3.765);
+            for sign in [-1.0,1.0] {
+                assert!(body.v.chunks(crate::mesh::STRIDE*3).any(|tri|
+                    blocked(point,point+V3::X*(sign*0.30),tri)),
+                    "gap below the HUD optical head at {point:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn hud_lead_ends_enter_the_solid_projector_housing() {
+        let mut body=Mesh::new();flanker_hud_body(&mut body);
+        let lead=flanker_hud_lead();
+        for end in [lead[0],lead[6]] {
+            // An isolated housing surrounds the connector in every direction.
+            // A detached endpoint outside it fails at least one of these rays.
+            for axis in [V3::X,V3::Y,V3::Z] {for sign in [-1.0,1.0] {
+                assert!(body.v.chunks(crate::mesh::STRIDE*3).any(|tri|
+                    blocked(end,end+axis*(sign*0.30),tri)),"floating HUD lead endpoint {end:?}");
+            }}
+        }
+    }
+
+    #[test]
+    fn hornet_mating_bow_has_tapered_posts_and_a_shallow_crown() {
+        let bow=hornet_bow();
+        for i in 0..6 {
+            let a=bow[i];let b=bow[12-i];
+            assert!((a.x+b.x).abs()<1e-9 && (a.y-b.y).abs()<1e-9 && (a.z-b.z).abs()<1e-9);
+        }
+        // A wide shallow crown, not a pointed V or a circular cap.
+        assert!((bow[5].x-bow[7].x).abs()>0.20);
+        assert!((bow[6].y-bow[5].y).abs()<0.008);
+        assert!((bow[1].x-bow[0].x).abs()/(bow[1].y-bow[0].y)<0.25);
+        let offset=EYE-Type::F18.eye();
+        let frame=canopy_frame(Type::F18);
+        let front:Vec<_>=frame.v.chunks(crate::mesh::STRIDE)
+            .map(|v|v3(v[0] as f64,v[1] as f64,v[2] as f64)-offset)
+            .filter(|p|p.z > -4.32 && p.z < -4.09).collect();
+        assert!(front.len()>100);
+        assert!(front.iter().all(|p|p.y<1.280),"old triangular bow must be replaced, not overlaid");
+        let original=crate::flightgear::cockpit_mesh(Type::F18,"frame");
+        for foot in [bow[0],bow[12]] {
+            assert!(original.v.chunks(crate::mesh::STRIDE).any(|v|
+                (v3(v[0] as f64,v[1] as f64,v[2] as f64)-foot).len()<0.045),
+                "new bow foot must meet the original sill");
+        }
+    }
+
+    #[test]
+    fn crown_cases_seat_on_the_joint_without_an_elevated_mast() {
+        let elevation=|p:V3|(p.y-EYE.y)/(EYE.z-p.z);
+        for kind in [Type::F18,Type::Su27] {
+            let mirror=mirror_mounts(kind)[1];
+            let bow=mirror.anchor+if kind==Type::F18{v3(0.0,0.022,0.042)}else{V3::ZERO};
+            let rim=mirror.frame.p(0.0,-mirror.h*0.5-0.007,0.004);
+            let gap=elevation(rim)-elevation(bow);
+            assert!(gap<=0.006 && gap> -0.070,"{kind:?}: detached or buried crown rim {gap}");
+            for t in [-0.28,0.28] {
+                let (foot,hinge)=mirror_support(kind,1,&mirror,t);
+                assert!((foot-hinge).len()<0.040,"{kind:?}: elevated crown stalk");
+            }
+        }
+    }
+
+    #[test]
     fn hornet_side_panes_are_upright_on_the_actual_forward_canopy_bow() {
         let mirrors=mirror_mounts(Type::F18);
         for i in [0,2] {
@@ -973,7 +1086,7 @@ mod tests {
             assert!(mirror.frame.y.y>0.95 && side*mirror.frame.y.x>0.02);
             let native=mirror.anchor-(EYE-Type::F18.eye());
             assert!(native.z > -4.24 && native.z < -4.10);
-            assert!((native.x.abs()-0.328).abs()<0.006);
+            assert!((native.x.abs()-0.320).abs()<0.001);
             let mut glass=Mesh::new();
             curved_mirror(&mut glass,mirror.w,mirror.h,&|x,y,d|mirror.frame.p(x,y,d),DARK,MirrorSampling::Reflection);
             let top:Vec<_>=glass.v.chunks(crate::mesh::STRIDE).filter(|v|v[9]>=0.0)
@@ -992,7 +1105,7 @@ mod tests {
         for (i,mirror) in mirror_mounts(kind).iter().enumerate() {
             for t in [-0.28,0.28] {
                 let (foot,hinge)=mirror_support(kind,i,mirror,t);
-                assert!((foot-hinge).len()<0.14);
+                assert!((foot-hinge).len()<0.060,"mirror hinge must stay against the joint: {}",(foot-hinge).len());
                 assert!(frame.v.chunks(crate::mesh::STRIDE).any(|v|
                     (v3(v[0] as f64,v[1] as f64,v[2] as f64)-foot).len()<1e-6));
             }
@@ -1004,7 +1117,7 @@ mod tests {
         for kind in [Type::F18,Type::Su27] {
             let m=hardware(kind);
             for mirror in mirror_mounts(kind) {
-                for x in [-0.7,0.0,0.7] {for y in [-0.7,0.0,0.7] {
+                for x in [-0.85,-0.4,0.0,0.4,0.85] {for y in [-0.85,-0.4,0.0,0.4,0.85] {
                     let point=mirror.frame.p(x*mirror.w*0.5,y*mirror.h*0.5,0.006);
                     if let Some(tri)=m.v.chunks(crate::mesh::STRIDE*3).find(|t|blocked(EYE,point,t)) {
                         let p=|i|v3(tri[i] as f64,tri[i+1] as f64,tri[i+2] as f64);
@@ -1047,7 +1160,7 @@ mod tests {
             for side in [-1.0,1.0] {
                 let (w,h)=bounds(side);
                 if kind==Type::F18 {
-                    assert!(w>0.055 && w<0.105 && h>0.220 && h>2.0*w);
+                    assert!(w>0.055 && w<0.105 && h>0.200 && h>2.0*w);
                 } else {assert!(w>0.04 && h>0.15);}
             }
         }
