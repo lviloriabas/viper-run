@@ -3,9 +3,58 @@
 Open ONLINE from the main menu. The flight school and normal local missions
 remain available without a network connection.
 
+## Quick start: host inside the game
+
+1. Open ONLINE, CREATE GAME. Leave HOST ON THIS PC selected, choose a mode and
+   capacity, then CREATE GAME. The game owns the server; no second executable,
+   console or server address is needed. Allow private-network hosting if Windows
+   asks. Leaving the room closes the embedded listeners.
+2. On the same network, your friend opens NEARBY and selects JOIN. Public rooms
+   are discovered automatically every three seconds. Alternatively, share COPY
+   LAN INVITE; the guest copies it and selects JOIN FRIEND, PASTE AND JOIN.
+   Pasting into the invitation field and pressing Enter also connects directly.
+3. Across the Internet, wait for background router setup and share COPY INTERNET
+   INVITE when available. The guest uses the same PASTE AND JOIN flow. LAN
+   invitations do not connect separate networks.
+4. Guests mark READY; the host selects LAUNCH. The host must keep the game open.
+
+Router setup requests a finite TCP UPnP lease, renews it while the room is open
+and requests removal when the host closes it. Router discovery and control run
+on a separate thread. A mapping is not proof of end-to-end reachability: host
+firewalls, double NAT and carrier NAT may still block it. The game identifies
+nonpublic router addresses and offers CONNECTION HELP, including trying the
+other player as host. It does not deploy a public Internet relay or change
+Windows firewall/antivirus settings.
+
+CONNECTION HELP / PORTS shows the host's actual LAN IPv4 and listening TCP port,
+with step-by-step forwarding instructions. COPY ROUTER STEPS copies those exact
+values. If automatic mapping fails, forward that external TCP port to the shown
+host IP and internal port, allow the game on the Windows private network, then
+enter the router's public WAN IPv4 or DNS name in PUBLIC IPV4 / DNS. Include
+`:external-port` if it differs from the game's listening port. The game prefills
+the public address if the router reports it and validates that manual addresses
+are public IPv4 addresses. COPY INTERNET INVITE adds the port and the existing
+room credential; guests copy the entire `relay+tcp:IP:PORT#KEY` text and use
+PASTE AND JOIN. Neither player needs to construct or edit the invitation key.
+The guest needs no forwarding rule. Manual invitation generation does not test
+external reachability. Private WAN addresses and 100.64.0.0/10 carrier NAT need
+upstream configuration, a public address from the ISP, another host or a relay.
+
+The embedded server chooses the first free TCP/UDP port in 42861 through 42868.
+LAN discovery uses bounded UDP probes and TCP room listings, including room
+filters and pages. Private rooms are excluded from listings. A room invitation
+contains its credential and should only be shared with intended players.
+Guest/client traffic uses outbound TCP for gameplay and voice. Only the embedded
+host needs to accept connections; LAN discovery can be blocked by guest Wi-Fi
+isolation or network policy. Manual invites bypass discovery, not isolation.
+
+The remaining server-browser setup is optional. Choose CREATE GAME, CHANGE,
+USE EXTERNAL RELAY to use an existing reachable relay; ADVANCED browses that
+relay. This can serve Internet players whose providers prevent local hosting.
+
 ## Server browser and Internet play
 
-Use the current build of both the game and viper-server. ONLINE opens SERVERS.
+Use the current build of both the game and viper-server. ADVANCED opens the browser.
 Set CALLSIGN and aircraft, enter a running relay's address in RELAY SERVER and
 choose REFRESH. A hostname without a port uses TCP 42861. The callsign and last
 server address are remembered; invitation keys are never saved.
@@ -16,10 +65,10 @@ pilot count and FULL / JOIN. Select an open room to connect to its lobby.
 Full rooms remain visible. A failed connection clears stale results and gives
 a reason; REFRESH retries.
 
-CREATE ROOM uses the same relay address. Choose mode, capacity and PUBLIC or
-PRIVATE, then create. Wait for ROOM ONLINE, TCP RELAY. Public rooms appear in
-the browser; private rooms require COPY INVITE. Guests use JOIN INVITE, paste
-the entire invitation with Ctrl+V, press Enter and select JOIN ROOM. Relay
+CREATE GAME with USE EXTERNAL RELAY uses the same relay address. Choose mode,
+capacity and PUBLIC or INVITE ONLY, then create. Wait for ROOM ONLINE, TCP RELAY.
+Public rooms appear in the browser; private rooms require COPY INVITE. Guests use
+JOIN FRIEND and PASTE AND JOIN. Relay
 invitations already contain the server address.
 
 Clicking a text field selects its contents for replacement. Ctrl+A selects
@@ -58,14 +107,13 @@ The service also accepts the previous UDP relay protocol on the same port.
 New browser/host connections use TCP and invitations start with relay+tcp:.
 Do not mix game versions with different simulation formats.
 
-## Direct LAN option
+## Legacy direct UDP option (command line)
 
-LAN DIRECT needs no relay:
+Direct UDP remains available for diagnostics and custom deployments:
 
-1. Choose callsign, aircraft, mode, capacity and UDP port (42860).
-2. Select HOST LAN ROOM. The host allows incoming UDP on its private network.
-3. COPY INVITE; guests paste it in JOIN INVITE and select JOIN ROOM.
-4. Guests mark READY / WAIT; the host selects LAUNCH.
+1. Run `viper-run --host 0.0.0.0:42860`. Allow the host's UDP port.
+2. Share COPY INVITE; guests use JOIN FRIEND, PASTE AND JOIN.
+3. Guests mark READY / WAIT; the host selects LAUNCH.
 
 Direct rooms are invitation-only and are not listed in the relay browser.
 Windows can ask to allow the host on private networks. For direct Internet
@@ -74,7 +122,7 @@ UDP port, preserving the key. Prefer the TCP relay for Internet games.
 
 ## Windows Defender, firewall and SmartScreen
 
-The relay path removes the game's need for an inbound listener. It does not
+The external relay path removes the game's need for an inbound listener. It does not
 alter firewall rules, antivirus settings or exclusions, and does not request
 administrator access. The separate viper-server still needs its inbound TCP port.
 
@@ -164,11 +212,12 @@ python3 tools/check_multiplayer.py
 ~~~
 
 The Python check launches actual game processes for all six modes through
-both direct UDP and the new TCP relay. It checks
+direct UDP, the external TCP relay and the in-game embedded server. It checks
 control reception, replicated frames and selected airframe, remote ammunition
 use and microphone inactivity; every relay case uses the real server
-process. A graphical OpenGL session is required. Use --game and --server to
-select custom builds, --modes and --transport direct|tcp|both to narrow a diagnostic run, and --output to retain
+process; the embedded cases launch only two game processes. A graphical OpenGL
+session is required. Use --game and --server to select custom builds, --modes and
+--transport direct|tcp|embedded|both|all to narrow a diagnostic run, and --output to retain
 reports. All connections are loopback. The report switches deliberately use
 scripted controls even when the QA windows are in the background and never
 save user settings.

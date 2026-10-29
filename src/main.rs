@@ -100,7 +100,7 @@ enum View {
 struct Opts {
     autostart: bool,
     tutorial: Option<tutorial::Lesson>,
-    host:Option<String>, join:Option<String>, directory:Option<String>, callsign:Option<String>, online_mode:Option<net::GameMode>,
+    host:Option<String>, host_game:Option<String>, join:Option<String>, directory:Option<String>, callsign:Option<String>, online_mode:Option<net::GameMode>,
     ready:bool, launch_ready:bool, invite_file:Option<String>, net_report:Option<String>, exit_after:Option<f64>, future_ui_check:bool,
 
     audio_demo: Option<String>,
@@ -161,6 +161,7 @@ fn parse_opts() -> Opts {
         match args[i].as_str() {
             "--export-cockpit" => o.cockpit_export = Some(next(&mut i)),
             "--host" => o.host=Some(next(&mut i)),
+            "--host-game" => o.host_game=Some(next(&mut i)),
             "--join" => o.join=Some(next(&mut i)),
             "--directory" => o.directory=Some(next(&mut i)),
             "--callsign" => o.callsign=Some(next(&mut i)),
@@ -264,7 +265,7 @@ fn parse_opts() -> Opts {
             "--help" | "-h" => {
                 println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
                 println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
-                println!("Online: --host ADDRESS:PORT | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
+                println!("Online: --host-game BIND:PORT (embedded server) | --host ADDRESS:PORT (direct UDP) | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
                 println!("Model review: --export-cockpit DIRECTORY exports the assembled meshes for Blender");
                 println!("Layout QA: --layout-check --shot FILE.png [--layout-scene NAME]");
                 println!("QA: --future-ui-check --screen menu --shot FILE.png --frames 200; --invite-file FILE --net-report FILE --exit-after SECONDS");
@@ -2362,10 +2363,13 @@ impl EventHandler for App {
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
         self.pad_active = self.pad_dispatch;
+        if self.state==State::Network && self.multiplayer.menu.help && key==KeyCode::Escape {
+            self.network_action(Action::NetHelpClose);return;
+        }
         if self.state==State::Network && self.multiplayer.menu.editing.is_some() {
             match key {
                 KeyCode::Escape=>self.multiplayer.menu.finish(true),
-                KeyCode::Enter | KeyCode::KpEnter=>{self.multiplayer.menu.finish(false);self.save();},
+                KeyCode::Enter | KeyCode::KpEnter=>{let join=self.multiplayer.menu.editing==Some(multiplayer::Field::Invite);self.multiplayer.menu.finish(false);self.save();if join{self.network_action(Action::NetJoin);}},
                 KeyCode::A if mods.ctrl=>self.multiplayer.menu.replace_text=true,
                 KeyCode::Backspace=>self.multiplayer.menu.backspace(),
                 KeyCode::V if mods.ctrl=>{if let Some(text)=window::clipboard_get(){for ch in text.chars(){self.multiplayer.menu.character(ch);}}},

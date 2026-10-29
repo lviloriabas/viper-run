@@ -31,7 +31,7 @@ pub enum Action {
     School,
     NetTab(crate::multiplayer::Panel), NetFilter, NetPage(bool),
     Online, NetEdit(crate::multiplayer::Field), NetMode, NetCapacity, NetPublic,
-    NetHost, NetJoin, NetBrowse, NetRoom(u8), NetCopy, NetReady, NetLaunch, NetLeave, NetResume,
+    NetHost, NetJoin, NetPasteJoin, NetBrowse, NetNearby, NetHosting, NetHelp, NetHelpClose, NetRoom(u8), NetNearbyRoom(u8), NetCopy(bool), NetCopyManual, NetCopySetup, NetReady, NetLaunch, NetLeave, NetResume,
     VoiceMode, VoiceMute, VoiceDeafen, VoiceInput(bool), VoiceOutput(bool), VoiceThreshold(bool), VoicePeer(u64), VoicePeerGain(u64),
     Lesson(crate::tutorial::Lesson),
     Restart,
@@ -463,7 +463,7 @@ impl<'a> Ui<'a> {
         self.cv.text("MULTIPLAYER",left,y+16.0*s,2.0*s,GREEN,Align::Left);
         let menu=&mp.menu;
         let mut bx=left;
-        for (label,panel) in [("SERVERS",Panel::Browser),("CREATE ROOM",Panel::Create),("JOIN INVITE",Panel::Invite),("LAN DIRECT",Panel::Lan)] {
+        for (label,panel) in [("CREATE GAME",Panel::Create),("JOIN FRIEND",Panel::Invite),("NEARBY",Panel::Nearby),("ADVANCED",Panel::Browser)] {
             bx+=self.button(label,"",bx,y+32.0*s,menu.panel==panel,Action::NetTab(panel))+5.0*s;
         }
         let half=(width-8.0*s)/2.0;
@@ -491,27 +491,53 @@ impl<'a> Ui<'a> {
                         self.cv.paragraph(&browser.status(),left,y+172.0*s,width,sm,1.5,CREAM);
                     }
                 } else {
-                    self.cv.paragraph("Enter the address of a running viper-server. Everyone uses the same server. Refresh, then select a room to join.",left,y+163.0*s,width,sm,1.6,CREAM);
-                    self.cv.paragraph("Internet rooms use outbound TCP. No port forwarding is needed on players' PCs.",left,y+211.0*s,width,sm,1.6,DIM);
+                    self.cv.paragraph("Optional: browse an external relay. Enter its address and refresh. To play without a separate server, choose CREATE GAME or NEARBY.",left,y+163.0*s,width,sm,1.6,CREAM);
+                    self.cv.paragraph("An external relay helps when a router or Internet provider blocks hosting. Players only make outgoing connections.",left,y+211.0*s,width,sm,1.6,DIM);
                 }
             }
-            Panel::Create | Panel::Lan => {
-                let lan=menu.panel==Panel::Lan;
-                if lan { self.network_field("HOST UDP PORT",&menu.port,Field::Port,menu.editing==Some(Field::Port),true,left,y+84.0*s,width); }
-                else { self.network_field("RELAY SERVER (SAME ADDRESS AS OTHER PILOTS)",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+84.0*s,width); }
+            Panel::Nearby => {
+                self.cv.paragraph("Same Wi-Fi or local network? Your friend's public game appears here automatically.",left,y+86.0*s,width,sm,1.5,CREAM);
                 let mut bx=left;
-                bx+=self.button(menu.rules.mode.name(),"",bx,y+116.0*s,false,Action::NetMode)+5.0*s;
-                bx+=self.button(&format!("SLOTS {}",menu.rules.capacity),"",bx,y+116.0*s,false,Action::NetCapacity)+5.0*s;
-                if !lan { self.button(if menu.public{"PUBLIC"}else{"PRIVATE"},"",bx,y+116.0*s,false,Action::NetPublic); }
-                self.cv.paragraph(menu.rules.mode.brief(),left,y+151.0*s,width,sm,1.6,CREAM);
-                self.cv.paragraph(if lan{"Direct LAN hosting accepts incoming UDP. Windows may ask to allow the game on your private network. Share COPY INVITE with your friends."}else if menu.public{"Public rooms appear in the server browser. Create the room, wait for pilots to join, then launch when everyone is ready."}else{"Private rooms stay out of the browser. Create the room, choose COPY INVITE, and share it with your friends."},left,y+196.0*s,width,sm,1.6,DIM);
-                self.button(if lan{"HOST LAN ROOM"}else{"CREATE ROOM"},"",left,y+253.0*s,true,Action::NetHost);
+                bx+=self.button("SEARCH AGAIN","",bx,y+112.0*s,false,Action::NetNearby)+5.0*s;
+                self.button(menu.filter.map_or("ALL MODES",|m|m.name()),"",bx,y+112.0*s,false,Action::NetFilter);
+                if let Some(nearby)=&menu.nearby {
+                    for(i,room)in nearby.rooms.iter().enumerate() {
+                        let yy=y+(151.0+i as f32*18.0)*s;
+                        self.key_cap(&format!("{} / {}",room.title,room.mode.name()),left,yy,width-70.0*s,false,Action::NetNearbyRoom(i as u8));
+                        self.cv.text(&format!("{}/{} {}",room.players,room.capacity,if room.players>=room.capacity{"FULL"}else{"JOIN"}),left+width-62.0*s,yy+6.0*s,sm,ACID,Align::Left);
+                    }
+                    if nearby.rooms.is_empty() {
+                        self.cv.paragraph("Looking for games... The host selects CREATE GAME first. If nothing appears, ask for a LAN invite and use JOIN FRIEND.",left,y+154.0*s,width,sm,1.6,CREAM);
+                        self.button("CONNECTION HELP","",left,y+222.0*s,false,Action::NetHelp);
+                    }
+                    let bx=left+self.button("PREV","",left,y+264.0*s,false,Action::NetPage(false))+5.0*s;
+                    let bx=bx+self.button("NEXT","",bx,y+264.0*s,false,Action::NetPage(true))+8.0*s;
+                    self.cv.text(&format!("PAGE {} / {}",nearby.page+1,nearby.pages),bx,y+272.0*s,sm,DIM,Align::Left);
+                }
+            }
+            Panel::Create => {
+                self.button(if menu.external_server{"USE EXTERNAL RELAY"}else{"HOST ON THIS PC"},"CHANGE",left,y+84.0*s,false,Action::NetHosting);
+                if menu.external_server {
+                    self.network_field("EXTERNAL RELAY ADDRESS",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+112.0*s,width);
+                } else {
+                    self.cv.paragraph("The server starts inside the game. Keep this game open while your friends play.",left,y+115.0*s,width,sm,1.5,CREAM);
+                }
+                let mut bx=left;
+                bx+=self.button(menu.rules.mode.name(),"",bx,y+148.0*s,false,Action::NetMode)+5.0*s;
+                bx+=self.button(&format!("SLOTS {}",menu.rules.capacity),"",bx,y+148.0*s,false,Action::NetCapacity)+5.0*s;
+                self.button(if menu.public{"PUBLIC"}else{"INVITE ONLY"},"",bx,y+148.0*s,false,Action::NetPublic);
+                self.cv.paragraph(menu.rules.mode.brief(),left,y+183.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph(if menu.external_server{"Friends can join through an invitation or the external server browser."}else{"Same network: your friend opens NEARBY. Internet: share the Internet invite when router setup finishes. Windows may ask to allow hosting."},left,y+218.0*s,width,sm,1.5,DIM);
+                let bx=left+self.button("CREATE GAME","",left,y+264.0*s,true,Action::NetHost)+8.0*s;
+                self.button("CONNECTION HELP","",bx,y+264.0*s,false,Action::NetHelp);
             }
             Panel::Invite => {
                 self.network_field("INVITATION (CTRL+V TO PASTE)",&menu.invite,Field::Invite,menu.editing==Some(Field::Invite),true,left,y+84.0*s,width);
-                self.cv.paragraph("Ask the host for COPY INVITE. Select this field and paste the full invitation with Ctrl+V, press Enter, then join.",left,y+133.0*s,width,sm,1.6,CREAM);
-                self.cv.paragraph("Relay invitations include the server address. You do not need to configure it separately.",left,y+187.0*s,width,sm,1.6,DIM);
-                self.button("JOIN ROOM","",left,y+245.0*s,true,Action::NetJoin);
+                self.button("PASTE AND JOIN","",left,y+117.0*s,true,Action::NetPasteJoin);
+                self.cv.paragraph("Copy your friend's invitation, then select PASTE AND JOIN. You can also paste into the field and press Enter to connect.",left,y+155.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph("Use a LAN invite on the same network, or an Internet invite from another network. The invitation includes everything needed.",left,y+205.0*s,width,sm,1.6,DIM);
+                let bx=left+self.button("JOIN ROOM","",left,y+264.0*s,false,Action::NetJoin)+8.0*s;
+                self.button("CONNECTION HELP","",bx,y+264.0*s,false,Action::NetHelp);
             }
         }
         let max=(width/(6.0*sm))as usize;
@@ -521,6 +547,45 @@ impl<'a> Ui<'a> {
     }
     pub fn network_screen(&mut self,mp:&crate::multiplayer::Multiplayer,jet:crate::sim::Type,keys:&crate::keymap::Keymap) {
         use crate::multiplayer::Field;
+        if mp.menu.help {
+            if let Some(server)=&mp.server {
+                let s=self.s;let sm=(s-1.0).max(1.0);let pw=(self.w-20.0*s).min(610.0*s);let ph=330.0*s;
+                let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let left=x+12.0*s;let width=pw-24.0*s;
+                self.frame(x,y,pw,ph);
+                self.cv.text("HOST INTERNET SETUP",left,y+16.0*s,2.0*s,GREEN,Align::Left);
+                self.cv.text(&format!("HOST PC: {}   TCP PORT: {}",server.lan.ip(),server.lan.port()),left,y+44.0*s,sm,ACID,Align::Left);
+                let router=server.router_address.map_or("OPEN YOUR ROUTER SETTINGS".into(),|a|format!("ROUTER: {}",a.ip()));
+                self.cv.text(&router,left,y+58.0*s,sm,DIM,Align::Left);
+                self.cv.text(server.internet_status(),left,y+73.0*s,sm,AMBER,Align::Left);
+                self.cv.paragraph(&format!("1. If automatic setup fails, open Port Forwarding / Virtual Server in your router. Forward external TCP port {} to {}, internal port {}. No UDP forwarding is needed.",server.lan.port(),server.lan.ip(),server.lan.port()),left,y+95.0*s,width,sm,1.4,CREAM);
+                self.cv.paragraph("2. Save/apply the router rule. Allow Viper Run incoming connections on the Windows private network if asked. The guest does not open ports.",left,y+134.0*s,width,sm,1.4,CREAM);
+                self.cv.paragraph("3. Enter the router's WAN / Internet public IPv4 or your DNS name below. Include :port only if you chose a different external port. Copy the generated invitation and send it to your friend.",left,y+166.0*s,width,sm,1.4,CREAM);
+                self.network_field("PUBLIC IPV4 / DNS (OPTIONAL :EXTERNAL PORT)",&mp.menu.public_address,Field::PublicAddress,mp.menu.editing==Some(Field::PublicAddress),true,left,y+201.0*s,width);
+                let bx=left+self.button("COPY INTERNET INVITE","",left,y+232.0*s,true,Action::NetCopyManual)+8.0*s;
+                self.button("COPY ROUTER STEPS","",bx,y+232.0*s,false,Action::NetCopySetup);
+                self.cv.paragraph("If the WAN address is private or starts with 100.64 through 100.127, your connection may use double NAT / CGNAT. This router rule alone will not work. Try the other PC as host, ask your provider for a public IPv4, or use an external relay.",left,y+258.0*s,width,sm,1.4,DIM);
+                let max=(width/(6.0*sm))as usize;
+                self.cv.text(&mp.menu.status.chars().take(max).collect::<String>(),left,y+299.0*s,sm,AMBER,Align::Left);
+                self.button("BACK TO LOBBY","ESC",left,y+313.0*s,false,Action::NetHelpClose);
+                return;
+            }
+            let s=self.s;let sm=(s-1.0).max(1.0);let pw=(self.w-20.0*s).min(610.0*s);let ph=300.0*s;
+            let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let left=x+12.0*s;let width=pw-24.0*s;
+            self.frame(x,y,pw,ph);
+            self.cv.text("CONNECT WITH A FRIEND",left,y+16.0*s,2.0*s,GREEN,Align::Left);
+            for(i,(label,text))in[
+                ("SAME NETWORK","One pilot creates a public game. The other opens NEARBY and selects JOIN. If discovery is blocked, use COPY LAN INVITE and PASTE AND JOIN. Allow the host game on your private network when Windows asks."),
+                ("DIFFERENT NETWORKS","The host automatically asks the router for a temporary Internet connection. When available, use COPY INTERNET INVITE. The host keeps the game open; the guest needs no server setup."),
+                ("IF INTERNET SETUP FAILS","Try the other PC as host. Some routers and Internet providers (CGNAT) block incoming connections. An accessible external relay can be selected under CREATE GAME, CHANGE; ADVANCED browses its rooms."),
+                ("READY TO FLY","After connecting, the guest selects READY. The host selects LAUNCH. Microphones start off; select a voice mode in the lobby to talk."),
+            ].iter().enumerate() {
+                let yy=y+(52.0+i as f32*54.0)*s;
+                self.cv.text(label,left,yy,sm,ACID,Align::Left);
+                self.cv.paragraph(text,left,yy+12.0*s,width,sm,1.4,CREAM);
+            }
+            self.button("BACK TO GAME","ESC",left,y+276.0*s,true,Action::NetHelpClose);
+            return;
+        }
         if mp.session.is_none() { self.server_browser(mp,jet); return; }
         let s=self.s;let sm=(s-1.0).max(1.0);
         let(pw,ph)=((self.w-20.0*s).min(610.0*s),(self.h-30.0*s).min(320.0*s));
@@ -531,13 +596,18 @@ impl<'a> Ui<'a> {
         let menu=&mp.menu;
         let session=mp.session.as_ref().unwrap();
         self.cv.text(if session.host{"YOUR ROOM"}else{"JOINED ROOM"},x+12.0*s,y+53.0*s,s,ACID,Align::Left);
-        self.network_field("INVITATION", &session.invitation(),Field::Invite,false,false,x+12.0*s,y+67.0*s,cw);
+        self.network_field("INVITATION", &mp.invitation(false).unwrap_or_default(),Field::Invite,false,false,x+12.0*s,y+67.0*s,cw);
         let ready=session.members.iter().filter(|m|m.ready).count();
         self.cv.text(&format!("PILOTS {} / {}, READY {}",session.members.len(),session.rules.capacity,ready),x+12.0*s,y+103.0*s,sm,CREAM,Align::Left);
-        self.cv.paragraph(if session.host{"Wait for at least two pilots to be ready, then launch."}else{"Select READY when you want to fly. The host launches."},x+12.0*s,y+118.0*s,cw,sm,1.4,DIM);
-        self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy);
+        self.cv.paragraph(if let Some(server)=&mp.server{server.internet_status()}else if session.host{"Wait for at least two pilots to be ready, then launch."}else{"Select READY when you want to fly. The host launches."},x+12.0*s,y+118.0*s,cw,sm,1.4,DIM);
+        if let Some(server)=&mp.server {
+            let bx=x+12.0*s+self.button("COPY LAN INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy(false))+5.0*s;
+            if server.internet_address().is_some() {self.button("COPY INTERNET INVITE","",bx,y+149.0*s,false,Action::NetCopy(true));}
+            else {self.button(if server.checking_internet(){"CONNECTING..."}else{"INTERNET HELP"},"",bx,y+149.0*s,false,Action::NetHelp);}
+        } else {self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy(false));}
         self.cv.text(session.rules.mode.name(),x+12.0*s,y+174.0*s,s,AMBER,Align::Left);
-        self.cv.text(&session.status,x+12.0*s,y+191.0*s,sm,CREAM,Align::Left);
+        if mp.server.is_some() {self.button("CONNECTION HELP / PORTS","",x+12.0*s,y+188.0*s,false,Action::NetHelp);}
+        else {self.cv.paragraph(&session.status,x+12.0*s,y+190.0*s,cw,sm,1.2,CREAM);}
         self.cv.text(&format!("AIRFRAME: {}",jet.name()),rx,y+49.0*s,sm,AMBER,Align::Left);
         if !mp.active(){self.button("CHANGE JET","",rx,y+57.0*s,false,Action::Jet);}
         else {self.cv.text("AIRFRAME FIXED FOR THIS SORTIE",rx,y+65.0*s,sm,DIM,Align::Left);}

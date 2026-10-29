@@ -32,15 +32,17 @@ polars, engine ratings, gear, flap schedules and weapon stations.
 [New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
 variant data, calibration and shared game approximations.
 
-ONLINE opens a server browser with mode filters, pilot counts and pages.
-Select an open room to join, or use CREATE ROOM for a public/private lobby.
-Guests mark READY; the host launches. The relay path uses outbound TCP for
-gameplay and voice, so players do not need inbound firewall exceptions or
-port forwarding. LAN DIRECT offers invitation-only UDP games.
+ONLINE, CREATE GAME starts the server inside the game. No separate program or
+server address is needed. Friends on the same network open NEARBY and select
+JOIN, or use COPY LAN INVITE and PASTE AND JOIN. Guests mark READY; the host
+launches. Leaving the room also closes its embedded server.
 
-Run viper-server on a reachable machine (TCP 42861), then enter its address
-in ONLINE. There is no automatically deployed public relay. The address and
-callsign are remembered. The microphone starts off.
+For Internet play the host tries temporary UPnP router setup in the background.
+Share COPY INTERNET INVITE when available. Hosting depends on router, firewall
+and provider support; CGNAT can require an external relay. An optional relay
+address can be selected inside CREATE GAME; ADVANCED browses its rooms. The
+dedicated viper-server remains available for operators. There is no automatically
+deployed public relay. The microphone starts off.
 
 See [instrucciones en español](docs/MULTIPLAYER-ES.md),
 [setup, Defender distinctions and verification](docs/MULTIPLAYER.md),
