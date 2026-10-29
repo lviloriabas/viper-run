@@ -31,6 +31,15 @@ fn floats(data: &[u8], at: &mut usize, n: usize) -> Mesh {
     Mesh { v }
 }
 fn decode(data: &'static [u8]) -> Asset {
+    let data=if data.starts_with(b"VRZ1") {
+        let expected=u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+        assert!(expected<=64*1024*1024,"model exceeds decoded budget");
+        let raw=miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data[8..],expected)
+            .expect("corrupt embedded model");
+        assert_eq!(raw.len(),expected);
+        // Assets are decoded once; texture slices share this immutable allocation.
+        &*Box::leak(raw.into_boxed_slice())
+    }else{data};
     assert_eq!(&data[..4], b"VRM1");
     let mut at = 4;
     let n = u32_at(data, &mut at);
@@ -59,8 +68,8 @@ fn asset(kind: Type) -> &'static Asset {
     static F18: OnceLock<Asset> = OnceLock::new();
     static SU27: OnceLock<Asset> = OnceLock::new();
     match kind {
-        Type::F18 => F18.get_or_init(|| decode(include_bytes!("../assets/models/f18.vrm"))),
-        Type::Su27 => SU27.get_or_init(|| decode(include_bytes!("../assets/models/su27.vrm"))),
+        Type::F18 => F18.get_or_init(|| decode(include_bytes!("../assets/models/f18.vrz"))),
+        Type::Su27 => SU27.get_or_init(|| decode(include_bytes!("../assets/models/su27.vrz"))),
         _ => panic!("FlightGear asset requested for {kind:?}"),
     }
 }
@@ -73,7 +82,13 @@ pub fn textures(kind: Type) -> &'static [TextureMesh] {
     &asset(kind).textures
 }
 pub fn build(kind: Type) -> Airframe {
+    let controls=if kind==Type::F18 {
+        [-1.0,1.0].into_iter().enumerate().map(|(i,side)|crate::articulation::Surface{
+            mesh:part(kind,&format!("aileron{i}")),hinge:crate::articulation::Hinge{
+            pivot:v3(side*3.87,0.448,3.11839),axis:V3::X,drive:crate::articulation::Drive::Aileron,side}}).collect()
+    }else{Vec::new()};
     Airframe {
+        controls,
         body: part(kind, "body"),
         canopy: part(kind, "canopy"),
         stabs: [part(kind, "stab0"), part(kind, "stab1")],

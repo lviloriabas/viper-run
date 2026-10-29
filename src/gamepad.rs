@@ -32,6 +32,8 @@ pub struct State {
 
 pub struct Gamepad {
     device: backend::Device,
+    /// Unfiltered readings for drift measurement and the live setup monitor.
+    pub raw: State,
     pub state: State,
     prev: State,
     /// When each button went down, by bit, and the previous and current poll times.
@@ -41,20 +43,66 @@ pub struct Gamepad {
     nav_held: u16,
     nav_next: f64,
     nav_event: u16,
+    calibration: Option<Calibration>,
+    pub calibration_status: &'static str,
 }
 
 /// Radial dead zone, rescaled so the output rises linearly from zero at its
 /// edge and reaches full deflection a little short of the rim, where worn
 /// sticks stop. The FLCS adds the only response curve.
-fn stick((x, y): (f64, f64)) -> (f64, f64) {
-    const DEAD: f64 = 0.10;
+pub fn stick((x, y): (f64, f64), dead: f64) -> (f64, f64) {
     const FULL: f64 = 0.95;
+    let dead = dead.clamp(0.0, crate::settings::DEAD_ZONE_MAX);
     let m = (x * x + y * y).sqrt();
-    if m <= DEAD {
+    if m <= dead {
         return (0.0, 0.0);
     }
-    let k = ((m - DEAD) / (FULL - DEAD)).min(1.0) / m;
-    (x * k, y * k)
+    let output = ((m - dead) / (FULL - dead)).min(1.0);
+    (x / m * output, y / m * output)
+}
+
+/// A brief hands-off measurement. A settling interval lets the player release
+/// the menu stick; a range check rejects deliberate motion instead of hiding it.
+struct Calibration {
+    started: f64,
+    last: f64,
+    samples: usize,
+    peak: [f64; 2],
+    low: [f64; 4],
+    high: [f64; 4],
+}
+
+impl Calibration {
+    const SETTLE: f64 = 1.5;
+    const MEASURE: f64 = 3.0;
+
+    fn new(now: f64) -> Self {
+        Self { started: now, last: now, samples: 0, peak: [0.0; 2], low: [f64::INFINITY; 4], high: [f64::NEG_INFINITY; 4] }
+    }
+
+    fn sample(&mut self, raw: State, now: f64) -> Option<Result<(f64, f64), &'static str>> {
+        if !raw.connected { return Some(Err("CONTROLLER LOST. RECONNECT AND RETRY.")); }
+        if now - self.last > 0.25 || now < self.last { return Some(Err("MEASUREMENT INTERRUPTED. PLEASE RETRY.")); }
+        self.last = now;
+        if now - self.started < Self::SETTLE { return None; }
+        let axes = [raw.left.0, raw.left.1, raw.right.0, raw.right.1];
+        for (i, v) in axes.into_iter().enumerate() {
+            self.low[i] = self.low[i].min(v);
+            self.high[i] = self.high[i].max(v);
+        }
+        for (i, (x, y)) in [raw.left, raw.right].into_iter().enumerate() {
+            self.peak[i] = self.peak[i].max(x.hypot(y));
+        }
+        if self.peak.iter().any(|&p| p > 0.32) || (0..4).any(|i| self.high[i] - self.low[i] > 0.08) {
+            return Some(Err("STICKS MOVED OR DRIFT TOO HIGH. RETRY AT REST."));
+        }
+        self.samples += 1;
+        if now - self.started < Self::SETTLE + Self::MEASURE { return None; }
+        if self.samples < 60 { return Some(Err("TOO FEW SAMPLES. PLEASE RETRY.")); }
+        // Round up to whole percent, with 1.5% headroom above all observed drift.
+        let dead = |p: f64| ((p + 0.015) * 100.0).ceil() / 100.0;
+        Some(Ok((dead(self.peak[0]), dead(self.peak[1]))))
+    }
 }
 
 fn trigger(t: f64) -> f64 {
@@ -75,14 +123,16 @@ fn dirs(s: &State) -> u16 {
 
 impl Gamepad {
     pub fn new() -> Gamepad {
-        Gamepad { device: backend::Device::new(), state: State::default(), prev: State::default(), down_at: [0.0; 16], then: 0.0, now: 0.0, nav_held: 0, nav_next: 0.0, nav_event: 0 }
+        Gamepad { device: backend::Device::new(), raw: State::default(), state: State::default(), prev: State::default(), down_at: [0.0; 16], then: 0.0, now: 0.0, nav_held: 0, nav_next: 0.0, nav_event: 0, calibration: None, calibration_status: "RELEASE BOTH STICKS BEFORE CALIBRATING." }
     }
 
     /// Reads the controller; call once per frame. Returns the new connection
     /// state when a controller was plugged in or removed.
-    pub fn poll(&mut self, now: f64) -> Option<bool> {
+    pub fn poll(&mut self, now: f64, dead_left: f64, dead_right: f64) -> Option<bool> {
         self.prev = self.state;
-        self.state = self.device.read(now).map(|r| State { left: stick(r.left), right: stick(r.right), lt: trigger(r.lt), rt: trigger(r.rt), ..r }).unwrap_or_default();
+        self.raw = self.device.read(now).unwrap_or_default();
+        let r = self.raw;
+        self.state = if r.connected { State { left: stick(r.left, dead_left), right: stick(r.right, dead_right), lt: trigger(r.lt), rt: trigger(r.rt), ..r } } else { State::default() };
         (self.then, self.now) = (self.now, now);
         for i in 0..16 {
             if self.state.buttons & !self.prev.buttons & (1 << i) != 0 {
@@ -91,6 +141,49 @@ impl Gamepad {
         }
         self.update_navigation(now);
         (self.state.connected != self.prev.connected).then_some(self.state.connected)
+    }
+
+    pub fn calibrating(&self) -> bool { self.calibration.is_some() }
+
+    pub fn start_calibration(&mut self, now: f64) {
+        if self.raw.connected {
+            self.calibration = Some(Calibration::new(now));
+        } else {
+            self.calibration_status = "CONNECT A CONTROLLER FIRST.";
+        }
+    }
+
+    pub fn cancel_calibration(&mut self) {
+        if self.calibration.take().is_some() { self.calibration_status = "CALIBRATION CANCELLED. SETTINGS KEPT."; }
+    }
+
+    pub fn calibration_message(&self, now: f64) -> String {
+        if let Some(c) = &self.calibration {
+            let elapsed = now - c.started;
+            if elapsed < Calibration::SETTLE { "LET GO OF BOTH STICKS. KEEP THEM STILL.".into() }
+            else { format!("MEASURING DRIFT: {:.0} SECONDS LEFT. HANDS OFF.", (Calibration::SETTLE + Calibration::MEASURE - elapsed).max(0.0).ceil()) }
+        } else { self.calibration_status.into() }
+    }
+
+    pub fn calibration_tick(&mut self, now: f64) -> Option<(f64, f64)> {
+        let result = self.calibration.as_mut()?.sample(self.raw, now)?;
+        self.calibration = None;
+        match result {
+            Ok(dead) => { self.calibration_status = "CALIBRATED AND SAVED. TEST SMALL MOVEMENTS BELOW."; Some(dead) }
+            Err(message) => { self.calibration_status = message; None }
+        }
+    }
+
+    pub fn rudder(&self, settings: &crate::settings::Settings) -> bool {
+        self.held(X) || settings.click_rudder() && self.held(LS) && !self.held(RS)
+    }
+
+    pub fn countermeasures_held(&self, settings: &crate::settings::Settings) -> bool {
+        self.held(LS) && !self.held(RS) && (!settings.click_rudder() || self.held(X))
+    }
+
+    pub fn countermeasures_pressed(&self, settings: &crate::settings::Settings) -> bool {
+        self.countermeasures_held(settings) && (self.pressed(LS) || settings.click_rudder() && self.pressed(X))
     }
 
     pub fn held(&self, b: u16) -> bool {
@@ -361,5 +454,106 @@ mod menu_tests {
         p.state = State { connected: true, left: (0.0, 0.8), ..Default::default() };
         assert!(p.active()); p.prev = p.state; assert!(!p.active());
         p.state.buttons = A; assert!(p.active());
+    }
+}
+
+#[cfg(test)]
+mod tuning_tests {
+    use super::*;
+    use crate::settings::{PadLayout, Settings};
+
+    #[test]
+    fn radial_dead_zone_is_continuous_and_preserves_direction_and_full_travel() {
+        for dead in [0.0, 0.02, 0.1, 0.35] {
+            assert_eq!(stick((0.0, 0.0), dead), (0.0, 0.0));
+            assert_eq!(stick((dead, 0.0), dead), (0.0, 0.0));
+            assert!(stick((dead + 1e-8, 0.0), dead).0 < 1e-6);
+            assert_eq!(stick((0.95, 0.0), dead), (1.0, 0.0));
+            assert_eq!(stick((-1.0, 0.0), dead), (-1.0, 0.0));
+            let diagonal = stick((0.5, -0.5), dead);
+            assert!((diagonal.0 + diagonal.1).abs() < 1e-10);
+            let rim = stick((1.0, 1.0), dead);
+            assert!((rim.0.hypot(rim.1) - 1.0).abs() < 1e-10);
+        }
+        assert_eq!(stick((0.06, 0.0), 0.1), (0.0, 0.0));
+        assert!(stick((0.06, 0.0), 0.02).0 > 0.0);
+    }
+
+    #[test]
+    fn calibration_uses_raw_independent_peaks_and_safety_margin() {
+        let mut c = Calibration::new(0.0);
+        let mut result = None;
+        for i in 1..=280 {
+            let t = i as f64 / 60.0;
+            let raw = State { connected: true, left: (0.02 + (t * 2.0).sin() * 0.004, -0.01), right: (0.10, 0.04), ..Default::default() };
+            if let Some(r) = c.sample(raw, t) { result = Some(r.unwrap()); break; }
+        }
+        let (left, right) = result.unwrap();
+        assert_eq!((left, right), (0.05, 0.13));
+        assert_eq!(stick((0.024, -0.01), left), (0.0, 0.0));
+        assert_eq!(stick((0.10, 0.04), right), (0.0, 0.0));
+        assert!(stick((0.055, 0.0), left).0 > 0.0);
+    }
+
+    #[test]
+    fn calibration_rejects_movement_disconnects_sparse_samples_and_interruptions() {
+        let rest = State { connected: true, ..Default::default() };
+        let mut c = Calibration::new(0.0);
+        assert!(c.sample(rest, 0.5).unwrap().is_err());
+        let mut c = Calibration::new(0.0);
+        assert!(c.sample(State::default(), 0.01).unwrap().is_err());
+        let mut c = Calibration::new(0.0);
+        let mut result = None;
+        for i in 1..=30 { if let Some(r) = c.sample(rest, i as f64 * 0.2) { result = Some(r); break; } }
+        assert!(result.unwrap().is_err());
+        for step in [0.10, 0.5] {
+            let mut c = Calibration::new(0.0);
+            for i in 1..=100 { let _ = c.sample(rest, i as f64 / 60.0); }
+            assert!(c.sample(State { left: (step, 0.0), ..rest }, 101.0 / 60.0).unwrap().is_err());
+        }
+    }
+
+    #[test]
+    fn cancelled_or_failed_calibration_never_returns_settings() {
+        let mut pad = Gamepad::new();
+        pad.start_calibration(0.0);
+        assert!(!pad.calibrating());
+        pad.raw.connected = true;
+        pad.start_calibration(0.0);
+        assert!(pad.calibrating());
+        pad.cancel_calibration();
+        assert!(!pad.calibrating());
+        assert_eq!(pad.calibration_tick(5.0), None);
+        pad.start_calibration(6.0);
+        pad.raw.connected = false;
+        assert_eq!(pad.calibration_tick(6.01), None);
+        assert!(!pad.calibrating());
+    }
+
+    #[test]
+    fn optional_l3_rudder_keeps_x_and_countermeasures_chord_distinct() {
+        let mut pad = Gamepad::new();
+        let mut st = Settings::default();
+        for enabled in [false, true] {
+            st.pad_rudder_click = enabled;
+            pad.state.buttons = X;
+            assert!(pad.rudder(&st));
+            pad.state.buttons = LS;
+            assert_eq!(pad.rudder(&st), enabled);
+            assert_eq!(pad.countermeasures_pressed(&st), !enabled);
+            pad.state.buttons = X | LS;
+            assert!(pad.countermeasures_held(&st));
+            assert!(pad.countermeasures_pressed(&st));
+            pad.prev.buttons = LS;
+            assert_eq!(pad.countermeasures_pressed(&st), enabled);
+            pad.prev = State::default();
+            pad.state.buttons = LS | RS;
+            assert!(!pad.rudder(&st));
+            assert!(!pad.countermeasures_held(&st));
+        }
+        st.pad_layout = PadLayout::Classic;
+        pad.state.buttons = LS;
+        assert!(!pad.rudder(&st));
+        assert!(pad.countermeasures_pressed(&st));
     }
 }

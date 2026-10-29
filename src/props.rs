@@ -29,15 +29,15 @@ pub struct Models {
     /// Ejection, per jet (F-16, MiG-29): the seat (the K-36DM's with its
     /// booms out), the pilot seated and hanging, the main canopy and the
     /// cockpit canopy blown off.
-    seat: [Part; 4],
-    seat_stowed: [Part; 4],
-    deploying: [[[Part; 2]; crate::eject::DEPLOY_FRAMES]; 4],
-    landed: [[[Part; 2]; crate::eject::LANDING_FRAMES]; 4],
+    seat: [Part; Type::ALL.len()],
+    seat_stowed: [Part; Type::ALL.len()],
+    deploying: [[[Part; 2]; crate::eject::DEPLOY_FRAMES]; Type::ALL.len()],
+    landed: [[[Part; 2]; crate::eject::LANDING_FRAMES]; Type::ALL.len()],
     cord: Part,
-    seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; 4],
-    handle: [[Part; crate::eject::HANDLE_FRAMES]; 4],
-    chute: [Part; 4],
-    canopy: [Part; 4],
+    seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; Type::ALL.len()],
+    handle: [[Part; crate::eject::HANDLE_FRAMES]; Type::ALL.len()],
+    chute: [Part; Type::ALL.len()],
+    canopy: [Part; Type::ALL.len()],
 }
 
 /// AIM-120 AMRAAM, 3.66 m and 178 mm, nose at the origin pointing forward:
@@ -98,7 +98,11 @@ impl Models {
         let handle = std::array::from_fn(|k| std::array::from_fn(|frame| part(&eject::handle_mesh(
             Type::ALL[k], frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
         let chute=Type::ALL.map(|kind|part(&eject::chute_mesh(eject::spec(kind))));
-        let canopy=[part(&frame.canopy),part(&mig.canopy),part(&crate::hornet::build().canopy),part(&crate::su27::build().canopy)];
+        let canopy=Type::ALL.map(|kind|match kind.base(){
+            Type::F16=>part(&frame.canopy),Type::Mig29=>part(&mig.canopy),
+            Type::F18=>part(&crate::hornet::build().canopy),Type::Su27=>part(&crate::su27::build().canopy),
+            _=>unreachable!("base resolves Hornet variants"),
+        });
         Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, seat_stowed, deploying, landed, cord, seated, handle, chute, canopy }
     }
 }

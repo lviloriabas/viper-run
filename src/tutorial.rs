@@ -223,7 +223,7 @@ impl Training {
             _ => ("LESSON COMPLETE", "Completion saved. Repeat the lesson or return to flight school.", None),
         }
     }
-    pub fn hint(&self, keys: &Keymap, pad: bool, layout: PadLayout, pitch: PitchSource) -> String {
+    pub fn hint(&self, keys: &Keymap, pad: bool, layout: PadLayout, pitch: PitchSource, click_rudder: bool) -> String {
         let Some(b) = self.instruction().2 else {
             return "ESC CONFIGURATION / RESTART / MAIN MENU".into();
         };
@@ -232,7 +232,7 @@ impl Training {
                 Bind::PitchUp | Bind::PitchDown | Bind::RollLeft | Bind::RollRight => "LEFT STICK",
                 Bind::YawLeft => {
                     if layout == PadLayout::Combat {
-                        "HOLD X + LEFT STICK"
+                        if click_rudder { "HOLD X OR L3 + LEFT STICK" } else { "HOLD X + LEFT STICK" }
                     } else {
                         "LB / RB"
                     }
@@ -275,7 +275,7 @@ impl Training {
                 Bind::WheelBrake => "HOLD LT",
                 Bind::View => "Y",
                 Bind::Airbrake => "B",
-                Bind::Countermeasures => "LEFT STICK CLICK",
+                Bind::Countermeasures => if click_rudder { "X + LEFT STICK CLICK" } else { "LEFT STICK CLICK" },
                 _ => "ESC CONFIGURATION",
             }
             .into();
@@ -401,10 +401,10 @@ mod tests {
         let mut keys = Keymap::default();
         keys.set(Bind::Airbrake, 0, Some(miniquad::KeyCode::U));
         assert!(t
-            .hint(&keys, false, PadLayout::Combat, PitchSource::Keys)
+            .hint(&keys, false, PadLayout::Combat, PitchSource::Keys, false)
             .ends_with("U"));
         assert_eq!(
-            t.hint(&keys, true, PadLayout::Combat, PitchSource::Keys),
+            t.hint(&keys, true, PadLayout::Combat, PitchSource::Keys, false),
             "B"
         );
     }

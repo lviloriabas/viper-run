@@ -77,15 +77,20 @@ Its simplified cockpit geometry alone is insufficient to establish those
 details; the supplied Hornet photographs and instrument references are used
 for the interior adaptation.
 
-The Hornet shoulder panes follow the tangent of the mating bow, following
-the same arrangement as the MiG mirrors.
-The mounting layout follows the MiG-29: one crown pane and two shoulder panes
-seated against the pilot-facing canopy joint. The Hornet's forward bow replaces
-the coarse triangular source cap with tapered posts, distinct shoulders and a
-shallow crown. Its contiguous mating lip carries the mirror cases; the original
-sill and windshield rails still meet its feet. The Flanker's crown case rests
+The Hornet shoulder panes follow the tangent of a circular upper bow. A
+365 mm fitted radius replaces the flattened crown; the original sill and
+windshield rails still meet its short lower posts. The three rounded cases
+sit inside the pilot-facing mating lip, including the lower crown pane.
+The shape and placement follow this [Navy F/A-18C canopy photograph](https://www.dvidshub.net/image/9214059/plane-captain-cleans-canopy-f-18c-hornet).
+These are photographic fits, rather than surveyed hardware dimensions.
+The Flanker's crown case rests
 directly against its imported bow, with short hinges instead of the elevated
 stalk. Shoulder hinges attach to the rear face of that same joint.
+
+The Su-27 engine heat shields and nozzle petals use four flat grey material
+tones. Their original geometry and normals are retained, while painted wear,
+fine fasteners and metal grain are removed. The camouflage atlas remains
+byte-for-byte identical. See [style verification](NOZZLE-CANOPY-STYLE.md).
 
 The Su-27's thin HUD upper lip clears the lower crown rim without changing
 the original combiner glass. Both ends of the left HUD lead enter the solid

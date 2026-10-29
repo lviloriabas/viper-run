@@ -12,7 +12,13 @@ use std::time::{Duration, Instant};
 
 #[path = "net_tcp.rs"]
 mod tcp;
+#[path = "net_host.rs"]
+mod hosting;
+// The standalone server builds this shared module without using these helpers.
+#[allow(unused_imports)]
+pub use hosting::{LocalServer, Nearby};
 pub const BROWSER_PAGE: usize = 6;
+#[allow(dead_code)]
 pub const PORT: u16 = 42860;
 #[allow(dead_code)]
 pub const HUB_PORT: u16 = 42861;
@@ -146,13 +152,13 @@ pub enum Message {
 impl Message {
     fn valid(&self) -> bool {
         match self {
-            Self::Hello { name, jet } => valid_name(name) && *jet < 4,
+            Self::Hello { name, jet } => valid_name(name) && *jet < 6,
             Self::Lobby { rules, members } => {
                 rules.valid()
                     && members.len() <= MAX_PEERS
-                    && members.iter().all(|m| valid_name(&m.name) && m.jet < 4)
+                    && members.iter().all(|m| valid_name(&m.name) && m.jet < 6)
             }
-            Self::Ready { jet, .. } => *jet < 4,
+            Self::Ready { jet, .. } => *jet < 6,
             Self::Voice { data, .. } => data.len() <= 512,
             Self::Input { bytes, .. } => bytes.len() <= 256,
             Self::Frame { bytes, .. } => bytes.len() < MAX_MESSAGE - 128,
@@ -357,6 +363,14 @@ impl Directory {
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                 Err(e) => return Err(e),
             };
+            if n == 12 && &buf[..4] == b"VPD1" && hosting::local_source(from.ip()) {
+                // Discovery reveals only a listening port, never a private room key.
+                let mut reply = buf[..12].to_vec();
+                reply[..4].copy_from_slice(b"VPA1");
+                reply.extend(self.local_addr()?.port().to_le_bytes());
+                self.socket.send_to(&reply, from)?;
+                continue;
+            }
             if n < 4 || &buf[..4] != b"VPH3" {
                 continue;
             }
@@ -722,7 +736,7 @@ impl Session {
         jet: u8,
         rules: Rules,
     ) -> io::Result<Self> {
-        if !valid_name(name) || jet >= 4 || !rules.valid() {
+        if !valid_name(name) || jet >= 6 || !rules.valid() {
             return Err(err("invalid room setup"));
         }
         let socket = if hub.is_none() {
@@ -774,7 +788,7 @@ impl Session {
         Ok(s)
     }
     pub fn join(invite: Invite, name: &str, jet: u8) -> io::Result<Self> {
-        if !valid_name(name) || jet >= 4 {
+        if !valid_name(name) || jet >= 6 {
             return Err(err("invalid callsign or aircraft"));
         }
         let socket = if invite.tcp {
@@ -855,6 +869,11 @@ impl Session {
     }
     pub fn invitation(&self) -> String {
         self.invite.text()
+    }
+    pub fn invitation_at(&self, endpoint: SocketAddr) -> String {
+        let mut invite = self.invite.clone();
+        invite.endpoint = endpoint;
+        invite.text()
     }
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         if let Some(tcp) = &self.tcp {

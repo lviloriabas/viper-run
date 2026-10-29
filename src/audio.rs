@@ -28,6 +28,27 @@ pub struct Params {
     pub seeker_freq: f32,
 }
 
+impl Params {
+    /// Shared by flight audio and the offline demo. Power follows the spooled
+    /// core, so moving the throttle does not instantly change the engine sound.
+    pub fn jet(kind: crate::sim::Type, rpm: f32, burner: f32) -> Self {
+        let spool = ((rpm - 65.0) / 35.0).clamp(0.0, 1.0);
+        let running = (rpm / 65.0).clamp(0.0, 1.0);
+        let burner = burner.clamp(0.0, 1.0) * running;
+        Self {
+            engines: kind.engine_count() as f32,
+            eng_gain: running * (0.055 + spool * 0.10 + burner * 0.065),
+            eng_freq: 1600.0 + spool * 2600.0,
+            whine_gain: running * (0.018 - spool * 0.006),
+            whine_freq: 2000.0 + spool * 4000.0,
+            rumble_gain: running * (0.002 + spool * 0.004 + burner * 0.006),
+            rumble_freq: 55.0 + spool * 35.0,
+            burner,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Wave {
     Square,
@@ -189,8 +210,7 @@ struct Synth {
     seed: u32,
     brown: [f32; 2],
     eng: [Biquad; 2],
-    engine_phase: [f32; 2],
-    engine_drift: [f32; 2],
+    turbine: [Biquad; 2],
     wind: Biquad,
     rumble_lp: Biquad,
     tone_lp: Biquad,
@@ -214,8 +234,7 @@ impl Synth {
             seed: 0x1234567,
             brown: [0.0; 2],
             eng: [Biquad::default(); 2],
-            engine_phase: [0.0, 0.37],
-            engine_drift: [0.0; 2],
+            turbine: [Biquad::default(); 2],
             wind: Biquad::default(),
             rumble_lp: Biquad::default(),
             tone_lp: Biquad::default(),
@@ -263,7 +282,8 @@ impl Synth {
         c.seeker_freq = t.seeker_freq;
         let p = self.cur;
         for (i, eng) in self.eng.iter_mut().enumerate() {
-            eng.set(true, (p.eng_freq * (1.0 + i as f32 * 0.06)).max(40.0), 0.6);
+            eng.set(true, ((p.eng_freq + p.burner * 1800.0) * (1.0 + i as f32 * 0.06)).max(40.0), 0.6);
+            self.turbine[i].set(false, (p.whine_freq * (1.0 + i as f32 * 0.017)).max(60.0), 4.0);
         }
         self.wind.set(false, p.wind_freq.max(60.0), 0.35);
         self.rumble_lp.set(true, (p.rumble_freq * 2.5).max(50.0), 0.7);
@@ -278,15 +298,13 @@ impl Synth {
             let engines = if p.engines > 1.5 { 2 } else { 1 };
             let mut v = 0.0;
             for (i, &n) in noise.iter().enumerate().take(engines) {
-                self.engine_drift[i] = self.engine_drift[i] * 0.99997 + n * 0.00003;
-                let drift = self.engine_drift[i] * 8.0;
-                let turbine = p.whine_freq * (1.0 + i as f32 * 0.017 + drift * 0.006);
-                self.engine_phase[i] = (self.engine_phase[i] + turbine / RATE as f32).fract();
-                let phase = self.engine_phase[i] * TAU;
-                let air = self.eng[i].run(n * 0.55 + self.brown[i] * 3.0);
-                let whine = phase.sin() * 0.7 + (phase * 2.01 + drift).sin() * 0.12;
-                v += (air * p.eng_gain * (1.0 + drift * 0.08)
-                    + whine * p.whine_gain + n * p.burner * p.eng_gain * 0.18) / (engines as f32).sqrt();
+                // Broadband exhaust carries the roar. Brown noise here used
+                // to bury it under a low, piston-like rumble. A noisy compressor
+                // band gives a whine without paired sine waves beating in mono
+                // at a propeller-like rate on the twin-engine aircraft.
+                let air = self.eng[i].run(n);
+                let whine = self.turbine[i].run(n) * 3.5;
+                v += (air * p.eng_gain + whine * p.whine_gain) / (engines as f32).sqrt();
             }
             v += self.wind.run(self.brown[1] * 5.5) * p.wind_gain;
             v += self.rumble_lp.run((self.brown[0] + self.brown[1]) * 5.0) * p.rumble_gain;
@@ -693,13 +711,9 @@ pub fn demo(path: &str, kind: crate::sim::Type) -> std::io::Result<()> {
     let blocks = (RATE as usize * 12) / 512;
     for block in 0..blocks {
         let time = block as f32 * 512.0 / RATE as f32;
-        let rpm = ((time - 2.0) / 4.0).clamp(0.0, 1.0);
+        let power = ((time - 2.0) / 4.0).clamp(0.0, 1.0);
         let burner = if (7.0..10.0).contains(&time) { 1.0 } else { 0.0 };
-        synth.target = Params { master: 0.65, engines: if kind == crate::sim::Type::F16 { 1.0 } else { 2.0 },
-            eng_gain: 0.06 + rpm * 0.06 + burner * 0.06, eng_freq: 450.0 + rpm * 1900.0,
-            whine_gain: 0.002 + rpm * 0.006, whine_freq: 750.0 + rpm * 2250.0,
-            rumble_gain: 0.02 + burner * 0.02, rumble_freq: 40.0 + rpm * 30.0, burner,
-            ..Default::default() };
+        synth.target = Params { master: 0.5, ..Params::jet(kind, 65.0 + power.sqrt() * 35.0, burner) };
         if block == (RATE as usize * 10) / 512 {
             let wav: &'static [u8] = if kind.russian() {
                 include_bytes!("../assets/voices/mig-altitude.wav")
@@ -808,6 +822,82 @@ mod tests {
                 assert!(next.iter().all(|x| x.abs() < 31000));
                 if i > 0 { assert_ne!(next, previous, "audio buffer repeated"); }
                 previous = next;
+            }
+        }
+    }
+
+    #[test]
+    fn flight_engine_presets_are_audible_and_not_clipped_for_every_jet() {
+        for kind in crate::sim::Type::ALL {
+            let mut s = Synth::new();
+            s.target = Params { master: 0.5, ..Params::jet(kind, 65.0, 0.0) };
+            // Let the normal startup fade reach the quiet idle level first.
+            for _ in 0..30 { s.render(&mut [0i16; 512]); }
+            let mut previous = [0i16; 512];
+            for (rpm, burner) in [(65.0, 0.0), (85.0, 0.0), (100.0, 0.0), (100.0, 1.0)] {
+                s.target = Params { master: 0.5, ..Params::jet(kind, rpm, burner) };
+                for _ in 0..120 {
+                    let mut next = [0i16; 512]; s.render(&mut next);
+                    assert!(next.iter().any(|&x| x.abs() > 10));
+                    assert!(next.iter().all(|x| x.abs() < 31000));
+                    assert_ne!(next, previous, "audio buffer repeated");
+                    previous = next;
+                }
+            }
+        }
+    }
+
+    fn settled_engine(params: Params) -> Vec<f32> {
+        let mut synth = Synth::new();
+        synth.target = params;
+        let mut samples = Vec::new();
+        for block in 0..180 {
+            let mut out = [0i16; 512];
+            synth.render(&mut out);
+            if block >= 60 { samples.extend(out.map(|s| s as f32 / 32000.0)); }
+        }
+        samples
+    }
+
+    fn energy(samples: &[f32]) -> f32 {
+        samples.iter().map(|s| s*s).sum::<f32>() / samples.len() as f32
+    }
+
+    #[test]
+    fn exhaust_has_broadband_energy_at_idle_dry_power_and_afterburner() {
+        for kind in [crate::sim::Type::F16, crate::sim::Type::Mig29] {
+            let mut previous = 0.0;
+            for (rpm, burner) in [(65.0, 0.0), (85.0, 0.0), (100.0, 0.0), (100.0, 1.0)] {
+                let samples = settled_engine(Params { master: 0.5, ..Params::jet(kind, rpm, burner) });
+                let total = energy(&samples);
+                let mut bass = Biquad::default();
+                bass.set(true, 180.0, 0.707);
+                let low: Vec<f32> = samples.iter().map(|&s| bass.run(s)).collect();
+                let fraction = energy(&low) / total;
+                assert!(fraction < 0.20, "engine buried in sub-bass: {fraction}");
+                assert!(total > previous * 1.15, "power should audibly increase exhaust energy");
+                previous = total;
+            }
+        }
+        let stopped = settled_engine(Params { master: 0.5, ..Params::jet(crate::sim::Type::F16, 0.0, 0.0) });
+        assert!(stopped.iter().all(|&s| s == 0.0), "stopped engine must be silent");
+    }
+
+    #[test]
+    fn compressor_has_no_coherent_tones_that_beat_like_propeller_blades() {
+        for engines in [1.0, 2.0] {
+            for freq in [2000.0, 4000.0, 6000.0] {
+                let samples = settled_engine(Params { master: 0.5, engines,
+                    whine_gain: 0.1, whine_freq: freq, ..Default::default() });
+                for center in [freq, freq * 1.017] {
+                    let (mut re, mut im) = (0.0, 0.0);
+                    for (i, &sample) in samples.iter().enumerate() {
+                        let (sin, cos) = (TAU * center * i as f32 / RATE as f32).sin_cos();
+                        re += sample * cos; im += sample * sin;
+                    }
+                    let tone = 2.0 * (re*re + im*im) / (samples.len() as f32).powi(2);
+                    assert!(tone / energy(&samples) < 0.02, "coherent turbine line at {center} Hz");
+                }
             }
         }
     }

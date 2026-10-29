@@ -661,9 +661,10 @@ struct Cloud {
     alpha: f64,
 }
 
+struct MovingPart {part:Part,hinge:crate::articulation::Hinge}
 struct TwinParts {
     body:Part, canopy:Part, stabs:[Part;2], flaps:[Part;2],
-    rudders:[Part;2],brake:Part,gear:[Part;3],
+    rudders:[Part;2],brake:Part,gear:[Part;3],controls:Vec<MovingPart>,
 }
 pub struct World {
     fullscreen: Bindings,
@@ -694,6 +695,8 @@ pub struct World {
     flame: Part,
     stab: [Part; 2],
     flaperons: [Part; 2],
+    f16_controls:Vec<MovingPart>,
+    mig_controls:Vec<MovingPart>,
     rudder: Part,
     brakes: [Part; 4],
     gear: [Part; 3],
@@ -878,11 +881,13 @@ impl World {
         let stab = [skinned(&airframe.stab[0]), skinned(&airframe.stab[1])];
         let rudder = skinned(&airframe.rudder);
         let flaperons = [skinned(&airframe.flaperons[0]), skinned(&airframe.flaperons[1])];
+        let f16_controls=airframe.slats.iter().map(|c|MovingPart{part:skinned(&c.mesh),hinge:c.hinge}).collect();
         let brakes = [skinned(&airframe.brakes[0]), skinned(&airframe.brakes[1]), skinned(&airframe.brakes[2]), skinned(&airframe.brakes[3])];
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
         let gear_doors = [skinned(&airframe.gear_doors[0])];
         let fulcrum = crate::mig29::build();
         let (mig, mig_stab) = (skinned(&fulcrum.body), [skinned(&fulcrum.stabs[0]), skinned(&fulcrum.stabs[1])]);
+        let mig_controls=fulcrum.controls.iter().map(|c|MovingPart{part:skinned(&c.mesh),hinge:c.hinge}).collect();
         let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
         let mig_canopy = skinned(&fulcrum.canopy);
         let mig_brakes = [skinned(&fulcrum.brakes[0]), skinned(&fulcrum.brakes[1])];
@@ -895,7 +900,7 @@ impl World {
             let mut native=|mesh:&Mesh|{let mut p=part(ctx,mesh);p.bind.images=vec![tex];p};
             TwinParts {body:native(&m.body),canopy:native(&m.canopy),
                 stabs:m.stabs.map(|m|native(&m)),flaps:m.flaps.map(|m|native(&m)),
-                rudders:m.rudders.map(|m|native(&m)),brake:native(&m.brake),gear:m.gear.map(|m|native(&m))}
+                rudders:m.rudders.map(|m|native(&m)),brake:native(&m.brake),gear:m.gear.map(|m|native(&m)),controls:m.controls.into_iter().map(|c|MovingPart{part:native(&c.mesh),hinge:c.hinge}).collect()}
         });
         World {
             post_bind: fullscreen.clone(),
@@ -927,6 +932,8 @@ impl World {
             flame,
             stab,
             flaperons,
+            f16_controls,
+            mig_controls,
             rudder,
             brakes,
             gear,
@@ -1065,6 +1072,7 @@ impl World {
                 self.draw_mig(ctx, a, &base, &model, false);
             } else {
             self.draw_part(ctx, &self.exterior, &base, &model);
+                self.draw_controls(ctx,a,&base,&model,&self.f16_controls);
             let pitch = clamp(a.surf_pitch, -1.0, 1.0);
             let roll = clamp(a.surf_roll, -1.0, 1.0);
             for (i, side) in [-1.0, 1.0].iter().enumerate() {
@@ -1183,6 +1191,7 @@ impl World {
         let camo = (paint[3] == 1.0).then(|| self.aggressor[paint[0] as usize % self.aggressor.len()]);
         let base = AirU { paint: if camo.is_some() { [0.0; 4] } else { paint }, ..base };
         self.draw_part_in(ctx, &self.exterior, camo, &base, &model);
+        self.draw_controls(ctx,a,&base,&model,&self.f16_controls);
         if rel.len() > 2500.0 {
             return;
         }
@@ -1206,11 +1215,12 @@ impl World {
     }
 
     fn twin(&self,kind:Type)->Option<&TwinParts> {
-        match kind {Type::F18=>Some(&self.twins[0]),Type::Su27=>Some(&self.twins[1]),_=>None}
+        match kind {Type::F18|Type::F18E|Type::EA18G=>Some(&self.twins[0]),Type::Su27=>Some(&self.twins[1]),_=>None}
     }
     fn draw_twin(&self,ctx:&mut dyn RenderingBackend,a:&Aircraft,base:&AirU,model:&M4,canopy:bool) {
         let Some(p)=self.twin(a.kind)else{return};
         self.draw_part(ctx,&p.body,base,model);
+        self.draw_controls(ctx,a,base,model,&p.controls);
         if canopy{self.draw_part(ctx,&p.canopy,base,model);}
         let flanker=a.kind==Type::Su27;
         let pivot=if flanker{crate::su27::STAB_PIVOT}else{crate::hornet::STAB_PIVOT};
@@ -1222,7 +1232,7 @@ impl World {
             }
             if !a.lost.wing[i]{
                 let (fp,axis)=crate::hornet::flap_hinge(flanker,side);
-                let angle=(a.flaps*a.kind.flap_angle()-side*a.surf_roll*16.0+a.flap_damage*8.0)*DEG;
+                let angle=(a.flaps*a.kind.flap_angle()-if flanker{side*a.surf_roll*16.0}else{0.0}+a.flap_damage*8.0)*DEG;
                 self.draw_part(ctx,&p.flaps[i],base,&mat_mul(model,&rotate_about(fp,Quat::axis_angle(axis,angle))));
             }
             let (pivot,axis)=crate::hornet::rudder_hinge(flanker,side);
@@ -1238,6 +1248,7 @@ impl World {
     /// `canopy` draws the canopy opaque, as on the bandits.
     fn draw_mig(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4, canopy: bool) {
         self.draw_part(ctx, &self.mig, base, model);
+        self.draw_controls(ctx,a,base,model,&self.mig_controls);
         if canopy {
             self.draw_part(ctx, &self.mig_canopy, base, model);
         }
@@ -1258,6 +1269,14 @@ impl World {
             self.draw_part(ctx, &self.mig_brakes[i], base, &mat_mul(model, &local));
         }
         self.draw_legs(ctx, a, base, model, &self.mig_gear);
+    }
+
+    fn draw_controls(&self,ctx:&mut dyn RenderingBackend,a:&Aircraft,base:&AirU,model:&M4,parts:&[MovingPart]) {
+        for p in parts {
+            let wing=if p.hinge.side<0.0{0}else{1};
+            if !matches!(p.hinge.drive,crate::articulation::Drive::Rudder)&&a.lost.wing[wing]{continue;}
+            self.draw_part(ctx,&p.part,base,&mat_mul(model,&p.hinge.pose(a)));
+        }
     }
 
     fn draw_gear(&self, ctx: &mut dyn RenderingBackend, a: &Aircraft, base: &AirU, model: &M4) {

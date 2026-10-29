@@ -24,6 +24,7 @@ pub enum PadLayout {
 /// Cockpit vertical field of view range, degrees.
 pub const FOV_MIN: f64 = 40.0;
 pub const FOV_MAX: f64 = 95.0;
+pub const DEAD_ZONE_MAX: f64 = 0.35;
 
 /// RC-style stick expo, y = (1 - e) x + e x^3: a gentle slope round the
 /// centre for small corrections that steepens to full deflection at the rim,
@@ -41,6 +42,13 @@ pub struct Settings {
     pub pad_layout: PadLayout,
     /// Controller stick expo, 0 (linear) to 1 (cubic): see `stick_expo`.
     pub expo: f64,
+    /// Independent radial dead zones, measured before any response curve.
+    pub pad_dead_left: f64,
+    pub pad_dead_right: f64,
+    /// In COMBAT, X and a held L3 both select the rudder. X + L3 dispenses.
+    pub pad_rudder_click: bool,
+    /// Gentler small corrections while holding the zoom button.
+    pub pad_fine_aim: bool,
     pub fov: f64,
     pub muted: bool,
     pub fullscreen: bool,
@@ -54,7 +62,19 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.5, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, tutorial_completed: 0, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.65, pad_dead_left: 0.10, pad_dead_right: 0.10, pad_rudder_click: false, pad_fine_aim: true, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, tutorial_completed: 0, keys: Keymap::default() }
+    }
+}
+
+impl Settings {
+    pub fn click_rudder(&self) -> bool {
+        self.pad_layout == PadLayout::Combat && self.pad_rudder_click
+    }
+
+    /// Shape positions without adding input latency or losing full authority.
+    pub fn flight_stick(&self, (x, y): (f64, f64), zoom: f64) -> (f64, f64) {
+        let e = if self.pad_fine_aim { self.expo + (0.85 - self.expo).max(0.0) * zoom.clamp(0.0, 1.0) } else { self.expo };
+        (stick_expo(x, e), stick_expo(y, e))
     }
 }
 
@@ -92,6 +112,10 @@ fn parse(entries: Vec<(String, String)>) -> (Settings, Best) {
             ("sensitivity", Some(n)) => s.sensitivity = clamp(n, 0.5, 5.0),
             ("fov", Some(n)) => s.fov = clamp(n, FOV_MIN, FOV_MAX),
             ("expo", Some(n)) => s.expo = clamp(n, 0.0, 1.0),
+            ("pad_dead_left", Some(n)) => s.pad_dead_left = clamp(n, 0.0, DEAD_ZONE_MAX),
+            ("pad_dead_right", Some(n)) => s.pad_dead_right = clamp(n, 0.0, DEAD_ZONE_MAX),
+            ("pad_rudder_click", _) => s.pad_rudder_click = v == "true",
+            ("pad_fine_aim", _) => s.pad_fine_aim = v != "false",
             ("pitch", _) => s.pitch = if v == "keys" { PitchSource::Keys } else { PitchSource::Mouse },
             // Older versions saved "invert_y", when only the mouse flipped.
             ("invert_pitch", _) | ("invert_y", _) => s.invert_pitch = v == "true",
@@ -127,10 +151,10 @@ pub fn save(s: &Settings, b: &Best) {
 
 fn encode(s: &Settings, b: &Best) -> String {
     let text = format!(
-        "sensitivity={:.1}\nexpo={:.1}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nperformance_overlay={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
+        "sensitivity={:.1}\nexpo={:.2}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nperformance_overlay={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
         s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.performance_overlay, s.clock, b.score.round(), b.time
     );
-    text + &format!("tutorial_completed={}\n", s.tutorial_completed) + &s.keys.save()
+    text + &format!("tutorial_completed={}\npad_dead_left={:.2}\npad_dead_right={:.2}\npad_rudder_click={}\npad_fine_aim={}\n", s.tutorial_completed, s.pad_dead_left, s.pad_dead_right, s.pad_rudder_click, s.pad_fine_aim) + &s.keys.save()
 }
 
 #[cfg(test)]
@@ -194,5 +218,39 @@ mod online_tests {
     fn online_preferences_validate_names_and_do_not_restore_room_credentials() {
         assert_eq!(parse_online("callsign=Wing_2\nserver=localhost:42861\ninvite=secret"),("Wing_2".into(),"localhost:42861".into()));
         assert_eq!(parse_online("callsign=invalid/name\nserver=bad address"),("Pilot".into(),String::new()));
+    }
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    #[test]
+    fn controller_settings_round_trip_and_invalid_values_are_bounded() {
+        let settings = Settings { pad_dead_left: 0.03, pad_dead_right: 0.17, expo: 0.65, pad_rudder_click: true, pad_fine_aim: false, ..Settings::default() };
+        let entries = encode(&settings, &Best::default()).lines().filter_map(|l| l.split_once('=')).map(|(k,v)| (k.into(),v.into())).collect();
+        assert_eq!(parse(entries).0, settings);
+        let saved = parse(vec![("expo".into(), "0.5".into()), ("pad_dead_left".into(), "-1".into()), ("pad_dead_right".into(), "2".into())]).0;
+        assert_eq!((saved.expo, saved.pad_dead_left, saved.pad_dead_right), (0.5, 0.0, DEAD_ZONE_MAX));
+        for bad in ["NaN", "inf", "-inf", "bad"] {
+            assert_eq!(parse(vec![("pad_dead_left".into(), bad.into())]).0.pad_dead_left, 0.10);
+        }
+        assert!(!parse(Vec::new()).0.pad_rudder_click);
+    }
+
+    #[test]
+    fn fine_aim_reduces_small_inputs_without_losing_authority_or_reversing() {
+        let mut settings = Settings::default();
+        for x in [-1.0, -0.4, -0.05, 0.0, 0.05, 0.4, 1.0] {
+            let normal = settings.flight_stick((x, x), 0.0).0;
+            let zoomed = settings.flight_stick((x, x), 1.0).0;
+            assert!(zoomed.abs() <= normal.abs());
+            assert_eq!(zoomed.signum(), normal.signum());
+        }
+        assert_eq!(settings.flight_stick((1.0, -1.0), 1.0), (1.0, -1.0));
+        settings.pad_fine_aim = false;
+        assert_eq!(settings.flight_stick((0.2, 0.3), 1.0), settings.flight_stick((0.2, 0.3), 0.0));
+        settings.expo = 1.0;
+        settings.pad_fine_aim = true;
+        assert_eq!(settings.flight_stick((0.2, 0.3), 1.0), settings.flight_stick((0.2, 0.3), 0.0));
     }
 }

@@ -9,9 +9,6 @@ from pathlib import Path
 import wave
 
 import numpy as np
-import onnxruntime
-from piper import PiperVoice, SynthesisConfig
-from vosk_tts import Model, Synth
 
 ROOT = Path(__file__).resolve().parents[1]
 RATE = 22050
@@ -111,6 +108,11 @@ def main() -> None:
         model_files += [russian_path / name for name in ("model.onnx", "config.json", "dictionary", "bert/model.onnx", "bert/vocab.txt")]
     if not all(path.is_file() for path in model_files):
         parser.error("Models missing; follow assets/voices/README.md to download them")
+
+    # Synthesis dependencies are only needed for regeneration, not DSP checks.
+    import onnxruntime
+    from piper import PiperVoice, SynthesisConfig
+    from vosk_tts import Model, Synth
 
     # Seed before session creation: ONNX random nodes initialise their own RNGs.
     onnxruntime.set_seed(SEED)

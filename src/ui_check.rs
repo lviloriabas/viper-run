@@ -54,15 +54,47 @@ pub(super) fn step(app: &mut App, frame: u32) -> bool {
             assert_eq!(app.settings.sensitivity, 2.0);
             println!("PASS Escape opens configuration; controller A adjusts expo");
         },
-        6 => { key(app, KeyCode::Escape); assert_eq!(app.state, State::Flying); },
-        7 => key(app, KeyCode::P),
-        8 => { assert_eq!(app.state, State::Frozen); key(app, KeyCode::Escape); },
-        9 => { assert!(app.controls_open); key(app, KeyCode::Escape); },
-        10 => { assert_eq!(app.state, State::Frozen); app.pause(); },
-        11 => { assert_eq!(app.state, State::Paused); key(app, KeyCode::Escape); },
-        12 => { assert!(app.controls_open); key(app, KeyCode::Escape); assert_eq!(app.state, State::Frozen); },
-        13 => key(app, KeyCode::K),
-        14 => select(app, Action::Menu, 0),
+        6 => select(app, Action::PadSetup, 0),
+        7 => {
+            assert!(app.pad_setup_open && app.state == State::Paused);
+            let old = app.settings.pad_dead_left;
+            select(app, Action::PadDeadLeft(true), 1);
+            assert!((app.settings.pad_dead_left-old-0.01).abs()<1e-8);
+        },
+        8 => select(app, Action::PadExpo(true), 2),
+        9 => {
+            select(app, Action::PadRudderClick, 0);
+            assert!(app.settings.click_rudder());
+            app.pad.state = gamepad::State { connected: true, buttons: gamepad::LS, left: (0.2, 0.0), ..Default::default() };
+            let input = app.read_control_positions();
+            assert_eq!(input.roll_axis, 0.0);
+            assert!(input.yaw_axis > 0.0);
+            assert!(!app.pad.countermeasures_held(&app.settings));
+            app.pad = Gamepad::new();
+        },
+        10 => {
+            app.pad.raw.connected = true;
+            select(app, Action::PadCalibrate, 2);
+            assert!(app.pad.calibrating());
+        },
+        11 => {
+            let old = app.settings.pad_dead_left;
+            app.act(Action::PadDeadLeft(true));
+            assert_eq!(old,app.settings.pad_dead_left);
+            select(app, Action::PadCalibrate, 0);
+            assert!(!app.pad.calibrating());
+            println!("PASS controller setup, fine input, L3 rudder and calibration cancellation");
+        },
+        12 => select(app, Action::PadSetup, 2),
+        13 => { key(app, KeyCode::Escape); assert_eq!(app.state, State::Flying); },
+        14 => key(app, KeyCode::P),
+        15 => { assert_eq!(app.state, State::Frozen); key(app, KeyCode::Escape); },
+        16 => { assert!(app.controls_open); key(app, KeyCode::Escape); },
+        17 => { assert_eq!(app.state, State::Frozen); app.pause(); },
+        18 => { assert_eq!(app.state, State::Paused); key(app, KeyCode::Escape); },
+        19 => { assert!(app.controls_open); key(app, KeyCode::Escape); assert_eq!(app.state, State::Frozen); },
+        20 => key(app, KeyCode::K),
+        21 => select(app, Action::Menu, 0),
         _ => {
             assert!(!app.controls_open && app.state == State::Attract);
             println!("PASS configuration resumes flying/frozen states and Main Menu works");
@@ -129,14 +161,13 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             for ch in "TestPilot".chars(){app.char_event(ch,KeyMods::default(),false);}
             key(app,KeyCode::Enter);
             assert_eq!(app.multiplayer.menu.name,"TestPilot");
-            let probe=std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-            app.multiplayer.menu.port=probe.local_addr().unwrap().port().to_string();
-            drop(probe);
-            select(app,Action::NetTab(crate::multiplayer::Panel::Lan),0);
+            app.opts.host_game=Some("127.0.0.1:0".into());
+            select(app,Action::NetTab(crate::multiplayer::Panel::Create),0);
         }
         2=>select(app,Action::NetHost,0),
         3=>{
             assert!(app.multiplayer.session.as_ref().unwrap().host);bounds(app);
+            assert!(app.multiplayer.server.is_some(),"CREATE GAME must own its server");
             assert!(!app.multiplayer.voice.capturing());
             let talk=app.settings.keys.get(crate::keymap::Bind::PushToTalk).iter().flatten().next().copied().unwrap_or(KeyCode::U);
             app.settings.keys.set(crate::keymap::Bind::PushToTalk,0,Some(talk));
@@ -180,7 +211,7 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
         20=>{assert_eq!(app.state,State::Flying);key(app,KeyCode::Escape);}
         21=>{select(app,Action::NetLeave,0);}
         22=>{
-            assert!(app.multiplayer.session.is_none());assert!(!app.multiplayer.voice.capturing());assert!(!app.controls_open);
+            assert!(app.multiplayer.session.is_none());assert!(app.multiplayer.server.is_none(),"leaving must stop the embedded server");assert!(!app.multiplayer.voice.capturing());assert!(!app.controls_open);
             FUTURE_PEER.with(|p|{p.borrow_mut().take();});
             key(app,KeyCode::Escape);assert_eq!(app.state,State::Attract);
         }
@@ -240,6 +271,59 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
             key(app,KeyCode::Escape);assert_eq!(app.state,State::Attract);
             println!("PASS public server browser, controller join, TCP lobby ready, launch and leave");
         }
+        32=>{
+            let hub=crate::net::Directory::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let host=crate::net::Session::host("127.0.0.1:0".parse().unwrap(),Some(hub.local_addr().unwrap()),false,"Friend",0,crate::net::Rules::default()).unwrap();
+            miniquad::window::clipboard_set(&host.invitation());
+            FUTURE_HUB.with(|h|*h.borrow_mut()=Some(hub));
+            FUTURE_HOST.with(|h|*h.borrow_mut()=Some(host));
+            FUTURE_JOINED.with(|t|*t.borrow_mut()=Some(std::time::Instant::now()));
+            select(app,Action::Online,0);
+            app.multiplayer.menu.panel=crate::multiplayer::Panel::Invite;
+        }
+        33=>{bounds(app);select(app,Action::NetHelp,0);}
+        34=>{assert!(app.multiplayer.menu.help);bounds(app);key(app,KeyCode::Escape);assert!(!app.multiplayer.menu.help);}
+        35=>select(app,Action::NetPasteJoin,0),
+        36=>{
+            let connected=app.multiplayer.session.as_ref().is_some_and(|s|s.members.len()==2);
+            if !connected {
+                assert!(FUTURE_JOINED.with(|t|t.borrow().unwrap().elapsed().as_secs_f32()<5.0),"paste and join failed");
+                FUTURE_DELAY.with(|d|d.set(d.get()+1));return false;
+            }
+            assert!(!app.multiplayer.voice.capturing());
+            select(app,Action::NetLeave,0);
+        }
+        37=>{
+            assert!(app.multiplayer.session.is_none());
+            FUTURE_HOST.with(|h|h.borrow_mut().take());FUTURE_HUB.with(|h|h.borrow_mut().take());
+            println!("PASS connection help and PASTE AND JOIN using the native clipboard");
+        }
+        38=>select(app,Action::NetTab(crate::multiplayer::Panel::Create),0),
+        39=>select(app,Action::NetHost,0),
+        40=>select(app,Action::NetHelp,0),
+        41=>{
+            assert!(app.multiplayer.menu.help);bounds(app);
+            select(app,Action::NetEdit(crate::multiplayer::Field::PublicAddress),0);
+            for ch in "8.8.8.8:45678".chars(){app.char_event(ch,KeyMods::default(),false);}
+            key(app,KeyCode::Enter);
+            assert!(app.multiplayer.session.as_ref().unwrap().host,"editing host address must not join a different room");
+        }
+        42=>{
+            select(app,Action::NetCopyManual,0);
+            let copied=crate::net::Invite::parse(&miniquad::window::clipboard_get().unwrap()).unwrap();
+            assert_eq!(copied.endpoint,"8.8.8.8:45678".parse().unwrap());
+            let own=crate::net::Invite::parse(&app.multiplayer.session.as_ref().unwrap().invitation()).unwrap();
+            assert_eq!(copied.key,own.key,"manual invitation must preserve the room credential");
+        }
+        43=>{
+            select(app,Action::NetCopySetup,0);
+            let text=miniquad::window::clipboard_get().unwrap();
+            assert!(text.contains(&app.multiplayer.server.as_ref().unwrap().lan.to_string()));
+            assert!(text.contains("TCP"));
+            key(app,KeyCode::Escape);
+        }
+        44=>select(app,Action::NetLeave,0),
+        45=>{assert!(app.multiplayer.server.is_none());println!("PASS host router instructions, public address editing and complete invitation generation");}
         _=>{
             println!("PASS flight school lessons through click, Enter and controller A");
             println!("PASS online fields, private hosting, launch gating, leaving and microphone disabled");
@@ -252,11 +336,14 @@ pub(super) fn future_step(app:&mut App,frame:u32)->bool{
 /// Rendering these never calls voice tick or starts microphone capture.
 pub(super) fn layout_scene(app:&mut App,scene:&str) {
     use crate::{net,settings,voice,tutorial};
-    let known=matches!(scene,"keys"|"mouse"|"classic-invert"|"rebind"|"school-passed"|"fuel-min"|"lesson-passed"|"lesson-failed"|"lobby"|"lobby-client"|"lobby-voice"|"browser"|"fields"|"create"|"lan"|"browser-empty"|"server-error")
+    let known=matches!(scene,"keys"|"mouse"|"classic-invert"|"rebind"|"pad-setup"|"pad-calibrating"|"pad-rudder"|"school-passed"|"fuel-min"|"lesson-passed"|"lesson-failed"|"lobby"|"lobby-client"|"lobby-voice"|"lobby-embedded"|"lobby-host-help"|"browser"|"fields"|"create"|"create-external"|"nearby"|"help"|"lan"|"browser-empty"|"server-error")
         ||scene.starts_with("training-")||scene.starts_with("threats-")||scene.starts_with("network-");
     assert!(known,"unknown layout scene: {scene}");
     if scene=="create"||scene.starts_with("network-") { app.multiplayer.menu.panel=crate::multiplayer::Panel::Create; }
-    if scene=="lan" { app.multiplayer.menu.panel=crate::multiplayer::Panel::Lan; }
+    if scene=="lan"||scene=="nearby" { app.multiplayer.menu.panel=crate::multiplayer::Panel::Nearby; app.multiplayer.menu.nearby=Some(net::Nearby::new().unwrap()); }
+    if scene=="help" { app.multiplayer.menu.help=true; }
+    if scene=="create-external" { app.multiplayer.menu.external_server=true; }
+    if scene=="browser"||scene=="browser-empty"||scene=="server-error" { app.multiplayer.menu.panel=crate::multiplayer::Panel::Browser; }
     if scene=="server-error" { app.multiplayer.menu.status="SERVER UNREACHABLE: CONNECTION REFUSED. CHECK ADDRESS / TCP PORT, THEN REFRESH.".into(); }
     if let Some(mode)=scene.strip_prefix("network-") {
         app.multiplayer.menu.rules.mode=net::GameMode::parse(mode).expect("known multiplayer layout mode");
@@ -264,6 +351,13 @@ pub(super) fn layout_scene(app:&mut App,scene:&str) {
     if let Some(stage)=scene.strip_prefix("training-").and_then(|n|n.parse::<usize>().ok()) {
         let training=app.training.as_mut().expect("use --tutorial with a training layout scene");
         assert!(stage<training.lesson.steps()); training.stage=stage;
+    }
+    if scene.starts_with("pad-") {
+        app.pad_setup_open = true;
+        app.pad.raw = gamepad::State { connected: true, left: (0.025, -0.012), right: (0.08, 0.035), ..Default::default() };
+        app.pad.state = gamepad::State { left: gamepad::stick(app.pad.raw.left, app.settings.pad_dead_left), right: gamepad::stick(app.pad.raw.right, app.settings.pad_dead_right), ..app.pad.raw };
+        app.settings.pad_rudder_click = scene == "pad-rudder";
+        if scene == "pad-calibrating" { app.pad.start_calibration(miniquad::date::now()); }
     }
     if scene.contains("classic") {app.settings.pad_layout=settings::PadLayout::Classic;}
     if scene.contains("invert") {app.settings.invert_pitch=true;}
@@ -290,6 +384,15 @@ pub(super) fn layout_scene(app:&mut App,scene:&str) {
         for i in 1..8 {session.members.push(net::Member{id:session.id+i,name:"Longest-Callsign".into(),jet:(i%4)as u8,ready:i%2==0,team:(i%2)as u8});}
         if scene=="lobby-client" {session.host=false;}
         app.multiplayer.session=Some(session);
+        if scene=="lobby-embedded"||scene=="lobby-host-help" {
+            let mut server=net::LocalServer::bind("127.0.0.1:0".parse().unwrap(),false).unwrap();
+            server.lan="192.168.100.200:42868".parse().unwrap();
+            app.multiplayer.server=Some(server);
+            if scene=="lobby-host-help" {
+                app.multiplayer.menu.help=true;
+                app.multiplayer.menu.public_address="very-long-public-hostname.example.invalid:65535".into();
+            }
+        }
     }
     if scene=="browser" || scene=="browser-empty" {
         let mut browser=net::Browser::new("127.0.0.1:9".parse().unwrap()).unwrap();
@@ -301,7 +404,6 @@ pub(super) fn layout_scene(app:&mut App,scene:&str) {
         app.multiplayer.menu.name="Longest-Callsign".into();
         app.multiplayer.menu.invite="0123456789ABCDEF".repeat(10);
         app.multiplayer.menu.server="long-directory-hostname.example.invalid:42861".into();
-        app.multiplayer.menu.port="65535".into();
         app.multiplayer.menu.editing=Some(crate::multiplayer::Field::Invite);
         app.multiplayer.menu.status="A LONG STATUS MESSAGE THAT MUST STAY INSIDE THE PANEL. ".repeat(5);
     }

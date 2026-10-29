@@ -83,6 +83,25 @@ kids 0
         self.assertLess(red[2],65)
         self.assertLessEqual(len(styled.getcolors(256*256)),48)
 
+    def test_su27_metal_is_flat_and_paint_is_preserved(self):
+        refs=lambda u,v:[(0,u,1-v)]*3
+        for u in (.48,.61):
+            self.assertEqual(fg.su27_metal_colour("HULL_Hull_Upper",refs(u,.75),(0,1,0)),(.43,.45,.46))
+        self.assertEqual(fg.su27_metal_colour("HULL_Hull_Upper",refs(.9,.1),(0,-1,0)),(.43,.45,.46))
+        for u,v in [(.55,.75),(.48,.62),(.61,.88),(.2,.3),(.8,.2)]:
+            self.assertIsNone(fg.su27_metal_colour("HULL_Hull_Upper",refs(u,v),(0,1,0)))
+        self.assertEqual(fg.su27_metal_colour("HULL_Hull_Upper.002",refs(.5,.5),(0,1,0)),(.29,.31,.32))
+        self.assertEqual(fg.su27_metal_colour("EngineBlocks",refs(.5,.5),(0,0,1)),(.065,.075,.080))
+
+    def test_packed_models_decode_to_the_editable_mesh_byte_for_byte(self):
+        import zlib
+        for kind in ("f18","su27"):
+            root=fg.ROOT/"assets/models";packed=(root/(kind+".vrz")).read_bytes()
+            self.assertEqual(packed[:4],b"VRZ1")
+            raw=zlib.decompress(packed[8:])
+            self.assertEqual(len(raw),struct.unpack_from("<I",packed,4)[0])
+            self.assertEqual(raw,(root/(kind+".vrm")).read_bytes())
+
     def test_every_bundled_source_matches_its_original_hash(self):
         root=fg.ROOT/"assets/models"
         for entry in json.loads((root/"sources.json").read_text()):

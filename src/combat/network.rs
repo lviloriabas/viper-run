@@ -729,7 +729,7 @@ impl ActorState {
         a.mass = kind.empty_mass() + a.fuel + a.stores_mass;
     }
     fn valid(&self) -> bool {
-        self.kind < 4
+        self.kind < Type::ALL.len() as u8
             && self.hp.is_finite()
             && (0.0..=100.0).contains(&self.hp)
             && self.rounds <= gun_of(Type::ALL[self.kind as usize]).rounds

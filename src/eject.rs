@@ -93,7 +93,7 @@ pub const NACES:SeatSpec=SeatSpec {
 pub fn spec(kind: Type) -> &'static SeatSpec {
     match kind {
         Type::Mig29 | Type::Su27 => &K36DM,
-        Type::F18 => &NACES,
+        Type::F18|Type::F18E|Type::EA18G => &NACES,
         _ => &ACES2,
     }
 }
@@ -389,8 +389,8 @@ pub const HANDLE_FRAMES: usize = 12;
 pub fn cockpit_harness_origin()->V3 {crate::airframe::EYE-V3::Y*0.52}
 
 pub fn handle_point(kind: Type, pull: f64) -> V3 {
-    let y=if kind.russian(){-0.105}else if kind==Type::F18{-0.080}else{-0.070};
-    v3(0.0,y+clamp(pull,0.0,1.0)*0.10,if kind==Type::F18{-0.470}else{-0.480})
+    let y=if kind.russian(){-0.180}else if kind==Type::F18{-0.175}else{-0.170};
+    v3(0.0,y+clamp(pull,0.0,1.0)*0.10,if kind==Type::F18{-0.330}else{-0.335})
 }
 fn handle_curve(kind:Type,side:f64,t:f64)->V3 {
     if kind.russian() {

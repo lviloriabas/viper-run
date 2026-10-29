@@ -24,6 +24,7 @@ enum Shape {
     Dial,
     Display(bool),
     Label,
+    Ufc,
 }
 #[derive(Clone, Copy)]
 struct Instrument {
@@ -80,6 +81,7 @@ fn housing_size(item:&Instrument)->(f64,f64) {
     match item.shape {
         Shape::Dial=>(item.w+0.016,item.h+0.016),
         Shape::Display(_)=>(item.w,item.h),
+        Shape::Ufc=>(item.w+0.012,item.h+0.012),
         Shape::Label=>{let(w,h)=face_size(item);(w+0.012,h+0.012)}
     }
 }
@@ -99,7 +101,7 @@ fn layout(kind: Type) -> Vec<Instrument> {
             dial(0.092,0.754,0.021,mig::R_EGT),
             dial(0.171,0.754,0.021,mig::R_EGT_R),
             dial(-0.300,0.674,0.026,mig::R_CLOCK),
-            display_face(0.250,0.935,0.142,0.142,mig::R_TV,false),
+            display_face(0.265,0.940,0.165,0.155,mig::R_TV,false),
             dial(0.355,0.645,0.035,mig::R_SPO),
             label(0.235,0.766,0.040,0.105,mig::R_FUEL),
             label(0.306,0.765,0.056,0.080,mig::R_EKRAN),
@@ -114,22 +116,22 @@ fn layout(kind: Type) -> Vec<Instrument> {
         let mut v=vec![
             display_face(-0.262, 0.885, 0.245, 0.245, R_MFD_L, true),
             display_face(0.262, 0.885, 0.245, 0.245, R_MFD_R, true),
-            display_face(0.0, 1.005, 0.215, 0.240, UFC, true),
-            label(0.0, 0.812, 0.210, 0.080, HUD_CONTROL),
+            Instrument{x:0.0,y:0.910,w:0.238,h:0.264,rect:UFC,shape:Shape::Ufc},
+            label(0.0, 0.770, 0.210, 0.080, HUD_CONTROL),
             display_face(0.0, 0.635, 0.225, 0.225, R_HSI, true),
-            label(-0.350, 0.660, 0.215, 0.150, IFEI),
+            label(-0.310, 0.660, 0.290, 0.200, IFEI),
             dial(0.200, 0.650, 0.041, R_DIALS[2]),
             dial(0.335, 0.650, 0.041, R_DIALS[0]),
             dial(0.180, 0.735, 0.027, R_DIALS[1]),
             dial(0.300, 0.735, 0.027, R_DIALS[3]),
             dial(0.400, 0.735, 0.025, R_VVI),
-            dial(-0.432, 0.770, 0.025, R_RWR),
+            dial(-0.438, 0.770, 0.025, R_RWR),
             label(-0.432, 0.880, 0.040, 0.170, R_ARM),
-            label(-0.378, 1.035, 0.034, 0.075, R_AOA),
-            label(-0.270, 1.065, 0.150, 0.050, R_CAUTION),
-            label(0.270, 1.065, 0.150, 0.050, R_CAUTION),
+            label(-0.378, 1.015, 0.034, 0.075, R_AOA),
+            label(-0.270, 1.040, 0.150, 0.050, R_CAUTION),
+            label(0.270, 1.040, 0.150, 0.050, R_CAUTION),
         ];
-        for i in &mut v {i.x*=0.82;i.w*=0.82;i.h*=0.82;}
+        for i in &mut v {i.x*=0.70;i.w*=0.70;i.h*=0.70;}
         v
     }
 }
@@ -147,7 +149,7 @@ pub(super) fn hud_glass(kind:Type)->[V3;4] {
 fn mount(kind: Type, item: &Instrument) -> Frame {
     let mut f = instrument(kind, item.x, item.y);
     if kind==Type::F18 && item.rect.x==UFC.x && item.rect.y==UFC.y {
-        f.o += f.z*0.145;
+        f.o += f.z*0.045;
     }
     if kind==Type::Su27 && item.rect.x==HUD_CONTROL.x && item.rect.y==HUD_CONTROL.y {
         f.o.z=-3.700;
@@ -443,12 +445,12 @@ fn draw_consoles(cv: &mut Canvas, russian: bool) {
 fn build_board(m:&mut Mesh, kind:Type, panel:Rgb, wall:Rgb) {
     let russian=kind==Type::Su27;
     let xs:Vec<f64>=if russian{vec![-0.43,-0.30,-0.25,0.0,0.25,0.30,0.43]}
-        else{vec![-0.39,-0.30,-0.235,-0.12,-0.105,0.105,0.12,0.235,0.30,0.39]};
+        else{vec![-0.35,-0.27,-0.235,-0.12,-0.105,0.105,0.12,0.235,0.27,0.35]};
     let top=|x:f64|if russian{
         if x.abs()<=0.30{1.025}else{mix(1.025,0.875,(x.abs()-0.30)/0.13)}
-    }else if x.abs()<=0.12{1.15}else if x.abs()<=0.30{
-        mix(1.15,1.11,(x.abs()-0.12)/0.18)
-    }else{mix(1.11,0.94,(x.abs()-0.30)/0.09)};
+    }else if x.abs()<=0.12{1.10}else if x.abs()<=0.27{
+        mix(1.10,1.055,(x.abs()-0.12)/0.15)
+    }else{mix(1.055,0.94,(x.abs()-0.27)/0.08)};
     for pair in xs.windows(2) {
         let (a,b)=(pair[0],pair[1]);let mid=(a+b)*0.5;
         let bottom=if russian{if mid.abs()<0.25{0.66}else{0.58}}
@@ -469,7 +471,7 @@ fn build_board(m:&mut Mesh, kind:Type, panel:Rgb, wall:Rgb) {
     // The cheek panels join the front board to the tub with closed returns.
     let outer=if russian{0.68}else{0.43};
     for side in [-1.0,1.0] {
-        let edge=if russian{0.43}else{0.39};
+        let edge=if russian{0.43}else{0.35};
         let p=instrument(kind,side*edge,top(edge)).o;
         let a=v3(side*outer,0.55,p.z+0.12);
         let b=v3(side*outer,0.55,p.z-0.38);
@@ -526,6 +528,29 @@ fn hornet_hud_structure(m:&mut Mesh) {
         for z in [-4.025,-4.066] {
             m.ellipsoid(v3(side*0.127,1.156,z),v3(0.002,0.001,0.002),METALC.scale(0.6),4,8);
         }
+    }
+}
+/// Legacy C UFC: physical keypad, option selectors, frequency windows and
+/// two COMM knobs. The face uses one atlas scale, including each raised key.
+fn hornet_ufc(m:&mut Mesh,f:&Frame,w:f64,h:f64) {
+    plate(m,f,w,h,UFC);
+    let pixel=|x:f64,y:f64|((x/160.0-0.5)*w,(0.5-y/176.0)*h);
+    for row in 0..4 {for col in 0..3 {
+        let px=10.0+col as f64*24.0;let py=45.0+row as f64*23.0;
+        let(x,y)=pixel(px+9.0,py+9.0);
+        let key=f.at(x,y,0.012);
+        m.block(&key,v3(w*9.0/160.0,h*9.0/176.0,0.005),DARK.scale(1.8));
+        screen(m,&key.at(0.0,0.0,0.0051),w*18.0/160.0,h*18.0/176.0,
+            r(UFC.x+px as f32,UFC.y+py as f32,18.0,18.0));
+    }}
+    for row in 0..5 {
+        let(x,y)=pixel(92.0,45.0+row as f64*20.0);
+        m.block(&f.at(x,y,0.012),v3(0.0045,0.006,0.005),DARK.scale(1.7));
+    }
+    for side in [-1.0,1.0] {
+        let knob=f.p(side*(w*0.5-0.011),-h*0.5+0.012,0.012);
+        m.lathe(knob,f.z,&[(0.0,0.009),(0.018,0.009),(0.020,0.007)],12,DARK.scale(1.8));
+        m.capsule(knob+f.z*0.021,knob+f.z*0.021+f.y*0.006,0.0008,0.0008,METALC,4);
     }
 }
 fn hardware(kind:Type)->Mesh {
@@ -594,6 +619,20 @@ fn hardware(kind:Type)->Mesh {
     for z in [-3.645,-3.285] {
         for dx in [-0.048,0.048] {m.ellipsoid(v3(tx+dx,0.657,z),v3(0.002,0.001,0.002),METALC,4,8);}
     }
+    if russian {
+        let f=instrument(kind,0.0,0.8);
+        // Removable analogue subpanels: these are shallow structural seams,
+        // not another opaque board over the live dials.
+        for x in [-0.350,-0.250,-0.145,-0.025,0.075,0.205] {
+            let a=instrument(kind,x,0.705).o+f.z*0.0008;
+            let b=instrument(kind,x,0.902).o+f.z*0.0008;
+            m.capsule(a,b,0.0007,0.0007,panel.scale(0.60),4);
+        }
+        for (x,y) in [(-0.337,0.913),(-0.245,0.913),(-0.145,0.913),(0.070,0.913),(0.203,0.850),(-0.337,0.633)] {
+            let at=instrument(kind,x,y);
+            m.ellipsoid(at.o+f.z*0.0018,v3(0.0018,0.0018,0.0010),METALC.scale(0.55),4,8);
+        }
+    }
     for item in layout(kind) {
         let f=mount(kind,&item);let(w,h)=face_size(&item);
         let base=instrument(kind,item.x,item.y);
@@ -608,10 +647,21 @@ fn hardware(kind:Type)->Mesh {
         match item.shape {
             Shape::Dial=>gauge_mount(&mut m,&f,item.w*0.5,item.rect,0.008),
             Shape::Display(buttons)=>display(&mut m,&f,item.w,item.h,w,h,item.rect,buttons),
+            Shape::Ufc=>hornet_ufc(&mut m,&f,w,h),
             Shape::Label=>plate(&mut m,&f,w,h,item.rect),
         }
     }
     if russian {
+        let monitor=layout(kind).into_iter().find(|i|i.rect.x==mig::R_TV.x&&i.rect.y==mig::R_TV.y).unwrap();
+        let f=mount(kind,&monitor);
+        // CRT visor and side returns are outside the active square image.
+        // They expose the monitor's depth instead of an oversized flat tile.
+        for side in [-1.0,1.0] {
+            m.block(&f.at(side*(monitor.w*0.5+0.002),0.0,-0.020),
+                v3(0.004,monitor.h*0.5+0.005,0.050),DARK);
+        }
+        m.block(&f.at(0.0,monitor.h*0.5+0.004,-0.020),
+            v3(monitor.w*0.5+0.006,0.004,0.050),DARK);
         let glass=hud_glass(kind);
         flanker_hud_body(&mut m);
         let lead=flanker_hud_lead();
@@ -622,7 +672,10 @@ fn hardware(kind:Type)->Mesh {
         }
         for (a,b) in [(glass[0],glass[3]),(glass[1],glass[2])] {
             let side=(a.x-0.0095).signum();
-            m.capsule(a-V3::Y*0.035,b+V3::Y*0.004,0.0055,0.0055,DARK,8);
+            pilot::bar(&mut m,a-V3::Y*0.035,b+V3::Y*0.004,0.007,0.008,V3::X,DARK);
+            let foot=v3(a.x,1.034,a.z+0.085);
+            pilot::bar(&mut m,foot,a-V3::Y*0.025,0.007,0.008,V3::X,DARK);
+            m.block(&plain(foot),v3(0.013,0.006,0.025),DARK);
             let d=V3::X*(side*0.011)-V3::Z*0.008;
             m.capsule(a+d,b+d,0.003,0.003,DARK,6);
             for t in [0.1,0.45,0.80] {m.capsule(a.lerp(b,t),a.lerp(b,t)+d,0.003,0.003,METALC.scale(0.4),6);}
@@ -647,8 +700,9 @@ fn hardware(kind:Type)->Mesh {
             let (foot,hinge)=mirror_support(kind,i,&mirror,t);
             m.capsule(foot,hinge,0.005,0.005,DARK,8);
         }
-        curved_mirror(&mut m,mirror.w,mirror.h,
-            &|x,y,d|mirror.frame.p(x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)));
+        curved_mirror_roundness(&mut m,mirror.w,mirror.h,
+            &|x,y,d|mirror_point(kind,&mirror,x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)),
+            if kind==Type::F18{0.45}else{0.25});
     }
     compass::housing(&mut m,kind);
     let back=native(aft,PI/2.0);
@@ -658,19 +712,17 @@ fn hardware(kind:Type)->Mesh {
 #[derive(Clone,Copy)]
 struct MirrorMount { frame:Frame, #[cfg(test)] anchor:V3, w:f64, h:f64, #[cfg(test)] rear:V3 }
 
-// The Hornet's mating bow has tapered posts, distinct shoulders and a
-// shallow crown. It is not the triangular cap in the low-poly source.
-// Native coordinates keep its feet on the imported sill/glass joint.
+// Circular upper bow fitted to Navy F/A-18C canopy photographs. The short
+// lower posts retain the imported sill contacts. Dimensions are a visual fit.
+fn hornet_arch(phi:f64)->V3 {
+    let y=0.910+0.365*phi.sin();
+    v3(0.365*phi.cos(),y,-4.184-(y-0.910)*0.18)+EYE-Type::F18.eye()
+}
 fn hornet_bow() -> Vec<V3> {
-    let half=[
-        v3(0.380,0.722,-4.142),v3(0.350,0.880,-4.178),
-        v3(0.320,1.020,-4.208),v3(0.285,1.130,-4.233),
-        v3(0.200,1.207,-4.250),v3(0.105,1.247,-4.258),
-        v3(0.000,1.253,-4.259),
-    ];
     let offset=EYE-Type::F18.eye();
-    half.iter().map(|p|v3(-p.x,p.y,p.z)+offset)
-        .chain(half[..half.len()-1].iter().rev().map(|p|*p+offset)).collect()
+    std::iter::once(v3(-0.380,0.722,-4.142)+offset)
+        .chain((0..=24).map(|i|hornet_arch(PI-i as f64*PI/24.0)))
+        .chain(std::iter::once(v3(0.380,0.722,-4.142)+offset)).collect()
 }
 fn nearest_on_bow(point:V3)->V3 {
     hornet_bow().windows(2).map(|p|{
@@ -709,9 +761,17 @@ fn source_bow_support(kind:Type,point:V3)->V3 {
         .min_by(|a,b|(*a-point).dot(*a-point).total_cmp(&(*b-point).dot(*b-point)))
         .unwrap()
 }
+/// The long cases follow the mating bow, as on the MiG. Curvature is
+/// part of the physical glass, so reflection UVs use its actual normals.
+fn mirror_point(kind:Type,mirror:&MirrorMount,x:f64,y:f64,d:f64)->V3 {
+    let radius=if kind==Type::Su27{0.52}else{0.365};
+    let angle=x/radius;let radial=V3::Z.cross(mirror.frame.x).norm();
+    mirror.frame.p(x,y,d)+radial*(radius*(angle.cos()-1.0))
+        +mirror.frame.x*(radius*angle.sin()-x)
+}
 fn mirror_support(kind:Type,_index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
     let (x,y)=(t*mirror.w,0.0);
-    let hinge=mirror.frame.p(x,y,-0.020);
+    let hinge=mirror_point(kind,mirror,x,y,-0.020);
     let foot=if kind==Type::F18 {nearest_on_bow(hinge)+V3::Z*0.042}
         else{source_bow_support(kind,hinge)};
     (foot,hinge)
@@ -723,11 +783,11 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let crown=i==1;
         let offset=EYE-kind.eye();
         let (anchor,radial,hint,w,h)=if kind==Type::F18 {
-            let anchor=if crown{hornet_bow()[6]}
-                else{v3(side*0.320,1.020,-4.208)+offset};
-            (anchor,if crown{V3::Y}else{V3::X*side},
-                if crown{V3::X}else{v3(0.22,-side*0.975,0.0).norm()},
-                if crown{0.230}else{0.225},if crown{0.055}else{0.067})
+            let phi=if crown{PI/2.0}else if side>0.0{38.0*DEG}else{PI-38.0*DEG};
+            let radial=v3(phi.cos(),phi.sin(),0.0);
+            (hornet_arch(phi),radial,
+                v3(phi.sin(),-phi.cos(),0.0),
+                if crown{0.205}else{0.180},if crown{0.052}else{0.060})
         }else {
             let phi=if crown{PI/2.0}else if side>0.0{0.66}else{PI-0.66};
             let radial=v3(phi.cos(),phi.sin(),0.0);
@@ -736,10 +796,11 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
             (anchor,radial,if crown{V3::X}else{v3(phi.sin(),-phi.cos(),0.0)},
                 if crown{0.230}else{0.225},if crown{0.045}else{0.067})
         };
-        // As on the MiG, the crown pane's lower rim rests on the bow and
-        // the shoulder panes sit on its pilot-facing lip. No elevated mast.
-        let centre=anchor+radial*(if crown{if kind==Type::Su27{0.012}else{0.024}}else{0.008})
-            +V3::Z*(if kind==Type::F18{0.055}else if crown{0.020}else{0.030});
+        // Hornet cases sit inside the bow, on its aft lip, with the outer
+        // rim against the joint instead of standing above it on stalks.
+        let inset=if kind==Type::F18{-h*0.5-0.015}else if crown{0.012}else{0.008};
+        let centre=anchor+radial*inset
+            +V3::Z*(if kind==Type::F18{0.063}else if crown{0.020}else{0.030});
         let rear=v3(if crown{0.0}else{side*0.38},0.12,1.0).norm();
         let normal=((cockpit_eye(kind)-centre).norm()+rear).norm();
         let x=(hint-normal*hint.dot(normal)).norm();
@@ -821,61 +882,23 @@ pub fn hornet_instruments(
 ) {
     draw_consoles(cv, false);
     mfd(cv, R_HSI, Page::Hsd, a, ad, m, time, c);
-    let r = UFC;
-    cv.rect(r.x, r.y, r.w, r.h, rgba(0x02, 0x0d, 0x08, 1.0));
-    cv.text(
-        "COM 1     COM 2",
-        r.x + r.w * 0.5,
-        r.y + 18.0,
-        1.0,
-        GREEN,
-        Align::Center,
-    );
-    cv.text(
-        "305.000   127.500",
-        r.x + r.w * 0.5,
-        r.y + 39.0,
-        1.2,
-        GREEN,
-        Align::Center,
-    );
-    for (i, name) in ["IFF", "TCN", "ILS", "D/L"].into_iter().enumerate() {
-        cv.text(
-            name,
-            r.x + 12.0,
-            r.y + 65.0 + i as f32 * 22.0,
-            1.0,
-            GREEN,
-            Align::Left,
-        );
+    let r=UFC;
+    cv.rect(r.x,r.y,r.w,r.h,rgba(0x20,0x24,0x24,1.0));
+    cv.rect(r.x+7.0,r.y+5.0,146.0,28.0,rgba(0x01,0x09,0x04,1.0));
+    cv.text(&format!("{} {:03.0}",c.mode.label(),a.heading),r.x+80.0,r.y+12.0,1.0,GREEN,Align::Center);
+    for (row,labels) in [["1","2","3"],["4","5","6"],["7","8","9"],["CLR","0","ENT"]].iter().enumerate() {
+        for (col,label) in labels.iter().enumerate() {
+            let x=r.x+10.0+col as f32*24.0;let y=r.y+45.0+row as f32*23.0;
+            cv.rect(x,y,18.0,18.0,rgba(0x13,0x16,0x17,1.0));
+            cv.text(label,x+9.0,y+6.0,if label.len()>1{0.65}else{1.0},WHITE,Align::Center);
+        }
     }
-    for (i, name) in ["A/P", "WPT", "TIME", "MENU"].into_iter().enumerate() {
-        cv.text(
-            name,
-            r.x + r.w - 12.0,
-            r.y + 65.0 + i as f32 * 22.0,
-            1.0,
-            GREEN,
-            Align::Right,
-        );
+    for (row,label) in ["COM1","COM2","TCN","ILS","IFF"].iter().enumerate() {
+        let y=r.y+39.0+row as f32*20.0;
+        cv.rect(r.x+101.0,y,52.0,15.0,rgba(0x01,0x0a,0x04,1.0));
+        cv.text(label,r.x+127.0,y+5.0,0.8,GREEN,Align::Center);
     }
-    cv.text(
-        &format!("HDG {:03.0}", a.heading),
-        r.x + r.w * 0.5,
-        r.y + 92.0,
-        1.2,
-        GREEN,
-        Align::Center,
-    );
-    cv.text(
-        c.mode.label(),
-        r.x + r.w * 0.5,
-        r.y + 119.0,
-        1.0,
-        GREEN,
-        Align::Center,
-    );
-    cv.stroke_rect(r.x + 49.0, r.y + 145.0, r.w - 98.0, 24.0, 1.0, GREEN);
+    cv.text("305.0   127.5",r.x+80.0,r.y+155.0,0.8,GREEN,Align::Center);
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x2a, 0x2a, 1.0));
     for (i, name) in ["HUD", "BRT", "DAY", "ATT", "ALT"].into_iter().enumerate() {
@@ -1010,9 +1033,13 @@ mod tests {
                 let reflected=ray-f.z*(2.0*ray.dot(f.z));
                 assert!((reflected-mirror.rear).len()<1e-8);
                 assert!(f.z.dot((cockpit_eye(kind)-f.o).norm())>0.75);
-                assert!((f.o-mirror.anchor).len()<0.061);
+                if kind==Type::F18 {
+                    let radial=(mirror.anchor-hornet_arch(0.0)+V3::X*0.365).norm();
+                    assert!((f.o-mirror.anchor).dot(radial)<0.0,"Hornet pane must sit inside the arch");
+                    assert!((f.o-mirror.anchor).len()<0.080);
+                } else {assert!((f.o-mirror.anchor).len()<0.061);}
                 let mut m=Mesh::new();
-                curved_mirror(&mut m,mirror.w,mirror.h,&|x,y,d|f.p(x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)));
+                curved_mirror(&mut m,mirror.w,mirror.h,&|x,y,d|mirror_point(kind,&mirror,x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)));
                 let mut count=0;
                 for v in m.v.chunks(crate::mesh::STRIDE).filter(|v|v[9]>=0.0) {
                     let (x,y)=(v[9] as f64*AW,(1.0-v[10] as f64)*A);
@@ -1081,25 +1108,26 @@ mod tests {
     }
 
     #[test]
-    fn hornet_mating_bow_has_tapered_posts_and_a_shallow_crown() {
+    fn hornet_mating_bow_has_a_circular_cap_and_original_sill_contacts() {
         let bow=hornet_bow();
-        for i in 0..6 {
-            let a=bow[i];let b=bow[12-i];
+        for i in 0..bow.len()/2 {
+            let a=bow[i];let b=bow[bow.len()-1-i];
             assert!((a.x+b.x).abs()<1e-9 && (a.y-b.y).abs()<1e-9 && (a.z-b.z).abs()<1e-9);
         }
-        // A wide shallow crown, not a pointed V or a circular cap.
-        assert!((bow[5].x-bow[7].x).abs()>0.20);
-        assert!((bow[6].y-bow[5].y).abs()<0.008);
-        assert!((bow[1].x-bow[0].x).abs()/(bow[1].y-bow[0].y)<0.25);
         let offset=EYE-Type::F18.eye();
+        for p in &bow[1..bow.len()-1] {
+            let p=*p-offset;
+            assert!((p.x.hypot(p.y-0.910)-0.365).abs()<1e-9,"flattened canopy arch");
+        }
+        assert!((bow[bow.len()/2].y-bow[1].y-0.365).abs()<1e-9);
         let frame=canopy_frame(Type::F18);
         let front:Vec<_>=frame.v.chunks(crate::mesh::STRIDE)
             .map(|v|v3(v[0] as f64,v[1] as f64,v[2] as f64)-offset)
             .filter(|p|p.z > -4.32 && p.z < -4.09).collect();
         assert!(front.len()>100);
-        assert!(front.iter().all(|p|p.y<1.280),"old triangular bow must be replaced, not overlaid");
+        assert!(front.iter().all(|p|p.y<1.300),"old triangular bow must be replaced, not overlaid");
         let original=crate::flightgear::cockpit_mesh(Type::F18,"frame");
-        for foot in [bow[0],bow[12]] {
+        for foot in [bow[0],bow[bow.len()-1]] {
             assert!(original.v.chunks(crate::mesh::STRIDE).any(|v|
                 (v3(v[0] as f64,v[1] as f64,v[2] as f64)-foot).len()<0.045),
                 "new bow foot must meet the original sill");
@@ -1113,7 +1141,7 @@ mod tests {
             let elevation=|p:V3|(p.y-eye.y)/(eye.z-p.z);
             let mirror=mirror_mounts(kind)[1];
             let bow=mirror.anchor+if kind==Type::F18{v3(0.0,0.022,0.042)}else{V3::ZERO};
-            let rim=mirror.frame.p(0.0,-mirror.h*0.5-0.007,0.004);
+            let rim=mirror.frame.p(0.0,(mirror.h*0.5+0.007)*if kind==Type::F18{1.0}else{-1.0},0.004);
             let gap=elevation(rim)-elevation(bow);
             assert!(gap<=0.006 && gap> -0.070,"{kind:?}: detached or buried crown rim {gap}");
             for t in [-0.28,0.28] {
@@ -1128,8 +1156,8 @@ mod tests {
         for i in [0,2] {
             let mirror=mirror_mounts(Type::F18)[i];
             let side=if i==0{-1.0}else{1.0};
-            assert!(mirror.w>3.0*mirror.h);
-            assert!(mirror.frame.x.dot(v3(0.22,-side*0.975,0.0).norm())>0.95);
+            assert!(mirror.w>=3.0*mirror.h);
+            assert!(mirror.frame.x.dot(v3((38.0*DEG).sin(),-side*(38.0*DEG).cos(),0.0))>0.95);
             for t in [-0.28,0.28] {
                 let (foot,hinge)=mirror_support(Type::F18,i,&mirror,t);
                 assert!((foot-hinge).len()<0.060,"detached shoulder mirror");
@@ -1157,10 +1185,12 @@ mod tests {
             let m=hardware(kind);
             for mirror in mirror_mounts(kind) {
                 for x in [-0.85,-0.4,0.0,0.4,0.85] {for y in [-0.85,-0.4,0.0,0.4,0.85] {
-                    let point=mirror.frame.p(x*mirror.w*0.5,y*mirror.h*0.5,0.006);
-                    if let Some(tri)=m.v.chunks(crate::mesh::STRIDE*3).find(|t|blocked(cockpit_eye(kind),point,t)) {
-                        let p=|i|v3(tri[i] as f64,tri[i+1] as f64,tri[i+2] as f64);
-                        panic!("{kind:?}: mirror obscured at {point:?} by {:?} {:?} {:?}",p(0),p(11),p(22));
+                    let point=mirror_point(kind,&mirror,x*mirror.w*0.5,y*mirror.h*0.5,0.006);
+                    for shift in [V3::ZERO,V3::X*0.015,-V3::X*0.015,V3::Y*0.010,-V3::Y*0.010] {
+                        if let Some(tri)=m.v.chunks(crate::mesh::STRIDE*3).find(|t|blocked(cockpit_eye(kind)+shift,point,t)) {
+                            let p=|i|v3(tri[i] as f64,tri[i+1] as f64,tri[i+2] as f64);
+                            panic!("{kind:?}: mirror obscured at {point:?}, head {shift:?}, by {:?} {:?} {:?}",p(0),p(11),p(22));
+                        }
                     }
                 }}
             }
@@ -1168,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn both_aircraft_have_a_crown_mirror_and_two_tall_side_mirrors() {
+    fn both_aircraft_have_three_panes_with_reference_shoulder_angles() {
         for kind in [Type::F18, Type::Su27] {
             let m = build(kind);
             let glass: Vec<_> =
@@ -1199,7 +1229,7 @@ mod tests {
             for side in [-1.0,1.0] {
                 let (w,h)=bounds(side);
                 if kind==Type::F18 {
-                    assert!(w>0.060 && w<0.150 && h>0.180 && h>1.5*w);
+                    assert!(w>0.060 && w<0.150 && h>0.100 && h>w,"shoulder pane {w} x {h}");
                 } else {assert!(w>0.04 && h>0.15);}
             }
         }
@@ -1373,6 +1403,7 @@ mod tests {
                         let (w, h) = face_size(item);
                         (w, h, 0.006)
                     }
+                    Shape::Ufc => {let(w,h)=face_size(item);(w,h,0.019)},
                     Shape::Label => {
                         let (w, h) = face_size(item);
                         (w, h, 0.0085)

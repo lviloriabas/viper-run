@@ -53,6 +53,7 @@ pub struct Fulcrum {
     pub gear: [Mesh; 3],
     /// Upper and lower airbrake petals, closed.
     pub brakes: [Mesh; 2],
+    pub controls:Vec<crate::articulation::Surface>,
 }
 
 /// Underwing pylons on each side, inboard to outboard.
@@ -410,6 +411,8 @@ fn tip_cap(m: &mut Mesh, upper: &[V3], lower: &[V3], out: V3, col: Rgb) {
 }
 
 pub fn build() -> Fulcrum {
+    use crate::articulation::{Surface,Hinge,Drive,extract};
+    let mut controls=Vec::new();
     let mut m = Mesh::new();
 
     // Fuselage up to the airbrake hinges; the open bay has no fixed skin
@@ -498,13 +501,25 @@ pub fn build() -> Fulcrum {
         let b_axis = move |p: V3| v3(side * BOOM_X, BOOM_Y, p.z);
         m.surface(16, 8, move |u, v| boom_point(side, mix(BOOM[0][0], BOOM[5][0], u), v * TAU), skin, Some(&b_axis));
 
-        // Wing.
-        for upper in [true, false] {
-            let out = move |p: V3| p - V3::Y * if upper { 1.0 } else { -1.0 };
-            m.surface(WING_X.len() - 1, WING_C.len() - 1, move |u, v| wing_point(side, steps(&WING_X, u), steps(&WING_C, v), upper), move |p, n| if upper { wing_colour(p, n) } else { BELLY }, Some(&out));
+        // One parent skin is partitioned into leading flaps, inboard
+        // landing flaps and outer ailerons, preserving colours at every cut.
+        let mut wing=Mesh::new();
+        for upper in [true,false] {
+            let out=move|p:V3|p-V3::Y*if upper{1.0}else{-1.0};
+            wing.surface(WING_X.len()-1,WING_C.len()-1,move|u,v|wing_point(side,steps(&WING_X,u),steps(&WING_C,v),upper),
+                move|p,n|if upper{wing_colour(p,n)}else{BELLY},Some(&out));
         }
-        let edge = |upper: bool| -> Vec<V3> { WING_C.iter().map(|&c| wing_point(side, WING_TIP, c, upper)).collect() };
-        tip_cap(&mut m, &edge(true), &edge(false), V3::X * side, LIGHT);
+        let edge=|upper:bool|->Vec<V3>{WING_C.iter().map(|&c|wing_point(side,WING_TIP,c,upper)).collect()};
+        tip_cap(&mut wing,&edge(true),&edge(false),V3::X*side,LIGHT);
+        for (drive,c,x0,x1,leading) in [(Drive::Slat,0.14,2.38,5.68,true),
+            (Drive::Flap,0.76,2.38,4.01,false),(Drive::Aileron,0.76,4.01,5.68,false)] {
+            let mid=|x:f64|(wing_point(side,x,c,true)+wing_point(side,x,c,false))*0.5;
+            let a=mid(x0);let b=mid(x1);let slope=(b.z-a.z)/(x1-x0);
+            let n=v3(-side*slope,0.0,1.0)*if leading{1.0}else{-1.0};
+            let(fixed,moving)=extract(wing,&[(n,n.dot(a)),(-V3::X*side,-x0),(V3::X*side,x1)]);
+            wing=fixed;controls.push(Surface{mesh:moving,hinge:Hinge{pivot:a,axis:((b-a)*side).norm(),drive,side}});
+        }
+        m.v.extend(wing.v);
         let p = wing_point(side, 4.95, 0.38, false);
         star(&mut m, p, -V3::Y, 0.36);
         // Pylons, with launch rails under the outer two for the missiles.
@@ -517,15 +532,22 @@ pub fn build() -> Fulcrum {
             }
         }
 
-        // Fin, its root extension and the dielectric cap on top.
+        // Fin and a separate rudder on the canted trailing hinge.
+        let mut fin=Mesh::new();
         for sign in [1.0, -1.0] {
             let out = move |p: V3| p - v3(side * (6.0 * DEG).cos(), -(6.0 * DEG).sin(), 0.0) * sign;
-            m.surface(FIN_HS.len() - 1, FIN_C.len() - 1, move |u, v| fin_point(side, steps(&FIN_HS, u), steps(&FIN_C, v), sign), fin_colour, Some(&out));
+            fin.surface(FIN_HS.len() - 1, FIN_C.len() - 1, move |u, v| fin_point(side, steps(&FIN_HS, u), steps(&FIN_C, v), sign), fin_colour, Some(&out));
             let n = v3(side * (6.0 * DEG).cos(), -(6.0 * DEG).sin(), 0.0) * sign;
             star(&mut m, fin_point(side, 1.35, 0.45, sign), n, 0.36);
         }
         let edge = |sign: f64| -> Vec<V3> { FIN_C.iter().map(|&c| fin_point(side, FIN_H, c, sign)).collect() };
-        tip_cap(&mut m, &edge(1.0), &edge(-1.0), v3(side * (6.0 * DEG).sin(), (6.0 * DEG).cos(), 0.0), WHITE);
+        tip_cap(&mut fin, &edge(1.0), &edge(-1.0), v3(side * (6.0 * DEG).sin(), (6.0 * DEG).cos(), 0.0), WHITE);
+        let a=fin_point(side,0.42,0.72,0.0);let b=fin_point(side,2.42,0.72,0.0);
+        let axis=(b-a).norm();let n=v3(0.0,-(b.z-a.z)/(b.y-a.y),1.0);
+        let(fixed,rudder)=extract(fin,&[(-n,-n.dot(a)),(-V3::Y,-a.y),(V3::Y,b.y)]);
+        m.v.extend(fixed.v);
+        controls.push(Surface{mesh:rudder,hinge:Hinge{pivot:a,axis,drive:Drive::Rudder,side}});
+
     }
 
     let stab = |side: f64| {
@@ -544,7 +566,8 @@ pub fn build() -> Fulcrum {
     for mesh in std::iter::once(&mut m).chain(stabs.iter_mut()).chain(brakes.iter_mut()) {
         flag_camo(mesh);
     }
-    Fulcrum { body: m, canopy, stabs, gear: landing_gear(), brakes }
+    for c in &mut controls {flag_camo(&mut c.mesh);}
+    Fulcrum { body: m, canopy, stabs, gear: landing_gear(), brakes, controls }
 }
 
 /// The 9.13S retains the split tail airbrake, surrounding the drag-chute

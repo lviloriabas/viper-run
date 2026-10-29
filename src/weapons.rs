@@ -85,7 +85,7 @@ pub fn gun_of(kind: Type) -> &'static Gun {
     match kind {
         Type::F16 => &M61A1,
         Type::Mig29 => &GSH301,
-        Type::F18 => &M61_HORNET,
+        Type::F18|Type::F18E|Type::EA18G => &M61_HORNET,
         Type::Su27 => &GSH_FLANKER,
     }
 }
@@ -880,7 +880,7 @@ pub fn dispenser_of(kind: Type) -> &'static str {
     match kind {
         Type::F16 => "ALE-47",
         Type::Mig29 => "BVP-30-26M",
-        Type::F18 => "AN/ALE-39",
+        Type::F18|Type::F18E|Type::EA18G => "AN/ALE-39",
         Type::Su27 => "APP-50",
     }
 }

@@ -114,7 +114,7 @@ pub fn layout(kind: Type) -> &'static [Module] {
     match kind {
         Type::F16 => &F16,
         Type::Mig29 => &MIG29,
-        Type::F18 => &F18_MODULES,
+        Type::F18|Type::F18E|Type::EA18G => &F18_MODULES,
         Type::Su27 => &SU27_MODULES,
     }
 }

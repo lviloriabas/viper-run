@@ -317,7 +317,7 @@ pub fn tip_store(jet: Type) -> Store {
 /// pair; the R-27s, R-77s, FAB-500s or FAB-250s, singly or two on an
 /// MBD3-U2T tandem rack, on the inner pair, for up to 2,000 kg of bombs.
 fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
-    match (jet, pair) {
+    match (jet.base(), pair) {
         (Type::F16, 0) => &[Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 2) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82), Some(Store::Mk82Ter)],
@@ -335,6 +335,7 @@ fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
         (Type::Mig29, 1) => &[None],
         (Type::Mig29, 2) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250), Some(Store::Fab500)],
         (Type::Mig29, _) => &[None, Some(Store::R27r), Some(Store::R27t), Some(Store::R77), Some(Store::Fab500), Some(Store::Fab250), Some(Store::Fab250Twin)],
+        (Type::F18E|Type::EA18G, _) => unreachable!("base resolves Hornet variants"),
     }
 }
 
@@ -2804,7 +2805,7 @@ impl Combat {
             let r = (a.pos - b.jet.pos).len();
             if r < 60000.0 {
                 let locked = self.hostile && b.radar_track;
-                v.push((b.jet.pos, match b.jet.kind { Type::F16=>"16",Type::Mig29=>"29",Type::F18=>"18",Type::Su27=>"27" }, locked));
+                v.push((b.jet.pos, match b.jet.kind { Type::F16=>"16",Type::Mig29=>"29",Type::F18|Type::F18E|Type::EA18G=>"18",Type::Su27=>"27" }, locked));
             }
         }
         for s in self.sites.iter().filter(|s| !s.dead) {

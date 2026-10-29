@@ -660,6 +660,31 @@ mod tests {
     use crate::airframe::EYE;
 
     #[test]
+    fn centre_sticks_clear_the_actual_ejection_handle_through_full_travel() {
+        use crate::sim::Type;
+        for kind in [Type::Mig29,Type::F18,Type::Su27] {
+            let mut handle=crate::eject::handle_mesh(kind,0.0);
+            shift(&mut handle,crate::eject::cockpit_harness_origin()+super::super::seat_offset(kind));
+            for pitch in [-1.0,-0.5,0.0,0.5,1.0] {for roll in [-1.0,0.0,1.0] {
+                let h=Hands{pitch,roll,..Default::default()};let mut stick=Mesh::new();
+                let grip=twin_stick_grip(&h,kind==Type::Su27);
+                if kind==Type::Su27{flanker_stick(&mut stick,&grip);}else{mig_stick(&mut stick,&grip);}
+                // Vertex envelope includes the boot, trigger and mounting bars,
+                // not only the nominal stick centre.
+                let mut distance=f64::INFINITY;
+                for a in stick.v.chunks(crate::mesh::STRIDE) {
+                    let a=v3(a[0] as f64,a[1] as f64,a[2] as f64);
+                    for b in handle.v.chunks(crate::mesh::STRIDE) {
+                        let b=v3(b[0] as f64,b[1] as f64,b[2] as f64);
+                        distance=distance.min((a-b).len());
+                    }
+                }
+                assert!(distance>0.025,"{kind:?} stick/handle clearance {distance} at {pitch},{roll}");
+            }}
+        }
+    }
+
+    #[test]
     fn flanker_controls_remain_reachable_from_the_rearward_seat() {
         let shoulder=SHOULDER+super::super::seat_offset(crate::sim::Type::Su27);
         for pitch in [-1.0,0.0,1.0] {for roll in [-1.0,0.0,1.0] {

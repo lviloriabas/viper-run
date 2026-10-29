@@ -31,7 +31,7 @@ pub enum Action {
     School,
     NetTab(crate::multiplayer::Panel), NetFilter, NetPage(bool),
     Online, NetEdit(crate::multiplayer::Field), NetMode, NetCapacity, NetPublic,
-    NetHost, NetJoin, NetBrowse, NetRoom(u8), NetCopy, NetReady, NetLaunch, NetLeave, NetResume,
+    NetHost, NetJoin, NetPasteJoin, NetBrowse, NetNearby, NetHosting, NetHelp, NetHelpClose, NetRoom(u8), NetNearbyRoom(u8), NetCopy(bool), NetCopyManual, NetCopySetup, NetReady, NetLaunch, NetLeave, NetResume,
     VoiceMode, VoiceMute, VoiceDeafen, VoiceInput(bool), VoiceOutput(bool), VoiceThreshold(bool), VoicePeer(u64), VoicePeerGain(u64),
     Lesson(crate::tutorial::Lesson),
     Restart,
@@ -46,6 +46,14 @@ pub enum Action {
     Pitch,
     Invert,
     PadLayout,
+    PadSetup,
+    PadExpo(bool),
+    PadDeadLeft(bool),
+    PadDeadRight(bool),
+    PadRudderClick,
+    PadFineAim,
+    PadCalibrate,
+    PadReset,
     Fullscreen,
     Performance,
     Reset,
@@ -72,6 +80,12 @@ pub enum Action {
     /// Wait for a key for an action (index into keymap::BINDS) and slot.
     Rebind(u8, u8),
     ResetKeys,
+}
+
+impl Action {
+    pub fn pad_setting(self) -> bool {
+        matches!(self, Self::PadSetup | Self::PadExpo(_) | Self::PadDeadLeft(_) | Self::PadDeadRight(_) | Self::PadRudderClick | Self::PadFineAim | Self::PadCalibrate | Self::PadReset)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -114,6 +128,7 @@ pub struct Ui<'a> {
     pub pad: bool,
     /// Which controller layout those lists show.
     pub layout: PadLayout,
+    pub click_rudder: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -338,13 +353,14 @@ impl<'a> Ui<'a> {
             crate::sim::Type::F16 => ("AIRFRAME", crate::sim::Type::F16.full_name(), "LOCKHEED MARTIN, F110-GE-129"),
             crate::sim::Type::Mig29 => ("AIRFRAME", crate::sim::Type::Mig29.full_name(), "MIKOYAN, 2 X KLIMOV RD-33"),
             crate::sim::Type::F18 => ("AIRFRAME", crate::sim::Type::F18.full_name(), "MCDONNELL DOUGLAS, 2 X F404-GE-402"),
+            crate::sim::Type::F18E|crate::sim::Type::EA18G => ("AIRFRAME", cfg.jet.full_name(), "BOEING, 2 X F414-GE-400"),
             crate::sim::Type::Su27 => ("AIRFRAME", crate::sim::Type::Su27.full_name(), "SUKHOI, 2 X AL-31F"),
         };
         let bandits = format!("{} BANDITS", cfg.threats.bandits);
         let heaters = match (cfg.threats.mixed, cfg.aggressor) {
             (true, _) => "AIM-9 + R-73",
             (false, crate::sim::Type::Mig29 | crate::sim::Type::Su27) => "R-73",
-            (false, crate::sim::Type::F16 | crate::sim::Type::F18) => "AIM-9",
+            (false, crate::sim::Type::F16 | crate::sim::Type::F18 | crate::sim::Type::F18E | crate::sim::Type::EA18G) => "AIM-9",
         };
         let fleet = format!("{}, {heaters}, GUN", cfg.fleet_name());
         let stores = cfg.stores_summary();
@@ -375,7 +391,7 @@ impl<'a> Ui<'a> {
         // Missions with something to shoot list the weapons; the others list
         // what flying the route and landing need.
         let armed = matches!(mission, MissionKind::Dogfight | MissionKind::Strike | MissionKind::Free);
-        let keys = match (armed, self.pad, self.layout) {
+        let mut keys = match (armed, self.pad, self.layout) {
             (true, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{RT}", "FIRE"), ("{RB}", "LOCK TARGET"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{A}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (true, true, PadLayout::Classic) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{A}", "FIRE"), ("{DD}", "LOCK TARGET"), ("{RT}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{DU}", "NEXT WEAPON"), ("{L3}", "CHAFF / FLARE"), ("{LB} {RB}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{Y}", "CAMERA"), ("{START}", "PAUSE")],
             (false, true, PadLayout::Combat) => [("{LS}", "PITCH / ROLL"), ("{RS}", "LOOK"), ("{LB}", "THROTTLE UP"), ("{LT}", "THROTTLE DOWN"), ("{X} + {LS}", "RUDDER"), ("{B}", "AIRBRAKE"), ("{DD}", "LANDING GEAR"), ("{DU}", "FLAPS"), ("{LT} GROUND", "WHEEL BRAKES"), ("{Y}", "CAMERA"), ("{START}", "PAUSE"), ("{BACK}", "CONTROLS")],
@@ -383,6 +399,12 @@ impl<'a> Ui<'a> {
             (true, false, _) => [k1, ("A D", "ROLL"), ("F L-CLICK", "FIRE"), ("T", "LOCK TARGET"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("X", "NEXT WEAPON"), ("Z", "CHAFF / FLARE"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("V", "CAMERA"), ("ESC", "CONFIG")],
             (false, false, _) => [k1, ("A D", "ROLL"), ("SHIFT", "THROTTLE UP"), ("CTRL", "THROTTLE DOWN"), ("Q E", "RUDDER"), ("H", "AIRBRAKE"), ("G", "LANDING GEAR"), ("L", "FLAPS"), ("B", "WHEEL BRAKES"), ("V", "CAMERA"), ("ALT+MOUSE", "LOOK"), ("ESC", "CONFIG")],
         };
+        if self.pad && self.click_rudder {
+            for row in &mut keys {
+                if row.1 == "RUDDER" { row.0 = "{X} / {L3} + {LS}"; }
+                if row.1 == "CHAFF / FLARE" { row.0 = "{X} + {L3}"; }
+            }
+        }
         self.cv.text(if self.pad { "XBOX CONTROLLER" } else { "FLIGHT CONTROLS" }, bxx + 6.0 * s, ry, sm, AMBER, Align::Left);
         ry += 10.0 * sm;
         let col_w=(bw-16.0*s)/2.0;
@@ -463,7 +485,7 @@ impl<'a> Ui<'a> {
         self.cv.text("MULTIPLAYER",left,y+16.0*s,2.0*s,GREEN,Align::Left);
         let menu=&mp.menu;
         let mut bx=left;
-        for (label,panel) in [("SERVERS",Panel::Browser),("CREATE ROOM",Panel::Create),("JOIN INVITE",Panel::Invite),("LAN DIRECT",Panel::Lan)] {
+        for (label,panel) in [("CREATE GAME",Panel::Create),("JOIN FRIEND",Panel::Invite),("NEARBY",Panel::Nearby),("ADVANCED",Panel::Browser)] {
             bx+=self.button(label,"",bx,y+32.0*s,menu.panel==panel,Action::NetTab(panel))+5.0*s;
         }
         let half=(width-8.0*s)/2.0;
@@ -491,27 +513,53 @@ impl<'a> Ui<'a> {
                         self.cv.paragraph(&browser.status(),left,y+172.0*s,width,sm,1.5,CREAM);
                     }
                 } else {
-                    self.cv.paragraph("Enter the address of a running viper-server. Everyone uses the same server. Refresh, then select a room to join.",left,y+163.0*s,width,sm,1.6,CREAM);
-                    self.cv.paragraph("Internet rooms use outbound TCP. No port forwarding is needed on players' PCs.",left,y+211.0*s,width,sm,1.6,DIM);
+                    self.cv.paragraph("Optional: browse an external relay. Enter its address and refresh. To play without a separate server, choose CREATE GAME or NEARBY.",left,y+163.0*s,width,sm,1.6,CREAM);
+                    self.cv.paragraph("An external relay helps when a router or Internet provider blocks hosting. Players only make outgoing connections.",left,y+211.0*s,width,sm,1.6,DIM);
                 }
             }
-            Panel::Create | Panel::Lan => {
-                let lan=menu.panel==Panel::Lan;
-                if lan { self.network_field("HOST UDP PORT",&menu.port,Field::Port,menu.editing==Some(Field::Port),true,left,y+84.0*s,width); }
-                else { self.network_field("RELAY SERVER (SAME ADDRESS AS OTHER PILOTS)",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+84.0*s,width); }
+            Panel::Nearby => {
+                self.cv.paragraph("Same Wi-Fi or local network? Your friend's public game appears here automatically.",left,y+86.0*s,width,sm,1.5,CREAM);
                 let mut bx=left;
-                bx+=self.button(menu.rules.mode.name(),"",bx,y+116.0*s,false,Action::NetMode)+5.0*s;
-                bx+=self.button(&format!("SLOTS {}",menu.rules.capacity),"",bx,y+116.0*s,false,Action::NetCapacity)+5.0*s;
-                if !lan { self.button(if menu.public{"PUBLIC"}else{"PRIVATE"},"",bx,y+116.0*s,false,Action::NetPublic); }
-                self.cv.paragraph(menu.rules.mode.brief(),left,y+151.0*s,width,sm,1.6,CREAM);
-                self.cv.paragraph(if lan{"Direct LAN hosting accepts incoming UDP. Windows may ask to allow the game on your private network. Share COPY INVITE with your friends."}else if menu.public{"Public rooms appear in the server browser. Create the room, wait for pilots to join, then launch when everyone is ready."}else{"Private rooms stay out of the browser. Create the room, choose COPY INVITE, and share it with your friends."},left,y+196.0*s,width,sm,1.6,DIM);
-                self.button(if lan{"HOST LAN ROOM"}else{"CREATE ROOM"},"",left,y+253.0*s,true,Action::NetHost);
+                bx+=self.button("SEARCH AGAIN","",bx,y+112.0*s,false,Action::NetNearby)+5.0*s;
+                self.button(menu.filter.map_or("ALL MODES",|m|m.name()),"",bx,y+112.0*s,false,Action::NetFilter);
+                if let Some(nearby)=&menu.nearby {
+                    for(i,room)in nearby.rooms.iter().enumerate() {
+                        let yy=y+(151.0+i as f32*18.0)*s;
+                        self.key_cap(&format!("{} / {}",room.title,room.mode.name()),left,yy,width-70.0*s,false,Action::NetNearbyRoom(i as u8));
+                        self.cv.text(&format!("{}/{} {}",room.players,room.capacity,if room.players>=room.capacity{"FULL"}else{"JOIN"}),left+width-62.0*s,yy+6.0*s,sm,ACID,Align::Left);
+                    }
+                    if nearby.rooms.is_empty() {
+                        self.cv.paragraph("Looking for games... The host selects CREATE GAME first. If nothing appears, ask for a LAN invite and use JOIN FRIEND.",left,y+154.0*s,width,sm,1.6,CREAM);
+                        self.button("CONNECTION HELP","",left,y+222.0*s,false,Action::NetHelp);
+                    }
+                    let bx=left+self.button("PREV","",left,y+264.0*s,false,Action::NetPage(false))+5.0*s;
+                    let bx=bx+self.button("NEXT","",bx,y+264.0*s,false,Action::NetPage(true))+8.0*s;
+                    self.cv.text(&format!("PAGE {} / {}",nearby.page+1,nearby.pages),bx,y+272.0*s,sm,DIM,Align::Left);
+                }
+            }
+            Panel::Create => {
+                self.button(if menu.external_server{"USE EXTERNAL RELAY"}else{"HOST ON THIS PC"},"CHANGE",left,y+84.0*s,false,Action::NetHosting);
+                if menu.external_server {
+                    self.network_field("EXTERNAL RELAY ADDRESS",&menu.server,Field::Server,menu.editing==Some(Field::Server),true,left,y+112.0*s,width);
+                } else {
+                    self.cv.paragraph("The server starts inside the game. Keep this game open while your friends play.",left,y+115.0*s,width,sm,1.5,CREAM);
+                }
+                let mut bx=left;
+                bx+=self.button(menu.rules.mode.name(),"",bx,y+148.0*s,false,Action::NetMode)+5.0*s;
+                bx+=self.button(&format!("SLOTS {}",menu.rules.capacity),"",bx,y+148.0*s,false,Action::NetCapacity)+5.0*s;
+                self.button(if menu.public{"PUBLIC"}else{"INVITE ONLY"},"",bx,y+148.0*s,false,Action::NetPublic);
+                self.cv.paragraph(menu.rules.mode.brief(),left,y+183.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph(if menu.external_server{"Friends can join through an invitation or the external server browser."}else{"Same network: your friend opens NEARBY. Internet: share the Internet invite when router setup finishes. Windows may ask to allow hosting."},left,y+218.0*s,width,sm,1.5,DIM);
+                let bx=left+self.button("CREATE GAME","",left,y+264.0*s,true,Action::NetHost)+8.0*s;
+                self.button("CONNECTION HELP","",bx,y+264.0*s,false,Action::NetHelp);
             }
             Panel::Invite => {
                 self.network_field("INVITATION (CTRL+V TO PASTE)",&menu.invite,Field::Invite,menu.editing==Some(Field::Invite),true,left,y+84.0*s,width);
-                self.cv.paragraph("Ask the host for COPY INVITE. Select this field and paste the full invitation with Ctrl+V, press Enter, then join.",left,y+133.0*s,width,sm,1.6,CREAM);
-                self.cv.paragraph("Relay invitations include the server address. You do not need to configure it separately.",left,y+187.0*s,width,sm,1.6,DIM);
-                self.button("JOIN ROOM","",left,y+245.0*s,true,Action::NetJoin);
+                self.button("PASTE AND JOIN","",left,y+117.0*s,true,Action::NetPasteJoin);
+                self.cv.paragraph("Copy your friend's invitation, then select PASTE AND JOIN. You can also paste into the field and press Enter to connect.",left,y+155.0*s,width,sm,1.6,CREAM);
+                self.cv.paragraph("Use a LAN invite on the same network, or an Internet invite from another network. The invitation includes everything needed.",left,y+205.0*s,width,sm,1.6,DIM);
+                let bx=left+self.button("JOIN ROOM","",left,y+264.0*s,false,Action::NetJoin)+8.0*s;
+                self.button("CONNECTION HELP","",bx,y+264.0*s,false,Action::NetHelp);
             }
         }
         let max=(width/(6.0*sm))as usize;
@@ -521,6 +569,45 @@ impl<'a> Ui<'a> {
     }
     pub fn network_screen(&mut self,mp:&crate::multiplayer::Multiplayer,jet:crate::sim::Type,keys:&crate::keymap::Keymap) {
         use crate::multiplayer::Field;
+        if mp.menu.help {
+            if let Some(server)=&mp.server {
+                let s=self.s;let sm=(s-1.0).max(1.0);let pw=(self.w-20.0*s).min(610.0*s);let ph=330.0*s;
+                let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let left=x+12.0*s;let width=pw-24.0*s;
+                self.frame(x,y,pw,ph);
+                self.cv.text("HOST INTERNET SETUP",left,y+16.0*s,2.0*s,GREEN,Align::Left);
+                self.cv.text(&format!("HOST PC: {}   TCP PORT: {}",server.lan.ip(),server.lan.port()),left,y+44.0*s,sm,ACID,Align::Left);
+                let router=server.router_address.map_or("OPEN YOUR ROUTER SETTINGS".into(),|a|format!("ROUTER: {}",a.ip()));
+                self.cv.text(&router,left,y+58.0*s,sm,DIM,Align::Left);
+                self.cv.text(server.internet_status(),left,y+73.0*s,sm,AMBER,Align::Left);
+                self.cv.paragraph(&format!("1. If automatic setup fails, open Port Forwarding / Virtual Server in your router. Forward external TCP port {} to {}, internal port {}. No UDP forwarding is needed.",server.lan.port(),server.lan.ip(),server.lan.port()),left,y+95.0*s,width,sm,1.4,CREAM);
+                self.cv.paragraph("2. Save/apply the router rule. Allow Viper Run incoming connections on the Windows private network if asked. The guest does not open ports.",left,y+134.0*s,width,sm,1.4,CREAM);
+                self.cv.paragraph("3. Enter the router's WAN / Internet public IPv4 or your DNS name below. Include :port only if you chose a different external port. Copy the generated invitation and send it to your friend.",left,y+166.0*s,width,sm,1.4,CREAM);
+                self.network_field("PUBLIC IPV4 / DNS (OPTIONAL :EXTERNAL PORT)",&mp.menu.public_address,Field::PublicAddress,mp.menu.editing==Some(Field::PublicAddress),true,left,y+201.0*s,width);
+                let bx=left+self.button("COPY INTERNET INVITE","",left,y+232.0*s,true,Action::NetCopyManual)+8.0*s;
+                self.button("COPY ROUTER STEPS","",bx,y+232.0*s,false,Action::NetCopySetup);
+                self.cv.paragraph("If the WAN address is private or starts with 100.64 through 100.127, your connection may use double NAT / CGNAT. This router rule alone will not work. Try the other PC as host, ask your provider for a public IPv4, or use an external relay.",left,y+258.0*s,width,sm,1.4,DIM);
+                let max=(width/(6.0*sm))as usize;
+                self.cv.text(&mp.menu.status.chars().take(max).collect::<String>(),left,y+299.0*s,sm,AMBER,Align::Left);
+                self.button("BACK TO LOBBY","ESC",left,y+313.0*s,false,Action::NetHelpClose);
+                return;
+            }
+            let s=self.s;let sm=(s-1.0).max(1.0);let pw=(self.w-20.0*s).min(610.0*s);let ph=300.0*s;
+            let(x,y)=((self.w-pw)/2.0,(self.h-ph)/2.0);let left=x+12.0*s;let width=pw-24.0*s;
+            self.frame(x,y,pw,ph);
+            self.cv.text("CONNECT WITH A FRIEND",left,y+16.0*s,2.0*s,GREEN,Align::Left);
+            for(i,(label,text))in[
+                ("SAME NETWORK","One pilot creates a public game. The other opens NEARBY and selects JOIN. If discovery is blocked, use COPY LAN INVITE and PASTE AND JOIN. Allow the host game on your private network when Windows asks."),
+                ("DIFFERENT NETWORKS","The host automatically asks the router for a temporary Internet connection. When available, use COPY INTERNET INVITE. The host keeps the game open; the guest needs no server setup."),
+                ("IF INTERNET SETUP FAILS","Try the other PC as host. Some routers and Internet providers (CGNAT) block incoming connections. An accessible external relay can be selected under CREATE GAME, CHANGE; ADVANCED browses its rooms."),
+                ("READY TO FLY","After connecting, the guest selects READY. The host selects LAUNCH. Microphones start off; select a voice mode in the lobby to talk."),
+            ].iter().enumerate() {
+                let yy=y+(52.0+i as f32*54.0)*s;
+                self.cv.text(label,left,yy,sm,ACID,Align::Left);
+                self.cv.paragraph(text,left,yy+12.0*s,width,sm,1.4,CREAM);
+            }
+            self.button("BACK TO GAME","ESC",left,y+276.0*s,true,Action::NetHelpClose);
+            return;
+        }
         if mp.session.is_none() { self.server_browser(mp,jet); return; }
         let s=self.s;let sm=(s-1.0).max(1.0);
         let(pw,ph)=((self.w-20.0*s).min(610.0*s),(self.h-30.0*s).min(320.0*s));
@@ -531,13 +618,18 @@ impl<'a> Ui<'a> {
         let menu=&mp.menu;
         let session=mp.session.as_ref().unwrap();
         self.cv.text(if session.host{"YOUR ROOM"}else{"JOINED ROOM"},x+12.0*s,y+53.0*s,s,ACID,Align::Left);
-        self.network_field("INVITATION", &session.invitation(),Field::Invite,false,false,x+12.0*s,y+67.0*s,cw);
+        self.network_field("INVITATION", &mp.invitation(false).unwrap_or_default(),Field::Invite,false,false,x+12.0*s,y+67.0*s,cw);
         let ready=session.members.iter().filter(|m|m.ready).count();
         self.cv.text(&format!("PILOTS {} / {}, READY {}",session.members.len(),session.rules.capacity,ready),x+12.0*s,y+103.0*s,sm,CREAM,Align::Left);
-        self.cv.paragraph(if session.host{"Wait for at least two pilots to be ready, then launch."}else{"Select READY when you want to fly. The host launches."},x+12.0*s,y+118.0*s,cw,sm,1.4,DIM);
-        self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy);
+        self.cv.paragraph(if let Some(server)=&mp.server{server.internet_status()}else if session.host{"Wait for at least two pilots to be ready, then launch."}else{"Select READY when you want to fly. The host launches."},x+12.0*s,y+118.0*s,cw,sm,1.4,DIM);
+        if let Some(server)=&mp.server {
+            let bx=x+12.0*s+self.button("COPY LAN INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy(false))+5.0*s;
+            if server.internet_address().is_some() {self.button("COPY INTERNET INVITE","",bx,y+149.0*s,false,Action::NetCopy(true));}
+            else {self.button(if server.checking_internet(){"CONNECTING..."}else{"INTERNET HELP"},"",bx,y+149.0*s,false,Action::NetHelp);}
+        } else {self.button("COPY INVITE","",x+12.0*s,y+149.0*s,false,Action::NetCopy(false));}
         self.cv.text(session.rules.mode.name(),x+12.0*s,y+174.0*s,s,AMBER,Align::Left);
-        self.cv.text(&session.status,x+12.0*s,y+191.0*s,sm,CREAM,Align::Left);
+        if mp.server.is_some() {self.button("CONNECTION HELP / PORTS","",x+12.0*s,y+188.0*s,false,Action::NetHelp);}
+        else {self.cv.paragraph(&session.status,x+12.0*s,y+190.0*s,cw,sm,1.2,CREAM);}
         self.cv.text(&format!("AIRFRAME: {}",jet.name()),rx,y+49.0*s,sm,AMBER,Align::Left);
         if !mp.active(){self.button("CHANGE JET","",rx,y+57.0*s,false,Action::Jet);}
         else {self.cv.text("AIRFRAME FIXED FOR THIS SORTIE",rx,y+65.0*s,sm,DIM,Align::Left);}
@@ -548,7 +640,7 @@ impl<'a> Ui<'a> {
                 let color=if (m.id==session.id&&mp.voice.transmitting())||mp.voice.peer_talking(m.id){ACID}else{CREAM};
                 let score=mp.battle.as_ref().and_then(|b|b.scores.iter().find(|r|r.0==m.id));
                 let name=m.name.chars().take(10).collect::<String>();
-                let text=if let Some((_,_,kills,deaths))=score{format!("{name} K{kills}/D{deaths}")}else{format!("{} {} {}",if m.ready{"READY"}else{"WAIT"},name,["F16","M29","F18","S27"][m.jet as usize])};
+                let text=if let Some((_,_,kills,deaths))=score{format!("{name} K{kills}/D{deaths}")}else{format!("{} {} {}",if m.ready{"READY"}else{"WAIT"},name,["F16","M29","F18","S27","F18E","E18G"][m.jet as usize])};
                 self.cv.text(&text,rx,yy,sm,color,Align::Left);
                 if m.id!=session.id{
                     let bx=x+pw-103.0*s;
@@ -1069,7 +1161,15 @@ impl<'a> Ui<'a> {
         };
         // The controller map is long: like the key bindings, it gets its own
         // panel beside the drawer, which then holds only the settings.
-        let rows: Vec<(&str, &str)> = pitch_rows.iter().chain(rest.iter()).copied().collect();
+        let rows: Vec<(&str, &str)> = pitch_rows.iter().chain(rest.iter()).copied().map(|row| {
+            if self.pad && st.click_rudder() {
+                match row {
+                    ("{X} + {LS}", _) => ("{X} / {L3} HOLD", "Rudder with left stick"),
+                    ("{L3}", "Chaff and flare") => ("{X} + {L3}", "Chaff and flare"),
+                    _ => row,
+                }
+            } else { row }
+        }).collect();
         if self.pad { self.pad_map(&rows, w); }
         y += 6.0 * s;
         let slider = |ui: &mut Ui, y: f32, label: &str, value: String, t: f64, down: Action, up: Action| {
@@ -1101,6 +1201,8 @@ impl<'a> Ui<'a> {
             self.button(if st.pad_layout == PadLayout::Combat { "PAD LAYOUT: COMBAT" } else { "PAD LAYOUT: CLASSIC" }, "", m, y, false, Action::PadLayout);
             y += 18.0 * s;
         }
+        self.button("CONTROLLER SETUP", "", m, y, false, Action::PadSetup);
+        y += 18.0 * s;
         self.button(if st.fullscreen { "[X] FULLSCREEN" } else { "[ ] FULLSCREEN" }, "F11", m, y, false, Action::Fullscreen);
         y += 18.0 * s;
         self.button(if st.performance_overlay { "[X] PERFORMANCE OVERLAY" } else { "[ ] PERFORMANCE OVERLAY" }, "", m, y, false, Action::Performance);
@@ -1118,6 +1220,73 @@ impl<'a> Ui<'a> {
         self.cv.paragraph(if self.pad { "Press {BACK} or {B} to close. Settings are saved for this user." } else { "Press Esc or K to close. Settings are saved for this user." }, m, y, w - 2.0 * m, sm, 1.6, rgba(0x91, 0xa1, 0x8f, 1.0));
         if !self.pad {
             self.key_bindings(&st.keys, w, waiting);
+        }
+    }
+
+    /// Dedicated setup page, available with either mouse or controller.
+    pub fn pad_setup(&mut self, st: &Settings, pad: &crate::gamepad::Gamepad, now: f64) {
+        let s = self.s;
+        let sm = (s - 1.0).max(1.0);
+        let w = (604.0 * s).min(self.w - 16.0 * s);
+        let x = (self.w - w) * 0.5;
+        let y = 10.0 * s;
+        let h = self.h - 20.0 * s;
+        self.cv.layout_item(crate::menu_layout::Kind::Panel, "controller setup", [x, y, w, h]);
+        self.cv.rect(x, y, w, h, rgba(0x09, 0x10, 0x12, 0.98));
+        self.cv.stroke_rect(x, y, w, h, 1.0, LINE);
+        let left = x + 12.0 * s;
+        let right = x + w * 0.52;
+        self.cv.text("CONTROLLER SETUP", left, y + 14.0 * s, s, CREAM, Align::Left);
+        self.cv.text(if pad.raw.connected { "CONTROLLER CONNECTED" } else { "CONNECT A CONTROLLER TO CALIBRATE" }, left, y + 30.0 * s, sm, if pad.raw.connected { GREEN } else { AMBER }, Align::Left);
+        let slider = |ui: &mut Ui, row: f32, label: &str, value: f64, range: f64, down: Action, up: Action| {
+            let width = w * 0.45;
+            ui.cv.text(label, left, row, sm, CREAM, Align::Left);
+            ui.cv.text(&format!("{:.0}%", value * 100.0), left + width, row, sm, GREEN, Align::Right);
+            ui.button("-", "", left, row + 7.0 * s, false, down);
+            let bw = ui.button_width("+", "");
+            let bx = left + bw + 5.0 * s;
+            let bar = width - 2.0 * bw - 10.0 * s;
+            ui.cv.rect(bx, row + 14.0 * s, bar, 1.0, LINE_HOT);
+            ui.cv.rect(bx + bar * (value / range) as f32 - s, row + 10.0 * s, 2.0 * s, 9.0 * s, ACID);
+            ui.button("+", "", left + width - bw, row + 7.0 * s, false, up);
+        };
+        if !pad.calibrating() {
+            slider(self, y + 49.0 * s, "LEFT DEAD ZONE", st.pad_dead_left, crate::settings::DEAD_ZONE_MAX, Action::PadDeadLeft(false), Action::PadDeadLeft(true));
+            slider(self, y + 80.0 * s, "RIGHT DEAD ZONE", st.pad_dead_right, crate::settings::DEAD_ZONE_MAX, Action::PadDeadRight(false), Action::PadDeadRight(true));
+            slider(self, y + 111.0 * s, "CENTER SOFTNESS (EXPO)", st.expo, 1.0, Action::PadExpo(false), Action::PadExpo(true));
+            self.button(if st.pad_fine_aim { "[X] FINE AIM WITH ZOOM" } else { "[ ] FINE AIM WITH ZOOM" }, "", left, y + 140.0 * s, false, Action::PadFineAim);
+            self.button(if st.pad_rudder_click { "[X] X OR L3 FOR RUDDER" } else { "[ ] X OR L3 FOR RUDDER" }, "", left, y + 162.0 * s, false, Action::PadRudderClick);
+        } else {
+            self.cv.paragraph("LET GO OF BOTH STICKS. Calibration measures each stick separately. Keep the controller still until it finishes.", left, y + 65.0 * s, w * 0.45, sm, 1.6, AMBER);
+        }
+        self.cv.paragraph(if st.pad_layout == PadLayout::Classic {
+            "L3 rudder applies to COMBAT layout. CLASSIC keeps LB / RB rudder and L3 countermeasures."
+        } else if st.click_rudder() {
+            "Hold X or click and hold L3, then move left / right for rudder. X + L3 releases chaff / flare."
+        } else {
+            "Hold X and move left / right for rudder. Enable L3 above to use either button. L3 releases chaff / flare."
+        }, left, y + 190.0 * s, w * 0.45, sm, 1.4, DIM);
+
+        self.cv.text("LIVE INPUT: LEFT / RIGHT", right, y + 49.0 * s, sm, CREAM, Align::Left);
+        for (i, (raw, filtered, dead)) in [(pad.raw.left, st.flight_stick(pad.state.left, 0.0), st.pad_dead_left), (pad.raw.right, (crate::settings::stick_expo(pad.state.right.0, 0.5), crate::settings::stick_expo(pad.state.right.1, 0.5)), st.pad_dead_right)].into_iter().enumerate() {
+            let (cx, cy, r) = (right + (46.0 + i as f32 * 124.0) * s, y + 102.0 * s, 34.0 * s);
+            self.cv.circle(cx, cy, r, 1.0, LINE_HOT);
+            self.cv.circle(cx, cy, r * dead as f32, 1.0, AMBER);
+            self.cv.line(cx - r, cy, cx + r, cy, 1.0, LINE);
+            self.cv.line(cx, cy - r, cx, cy + r, 1.0, LINE);
+            self.cv.rect(cx + raw.0 as f32 * r - s, cy - raw.1 as f32 * r - s, 2.0 * s, 2.0 * s, AMBER);
+            self.cv.circle(cx + filtered.0 as f32 * r, cy - filtered.1 as f32 * r, 2.0 * s, s, GREEN);
+        }
+        self.cv.text("AMBER: RAW / DEAD ZONE", right, y + 146.0 * s, sm, AMBER, Align::Left);
+        self.cv.text("GREEN: FLIGHT / LOOK OUTPUT", right, y + 159.0 * s, sm, GREEN, Align::Left);
+        self.cv.text(&format!("RAW DRIFT  L {:.1}%  R {:.1}%", pad.raw.left.0.hypot(pad.raw.left.1) * 100.0, pad.raw.right.0.hypot(pad.raw.right.1) * 100.0), right, y + 176.0 * s, sm, CREAM, Align::Left);
+        self.cv.paragraph("Lower dead zone until small movements register. If the green dot moves at rest, raise it or calibrate. More softness gives finer corrections near center. Full travel keeps full authority.", right, y + 194.0 * s, w * 0.44, sm, 1.4, DIM);
+        self.button(if pad.calibrating() { "CANCEL CALIBRATION" } else { "AUTO CALIBRATE DRIFT" }, "", left, y + 245.0 * s, false, Action::PadCalibrate);
+        self.cv.paragraph(&pad.calibration_message(now), left, y + 270.0 * s, w - 24.0 * s, sm, 1.4, AMBER);
+        self.button("BACK", "ESC", left, y + h - 26.0 * s, false, Action::PadSetup);
+        if !pad.calibrating() {
+            let bw = self.button_width("RESET CONTROLLER", "");
+            self.button("RESET CONTROLLER", "", x + w - 12.0 * s - bw, y + h - 26.0 * s, false, Action::PadReset);
         }
     }
 
@@ -1309,6 +1478,7 @@ pub struct StickCue {
     pub roll: f64,
     pub source: PitchSource,
     pub layout: PadLayout,
+    pub click_rudder: bool,
     pub pad: bool,
     pub brake: bool,
 }
@@ -1496,7 +1666,8 @@ pub fn chase_overlay(cv: &mut Canvas, w: f32, h: f32, a: &Aircraft, m: &Mission,
     }
     cv.text(if cue.pad { "{Y} COCKPIT VIEW" } else { "V  COCKPIT VIEW" }, w - edge, h - 24.0 * s, sm, with_alpha(HUD, 0.68), Align::Right);
     let hint = if cue.pad {
-        if cue.layout == PadLayout::Combat { "{LS} PITCH / ROLL  ,  {X} + {LS} RUDDER" }
+        if cue.layout == PadLayout::Combat && cue.click_rudder { "{LS} PITCH / ROLL  ,  HOLD {X} / {L3} RUDDER" }
+        else if cue.layout == PadLayout::Combat { "{LS} PITCH / ROLL  ,  {X} + {LS} RUDDER" }
         else { "{LS} PITCH / ROLL  ,  {LB} {RB} RUDDER" }
     } else if cue.source == PitchSource::Mouse { "A / D  ROLL  ,  MOUSE PITCH / YAW" }
     else { "A / D  ROLL  ,  W / S  PITCH  ,  MOUSE YAW" };
@@ -1593,7 +1764,7 @@ pub fn training_overlay(cv: &mut Canvas, w: f32, h: f32, t: &crate::tutorial::Tr
     let (title, detail, _) = t.instruction();
     cv.text(&format!("{}  {}/{}: {}", t.lesson.name(), t.stage+1, t.lesson.steps(), title),x+8.0*s,y+9.0*s,sm,ACID,Align::Left);
     cv.paragraph(detail,x+8.0*s,y+20.0*s,pw-16.0*s,sm,1.3,CREAM);
-    cv.text(&t.hint(&settings.keys,pad,settings.pad_layout,settings.pitch),x+8.0*s,y+51.0*s,sm,AMBER,Align::Left);
+    cv.text(&t.hint(&settings.keys,pad,settings.pad_layout,settings.pitch,settings.click_rudder()),x+8.0*s,y+51.0*s,sm,AMBER,Align::Left);
     cv.rect(x+8.0*s,y+60.0*s,pw-16.0*s,2.0*s,LINE);
     cv.rect(x+8.0*s,y+60.0*s,(pw-16.0*s)*(t.held/t.duration().max(0.01)).min(1.0) as f32,2.0*s,ACID);
 }

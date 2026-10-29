@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
-import gzip, hashlib, json, math, re, shlex, struct
+import gzip, hashlib, json, math, re, shlex, struct, zlib
 from pathlib import Path
 import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
@@ -218,6 +218,23 @@ def styled_texture(image, cockpit=False):
     fixed=Image.new("P",(1,1));fixed.putpalette(palette+palette[:3]*((768-len(palette))//3))
     return flat.quantize(palette=fixed,dither=Image.Dither.NONE).convert("RGB")
 
+def su27_metal_colour(name, refs, normal):
+    """Flat heat shields and nozzle petals; leave painted atlas islands intact.
+
+    The rectangles are the bare engine shrouds in the pinned 2048 atlas,
+    in top-left image coordinates. No source pixels or camouflage are changed.
+    """
+    if name=="EngineBlocks":return (.065,.075,.080)
+    if name=="HULL_Hull_Upper.002":return (.29,.31,.32) if normal[2]<.65 else (.10,.115,.12)
+    if name!="HULL_Hull_Upper":return None
+    u=sum(r[1] for r in refs)/len(refs)
+    v=1.-sum(r[2] for r in refs)/len(refs)
+    if .663<=v<=.845 and (.456<=u<=.517 or .582<=u<=.644):
+        return (.43,.45,.46)
+    if .834<=u<=.995 and .003<=v<=.186:
+        return (.43,.45,.46)
+    return None
+
 def generate(source,out):
     from PIL import Image
     import shutil
@@ -234,7 +251,7 @@ def generate(source,out):
         if p not in textures:textures[p]=styled_texture(Image.open(p),cockpit=True); USED.add(p)
         return p
     for kind in ("f18","su27"):
-        parts={n:[] for n in ("body","canopy","stab0","stab1","flap0","flap1","rudder0","rudder1","brake","gear0","gear1","gear2","cockpit","frame","nose_tyre")}
+        parts={n:[] for n in ("body","canopy","stab0","stab1","flap0","flap1","aileron0","aileron1","rudder0","rudder1","brake","gear0","gear1","gear2","cockpit","frame","nose_tyre")}
         texparts={}; objects=[]
         # Compact flat-colour exterior atlas; normalized UVs retain source shapes.
         skin_sources=[source/"f18/f18top.rgb",source/"f18/f18tail.rgb"] if kind=="f18" else [source/"su27/Models/USSR177IAP.png",source/"su27/Models/fabric.png"]
@@ -278,13 +295,15 @@ def generate(source,out):
                         if kind=="su27" and part=="body" and -4.<centre[2]<-1. and abs(centre[0])>.65 and centre[1]<0 and abs(n[2])>.7:col=(.045,.055,.06)
                         if kind=="su27" and part=="body" and sum(p[1] for p in tri)/3<-.65:col=(.74,.80,.82)
                     if ext:col=o.materials[mat].rgb
+                    metal=su27_metal_colour(o.name,[refs[k] for k in ids],n) if kind=="su27" and part=="body" else None
+                    if metal is not None:col=metal
                     vertices=[]
                     for k in ids:
                         uv=refs[k][1:]
-                        if ext:
+                        if ext and metal is None:
                             tx,ty,tw,th=ext
                             uv=((tx+.5+uv[0]*(tw-1))/sw,(ty+.5+(1.-uv[1])*(th-1))/sh)
-                        vertices.append((*ps[k],*n,*col,uv[0],1.-uv[1]) if tex else ((*ps[k],*n,*col,*uv) if ext else (*ps[k],*n,*col,-1.,-1.)))
+                        vertices.append((*ps[k],*n,*col,uv[0],1.-uv[1]) if tex else ((*ps[k],*n,*col,*uv) if ext and metal is None else (*ps[k],*n,*col,-1.,-1.)))
                     if kind=="su27" and part=="cockpit" and "/LeftPanels/" in o.path.as_posix():
                         for poly in without_rectangle(vertices,-.493,-.377,-6.198,-5.788):
                             for j in range(1,len(poly)-1):
@@ -312,7 +331,8 @@ def generate(source,out):
                 if name.startswith(("Sidewinder","ExternalFlame","InternalFlame","RightDoor","LeftDoor","FrontDoor","Ramp")):continue
                 if name in ("RightWheel","LeftWheel","FrontWheel"):part="gear0" if name=="FrontWheel" else ("gear1" if name=="LeftWheel" else "gear2")
                 elif name.startswith("Elevator"):part="stab0" if "Left" in name else "stab1"
-                elif name.startswith(("Flaps","Aileron")):part="flap0" if "Left" in name else "flap1"
+                elif name.startswith("Flaps"):part="flap0" if "Left" in name else "flap1"
+                elif name.startswith("Aileron"):part="aileron0" if "Left" in name else "aileron1"
                 elif name.startswith("Rudder"):part="rudder0" if "Left" in name else "rudder1"
                 elif name=="Canopy_Glass":part="canopy"
                 elif name.startswith(("cube","cylinder","Stick","Truster","box")):continue
@@ -369,6 +389,7 @@ def generate(source,out):
         for tex,arr in texparts.items():
             img=qoi(textures[tex]);data.extend(struct.pack("<II",len(arr),len(img))+struct.pack("<"+"f"*len(arr),*arr)+img)
         (out/(kind+".vrm")).write_bytes(data)
+        (out/(kind+".vrz")).write_bytes(b"VRZ1"+struct.pack("<I",len(data))+zlib.compress(data,9))
         report[kind]={"parts":{k:len(v)//33 for k,v in parts.items()},"textured_parts":len(texparts),"textures":[{"source":k.relative_to(source).as_posix(),"size":textures[k].size,"style":"flat-64"} for k in texparts],"objects":objects}
         print(kind,report[kind]["parts"],"textures",len(texparts),"bytes",len(data),flush=True)
     (out/"geometry.json").write_text(json.dumps(report,indent=2)+"\n", newline="\n")

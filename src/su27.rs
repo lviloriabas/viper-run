@@ -22,22 +22,26 @@ pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
     ),
 ];
 pub fn build() -> Airframe {
-    crate::flightgear::build(Type::Su27)
+    let mut a=crate::flightgear::build(Type::Su27);
+    for side in [-1.0,1.0] {
+        let p=v3(side*2.2,0.3464,0.14);let q=v3(side*7.15,0.3464,4.2485);
+        let n=v3(-side*0.83,0.0,1.0);
+        let(fixed,slat)=crate::articulation::extract(a.body,&[(n,n.dot(p)),(-V3::X*side,-2.2),(V3::X*side,7.15)]);
+        a.body=fixed;a.controls.push(crate::articulation::Surface{mesh:slat,
+            hinge:crate::articulation::Hinge{pivot:p,axis:((q-p)*side).norm(),drive:crate::articulation::Drive::Slat,side}});
+    }
+    a
 }
 pub(crate) fn brake_hinge() -> V3 {
     crate::flightgear::native(Type::Su27, v3(8.95, 1.176, 0.))
 }
-pub(crate) fn flap_hinge(side: f64) -> (V3, V3) {
-    {
-        let a = crate::flightgear::native(Type::Su27, v3(14.385, 0.2, -side * 2.15));
-        let b = crate::flightgear::native(Type::Su27, v3(15.700, 0.2, -side * 5.25));
-        ((a + b) * 0.5, ((b - a) * side).norm())
-    }
+pub(crate) fn flap_hinge(side:f64)->(V3,V3) {
+    let a=v3(side*2.16955,0.29362,3.44078);
+    let b=v3(side*5.34686,0.31700,4.85649);
+    (a,((b-a)*side).norm())
 }
-pub(crate) fn rudder_hinge(side: f64) -> (V3, V3) {
-    let a = crate::flightgear::native(Type::Su27, v3(17.3, 0.672, -side * 2.04));
-    let b = crate::flightgear::native(Type::Su27, v3(17.9, 2.7, -side * 2.04));
-    ((a + b) * 0.5, (b - a).norm())
+pub(crate) fn rudder_hinge(side:f64)->(V3,V3) {
+    (v3(side*2.12870,0.26727,6.15312),v3(0.0,2.21600,0.46366).norm())
 }
 pub fn store_shift(at: V3) -> V3 {
     let x = at.x.abs();

@@ -26,7 +26,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
     let root = std::path::Path::new(path);
     fs::create_dir_all(root)?;
     for kind in [crate::sim::Type::F18, crate::sim::Type::Su27,crate::sim::Type::Mig29] {
-        let name=match kind{crate::sim::Type::F18=>"f18",crate::sim::Type::Su27=>"su27",_=>"mig29"};
+        let name=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>"f18",crate::sim::Type::Su27=>"su27",_=>"mig29"};
         let mut hardware=Mesh::new();
         if kind==crate::sim::Type::Mig29{mig::build_static(&mut hardware);}else{hardware=modern::build(kind);}
         let mut parts = vec![("hardware".to_owned(), hardware)];
@@ -59,7 +59,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
     let mut parts=Vec::new();
     for kind in crate::sim::Type::ALL {
         let jet=match kind{crate::sim::Type::F16=>"f16",crate::sim::Type::Mig29=>"mig29",
-            crate::sim::Type::F18=>"f18",_=>"su27"};
+            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>"f18",_=>"su27"};
         for (phase,pull,deploy) in [("rest",0.0,None),("pulled",1.0,None),
             ("separating",1.0,Some(crate::eject::DEPLOY_FRAMES/2)),
             ("hanging",1.0,Some(crate::eject::DEPLOY_FRAMES-1))] {
@@ -294,7 +294,7 @@ pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012
 /// Fixed readout positions adapt to the aperture; aiming directions do not.
 fn fixed_hud_coords(kind:crate::sim::Type,x:f64,y:f64)->(f64,f64) {
     (if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {x*0.90} else {x},match kind {
-        crate::sim::Type::F18=>y*0.68-50.0,
+        crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>y*0.68-50.0,
         crate::sim::Type::Su27=>y*0.72,
         _=>y,
     })
@@ -605,7 +605,7 @@ impl Cockpit {
         let kind=aircraft.kind;
         let mig=kind.russian();
         let (statics,canopy)=match kind {
-            crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][2]),
+            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>(&self.extra[0][0],&self.extra[0][2]),
             crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][2]),
             crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[2]),
             crate::sim::Type::F16=>(&self.statics,&self.canopy),
@@ -619,7 +619,7 @@ impl Cockpit {
         ctx.apply_bindings(&statics.bind);
         ctx.apply_uniforms(UniformsSource::table(&u));
         ctx.draw(0, statics.count, 1);
-        if let Some(i)=match kind{crate::sim::Type::F18=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+        if let Some(i)=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
             for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
         }
 
@@ -650,7 +650,7 @@ impl Cockpit {
         }
 
         ctx.apply_pipeline(&self.glass_pip);
-        let glass=&self.hud_glass[match kind {crate::sim::Type::F16=>0,crate::sim::Type::Mig29=>1,crate::sim::Type::F18=>2,crate::sim::Type::Su27=>3}];
+        let glass=&self.hud_glass[match kind {crate::sim::Type::F16=>0,crate::sim::Type::Mig29=>1,crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>2,crate::sim::Type::Su27=>3}];
         ctx.apply_bindings(&glass.bind);
         ctx.apply_uniforms(UniformsSource::table(&CockpitU { alpha: 0.05, tint: [0.10, 0.16, 0.13], ..u }));
         ctx.draw(0, glass.count, 1);
@@ -667,7 +667,7 @@ impl Cockpit {
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
     pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, kind: crate::sim::Type, mirror_texture:Option<TextureId>) {
         let (statics,faces)=match kind {
-            crate::sim::Type::F18=>(&self.extra[0][0],&self.extra[0][1]),
+            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>(&self.extra[0][0],&self.extra[0][1]),
             crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][1]),
             crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[1]),
             crate::sim::Type::F16=>(&self.statics,&self.faces),
@@ -683,7 +683,7 @@ impl Cockpit {
         ctx.draw(0, self.dyn_count as i32, 1);
         ctx.apply_pipeline(&self.face_pip);
         ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
-        if let Some(i)=match kind{crate::sim::Type::F18=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+        if let Some(i)=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
             for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
         }
         ctx.apply_bindings(&faces.bind);
@@ -692,7 +692,7 @@ impl Cockpit {
         ctx.apply_bindings(&self.dyn_face_bind);
         ctx.draw(0, self.dyn_face_count as i32, 1);
         if let (Some(texture),Some(i))=(mirror_texture,match kind{
-            crate::sim::Type::Mig29=>Some(0),crate::sim::Type::F18=>Some(1),
+            crate::sim::Type::Mig29=>Some(0),crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(1),
             crate::sim::Type::Su27=>Some(2),_=>None}) {
             let part=&self.mirror_faces[i];
             let bind=Bindings{images:vec![texture],..part.bind.clone()};
@@ -1554,7 +1554,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     let (rotate,approach,aoa,g)=match a.kind {
         crate::sim::Type::F16=>(150.0,150.0,"13 DEG","+9.0 / -3.0"),
         crate::sim::Type::Mig29=>(130.0,140.0,"11 DEG","+8.0 / -3.0"),
-        crate::sim::Type::F18=>(150.0,145.0,"8.1 DEG","+7.5 / -3.0"),
+        crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>(150.0,145.0,"8.1 DEG","+7.5 / -3.0"),
         crate::sim::Type::Su27=>(165.0,155.0,"10 DEG","+9.0 / -3.0"),
     };
     cv.text("LANDING CARD", r.x + r.w / 2.0, r.y + 18.0, 2.0, ink, Align::Center);
@@ -2218,8 +2218,11 @@ fn reflected_mirror_uv(p:V3, normal:V3,eye:V3)->(f64,f64) {
 }
 
 fn curved_mirror(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, sampling: MirrorSampling) {
+    curved_mirror_roundness(m,w,h,place,housing,sampling,0.25);
+}
+fn curved_mirror_roundness(m: &mut Mesh, w: f64, h: f64, place: &dyn Fn(f64, f64, f64) -> V3, housing: Rgb, sampling: MirrorSampling, roundness:f64) {
     let rear_offset=match sampling{MirrorSampling::Panorama(x)=>x,MirrorSampling::Reflection(_)=>0.0};
-    let corners = rounded_rect(w, h, w.min(h) * 0.25, 4);
+    let corners = rounded_rect(w, h, w.min(h) * roundness, 6);
     // Subdivide the long edges as well as the rounded corners: the panes
     // follow the canopy arch, so a single chord would flatten their rims.
     let mut outline = Vec::new();

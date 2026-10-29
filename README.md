@@ -32,15 +32,17 @@ polars, engine ratings, gear, flap schedules and weapon stations.
 [New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
 variant data, calibration and shared game approximations.
 
-ONLINE opens a server browser with mode filters, pilot counts and pages.
-Select an open room to join, or use CREATE ROOM for a public/private lobby.
-Guests mark READY; the host launches. The relay path uses outbound TCP for
-gameplay and voice, so players do not need inbound firewall exceptions or
-port forwarding. LAN DIRECT offers invitation-only UDP games.
+ONLINE, CREATE GAME starts the server inside the game. No separate program or
+server address is needed. Friends on the same network open NEARBY and select
+JOIN, or use COPY LAN INVITE and PASTE AND JOIN. Guests mark READY; the host
+launches. Leaving the room also closes its embedded server.
 
-Run viper-server on a reachable machine (TCP 42861), then enter its address
-in ONLINE. There is no automatically deployed public relay. The address and
-callsign are remembered. The microphone starts off.
+For Internet play the host tries temporary UPnP router setup in the background.
+Share COPY INTERNET INVITE when available. Hosting depends on router, firewall
+and provider support; CGNAT can require an external relay. An optional relay
+address can be selected inside CREATE GAME; ADVANCED browses its rooms. The
+dedicated viper-server remains available for operators. There is no automatically
+deployed public relay. The microphone starts off.
 
 See [instrucciones en español](docs/MULTIPLAYER-ES.md),
 [setup, Defender distinctions and verification](docs/MULTIPLAYER.md),
@@ -105,8 +107,8 @@ fire with `RT`.
 | `RB` | Lock the target nearest the helmet line of sight or the nose; again for the next; held half a second drops the lock |
 | `LB` / `LT` | Throttle up / down; `LB` held to the stop lights the afterburner |
 | `LT` on the ground | Wheel brakes |
-| `X` (held) | Rudder: the left stick's X axis works the pedals instead of the roll |
-| Left-stick click | Countermeasures: chaff and flare |
+| `X` (held), or optionally `L3` (click and hold) | Rudder: the left stick's X axis works the pedals instead of the roll. Enable both under CONTROLLER SETUP |
+| Left-stick click | Countermeasures: chaff and flare. With L3 rudder enabled, use `X` + `L3` instead |
 | `A` | Cycle the weapon and master mode |
 | `B` | Airbrake deployed / retracted |
 | `Y` | Toggle cockpit / chase view |
@@ -133,6 +135,32 @@ a resting controller does not keep overriding keyboard prompts.
 CLASSIC is the earlier layout: `RT` / `LT` throttle (`RT` to the stop for
 afterburner), `LB` / `RB` rudder, `A` fire, d-pad up / down cycle weapon and
 lock, `X` landing gear; the rest is as above.
+
+Open **Controls / Config, CONTROLLER SETUP** from the menu or during a sortie.
+This page is also available with the mouse, even without a connected pad.
+Left and right radial dead zones are independent, adjustable from 0% to 35%
+in 1% steps. The live monitor shows raw input and the resulting flight / look
+output. Lower the dead zone for small corrections; increase it if the output
+moves with the sticks untouched. Both start at 10% for compatibility.
+
+**AUTO CALIBRATE DRIFT** is optional. Release both sticks: after 1.5 seconds
+to settle, it measures three seconds of raw readings and saves separate dead
+zones, rounded up with a 1.5% safety margin. Movement, disconnection or an
+interrupted measurement keeps the previous settings. Cancel at any time with
+B, Esc or the cancel button. This measures resting drift, not stick travel.
+Run it again when changing controllers; settings apply to the active pad.
+
+**CENTER SOFTNESS (EXPO)** makes small stick movements gentler while preserving
+full authority at the rim. New settings start at 65%; previously saved values
+are retained. **FINE AIM WITH ZOOM** adds center softness while holding zoom
+and can be switched off. Flight inputs have no added smoothing delay.
+The right stick also has a soft center for finer helmet / camera adjustment.
+
+**X OR L3 FOR RUDDER** keeps X plus left stick and optionally enables click
+and hold L3 plus left stick at the same time in COMBAT. L3 means the stick's
+button, not pulling the stick back. Countermeasures then use X + L3 to avoid
+releasing them while steering. Both stick clicks still toggle the limiters.
+CLASSIC retains its existing bumper rudder and L3 countermeasures.
 
 On Windows the pad is read through XInput; on Linux through the kernel
 joystick device (`/dev/input/js*`, xpad driver layout). Unplugging it in
@@ -611,9 +639,11 @@ out of margin.
 - Procedural audio synthesised on its own thread: engine, wind, rumble and
   turbine whine follow throttle, speed and afterburner, plus warning tones,
   the gun's buzz, the Sidewinder's growl and lock tone, launches, blasts and
-  the RWR. Engine pitch follows spool RPM; independently filtered noise and
-  drifting turbine partials avoid a repeating engine loop. The MiG uses two
-  independent sources. Airframe-specific voice warnings have priorities,
+  the RWR. Engine pitch and exhaust level follow spool RPM. Broadband exhaust
+  and noisy compressor bands keep the roar continuous, without coherent tones
+  beating like propeller blades on twin-engine jets. Each engine has an
+  independent noise source; the demo uses the same presets as flight audio.
+  Airframe-specific voice warnings have priorities,
   repeat delays and engine ducking; F-16 low-speed and gear warnings use tones.
   Voice assets are original speech synthesis, not recordings from an aircraft
   or another game. See [assets/voices/README.md](assets/voices/README.md).

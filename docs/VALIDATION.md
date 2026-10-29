@@ -1,5 +1,94 @@
 # Validation
 
+## Integrated controller precision, audio and multiplayer, 28 October 2026
+
+Final distributions contain the controller setup page, optional resting-drift
+calibration, independent radial dead zones, center response and zoom precision,
+optional L3 rudder, revised jet audio, final flat Su-27 metal and Hornet bow,
+and the in-game multiplayer host. Sources and binaries were integrated after
+the other active chats completed. Controller choices and sources are documented
+in [CONTROLLER-PRECISION.md](CONTROLLER-PRECISION.md).
+
+Final checks:
+
+- Rust: 321 game tests and 16 server tests passed, with no failures or ignored tests.
+- Python: all 10 importer checks and three warning-speaker checks passed. Neural
+  synthesis dependencies now load only for regeneration; DSP checks need NumPy.
+- Controller UI integration passed on Linux and native Windows, using actual
+  mouse, keyboard and controller dispatch, L3 rudder and calibration cancellation.
+- All 48 controller/configuration layouts passed at 640x360, 1280x720 and
+  1920x1080, with both prompt styles. The final native Windows executable also
+  passed nine setup/calibration/L3 layouts at those three sizes.
+- Native Windows future-UI checks passed, including hosting, ready/launch/leave
+  and clipboard invitation handling.
+- Real game processes passed all 18 Linux cases (six modes with UDP, external TCP
+  and embedded TCP) and all six native Windows embedded-host modes.
+- Microsoft Defender reported no threats in either final Windows executable.
+- The four distribution checksums match `dist/SHA256SUMS.txt`.
+
+Native multiplayer QA now uses a dedicated configuration directory, rather than
+inheriting the player's fullscreen, key or controller preferences. Two inherited
+fullscreen windows could suspend one another on Windows and prevent reports from
+exiting. The isolated run passed all six modes with the original assertions and
+deadlines. No test was skipped or relaxed. Results remain loopback checks, not
+physical router or two-PC acceptance tests. Controller drift and button behavior
+were checked with synthetic readings and dispatch; physical-controller feel still
+depends on the player's hardware and the chosen settings.
+
+Final game hashes:
+
+- Linux: `8ed73162d282dac9d84d65fc4b459ea1789056899f70c3869520743acc81292c`.
+- Windows: `e4300d2ec6882b9cc9b61c89266a82e15dabdc6a4fc3b433361e3822a8d77b74`.
+
+Reports, native captures and integration logs are under
+`target/controller-review/`. The inspected Windows copy matches the distributed
+binary byte for byte. The following older sections retain their own snapshot
+hashes and validation scope.
+
+## Su-27 metal and circular Hornet bow, 28 October 2026
+
+The Su-27 engine shrouds, underside metal and nozzle petals use four flat grey
+materials. Original positions, normals and the camouflage QOI are preserved.
+The F/A-18C has a circular upper bow, rounded mirrors seated inside its aft lip
+and short paired hinges. The original sill contacts remain connected. Reference,
+dimensions, resource counts and limitations are in
+[NOZZLE-CANOPY-STYLE.md](NOZZLE-CANOPY-STYLE.md).
+
+The combined model and in-game multiplayer snapshot passed 311 game tests and
+16 server tests. All 10 importer tests passed. Native inspection produced 67
+Linux airframe/cockpit captures and 21 Windows mirror captures. Blender review
+saved the exact cockpit, cutaway views, source frame and Navy photo in
+`target/model-review/texture-bow/cockpit/blender/f18-cockpit-with-references.blend`.
+Regression coverage includes the circular cap, physical mounts, reflection
+bounds and small head movements. Asset comparison confirms that only colour
+and UV change on 1,491 metal vertices; no camouflage pixel changes.
+
+The pre-underside build passed all 18 Linux real-process multiplayer cases
+(six modes, direct UDP, external TCP relay and embedded relay). Initial runs
+overlapped several graphics capture suites and timed out. Serial execution
+passed with the same assertions and deadlines. This is an environment scheduling
+requirement for native QA, rather than a relaxed test. Per-case reports and logs
+are under `target/model-review/texture-bow/`.
+
+The same retained Windows snapshot passed native future-UI interaction checks,
+external Su-27 views and all six embedded-host modes, verified in separate runs.
+Repeated suite launches intermittently exceeded the unchanged eight-second
+invitation startup deadline during concurrent development. Four modes passed in
+`windows-local-qa.log`; escort and defense passed in `windows-remaining.log`.
+Windows per-case reports are retained in the chat's local visualization directory,
+under `model-qa/`. The definitive underside material extension passed all ten
+importer checks and was built and inspected in the Linux native view
+`texture-bow/su27-underside-final.png`.
+
+That snapshot's Windows game is 12,753,408 bytes, SHA-256
+`4be9e57b3c635ae85a603819dcf4ab5bee049c02dede40a048dc90f936acafec`;
+Linux game is 12,944,304 bytes, SHA-256
+`3c799fddbedafb83aa30090b27c7c8890abc5b0cfabf86c3d8374fb583cdefd0`.
+Both Windows executables passed Defender without threats. These hashes identify
+the retained `texture-bow/bin/` snapshot, before the final underside material
+extension and concurrent controls/audio edits. Rebuild final distributions and
+refresh affected native captures and hashes after all active chats finish.
+
 ## Unified model style, cockpit clearance and tactical units, 27 October 2026
 
 The Hornet/Flanker exterior palettes use 48 clean colours; source cockpit

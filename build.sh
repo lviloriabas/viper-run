@@ -18,10 +18,11 @@ else
 fi
 
 mkdir -p dist
-cp target/x86_64-unknown-linux-gnu/release/viper-run dist/viper-run-linux-x86_64
-cp target/x86_64-pc-windows-gnu/release/viper-run.exe dist/viper-run-windows-x86_64.exe
-cp target/x86_64-unknown-linux-gnu/release/viper-server dist/viper-server-linux-x86_64
-cp target/x86_64-pc-windows-gnu/release/viper-server.exe dist/viper-server-windows-x86_64.exe
+target_dir="${CARGO_TARGET_DIR:-target}"
+cp "$target_dir/x86_64-unknown-linux-gnu/release/viper-run" dist/viper-run-linux-x86_64
+cp "$target_dir/x86_64-pc-windows-gnu/release/viper-run.exe" dist/viper-run-windows-x86_64.exe
+cp "$target_dir/x86_64-unknown-linux-gnu/release/viper-server" dist/viper-server-linux-x86_64
+cp "$target_dir/x86_64-pc-windows-gnu/release/viper-server.exe" dist/viper-server-windows-x86_64.exe
 cp docs/MULTIPLAYER-ES.md dist/INSTRUCCIONES-MULTIJUGADOR.md
 cp docs/MULTIPLAYER.md dist/MULTIPLAYER.md
 cp docs/MULTIPLAYER-MISSIONS.md docs/VOICE-CHAT.md dist/

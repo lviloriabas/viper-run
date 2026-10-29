@@ -104,16 +104,24 @@ pub enum Type {
     Mig29,
     F18,
     Su27,
+    F18E,
+    EA18G,
 }
 
 impl Type {
-    pub const ALL: [Type; 4] = [Type::F16, Type::Mig29, Type::F18, Type::Su27];
-    pub fn index(self) -> usize { match self { Type::F16 => 0, Type::Mig29 => 1, Type::F18 => 2, Type::Su27 => 3 } }
+    pub const ALL: [Type; 6] = [Type::F16, Type::Mig29, Type::F18, Type::Su27,Type::F18E,Type::EA18G];
+    pub fn index(self) -> usize { match self { Type::F16 => 0, Type::Mig29 => 1, Type::F18 => 2, Type::Su27 => 3,Type::F18E=>4,Type::EA18G=>5 } }
+    pub fn base(self)->Type{match self{Type::F18E|Type::EA18G=>Type::F18,_=>self}}
+    pub fn hornet(self)->bool{self.base()==Type::F18}
+    pub fn modern(self)->bool{self.hornet()||self==Type::Su27}
+    pub fn id(self)->&'static str{match self{Type::F16=>"f16",Type::Mig29=>"mig29",Type::F18=>"f18",Type::Su27=>"su27",Type::F18E=>"f18e",Type::EA18G=>"ea18g"}}
     pub fn parse(text: &str) -> Option<Type> {
         match text.to_ascii_lowercase().as_str() {
             "f16" | "f-16" => Some(Type::F16), "mig29" | "mig-29" => Some(Type::Mig29),
             "f18" | "fa18" | "f/a-18" | "hornet" => Some(Type::F18),
-            "su27" | "su-27" | "flanker" => Some(Type::Su27), _ => None,
+            "su27" | "su-27" | "flanker" => Some(Type::Su27),
+            "f18e"|"fa18e"|"superhornet"|"super-hornet"=>Some(Type::F18E),
+            "ea18g"|"ea-18g"|"growler"=>Some(Type::EA18G), _ => None,
         }
     }
     pub fn russian(self) -> bool { matches!(self, Type::Mig29 | Type::Su27) }
@@ -123,42 +131,43 @@ impl Type {
     pub fn engine_count(self) -> usize { if self == Type::F16 { 1 } else { 2 } }
     /// Operating envelope used for the game's overspeed warning. It does
     /// not clamp the physical speed or substitute for the aerodynamic polar.
-    pub fn vmax_kcas(self)->f64{match self{Type::F16=>crate::air::VMAX_KCAS,Type::Mig29=>1500.0/1.852,Type::F18=>600.0,Type::Su27=>1400.0/1.852}}
-    pub fn max_mach(self)->f64{match self{Type::F16=>crate::air::MACH_MAX,Type::Mig29=>2.35,Type::F18=>1.8,Type::Su27=>2.35}}
-    pub fn gear_limit_kt(self) -> f64 { match self { Type::F18 => 250.0, Type::Su27 => 500.0 / 1.852, _ => GEAR_LIMIT_KT } }
-    pub fn flap_limit_kt(self) -> f64 { match self { Type::F18 => 250.0, Type::Su27 => 600.0 / 1.852, _ => FLAP_BLOWBACK_KT } }
-    pub fn gear_drag(self)->f64{match self{Type::F18=>0.026,Type::Su27=>0.024,_=>GEAR_DRAG}}
-    pub fn flap_drag(self)->f64{match self{Type::F18=>0.085,Type::Su27=>0.045,_=>FLAP_CD}}
-    pub fn gear_flap_fraction(self)->f64{match self{Type::F18=>30.0/45.0,Type::Su27=>18.0/25.0,_=>1.0}}
-    pub fn flap_angle(self) -> f64 { match self { Type::F18 => 45.0, Type::Su27 => 25.0, _ => FLAP_MAX } }
-    pub fn critical_alpha(self) -> f64 { match self { Type::F18 => 35.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
-    pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18 => crate::hornet::EYE, Type::Su27 => crate::su27::EYE } }
+    pub fn vmax_kcas(self)->f64{match self{Type::F16=>crate::air::VMAX_KCAS,Type::Mig29=>1500.0/1.852,Type::F18|Type::F18E|Type::EA18G =>600.0,Type::Su27=>1400.0/1.852}}
+    pub fn max_mach(self)->f64{match self{Type::F16=>crate::air::MACH_MAX,Type::Mig29=>2.35,Type::F18|Type::F18E|Type::EA18G =>1.8,Type::Su27=>2.35}}
+    pub fn gear_limit_kt(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 250.0, Type::Su27 => 500.0 / 1.852, _ => GEAR_LIMIT_KT } }
+    pub fn flap_limit_kt(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 250.0, Type::Su27 => 600.0 / 1.852, _ => FLAP_BLOWBACK_KT } }
+    pub fn gear_drag(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>0.026,Type::Su27=>0.024,_=>GEAR_DRAG}}
+    pub fn flap_drag(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>0.085,Type::Su27=>0.045,_=>FLAP_CD}}
+    pub fn gear_flap_fraction(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>30.0/45.0,Type::Su27=>18.0/25.0,_=>1.0}}
+    pub fn flap_angle(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 45.0, Type::Su27 => 25.0, _ => FLAP_MAX } }
+    pub fn critical_alpha(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 35.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
+    pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18|Type::F18E|Type::EA18G => crate::hornet::EYE, Type::Su27 => crate::su27::EYE } }
     pub fn nozzles(self) -> &'static [V3] {
         const F16_NOZZLES:[V3;1]=[crate::airframe::NOZZLE_EXIT];
         const MIG_NOZZLES:[V3;2]={let n=crate::mig29::NOZZLE;[v3(-n.x,n.y,n.z),v3(n.x,n.y,n.z)]};
         match self { Type::F16 => &F16_NOZZLES,
             Type::Mig29 => &MIG_NOZZLES,
-            Type::F18 => &crate::hornet::NOZZLES, Type::Su27 => &crate::su27::NOZZLES }
+            Type::F18|Type::F18E|Type::EA18G => &crate::hornet::NOZZLES, Type::Su27 => &crate::su27::NOZZLES }
     }
     pub fn store_shift(self, at: V3) -> V3 {
-        match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18 => crate::hornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
+        match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18|Type::F18E|Type::EA18G => crate::hornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
     }
     /// Tyre radius used to place each rendered axle above its contact point.
     pub fn wheel_radius(self, i: usize) -> f64 {
         match self {
             Type::F16 => if i==0{0.22}else{0.35},
             Type::Mig29 => if i==0{0.285}else{0.42},
-            Type::F18 => if i==0{0.25}else{0.34},
+            Type::F18|Type::F18E|Type::EA18G => if i==0{0.25}else{0.34},
             Type::Su27 => if i==0{0.34}else{0.51},
         }
     }
-    pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18 => &F18_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
+    pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18|Type::F18E|Type::EA18G => &F18_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
     pub fn landing_height(self) -> f64 { -self.wheels()[0].local.y - 0.10 }
     pub fn name(self) -> &'static str {
         match self {
             Type::F16 => "F-16C BLOCK 50",
             Type::Mig29 => "MIG-29S 9.13S",
             Type::F18 => "F/A-18C HORNET",
+            Type::F18E=>"F/A-18E SUPER HORNET",Type::EA18G=>"EA-18G GROWLER",
             Type::Su27 => "SU-27SK FLANKER-B",
         }
     }
@@ -168,40 +177,45 @@ impl Type {
             Type::F16 => "F-16C BLOCK 50 FIGHTING FALCON",
             Type::Mig29 => "MIG-29S FULCRUM-C, IZDELIYE 9.13S",
             Type::F18 => "F/A-18C LOT 20 HORNET",
+            Type::F18E=>"F/A-18E SUPER HORNET",Type::EA18G=>"EA-18G GROWLER",
             Type::Su27 => "SU-27SK FLANKER-B",
         }
     }
     pub fn empty_mass(self) -> f64 {
+        if self==Type::F18E{return 14552.0;}if self==Type::EA18G{return 15011.0;}
         match self {
             Type::F16 => EMPTY_MASS,
             Type::Mig29 => 11200.0,
-            Type::F18 => 10900.0,
+            Type::F18|Type::F18E|Type::EA18G => 10900.0,
             Type::Su27 => 16300.0,
         }
     }
     /// Wing reference area, m^2.
     pub fn area(self) -> f64 {
+        if matches!(self,Type::F18E|Type::EA18G){return 46.45;}
         match self {
             Type::F16 => aero::WING_AREA,
             Type::Mig29 => aero_mig29::WING_AREA,
-            Type::F18 => crate::aero_hornet::WING_AREA,
+            Type::F18|Type::F18E|Type::EA18G => crate::aero_hornet::WING_AREA,
             Type::Su27 => crate::aero_su27::WING_AREA,
         }
     }
     /// Wing span and mean aerodynamic chord, m.
     pub fn span(self) -> f64 {
+        if matches!(self,Type::F18E|Type::EA18G){return 13.70;}
         match self {
             Type::F16 => aero::SPAN,
             Type::Mig29 => aero_mig29::SPAN,
-            Type::F18 => crate::aero_hornet::SPAN,
+            Type::F18|Type::F18E|Type::EA18G => crate::aero_hornet::SPAN,
             Type::Su27 => crate::aero_su27::SPAN,
         }
     }
     pub fn chord(self) -> f64 {
+        if matches!(self,Type::F18E|Type::EA18G){return 3.72;}
         match self {
             Type::F16 => aero::CHORD,
             Type::Mig29 => aero_mig29::CHORD,
-            Type::F18 => crate::aero_hornet::CHORD,
+            Type::F18|Type::F18E|Type::EA18G => crate::aero_hornet::CHORD,
             Type::Su27 => crate::aero_su27::CHORD,
         }
     }
@@ -211,25 +225,27 @@ impl Type {
         match self {
             Type::F16 => mix(0.661, 1.9, ab),
             Type::Mig29 => mix(0.77, 1.85, ab),
-            Type::F18 => mix(0.81, 1.79, ab),
+            Type::F18|Type::F18E|Type::EA18G => mix(0.81, 1.79, ab),
             Type::Su27 => mix(0.75, 1.92, ab),
         }
     }
     /// Internal fuel, kg.
     pub fn fuel_max(self) -> f64 {
+        if self==Type::F18E{return 6531.0;}if self==Type::EA18G{return 6217.0;}
         match self {
             Type::F16 => FUEL_MAX,
             Type::Mig29 => 3820.0,
-            Type::F18 => 4930.0,
+            Type::F18|Type::F18E|Type::EA18G => 4930.0,
             Type::Su27 => 9400.0,
         }
     }
     /// Full afterburner thrust at sea level, lbf: one F110-GE-129, two RD-33s.
     pub fn max_thrust_lbf(self) -> f64 {
+        if matches!(self,Type::F18E|Type::EA18G){return 44000.0;}
         match self {
             Type::F16 => 29000.0,
             Type::Mig29 => 36600.0,
-            Type::F18 => 35400.0,
+            Type::F18|Type::F18E|Type::EA18G => 35400.0,
             Type::Su27 => 55115.0,
         }
     }
@@ -240,7 +256,7 @@ impl Type {
         match self {
             Type::F16 => 1000.0 / 2.20462,
             Type::Mig29 => 550.0,
-            Type::F18 => 900.0,
+            Type::F18|Type::F18E|Type::EA18G => 900.0,
             Type::Su27 => 1200.0,
         }
     }
@@ -251,14 +267,14 @@ impl Type {
         match self {
             Type::F16 => (ALPHA_LIMITER, ALPHA_MAX),
             Type::Mig29 => (22.0, 25.0),
-            Type::F18 => (27.0, 30.0),
+            Type::F18|Type::F18E|Type::EA18G => (27.0, 30.0),
             Type::Su27 => (24.0, 26.0),
         }
     }
     /// Positive load limit at a gross weight (kg).
     pub fn g_limit(self, mass: f64, mach: f64) -> f64 {
         match self {
-            Type::F18 => (7.5_f64 * 14515.0 / mass.max(14515.0)).clamp(4.5, 7.5),
+            Type::F18|Type::F18E|Type::EA18G => (7.5_f64 * 14515.0 / mass.max(14515.0)).clamp(4.5, 7.5),
             Type::Su27 if mass > 26000.0 => 8.0,
             Type::Mig29 if mach > 0.85 => 7.0,
             Type::Mig29 if mass > 14200.0 => 8.0,
@@ -275,7 +291,7 @@ impl Type {
         match self {
             Type::F16 => 1.35,
             Type::Mig29 => 2.1,
-            Type::F18 => 1.7,
+            Type::F18|Type::F18E|Type::EA18G => 1.7,
             Type::Su27 => 2.4,
         }
     }
@@ -284,7 +300,7 @@ impl Type {
         match self {
             Type::F16 => &COLLISION_POINTS,
             Type::Mig29 => &MIG_COLLISION_POINTS,
-            Type::F18 => &F18_CONTACTS,
+            Type::F18|Type::F18E|Type::EA18G => &F18_CONTACTS,
             Type::Su27 => &SU27_CONTACTS,
         }
     }
@@ -292,15 +308,16 @@ impl Type {
         match self {
             Type::F16 => (1.2, 4.8, 3.6),
             Type::Mig29 => (1.7, 5.68, 5.3),
-            Type::F18 => (1.4, 5.7, 3.5),
+            Type::F18|Type::F18E|Type::EA18G => (1.4, 5.7, 3.5),
             Type::Su27 => (2.1, 7.35, 6.6),
         }
     }
     pub fn inertia_scale(self) -> f64 {
+        if matches!(self,Type::F18E|Type::EA18G){return 3.5;}
         match self {
             Type::F16 => 1.0,
             Type::Mig29 => 1.35,
-            Type::F18 => 2.7,
+            Type::F18|Type::F18E|Type::EA18G => 2.7,
             Type::Su27 => 4.1,
         }
     }
@@ -309,7 +326,7 @@ impl Type {
             Type::F16 => Type::Mig29,
             Type::Mig29 => Type::F18,
             Type::F18 => Type::Su27,
-            Type::Su27 => Type::F16,
+            Type::Su27 => Type::F18E,Type::F18E=>Type::EA18G,Type::EA18G=>Type::F16,
         }
     }
 }
@@ -335,9 +352,9 @@ impl Piece {
             (Piece::Wing(i), Type::Mig29) => v3(side(i) * 3.6, 0.35, 3.1),
             (Piece::Tail, Type::F16) => v3(0.0, 0.30, 6.0),
             (Piece::Tail, Type::Mig29) => v3(0.0, 0.36, 6.9),
-            (Piece::Wing(i), Type::F18) => v3(side(i) * 3.4, 0.2, 1.3),
+            (Piece::Wing(i), Type::F18|Type::F18E|Type::EA18G) => v3(side(i) * 3.4, 0.2, 1.3),
             (Piece::Wing(i), Type::Su27) => v3(side(i) * 4.5, 0.3, 3.6),
-            (Piece::Tail, Type::F18) => v3(0.0, 0.1, 6.3),
+            (Piece::Tail, Type::F18|Type::F18E|Type::EA18G) => v3(0.0, 0.1, 6.3),
             (Piece::Tail, Type::Su27) => v3(0.0, 0.2, 8.8),
         }
     }
@@ -1608,7 +1625,7 @@ impl Aircraft {
         let pivots = match self.kind {
             Type::F16 => &crate::airframe::GEAR_PIVOTS,
             Type::Mig29 => &crate::mig29::GEAR_PIVOTS,
-            Type::F18 => &crate::hornet::GEAR_PIVOTS,
+            Type::F18|Type::F18E|Type::EA18G => &crate::hornet::GEAR_PIVOTS,
             Type::Su27 => &crate::su27::GEAR_PIVOTS,
         };
         let (pivot, axis, swing) = pivots[i];

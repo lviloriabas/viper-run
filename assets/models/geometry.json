@@ -5,8 +5,10 @@
       "canopy": 60,
       "stab0": 32,
       "stab1": 32,
-      "flap0": 24,
-      "flap1": 24,
+      "flap0": 12,
+      "flap1": 12,
+      "aileron0": 12,
+      "aileron1": 12,
       "rudder0": 8,
       "rudder1": 8,
       "brake": 0,
@@ -277,7 +279,7 @@
       },
       {
         "name": "AileronRight",
-        "part": "flap1",
+        "part": "aileron1",
         "source": "f18/f18.ac",
         "bounds": [
           [
@@ -328,7 +330,7 @@
       },
       {
         "name": "AileronLeft",
-        "part": "flap0",
+        "part": "aileron0",
         "source": "f18/f18.ac",
         "bounds": [
           [
@@ -608,6 +610,8 @@
       "stab1": 43,
       "flap0": 20,
       "flap1": 20,
+      "aileron0": 0,
+      "aileron1": 0,
       "rudder0": 30,
       "rudder1": 30,
       "brake": 116,

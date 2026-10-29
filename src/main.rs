@@ -8,6 +8,7 @@ mod aero_su27;
 mod ai;
 mod air;
 mod airframe;
+mod articulation;
 mod audio;
 mod canvas;
 mod capture;
@@ -100,7 +101,7 @@ enum View {
 struct Opts {
     autostart: bool,
     tutorial: Option<tutorial::Lesson>,
-    host:Option<String>, join:Option<String>, directory:Option<String>, callsign:Option<String>, online_mode:Option<net::GameMode>,
+    host:Option<String>, host_game:Option<String>, join:Option<String>, directory:Option<String>, callsign:Option<String>, online_mode:Option<net::GameMode>,
     ready:bool, launch_ready:bool, invite_file:Option<String>, net_report:Option<String>, exit_after:Option<f64>, future_ui_check:bool,
 
     audio_demo: Option<String>,
@@ -161,6 +162,7 @@ fn parse_opts() -> Opts {
         match args[i].as_str() {
             "--export-cockpit" => o.cockpit_export = Some(next(&mut i)),
             "--host" => o.host=Some(next(&mut i)),
+            "--host-game" => o.host_game=Some(next(&mut i)),
             "--join" => o.join=Some(next(&mut i)),
             "--directory" => o.directory=Some(next(&mut i)),
             "--callsign" => o.callsign=Some(next(&mut i)),
@@ -264,7 +266,7 @@ fn parse_opts() -> Opts {
             "--help" | "-h" => {
                 println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
                 println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
-                println!("Online: --host ADDRESS:PORT | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
+                println!("Online: --host-game BIND:PORT (embedded server) | --host ADDRESS:PORT (direct UDP) | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
                 println!("Model review: --export-cockpit DIRECTORY exports the assembled meshes for Blender");
                 println!("Layout QA: --layout-check --shot FILE.png [--layout-scene NAME]");
                 println!("QA: --future-ui-check --screen menu --shot FILE.png --frames 200; --invite-file FILE --net-report FILE --exit-after SECONDS");
@@ -381,6 +383,7 @@ struct App {
     /// right looks right as in the cockpit) and pitch.
     chase_look: (f64, f64),
     controls_open: bool,
+    pad_setup_open: bool,
     controls_was_flying: bool,
     controls_was_frozen: bool,
     paused_was_frozen: bool,
@@ -519,6 +522,7 @@ impl App {
             look: (0.0, LOOK_PITCH),
             chase_look: (0.0, 0.0),
             controls_open: false,
+            pad_setup_open: false,
             controls_was_flying: false,
             controls_was_frozen: false,
             paused_was_frozen: false,
@@ -817,6 +821,8 @@ impl App {
             return;
         }
         self.controls_open = open;
+        self.pad_setup_open = false;
+        self.pad.cancel_calibration();
         self.selected = 0;
         if open {
             self.controls_was_flying = matches!(self.state, State::Flying | State::Frozen | State::Paused);
@@ -850,7 +856,8 @@ impl App {
         if self.multiplayer.active() && matches!(a,Action::Restart|Action::Start|Action::Launch) {
             self.flash_toast("LEAVE THE ONLINE ROOM TO START A NEW SORTIE",2.0); return;
         }
-        if self.controls_open && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Performance | Action::Restart | Action::Menu | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
+        if self.pad.calibrating() && !matches!(a, Action::Controls | Action::PadSetup | Action::PadCalibrate) { return; }
+        if self.controls_open && !a.pad_setting() && !matches!(a, Action::Controls | Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Fullscreen | Action::Performance | Action::Restart | Action::Menu | Action::Reset | Action::Rebind(..) | Action::ResetKeys) {
             return;
         }
         match a {
@@ -873,6 +880,30 @@ impl App {
                 self.start_mission();
             },
             Action::Controls => self.toggle_controls(None),
+            Action::PadSetup => {
+                self.pad_setup_open = !self.pad_setup_open;
+                self.pad.cancel_calibration();
+                self.selected = 0;
+            },
+            Action::PadExpo(up) => self.settings.expo = clamp(((self.settings.expo + if up { 0.05 } else { -0.05 }) * 100.0).round() / 100.0, 0.0, 1.0),
+            Action::PadDeadLeft(up) => self.settings.pad_dead_left = clamp(((self.settings.pad_dead_left + if up { 0.01 } else { -0.01 }) * 100.0).round() / 100.0, 0.0, settings::DEAD_ZONE_MAX),
+            Action::PadDeadRight(up) => self.settings.pad_dead_right = clamp(((self.settings.pad_dead_right + if up { 0.01 } else { -0.01 }) * 100.0).round() / 100.0, 0.0, settings::DEAD_ZONE_MAX),
+            Action::PadRudderClick => self.settings.pad_rudder_click = !self.settings.pad_rudder_click,
+            Action::PadFineAim => self.settings.pad_fine_aim = !self.settings.pad_fine_aim,
+            Action::PadCalibrate => {
+                if self.pad.calibrating() { self.pad.cancel_calibration(); }
+                else { self.pad.start_calibration(date::now()); }
+                self.selected = 0;
+            },
+            Action::PadReset => {
+                let defaults = Settings::default();
+                self.settings.expo = defaults.expo;
+                self.settings.pad_dead_left = defaults.pad_dead_left;
+                self.settings.pad_dead_right = defaults.pad_dead_right;
+                self.settings.pad_rudder_click = defaults.pad_rudder_click;
+                self.settings.pad_fine_aim = defaults.pad_fine_aim;
+                self.pad.calibration_status = "CONTROLLER DEFAULTS RESTORED.";
+            },
             // Every sortie goes through its setup screen first.
             Action::Start if self.state == State::Attract => {
                 self.state = State::Loadout;
@@ -966,7 +997,7 @@ impl App {
             Action::ResetKeys => self.settings.keys = keymap::Keymap::default(),
             _ => {},
         }
-        if matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Clock | Action::Reset | Action::ResetKeys) {
+        if a.pad_setting() || matches!(a, Action::SensDown | Action::SensUp | Action::FovDown | Action::FovUp | Action::Pitch | Action::Invert | Action::PadLayout | Action::Clock | Action::Reset | Action::ResetKeys) {
             self.mouse = (0.0, 0.0);
             self.save();
         }
@@ -1128,15 +1159,14 @@ impl App {
         // applies inversion later.
         let pad = &self.pad;
         let on_ground = self.aircraft.as_ref().is_some_and(|a| a.on_ground);
-        let e = self.settings.expo;
-        let (lx, ly) = (settings::stick_expo(pad.state.left.0, e), settings::stick_expo(pad.state.left.1, e));
+        let (lx, ly) = self.settings.flight_stick(pad.state.left, self.zoom);
         let (roll, yaw, up, down, burner, brake_clear) = match self.settings.pad_layout {
             // LB / LT run the throttle (held at the stop, LB lights the
             // burner) and the bumpers are free of the rudder: holding X turns
             // the stick's X axis into rudder, and on the ground it also steers
             // the nose wheel.
             PadLayout::Combat => {
-                let rudder = pad.held(gamepad::X);
+                let rudder = pad.rudder(&self.settings);
                 let roll = if rudder { 0.0 } else { lx };
                 let yaw = if rudder || on_ground { lx } else { 0.0 };
                 (roll, yaw, pad.held(gamepad::LB), pad.state.lt > 0.3, false, !pad.held(gamepad::LB))
@@ -1185,6 +1215,13 @@ impl App {
     /// flight behave the same whichever is used.
     fn pad_buttons(&mut self) {
         use gamepad::{A, B, BACK, DOWN, LEFT, LS, RB, RIGHT, RS, START, UP, X, Y};
+        if self.pad.calibrating() {
+            if self.pad.pressed(B) || self.pad.pressed(BACK) || self.pad.pressed(START) {
+                self.pad.cancel_calibration();
+                self.selected = 0;
+            }
+            return;
+        }
         let menu = self.controls_open || matches!(self.state, State::Attract | State::Paused | State::Result | State::Loadout | State::School | State::Network);
         if !menu && self.ejection_chord() {
             self.zoom_pad = false;
@@ -1226,14 +1263,17 @@ impl App {
                 // Fire (RT), lock (RB) and countermeasures (L3) never take a
                 // thumb off a stick; the d-pad and face buttons are for what
                 // can wait.
-                PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LS, Bind::Countermeasures), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
-                PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock), (LS, Bind::Countermeasures)],
+                PadLayout::Combat => &[(Y, Bind::View), (A, Bind::Weapon), (RB, Bind::Lock), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (DOWN, Bind::Gear), (UP, Bind::Flaps)],
+                PadLayout::Classic => &[(Y, Bind::View), (X, Bind::Gear), (LEFT, Bind::LeftMfd), (RIGHT, Bind::RightMfd), (UP, Bind::Weapon), (DOWN, Bind::Lock)],
             };
             // Both sticks clicked together: the limiter override, which then
             // drops no countermeasures.
             let both = self.pad.pressed(LS) && self.pad.held(RS) || self.pad.pressed(RS) && self.pad.held(LS);
             if both {
                 self.toggle_limiters();
+            }
+            if !both && self.pad.countermeasures_pressed(&self.settings) {
+                self.bind_pressed(Bind::Countermeasures);
             }
             // The MiG has no MFDs: its left d-pad works the radar / IRST switch.
             let mig = self.aircraft.as_ref().is_some_and(|a| a.kind.has_irst());
@@ -1274,6 +1314,7 @@ impl App {
     /// camera, and springs back to the forward view when released.
     fn update_pad_look(&mut self, dt: f64) {
         let (x, y) = self.pad.state.right;
+        let (x, y) = (settings::stick_expo(x, 0.5), settings::stick_expo(y, 0.5));
         let r = 1.0 - (-dt * 10.0).exp();
         self.pad_look.0 += (x - self.pad_look.0) * r;
         self.pad_look.1 += (y - self.pad_look.1) * r;
@@ -1294,6 +1335,7 @@ impl App {
     /// framed shot holds without keeping the stick deflected.
     fn update_frozen_look(&mut self, dt: f64) {
         let (x, y) = self.pad.state.right;
+        let (x, y) = (settings::stick_expo(x, 0.5), settings::stick_expo(y, 0.5));
         self.pad_look = (0.0, 0.0);
         if self.view == View::Cockpit {
             self.look.0 = clamp(self.look.0 + x * 1.6 * dt, -155.0 * DEG, 155.0 * DEG);
@@ -1511,7 +1553,7 @@ impl App {
         }
         // Held down, the countermeasure button runs another program every
         // CM_REPEAT seconds; both sticks clicked together is the limiter override.
-        let cm = !self.flight_controls_blocked() && (self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.held(gamepad::LS) && !self.pad.held(gamepad::RS));
+        let cm = !self.flight_controls_blocked() && (self.settings.keys.held(Bind::Countermeasures, &self.keys) || self.pad.countermeasures_held(&self.settings));
         self.cm_hold = if cm { self.cm_hold + dt } else { 0.0 };
         if self.cm_hold >= CM_REPEAT {
             self.cm_hold -= CM_REPEAT;
@@ -1837,20 +1879,14 @@ impl App {
         let active = self.state == State::Flying || self.state == State::Transition;
         let mut p = Params::default();
         if let (Some(a), true) = (&self.aircraft, active) {
-            let (thr, speed, ab) = (a.throttle as f32, a.speed as f32, a.afterburner_visual as f32);
-            p.eng_gain = (0.025 + thr * 0.07 + ab * 0.075).clamp(0.0, 0.2);
-            let rpm = ((a.rpm as f32 - 45.0) / 55.0).clamp(0.0, 1.05);
-            p.eng_freq = 450.0 + rpm * 1900.0;
-            p.engines = a.kind.engine_count() as f32;
-            p.burner = ab;
+            let speed = a.speed as f32;
+            p = Params::jet(a.kind, a.rpm as f32, a.afterburner_visual as f32);
             // Separated flow roars and shudders through the airframe.
             let buffet = a.buffet as f32;
             p.wind_gain = (speed / 330.0 * 0.055).clamp(0.0, 0.07) + buffet * 0.03;
             p.wind_freq = 500.0 + speed * 14.0;
-            p.rumble_gain = 0.008 + thr * 0.012 + ab * 0.015 + buffet * 0.035;
-            p.rumble_freq = 39.0 + thr * 22.0 + ab * 15.0 - buffet * 12.0;
-            p.whine_gain = 0.002 + rpm * 0.006;
-            p.whine_freq = 750.0 + rpm * 2250.0;
+            p.rumble_gain += buffet * 0.035;
+            p.rumble_freq -= buffet * 12.0;
             p.gun = if self.combat.firing { 0.34 } else { 0.0 };
             p.gun_rate = self.combat.loadout.gun.rate as f32;
             // Sidewinder tone: a low growl while the seeker searches, a high
@@ -2002,13 +2038,19 @@ impl EventHandler for App {
         }
         // Snapshot and menu checks use scripted input, independent of live hardware.
         if self.opts.shot.is_none() && self.opts.bench.is_none() {
-            if let Some(on) = self.pad.poll(now) {
+            if let Some(on) = self.pad.poll(now, self.settings.pad_dead_left, self.settings.pad_dead_right) {
                 if !matches!(self.state, State::Paused | State::Frozen) {
                     self.flash_toast(if on { "CONTROLLER CONNECTED" } else { "CONTROLLER LOST" }, 2.0);
                 }
                 if !on {
                     self.pause();
                 }
+            }
+            if let Some((left, right)) = self.pad.calibration_tick(now) {
+                self.settings.pad_dead_left = left;
+                self.settings.pad_dead_right = right;
+                self.selected = 0;
+                self.save();
             }
             self.pad_buttons();
         }
@@ -2161,7 +2203,7 @@ impl EventHandler for App {
         let i = if self.state == State::Flying { self.read_control_positions() } else { Input { airbrake: self.airbrake, ..Default::default() } };
         let pad = self.pad_active;
         let obj = self.objective();
-        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, layout: self.settings.pad_layout, pad, brake: self.airbrake };
+        let cue = ui::StickCue { pitch: i.pitch(), yaw: i.yaw(), roll: i.roll(), source: self.settings.pitch, layout: self.settings.pad_layout, click_rudder: self.settings.click_rudder(), pad, brake: self.airbrake };
         {
             let cv = &mut self.overlay;
             if flying_view {
@@ -2211,7 +2253,7 @@ impl EventHandler for App {
             }
             let s = ui::ui_scale(w, h);
             if self.opts.layout_check && cv.layout_audit.is_none() { cv.layout_audit=Some(menu_layout::Audit::default()); }
-            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout };
+            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout, click_rudder: self.settings.click_rudder() };
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
@@ -2229,8 +2271,12 @@ impl EventHandler for App {
                     _ => {}
                 }
             } else {
-                u.controls_drawer(&self.settings, matches!(self.state, State::Paused | State::Frozen), self.rebinding, self.multiplayer.active());
-                if self.multiplayer.active() { u.online_controls_button(); }
+                if self.pad_setup_open {
+                    u.pad_setup(&self.settings, &self.pad, date::now());
+                } else {
+                    u.controls_drawer(&self.settings, matches!(self.state, State::Paused | State::Frozen), self.rebinding, self.multiplayer.active());
+                    if self.multiplayer.active() { u.online_controls_button(); }
+                }
             }
             buttons.append(&mut u.buttons);
             if let Some(audit)=cv.layout_audit.take() {
@@ -2362,10 +2408,13 @@ impl EventHandler for App {
 
     fn key_down_event(&mut self, key: KeyCode, mods: KeyMods, repeat: bool) {
         self.pad_active = self.pad_dispatch;
+        if self.state==State::Network && self.multiplayer.menu.help && key==KeyCode::Escape {
+            self.network_action(Action::NetHelpClose);return;
+        }
         if self.state==State::Network && self.multiplayer.menu.editing.is_some() {
             match key {
                 KeyCode::Escape=>self.multiplayer.menu.finish(true),
-                KeyCode::Enter | KeyCode::KpEnter=>{self.multiplayer.menu.finish(false);self.save();},
+                KeyCode::Enter | KeyCode::KpEnter=>{let join=self.multiplayer.menu.editing==Some(multiplayer::Field::Invite);self.multiplayer.menu.finish(false);self.save();if join{self.network_action(Action::NetJoin);}},
                 KeyCode::A if mods.ctrl=>self.multiplayer.menu.replace_text=true,
                 KeyCode::Backspace=>self.multiplayer.menu.backspace(),
                 KeyCode::V if mods.ctrl=>{if let Some(text)=window::clipboard_get(){for ch in text.chars(){self.multiplayer.menu.character(ch);}}},
@@ -2454,7 +2503,11 @@ impl EventHandler for App {
         }
         if self.controls_open {
             match key {
-                KeyCode::Escape => self.toggle_controls(Some(false)),
+                KeyCode::Escape => {
+                    if self.pad.calibrating() { self.pad.cancel_calibration(); self.selected = 0; }
+                    else if self.pad_setup_open { self.act(Action::PadSetup); }
+                    else { self.toggle_controls(Some(false)); }
+                },
                 KeyCode::Enter | KeyCode::KpEnter | KeyCode::Space if !repeat => {
                     if let Some(b) = self.buttons.get(self.selected).copied() {
                         self.act(b.action);
