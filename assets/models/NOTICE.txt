@@ -3,6 +3,14 @@ Viper Run, embedded aircraft model notices
 Legacy Hornet geometry and paint: Fabrice Kauffmann and FlightGear contributors,
 GNU GPL version 2 or later. Upstream: FlightGear FGAddon Aircraft/f18/Models.
 
+Super Hornet and Growler: Petar Jedvaj (3D), Lionel "F-GTUX" and credited
+FlightGear contributors. Original package F-18F/G, 2026-03-13, GPL version 2
+or later with express permission from the original geometry author. The
+single-seat E canopy/spine, compact tyres, mounts and material changes are
+Viper Run adaptations. Sources, permission and hashes are included under
+assets/models/source/superhornet/ and superhornet-sources.json. GPL-2.0 text
+is included as model-licenses/Hornet-GPL-2.0.txt.
+
 Su-27 geometry, cockpit and paint: the xcvb85/Su-27 project and its credited
 contributors, including Yanes Bechir and FGUK, under GNU GPL version 3.
 Pinned source commit: 30f1cb45c87d4f2443de198d7577a3a9b6b0455a.

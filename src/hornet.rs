@@ -73,13 +73,18 @@ pub fn build() -> Airframe {
                 .block(&f, v3(0.075, 0.035, 0.70), Rgb(0.31, 0.34, 0.35));
         }
         let f = Frame {
-            o: v3(side * 0.90, -0.61, 0.35),
+            o: v3(side * 0.90, -0.75, 1.10),
             x: V3::X,
             y: V3::Y,
             z: V3::Z,
         };
         a.body
             .block(&f, v3(0.045, 0.04, 0.67), Rgb(0.35, 0.38, 0.39));
+        for z in [0.70,1.45] {
+            let skin=skin_bottom(&wing,side*0.90,z);
+            let root=Frame{o:v3(side*0.90,(skin-0.71)*0.5,z),x:V3::X,y:V3::Y,z:V3::Z};
+            a.body.block(&root,v3(0.037,(skin+0.71).abs()*0.5+0.008,0.065),Rgb(0.38,0.41,0.43));
+        }
     }
     // Fit the curved door to the imported spine, including its transverse
     // section. A flat plate here visibly floats above the sloping rear body.
@@ -138,14 +143,19 @@ pub fn build() -> Airframe {
         (v3(-1.0,0.0,taper),0.40+taper*4.90),(-V3::Y,-0.54)]);
     a.body=fixed;
     a.body.v.extend(exterior_tub(Type::F18).v);
+    a.body.flat_nozzle_interiors(&NOZZLES,0.46);
     a
+}
+
+pub fn build_for(kind:Type)->Airframe {
+    match kind {Type::F18=>build(),Type::Su27=>crate::su27::build(),Type::F18E|Type::EA18G=>crate::superhornet::build(kind),_=>unreachable!("twin exterior")}
 }
 
 /// An opaque cockpit well below the transparent canopy, in exterior axes.
 /// Both sides are present so steep external views never see terrain through
 /// the fuselage. The detailed first-person boards remain in cockpit space.
 pub fn exterior_tub(kind:Type)->Mesh {
-    let base=kind.base();
+    let base=kind;
     let (front,aft)=crate::flightgear::canopy_range(base);
     let floor=kind.eye().y-0.95;
     let mut m=Mesh::new();
@@ -205,6 +215,42 @@ fn skin_sample(m: &Mesh, x: f64, z: f64) -> (f64,Rgb,(f64,f64)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cheek_missile_fins_clear_the_actual_intake_skin() {
+        use crate::combat::{Config,Loadout,MissionKind,Store};
+        let body=crate::flightgear::part(Type::F18,"body");
+        for store in [Store::Aim9,Store::Aim9x,Store::Aim120,Store::Aim120d,Store::Aim7] {
+            let mut cfg=Config::for_jet(MissionKind::Free,Type::F18);
+            cfg.tips_empty=true;cfg.outer=None;cfg.outboard=None;cfg.inboard=Some(store);
+            for st in Loadout::configure(&cfg).stations {
+                let mesh=crate::props::review_store(&st,Type::F18);
+                for v in mesh.v.chunks(crate::mesh::STRIDE) {
+                    let p=v3(v[0] as f64,v[1] as f64,v[2] as f64);
+                    let(mut lo,mut hi)=(f64::INFINITY,f64::NEG_INFINITY);
+                    for t in body.v.chunks(crate::mesh::STRIDE*3) {
+                        let a=v3(t[0] as f64,t[1] as f64,t[2] as f64);
+                        let b=v3(t[11] as f64,t[12] as f64,t[13] as f64)-a;
+                        let c=v3(t[22] as f64,t[23] as f64,t[24] as f64)-a;
+                        let d=b.x*c.z-c.x*b.z;if d.abs()<1e-12{continue;}
+                        let u=((p.x-a.x)*c.z-c.x*(p.z-a.z))/d;
+                        let w=(b.x*(p.z-a.z)-(p.x-a.x)*b.z)/d;
+                        if u>=0.0 && w>=0.0 && u+w<=1.0 {let y=a.y+u*b.y+w*c.y;lo=lo.min(y);hi=hi.max(y);}
+                    }
+                    assert!(hi-lo<0.016 || p.y<=lo+0.008 || p.y>=hi-0.008,"{store:?} intersects the intake at {p:?}, skin {lo}..{hi}");
+                }
+            }
+        }
+    }
+    #[test]
+    fn cheek_rails_attach_to_the_intakes_instead_of_hanging_under_the_empty_lex() {
+        let a=build();let skin=crate::flightgear::part(Type::F18,"body");
+        for side in [-1.0,1.0] {for z in [0.70,1.45] {
+            let y=skin_bottom(&skin,side*0.90,z);
+            assert!(y< -0.45,"attachment must meet the intake");
+            assert!(a.body.v.chunks(crate::mesh::STRIDE).any(|v|
+                (v[0] as f64-side*0.90).abs()<0.05 && (v[1] as f64-y).abs()<0.02 && (v[2] as f64-z).abs()<0.07));
+        }}
+    }
     #[test]
     fn speedbrake_owns_the_outer_skin_and_pylons_reach_the_fixed_wing() {
         let a=build();
@@ -293,7 +339,7 @@ pub fn store_shift(at: V3) -> V3 {
     } else if x > 2.9 {
         v3(2.50, -0.48, 1.65)
     } else {
-        v3(0.90, -0.76, 0.35)
+        v3(0.90, -0.90, 1.10)
     };
     v3(to.x * side, to.y, to.z) - at
 }

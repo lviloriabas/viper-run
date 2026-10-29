@@ -1,7 +1,7 @@
 # Air-to-air missiles: locks, launch and guidance
 
-Revised 23 October 2026. Which missiles of the F-16C Block 50 and the
-MiG-29S (9.13S) can be fired without a lock, which need the target acquired
+Revised 29 October 2026. Which missiles of all six playable airframes
+can be fired without a lock, which need the target acquired
 before they leave the rail, which can acquire it afterwards, and what the
 launching jet has to do while they fly. The code follows these rules in
 `weapons.rs` (the families and each missile's data) and `combat.rs`
@@ -26,13 +26,38 @@ launching jet has to do while they fly. The code follows these rules in
 
 ## By family
 
+Every airframe offers Fox 1, Fox 2 and Fox 3 in the loadout selector.
+This means available stores; the pilot chooses which families to carry.
+
+| Airframe | Fox 1 | Fox 2 | Fox 3 |
+| --- | --- | --- | --- |
+| F-16C | AIM-7M | AIM-9M, AIM-9X Block II | AIM-120C, AIM-120D |
+| MiG-29S | R-27R | R-60M, R-73, R-27T | R-77 |
+| F/A-18C | AIM-7M | AIM-9M | AIM-120C |
+| F/A-18E | AIM-7M | AIM-9M | AIM-120C |
+| EA-18G | AIM-7M | AIM-9M | AIM-120C |
+| Su-27SK (game weapon-system extension) | R-27R | R-73, R-27T | R-77 |
+
+The R-77 is selectable on the Su-27's two inner station groups, including
+the fuselage stations that mirror the innermost group. This represents an
+upgraded weapon system in the game, not historical R-77 integration on a
+stock Su-27SK. The F-16's Sparrow and the shared Hornet-family store lists
+also remain gameplay loadout choices rather than certification claims for
+every depicted variant or operator. Missile guidance follows its seeker
+family regardless of the carrying aircraft.
+
+The EA-18G's permanent ALQ-218 receivers reserve both wingtips: the tip
+selector remains EMPTY and even a stale configuration cannot mount missiles
+there. Its dogfight preset carries two AIM-9Ms, two AIM-7Ms and two AIM-120Cs
+on the three underwing station groups.
+
 | Family | F-16C Block 50 | MiG-29S 9.13S | Before launch | After launch |
 | --- | --- | --- | --- | --- |
 | Infrared, short range (Fox 2) | AIM-9M | R-60M, R-73 | LOBL: seeker tone, on the boresight, slaved to the radar or cued by the helmet | Fire and forget; the jet is free to manoeuvre |
 | Infrared, short range (Fox 2) | AIM-9X Block II | none | LOBL with a tone, or LOAL with no tone on the radar lock's cue | Datalink until it acquires; searches on its own with no cue |
 | Infrared, medium range (Fox 2) | none | R-27T | LOBL: the seeker must see the target, cued by the radar or the IRST | Fire and forget; no radar warning for the target |
 | Semi-active radar (Fox 1) | AIM-7M | R-27R | Radar lock (STT) required | The radar must hold the lock to impact; if it drops, the missile goes blind |
-| Active radar (Fox 3) | AIM-120C, AIM-120D | R-77 | With a lock: inertial and datalink. Without: active off the rail (maddog) | Datalink while the radar holds the lock; near the target its own radar takes over. If the lock drops far out, it flies on blind and searches when it gets there |
+| Active radar (Fox 3) | AIM-120C, AIM-120D | R-77 | With a lock: inertial and datalink. Without: autonomous radar search (maddog) | Updates while supported; without support, extrapolate the last measurement. The missile's own radar must acquire the target for autonomous homing |
 
 The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
 
@@ -80,12 +105,29 @@ The gaps the table shows (`combat::arsenal`, test `arsenal_by_family`):
 - The AIM-7M and R-27R are not fired without a lock and go blind as soon as
   the lock changes or drops.
 - The AIM-120C/D and R-77 with no lock search with their radar out to 15 km
-  in their 20 degree field. With a lock they follow the datalink; if the lock
-  drops with the target beyond 15 km they lose it and search when they get
-  there.
-- With a datalink a missile can turn toward a target outside its seeker's
-  field during its first 8 s (an off-boresight or over-the-shoulder shot);
-  without one, a target outside the field is lost.
+  in their 20 degree search field. A cued missile can acquire within its
+  gimbal limits. With support they receive updated position and velocity;
+  without it, they extrapolate only the last measurement. A manoeuvre by an
+  unseen target cannot update that estimate. Within 15 km, with clear terrain
+  visibility and the target inside the gimbal, the onboard radar acquires
+  and no longer needs the launcher's lock. Losing support does not erase
+  an existing onboard lock.
+- The AIM-9X distinguishes a prelaunch infrared lock from a radar cue.
+  A cue supplies midcourse data until its own infrared seeker acquires
+  within the game's 8 km acquisition range and gimbal limits. An existing
+  infrared lock needs no continuing radar support.
+- Datalink/inertial guidance can steer toward an estimated target outside
+  the seeker's field; it has no arbitrary eight-second cutoff. Terrain and
+  Doppler rejection apply to seeker homing, not to an inertial estimate.
+- Player, AI and remote-player missiles use their actual launcher and
+  target for support checks. SARH requires a live illuminator tracking the
+  same target; an IRST track supplies no radar illumination. A SAM requires
+  a live local tracking radar with terrain visibility.
+- Destroyed, crashed, structurally broken, ejected or removed aircraft
+  invalidate missile tracks and stored estimates. Kill processing clears
+  locks immediately so a respawn cannot inherit them. Autonomous seekers
+  may subsequently acquire a living enemy through a fresh search. Unguided
+  missiles continue flying until ground impact or their lifetime limit.
 - The MiG-29S's IRST track cues its heat seekers but guides no radar
   missile; its laser ranges inside 6.5 km. The IRST is passive, and neither
   jet has a missile approach warner, so a bandit sees an infrared missile
@@ -149,12 +191,28 @@ The search-to-STT presentation follows the radar workflow described in
 The implementation deliberately omits radar cursor/elevation controls,
 Doppler/notch filtering, TWS, jamming and detailed scan-bar timing.
 
+These rules reproduce the public distinction between SARH, independent IR
+homing and inertial/datalink plus active terminal homing. They do not claim
+an exact seeker simulation: the 15 km radar acquisition range, 8 km LOAL IR
+range, search cones and 0.6 s radar acquisition delay are game approximations.
+SARH support loss ends homing in this model; detailed missile-specific
+inertial coast and reacquisition logic for Sparrow/R-27R is not simulated.
+The game also excludes wrecks from acquisition even though real wreckage
+can retain heat and radar reflections.
+
+Regression coverage includes every available missile on all six airframes,
+IR lock versus radar cue, IRST restrictions, lost illumination, launcher
+loss, autonomous terminal acquisition, loss of datalink without access to
+unseen target manoeuvres, gimbal/terrain limits and invalid targets before
+and after respawn (`src/combat/missile_tests.rs`, `src/weapons.rs`).
+
 ## Sources
 
-- [Lock-on after launch (Wikipedia)](https://en.wikipedia.org/wiki/Lock-on_after_launch)
+- [USAF: AIM-7 Sparrow, semi-active CW/pulsed Doppler guidance](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104575/aim-7-sparrow/)
+- [US Navy: AIM-9X, passive infrared acquisition and tracking](https://www.navy.mil/Resources/Fact-Files/Display-FactFiles/Article/2168989/aim-9x-sidewinder-missile/)
 - [NAVAIR: AIM-9X Block II, LOAL performance](https://www.navair.navy.mil/node/22731)
-- [Flightglobal: AIM-9X Block II performing better than expected](https://www.flightglobal.com/aim-9x-block-ii-performing-better-than-expected/108582.article)
-- [R-77 (Wikipedia)](https://en.wikipedia.org/wiki/R-77)
-- [Bharat Rakshak: R-77 RVV-AE](https://www.bharat-rakshak.com/IAF/Galleries/Weapons/AAMs/R-77/)
+- [Raytheon: AMRAAM, inertial guidance, updates and onboard active radar](https://www.rtx.com/raytheon/what-we-do/air/amraam-missile)
+- [Rosoboronexport: RVV-AE, radio-updated inertial guidance and active terminal seeker](https://roe.ru/pdfs/pdf_4709.pdf)
+- [Rosoboronexport: R-27 family, semi-active and infrared variants](https://roe.ru/pdfs/pdf_4712.pdf)
 - [f-16.net thread on Block 50 stores and the Sparrow](https://www.f-16.net/forum/viewtopic.php?p=387492)
 - [GlobalSecurity: MiG-29 design](https://www.globalsecurity.org/military/world/russia/mig-29-design.htm)

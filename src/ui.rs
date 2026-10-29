@@ -8,7 +8,7 @@ use crate::keymap::{key_name, Keymap, BINDS};
 use crate::math::*;
 use crate::settings::{Best, PadLayout, PitchSource, Settings, FOV_MAX, FOV_MIN};
 use crate::scenario;
-use crate::sim::{Aircraft, Mission};
+use crate::sim::{Aircraft, Mission, Type};
 use crate::targets;
 use crate::terrain;
 use crate::world::Camera;
@@ -810,17 +810,18 @@ impl<'a> Ui<'a> {
         let name = |st: Option<Store>| st.map_or("EMPTY", |s| s.pair());
         let mig = cfg.jet.russian();
         let gun = crate::weapons::gun_of(cfg.jet);
-        let (tip, out, inb, ammo) = if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7", "STA 4 / 6", "PGU-28") };
+        let superhornet=matches!(cfg.jet,Type::F18E|Type::EA18G);
+        let (tip, out, inb, ammo) = if superhornet {("STA 1 / 11 WINGTIP","STA 3 / 9","STA 4 / 8","PGU-28")} else if mig { ("PYLON 1 / 6  OUTER", "PYLON 2 / 5  MIDDLE", "PYLON 3 / 4  INNER", "OFZ 30 MM") } else { ("STA 1 / 9  WINGTIP", "STA 3 / 7", "STA 4 / 6", "PGU-28") };
         // The MiG's gauges read kilograms, the F-16's pounds.
         let (unit, per_kg) = if mig { ("KG", 1.0) } else { ("LB", 2.20462) };
         let fuel_kg = cfg.jet.fuel_max() * cfg.fuel;
         let fuel = if cfg.fuel_is_min() { format!("{} {unit}  MINIMUM", (fuel_kg * per_kg).round() as i64) } else { format!("{} {unit}  {}%", (fuel_kg * per_kg).round() as i64, (cfg.fuel * 100.0).round() as i64) };
         let mut rows: Vec<(&str, String, Option<Action>)> = vec![("AIRFRAME", cfg.jet.name().to_string(), Some(Action::Jet))];
         if armed {
-            rows.push((tip, if cfg.tips_empty { "EMPTY".into() } else { cfg.tip.pair().into() }, Some(Action::Station(0))));
+            rows.push((tip, if cfg.jet==Type::EA18G{"ALQ-218, FIXED".into()}else if cfg.tips_empty { "EMPTY".into() } else { cfg.tip.pair().into() }, if cfg.jet==Type::EA18G{None}else{Some(Action::Station(0))}));
             // The MiG has no stations 2 and 8.
             if crate::combat::has_pair(cfg.jet, 1) {
-                rows.push(("STA 2 / 8", name(cfg.outer).to_string(), Some(Action::Station(1))));
+                rows.push((if superhornet{"STA 2 / 10"}else{"STA 2 / 8"}, name(cfg.outer).to_string(), Some(Action::Station(1))));
             }
             rows.push((out, name(cfg.outboard).to_string(), Some(Action::Station(2))));
             rows.push((inb, name(cfg.inboard).to_string(), Some(Action::Station(3))));

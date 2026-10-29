@@ -1,5 +1,90 @@
 # Validation
 
+## Hornet canopy, E/G exteriors and damage separation, 29 October 2026
+
+This revision replaces the shared C exterior for F/A-18E and EA-18G, reshapes
+the C windshield bow, fits slender mirrors and attaches the compass to the
+right arch. Store mounts follow the actual pylons; Growler tip receivers
+reserve their stations. Nozzle interiors no longer sample exterior paint.
+Structural cracks and weapon impact/burn masks use independent shader channels.
+The integrated missile changes also reject destroyed, crashed and abandoned
+targets and distinguish SARH support, independent IR and active terminal radar.
+References, source permission, transforms and approximation limits are in
+[HORNET-CANOPY-SUPER.md](HORNET-CANOPY-SUPER.md) and [WEAPONS.md](WEAPONS.md).
+
+Final source was frozen before building and capturing both distributions:
+
+- Rust: 351 game tests and 16 server tests passed, with zero failures or ignored
+  tests. Both release builds completed without warnings.
+- Python: all 16 importer, source reconstruction and warning-speaker tests passed.
+  Pinned GPL sources reconstruct both variants offline, byte for byte, and VRZ
+  decompression restores the editable meshes exactly.
+- Native Linux and Windows each produced 48 acceptance captures: 13 views of
+  each Hornet variant, plus nozzle and paired damage views of F-16, MiG-29 and
+  Su-27. Reviewed views cover mirrors, compass, panels, gear, brake, underside
+  mounts, full planform and separate damage causes.
+- Native UI and future-UI integration checks passed on both platforms. All 120
+  loadout layouts passed at 640x360: six aircraft, five missions and keyboard
+  and controller prompts on both operating systems.
+- The cheek-clearance regression checks all five western missile families
+  against the original C intake skin, allowing 8 mm at contact. Mirror tests
+  check the complete panes and optical mapping with small head displacement.
+  E/G tests check each rail centre/orientation, fixed Growler tips, separate
+  canopy lengths and tyre-to-ground contacts within 15 mm.
+- Control travel tests use each variant's actual surfaces, including E/G,
+  with neutral, intermediate, extreme and combined flap/roll/yaw states.
+- Blender generated three editable assembled scenes and 21 top/front/side,
+  quarter, underside, pilot-eye and bow renders from the final exported meshes.
+  The scenes include separate source-reference objects and mounted inventory.
+- Real Linux processes passed dogfight and combat over direct UDP, external TCP
+  relay and embedded TCP hosting. Native Windows passed both embedded modes.
+  Reports confirm remote inputs, snapshots, simulation ticks, gun inventory
+  consumption and disabled microphone capture. These are loopback checks.
+
+The first Windows future-UI attempt could not create its local network session
+inside the restricted execution environment. The same executable and assertions
+passed with loopback socket access. Python reconstruction tests also passed after
+granting the temporary-directory access denied by the Windows sandbox. No check
+was skipped or relaxed.
+
+After correcting the test to inspect E/G's own controls, all tests passed again.
+Rebuilding left Linux byte-identical; Windows differed only in two bytes of its
+COFF link timestamp (offsets 128 and 129). The captured Windows build is retained
+as the distribution, with identical runtime code and resources. This comparison
+is recorded in `target/canopy-super-review/test-only-rebuild.json`.
+
+Evidence is under `target/canopy-super-review/`; the native Windows copy and
+captures are in this chat's `hornet-revision/` artifact directory. Capture and
+layout manifests record their executable SHA-256. The four distribution hashes
+are listed in `dist/SHA256SUMS.txt`.
+
+Resource comparison includes the complete fixed and movable exterior and gear,
+excluding separately mounted inventory meshes:
+
+| Resource | Previous | Final |
+| --- | ---: | ---: |
+| Hornet C exterior triangles | 9,033 | 9,177 |
+| Super Hornet E exterior triangles | 9,033 shared | 25,392 |
+| Growler exterior triangles | 9,033 shared | 28,076 |
+| E editable / packed model bytes | shared | 3,163,028 / 701,057 |
+| G editable / packed model bytes | shared | 3,559,556 / 753,785 |
+| E / G styled QOI bytes | shared | 221,028 / 194,511 |
+| Linux game bytes | 12,991,624 | 14,890,048 |
+| Windows game bytes | 12,798,976 | 14,697,984 |
+
+Both new exteriors remain below 30,000 triangles. The two new palette-styled
+images retain their source UVs and dimensions; the original sources and explicit
+author permission are bundled in the repository. The single-seat roof and pilot
+fit remain reconstructed approximations, and the rear cockpit/EW equipment is
+not a complete systems simulation.
+
+Final game SHA-256:
+
+- Linux: `36f1fff38f30f48c0bfac29eafe509509b6fea15ec6b6dcadca84406869dd5cd`.
+- Windows: `7c0fa51363ed0cc2afa8d46fad38ec1a33a9bbdf9db8fd2c150409ed28fa4f97`.
+
+The older sections below describe historical snapshots and retain their hashes.
+
 ## Pending TODO completed, 29 October 2026
 
 All 16 open items are implemented and marked complete in TODO.md. Behavior,

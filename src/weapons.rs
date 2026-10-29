@@ -732,6 +732,9 @@ pub enum Fate {
     Spent(V3),
 }
 
+/// Simplified fighter acquisition range, not a published seeker specification.
+pub const ACTIVE_RANGE: f64 = 15000.0;
+
 #[derive(Clone, Debug)]
 pub struct Missile {
     pub spec: &'static Spec,
@@ -741,19 +744,37 @@ pub struct Missile {
     pub age: f64,
     pub from: Who,
     pub target: Option<Who>,
-    /// The seeker still sees its target.
+    /// Following a live target or its last observed inertial track.
     pub tracking: bool,
+    /// The launcher currently supplies illumination or valid target updates.
+    pub supported: bool,
     /// Lateral acceleration flown in the last step, m/s^2.
     pub accel: f64,
     /// Closest the missile has been to its target, m.
     pub best: f64,
     visibility_clock: f64,
     notch_time: f64,
+    terminal_lock: bool,
+    memory: Option<(V3, V3)>,
 }
 
 impl Missile {
     pub fn launch(spec: &'static Spec, pos: V3, vel: V3, from: Who, target: Option<Who>) -> Missile {
-        Missile { spec, pos, vel, mass: spec.mass, age: 0.0, from, target, tracking: target.is_some(), accel: 0.0, best: f64::INFINITY, visibility_clock: 0.0, notch_time: 0.0 }
+        Missile { spec, pos, vel, mass: spec.mass, age: 0.0, from, target, tracking: target.is_some(), supported: true, accel: 0.0, best: f64::INFINITY, visibility_clock: 0.0, notch_time: 0.0, terminal_lock: spec.infrared() && target.is_some(), memory: None }
+    }
+
+    /// Target data loaded before release, with an independent seeker lock if held.
+    pub fn cue(&mut self, track: Option<(V3, V3)>, acquired: bool) {
+        self.memory = track;
+        self.terminal_lock = acquired;
+    }
+
+    /// A destroyed or removed actor must never be followed through a respawn.
+    pub fn lose_target(&mut self) {
+        self.target = None;
+        self.tracking = false;
+        self.terminal_lock = false;
+        self.memory = None;
     }
 
     /// Motor burning (for the smoke trail and the seeker's heat).
@@ -769,6 +790,37 @@ impl Missile {
     pub fn step(&mut self, dt: f64, target: Option<(V3, V3)>, floor: &dyn Fn(f64, f64) -> f64) -> Fate {
         let s = self.spec;
         let p0 = self.pos;
+        if self.age == 0.0 && self.memory.is_none() {
+            self.memory = target;
+        }
+        if target.is_none() && self.target.is_some() {
+            self.lose_target();
+        }
+        if s.semi_active() && !self.supported {
+            self.tracking = false;
+        }
+        // Datalink loss preserves only the last measurement. Do not keep
+        // reading the target's manoeuvres until the missile's own seeker sees it.
+        let mut midcourse = false;
+        let mut observed = target;
+        if self.tracking && s.datalink && !self.terminal_lock {
+            let reach = if s.active() { ACTIVE_RANGE } else { 8000.0 };
+            self.terminal_lock = target.is_some_and(|(p, _)| {
+                let r = p - self.pos;
+                r.len() <= reach && self.vel.norm().dot(r.norm()) >= s.gimbal.cos()
+                    && !terrain_masked(self.pos, p, floor)
+            });
+            if !self.terminal_lock {
+                midcourse = true;
+                if self.supported {
+                    self.memory = target;
+                } else if let Some((p, v)) = self.memory {
+                    self.memory = Some((p + v * dt, v));
+                }
+                observed = self.memory;
+                if observed.is_none() { self.tracking = false; }
+            }
+        }
         self.age += dt;
         let atm = atmosphere_at(self.pos.y);
         let speed = self.vel.len().max(1.0);
@@ -784,29 +836,27 @@ impl Missile {
 
         let mut lateral = V3::ZERO;
         let guided = burn >= 0.0 && self.age > 0.15;
-        // A seeker cannot see through a ridge. Sample at 10 Hz, including
-        // midcourse, rather than continuing to use an occluded target's truth.
+        // A seeker cannot see through a ridge. Inertial midcourse guidance
+        // uses its estimate; seeker visibility is sampled separately at 10 Hz.
         self.visibility_clock -= dt;
-        if self.tracking && self.visibility_clock <= 0.0 {
+        if self.tracking && !midcourse && self.visibility_clock <= 0.0 {
             self.visibility_clock = 0.1;
             if target.is_some_and(|(tp, _)| terrain_masked(self.pos, tp, floor)) {
                 self.tracking = false;
             }
         }
-        let seen = if self.tracking { target } else { None };
+        let seen = if self.tracking { observed } else { None };
         if let (Some((tp, tv)), true) = (seen, guided) {
             let r = tp - self.pos;
             let range = r.len().max(1.0);
             // Past the seeker's look limit a missile loses its target, unless
-            // a datalink still steers it there early in its flight (a shot
-            // over the shoulder, or at a target off the nose).
-            let midcourse = s.datalink && self.age < 8.0;
+            // inertial/datalink midcourse is steering to an estimated intercept.
             // Simplified look-down Doppler rejection: a sustained beam at
             // low altitude merges with clutter. Better ECCM requires a longer,
             // tighter notch; there is no instant guaranteed dodge.
             let radial = tv.dot(r / range).abs();
             let clutter = tp.y < self.pos.y + 100.0 && tp.y - floor(tp.x, tp.z) < 2500.0;
-            let notching = !s.infrared() && clutter && radial < mix(45.0, 22.0, s.ccm)
+            let notching = !midcourse && !s.infrared() && clutter && radial < mix(45.0, 22.0, s.ccm)
                 && (!s.active() || range < 15000.0);
             self.notch_time = if notching { self.notch_time + dt } else { (self.notch_time - dt * 2.0).max(0.0) };
             if r.dot(dir) / range < s.gimbal.cos() && !midcourse
@@ -1339,13 +1389,73 @@ mod tests {
         assert_eq!(hits, 20);
     }
     #[test]
+    fn unsupported_midcourse_uses_only_the_last_measurement() {
+        for spec in [&AIM120C, &AIM120D, &R77, &AIM9X] {
+            let track = (v3(1500.0, 6000.0, -40000.0), v3(120.0, 0.0, -200.0));
+            let mut m = Missile::launch(spec, v3(0.0, 6000.0, 0.0), v3(0.0, 0.0, -500.0), Who::Player, Some(Who::Bandit(0)));
+            m.cue(Some(track), false);
+            m.age = 1.0;
+            m.supported = false;
+            let mut other = m.clone();
+            m.step(FIXED_DT, Some(track), &flat);
+            other.step(FIXED_DT, Some((v3(-9000.0, 8000.0, -35000.0), v3(-300.0, 80.0, 0.0))), &flat);
+            assert_eq!(m.pos, other.pos, "{} used unseen position", spec.name);
+            assert_eq!(m.vel, other.vel, "{} used unseen velocity", spec.name);
+            assert_eq!(m.memory, Some((track.0 + track.1 * FIXED_DT, track.1)));
+            assert!(!m.terminal_lock && m.tracking);
+            other.supported = true;
+            let update = (v3(-9000.0, 8000.0, -35000.0), v3(-300.0, 80.0, 0.0));
+            other.step(FIXED_DT, Some(update), &flat);
+            assert_eq!(other.memory, Some(update), "{} failed to resume updates", spec.name);
+        }
+    }
+
+    #[test]
+    fn active_seekers_acquire_without_launcher_support_and_respect_their_gimbal() {
+        for spec in [&AIM120C, &AIM120D, &R77] {
+            let mut m = Missile::launch(spec, v3(0.0, 6000.0, 0.0), v3(0.0, 0.0, -500.0), Who::Player, Some(Who::Bandit(0)));
+            m.supported = false;
+            m.cue(Some((v3(0.0, 6000.0, -20000.0), V3::ZERO)), false);
+            m.step(FIXED_DT, Some((v3(0.0, 6000.0, -5000.0), -V3::Z * 200.0)), &flat);
+            assert!(m.terminal_lock && m.tracking, "{} failed autonomous acquisition", spec.name);
+            m.age = 1.0;
+            m.step(FIXED_DT, Some((m.pos + V3::X * 5000.0, V3::ZERO)), &flat);
+            assert!(!m.tracking, "{} followed a target outside its gimbal", spec.name);
+        }
+    }
+
+    #[test]
+    fn midcourse_updates_remain_available_after_eight_seconds() {
+        let mut m = Missile::launch(&AIM120C, v3(0.0, 6000.0, 0.0), -V3::Z * 600.0, Who::Player, Some(Who::Bandit(0)));
+        m.age = 10.0;
+        m.step(FIXED_DT, Some((v3(40000.0, 6000.0, 0.0), -V3::Z * 200.0)), &flat);
+        assert!(m.tracking && !m.terminal_lock, "supported inertial guidance has no eight-second cutoff");
+    }
+
+    #[test]
+    fn missing_targets_cannot_leave_tracking_or_trigger_a_ghost_fuze() {
+        for spec in [&AIM9M, &AIM9X, &R60M, &R73, &R27T, &AIM7M, &R27R, &AIM120C, &AIM120D, &R77] {
+            let mut m = Missile::launch(spec, v3(0.0, 6000.0, 0.0), -V3::Z * 500.0, Who::Player, Some(Who::Bandit(0)));
+            m.age = 2.0;
+            m.cue(Some((m.pos, V3::ZERO)), true);
+            assert_eq!(m.step(FIXED_DT, None, &flat), Fate::Flying);
+            assert!(!m.tracking && m.target.is_none() && m.memory.is_none(), "{}", spec.name);
+        }
+    }
+
+    #[test]
     fn ridge_masks_radar_and_ir_seekers() {
         let ridge = |_x: f64, z: f64| if z.abs() < 450.0 { 2000.0 } else { 0.0 };
         for spec in [&AIM9M, &AIM120C, &R27R] {
             let mut m = Missile::launch(spec, v3(0.0, 1200.0, 4000.0), v3(0.0, 0.0, -450.0), Who::Player, Some(Who::Bandit(0)));
             let tp = v3(0.0, 1100.0, -4000.0);
             m.step(FIXED_DT, Some((tp, v3(0.0, 0.0, -230.0))), &ridge);
-            assert!(!m.tracking, "{} saw through a ridge", spec.name);
+            if spec.active() {
+                assert!(!m.terminal_lock, "{} acquired through a ridge", spec.name);
+                assert_eq!(m.memory, Some((tp, v3(0.0, 0.0, -230.0))));
+            } else {
+                assert!(!m.tracking, "{} saw through a ridge", spec.name);
+            }
         }
     }
 

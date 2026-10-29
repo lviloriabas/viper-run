@@ -134,7 +134,7 @@ mod tests {
             let surfaces=match kind {
                 Type::F16=>crate::airframe::build().slats,
                 Type::Mig29=>crate::mig29::build().controls,
-                Type::F18|Type::F18E|Type::EA18G=>crate::hornet::build().controls,
+                Type::F18|Type::F18E|Type::EA18G=>crate::hornet::build_for(kind).controls,
                 Type::Su27=>crate::su27::build().controls,
             };
             for s in surfaces {
@@ -151,6 +151,19 @@ mod tests {
                     let n=v3(v[3] as f64,v[4] as f64,v[5] as f64);
                     assert!((n.len()-1.0).abs()<0.001);
                 }
+                for flaps in [0.0,0.5,1.0] {for command in [-1.0,-0.5,0.0,0.5,1.0] {
+                    let mut probe=Aircraft::new(&crate::sim::Mission::new());probe.kind=kind;
+                    probe.flaps=flaps;probe.alpha=flaps*20.0*DEG;
+                    probe.surf_roll=command;probe.surf_yaw= -command;
+                    let angle=s.hinge.angle(&probe);assert!(angle.is_finite());
+                    let rotation=Quat::axis_angle(axis,angle);
+                    for v in s.mesh.v.chunks(STRIDE) {
+                        let local=v3(v[0] as f64,v[1] as f64,v[2] as f64)-p;
+                        let moved=rotation.rotate(local);
+                        assert!((moved.len()-local.len()).abs()<1e-8,"non-rigid control travel {kind:?}");
+                        assert!((moved.dot(axis)-local.dot(axis)).abs()<1e-8,"hinge drift {kind:?}");
+                    }
+                }}
                 match s.hinge.drive {
                     Drive::Slat=>assert!((q.rotate(-V3::Z)).y<0.0),
                     Drive::Flap=>assert!((q.rotate(V3::Z)).y<0.0),

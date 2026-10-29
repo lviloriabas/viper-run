@@ -32,6 +32,14 @@ recorded in [HORNET-FLANKER-MODELS.md](../../docs/HORNET-FLANKER-MODELS.md).
 
 ## Rebuild without network access
 
+Super Hornet/Growler sources, author permission and their separate hash manifest
+are under `source/superhornet/` and `superhornet-sources.json`. Restore them with
+the same unpack command below, then run `tools/import_superhornet.py` against
+the restored `superhornet` directory. The two variant VRM/VRZ files and flat
+skins are reconstructed offline. See
+[HORNET-CANOPY-SUPER.md](../../docs/HORNET-CANOPY-SUPER.md) for the source package,
+datum, E canopy reconstruction, weapon mounts, references and limitations.
+
 Install Pillow from `tools/requirements-models.txt`, then from the repository root:
 
 ```sh

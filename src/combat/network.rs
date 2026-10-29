@@ -262,6 +262,7 @@ impl Combat {
         }
     }
     pub fn network_clear_ai(&mut self) {
+        for i in 0..self.bandits.len() { self.forget_target(Who::Bandit(i)); }
         self.bandits.clear();
         self.reserve.clear();
         self.flight_track = None;
@@ -274,6 +275,7 @@ impl Combat {
         self.hostile = on;
     }
     pub fn network_reset_player(&mut self, a: &mut Aircraft, jet: Aircraft, kind: MissionKind) {
+        self.forget_target(Who::Player);
         *a = jet;
         self.equip(&Config::for_jet(kind, a.kind));
         load(a, &self.loadout);
@@ -285,6 +287,7 @@ impl Combat {
         self.drop_lock();
     }
     pub fn network_reset_remote(&mut self, i: usize, jet: Aircraft, kind: MissionKind) {
+        self.forget_target(Who::Bandit(i));
         let team = self.bandits[i].team;
         let mut b = bandit(jet, 0.6, CALLSIGNS[i % CALLSIGNS.len()]);
         b.team = team;
@@ -384,19 +387,10 @@ impl Combat {
         let trigger = control.trigger() && p.pilot.authority() > 0.5 && p.eject_clock == 0.0;
         self.player_weapons(dt, host, trigger, trigger && !self.trigger_was);
         self.trigger_was = trigger;
+        let supported = self.radar_lock().filter(|w| self.track(*w, host).is_some_and(|(pos, _)| self.radar_sees(host, pos, true)));
         for m in &mut self.missiles {
             if m.from == Who::Player {
-                if m.spec.semi_active() && self.lock != m.target {
-                    m.tracking = false;
-                }
-                if m.spec.active()
-                    && m.spec.datalink
-                    && self.lock != m.target
-                    && (m.pos - host.pos).len() > ACTIVE_RANGE
-                {
-                    m.target = None;
-                    m.tracking = false;
-                }
+                m.supported = m.target.is_some() && supported == m.target;
             }
         }
         host.stores_mass = self.loadout.mass();
@@ -1092,6 +1086,49 @@ mod tests {
         assert!(c.rounds.iter().all(|r| r.from == Who::Bandit(i)));
         assert_eq!(host.kind, Type::F16);
         assert_eq!(c.bandits[i].team, 1);
+    }
+}
+
+#[cfg(test)]
+mod missile_support_tests {
+    use super::*;
+
+    #[test]
+    fn remote_launchers_supply_their_own_lock_and_terminal_range_uses_the_actual_target() {
+        terrain::init();
+        for kind in Type::ALL {
+            let specs = if kind.russian() { [&R27R, &R77] } else { [&AIM7M, &AIM120C] };
+            for spec in specs {
+                let mut c = Combat::new(MissionKind::Dogfight, &mut Mission::new());
+                c.network_clear_ai();
+                c.networked = true;
+                let mut host = spawn_type(Type::F16, v3(70000.0, 6000.0, 0.0), 0.0, 230.0);
+                let source = c.network_spawn(spawn_type(kind, v3(0.0, 6000.0, 0.0), 0.0, 230.0),
+                    1, true, MissionKind::Dogfight);
+                let target = c.network_spawn(spawn_type(Type::F16, v3(0.0, 6000.0, -40000.0), 0.0, 200.0),
+                    2, true, MissionKind::Dogfight);
+                let mut missile = Missile::launch(spec, c.bandits[source].jet.pos, -V3::Z * 500.0,
+                    Who::Bandit(source), Some(Who::Bandit(target)));
+                missile.cue(Some((c.bandits[target].jet.pos, c.bandits[target].jet.vel)), false);
+                c.fire_missile(missile);
+                let mut pilot = RemotePilot { lock: Some(Who::Bandit(target)), ..Default::default() };
+                c.network_remote_step(source, &mut host, &Control::default(), &mut pilot, crate::sim::FIXED_DT);
+                c.step_missiles(crate::sim::FIXED_DT, &host);
+                assert!(c.missiles[0].supported && c.missiles[0].tracking, "{kind:?} {}", spec.name);
+                assert!(c.lock.is_none(), "host must not supply the remote player's lock");
+                pilot.lock = None;
+                c.network_remote_step(source, &mut host, &Control::default(), &mut pilot, crate::sim::FIXED_DT);
+                c.step_missiles(crate::sim::FIXED_DT, &host);
+                assert!(!c.missiles[0].supported);
+                assert_eq!(c.missiles[0].tracking, spec.active());
+                c.bandits[target].jet.pos = c.missiles[0].pos - V3::Z * 5000.0;
+                c.kill_bandit(source);
+                c.step_missiles(crate::sim::FIXED_DT, &host);
+                assert_eq!(c.missiles[0].tracking, spec.active(), "terminal acquisition must ignore the distant host");
+                c.kill_bandit(target);
+                assert!(c.missiles[0].target.is_none() && !c.missiles[0].tracking);
+            }
+        }
     }
 }
 

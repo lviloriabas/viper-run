@@ -10,6 +10,10 @@
 
 Revisión del 29 de octubre de 2026: [implementación, fuentes y límites](docs/PENDING-TASKS.md), [validación](docs/VALIDATION.md).
 
+- [x] Redondear todo el aro de la canopia Hornet, adelgazar y alargar los espejos y fijar la brújula al arco derecho con referencias reales.
+- [x] Dar al Super Hornet y al Growler exteriores distintos mediante fuentes editables de FlightGear y referencias visuales de War Thunder; conservar los receptores de las puntas del Growler.
+- [x] Corregir rieles, contactos y orientación del armamento, comprobar las aletas contra las tomas y eliminar texturas interiores de las toberas.
+- [x] Separar las grietas por fatiga estructural de los impactos, quemaduras y hollín causados por armas. Fuentes, reconstrucción y límites en [HORNET-CANOPY-SUPER.md](docs/HORNET-CANOPY-SUPER.md).
 - [x] Corregir alertas de compilación y warnings de código, debe quedar en el agents.md que se corrijan todos los warnings y alertas de compilación.
 - [x] El app perdió su icono en barra de tareas, corregir.
 - [x] Ajustar el limitador de G y AOA para que sea más realista, incluyendo el efecto de la velocidad y altitud en el desempeño del avión. Tener en cuenta que probablemente existe el limite para evitar un flat spin o perdida, en el F-18 actualmente está muy restrigido, debe cumplir su función en todos, pero sin ser muy restrictivo.

@@ -9,7 +9,10 @@ pub(super) fn frame(kind: Type) -> (V3, Frame) {
     if kind == Type::Mig29 {
         return mig::standby_compass_frame();
     }
-    let (c, anchor) = if kind == Type::Su27 {
+    let (c, anchor) = if kind.hornet() {
+        let (anchor,centre)=modern::hornet_compass_mount(kind);
+        (centre,anchor)
+    } else if kind == Type::Su27 {
         (
             v3(0.265, 1.205, -4.02),
             v3(0.287465397, 1.273293526, -3.893414542),
@@ -56,7 +59,7 @@ pub(super) fn housing(m: &mut Mesh, kind: Type) {
         v3(0.020, 0.005, 0.018),
         METALC.scale(0.5),
     );
-    if kind == Type::F18 {
+    if kind.hornet() {
         // Hornet standby unit: compact case with a horizontal reading window.
         // This is separate from the round KI-13 bowl used by the Soviet jets.
         m.block(&f.at(0.0, 0.0, -0.026), v3(0.036, 0.027, 0.012), CASE);
@@ -145,7 +148,7 @@ pub(super) fn dynamic(m: &mut Mesh, kind: Type, heading: f64, pitch: f64, bank: 
         return;
     }
     let (_, f) = frame(kind);
-    if kind == Type::F18 {
+    if kind.hornet() {
         let r = 0.0245;
         let ys = [
             -0.015, -0.010, -0.0075, -0.005, -0.0025, 0.0, 0.0025, 0.005, 0.0075, 0.010, 0.015,

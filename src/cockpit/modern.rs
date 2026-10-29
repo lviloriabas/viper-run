@@ -562,7 +562,7 @@ fn hardware(kind:Type)->Mesh {
     let mut m=crate::flightgear::cockpit_mesh(kind,"cockpit");
     m.v.extend(canopy_frame(kind).v);
     let offset=crate::airframe::EYE-kind.eye();
-    let native=|z:f64,phi:f64|crate::hornet::canopy_point(russian,z,phi)+offset;
+    let native=|z:f64,phi:f64|if matches!(kind,Type::F18E|Type::EA18G){crate::superhornet::canopy_point(kind,z,phi)+offset}else{crate::hornet::canopy_point(russian,z,phi)+offset};
     let (front,aft)=crate::flightgear::canopy_range(kind);
     // Continuous walls from the original canopy sills to the floor.
     let (front,aft)=(front+0.001,aft-0.001);
@@ -712,20 +712,34 @@ fn hardware(kind:Type)->Mesh {
 #[derive(Clone,Copy)]
 struct MirrorMount { frame:Frame, #[cfg(test)] anchor:V3, w:f64, h:f64, #[cfg(test)] rear:V3 }
 
-// Circular upper bow fitted to Navy F/A-18C canopy photographs. The short
-// lower posts retain the imported sill contacts. Dimensions are a visual fit.
+// Continuous oval fitted to the legacy windshield, including its curved
+// shoulders. The sill contacts stay fixed; no straight lower posts remain.
 fn hornet_arch(phi:f64)->V3 {
-    let y=0.910+0.365*phi.sin();
-    v3(0.365*phi.cos(),y,-4.184-(y-0.910)*0.18)+EYE-Type::F18.eye()
+    let y=0.722+0.553*phi.sin();
+    v3(0.380*phi.cos(),y,-4.142-(y-0.722)*0.196)+EYE-Type::F18.eye()
 }
+#[cfg(test)]
 fn hornet_bow() -> Vec<V3> {
-    let offset=EYE-Type::F18.eye();
-    std::iter::once(v3(-0.380,0.722,-4.142)+offset)
-        .chain((0..=24).map(|i|hornet_arch(PI-i as f64*PI/24.0)))
-        .chain(std::iter::once(v3(0.380,0.722,-4.142)+offset)).collect()
+    (0..=40).map(|i|hornet_arch(PI-i as f64*PI/40.0)).collect()
 }
+fn hornet_arch_for(kind:Type,phi:f64)->V3 {
+    if kind==Type::F18{hornet_arch(phi)}else{crate::superhornet::bow_point(phi)+EYE-kind.eye()}
+}
+fn hornet_bow_for(kind:Type)->Vec<V3> {
+    (0..=40).map(|i|hornet_arch_for(kind,PI-i as f64*PI/40.0)).collect()
+}
+pub(super) fn hornet_compass_mount(kind:Type)->(V3,V3) {
+    let phi=23.0*DEG;
+    let anchor=hornet_arch_for(kind,phi)+V3::Z*0.042;
+    let inward=v3(-phi.cos(),-phi.sin(),0.0);
+    (anchor,anchor+inward*0.053+V3::Z*0.074)
+}
+#[cfg(test)]
 fn nearest_on_bow(point:V3)->V3 {
-    hornet_bow().windows(2).map(|p|{
+    nearest_on_bow_for(Type::F18,point)
+}
+fn nearest_on_bow_for(kind:Type,point:V3)->V3 {
+    hornet_bow_for(kind).windows(2).map(|p|{
         let d=p[1]-p[0];
         p[0]+d*((point-p[0]).dot(d)/d.dot(d)).clamp(0.0,1.0)
     }).min_by(|a,b|(*a-point).len().total_cmp(&(*b-point).len())).unwrap()
@@ -739,9 +753,10 @@ fn canopy_frame(kind:Type)->Mesh {
         frame.v=frame.v.chunks(crate::mesh::STRIDE*3).filter(|tri|
             !tri.chunks(crate::mesh::STRIDE).all(|v|{
                 let z=v[2] as f64-offset.z;
-                z > -4.32 && z < -4.09
+                if kind==Type::F18 {z > -4.32 && z < -4.09}
+                else {z > crate::superhornet::source_point(v3(-4.95,0.0,0.0)).z && z < crate::superhornet::source_point(v3(-4.55,0.0,0.0)).z}
             })).flatten().copied().collect();
-        let bow=hornet_bow();
+        let bow=hornet_bow_for(kind);
         pilot::band(&mut frame,&bow,0.019,0.036,V3::Z,DARK);
         // Two contiguous lips and their narrow seal mark the actual
         // windshield/canopy mating joint, including the mirror seats.
@@ -772,7 +787,7 @@ fn mirror_point(kind:Type,mirror:&MirrorMount,x:f64,y:f64,d:f64)->V3 {
 fn mirror_support(kind:Type,_index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
     let (x,y)=(t*mirror.w,0.0);
     let hinge=mirror_point(kind,mirror,x,y,-0.020);
-    let foot=if kind.hornet() {nearest_on_bow(hinge)+V3::Z*0.042}
+    let foot=if kind.hornet() {nearest_on_bow_for(kind,hinge)+V3::Z*0.042}
         else{source_bow_support(kind,hinge)};
     (foot,hinge)
 }
@@ -785,9 +800,9 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let (anchor,radial,hint,w,h)=if kind.hornet() {
             let phi=if crown{PI/2.0}else if side>0.0{38.0*DEG}else{PI-38.0*DEG};
             let radial=v3(phi.cos(),phi.sin(),0.0);
-            (hornet_arch(phi),radial,
-                v3(phi.sin(),-phi.cos(),0.0),
-                if crown{0.205}else{0.180},if crown{0.052}else{0.060})
+            (hornet_arch_for(kind,phi),radial,
+                v3(0.380*phi.sin(),-0.553*phi.cos(),0.0).norm(),
+                if crown{0.222}else{0.212},if crown{0.038}else{0.041})
         }else {
             let phi=if crown{PI/2.0}else if side>0.0{0.66}else{PI-0.66};
             let radial=v3(phi.cos(),phi.sin(),0.0);
@@ -807,6 +822,9 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let frame=Frame{o:centre,x,y:normal.cross(x).norm(),z:normal};
         MirrorMount{frame,#[cfg(test)]anchor,w,h,#[cfg(test)]rear}
     })
+}
+pub(super) fn mirror_capture_height(kind:Type)->f64 {
+    (mirror_mounts(kind)[1].frame.o.y-cockpit_eye(kind).y).max(0.12)
 }
 /// Main levers and selector respond to the same commands as the flight model.
 pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
@@ -1037,15 +1055,16 @@ mod tests {
     use super::*;
     #[test]
     fn mirrors_face_the_eye_and_reflect_the_correct_rear_sector_without_clipped_uvs() {
-        for kind in [Type::F18,Type::Su27] {
+        for kind in [Type::F18,Type::Su27,Type::F18E,Type::EA18G] {
             for mirror in mirror_mounts(kind) {
                 let f=mirror.frame;
                 let ray=(f.o-cockpit_eye(kind)).norm();
                 let reflected=ray-f.z*(2.0*ray.dot(f.z));
                 assert!((reflected-mirror.rear).len()<1e-8);
                 assert!(f.z.dot((cockpit_eye(kind)-f.o).norm())>0.75);
-                if kind==Type::F18 {
-                    let radial=(mirror.anchor-hornet_arch(0.0)+V3::X*0.365).norm();
+                if kind.hornet() {
+                    let foot=hornet_arch_for(kind,0.0);
+                    let radial=(mirror.anchor-v3(0.0,foot.y,foot.z)).norm();
                     assert!((f.o-mirror.anchor).dot(radial)<0.0,"Hornet pane must sit inside the arch");
                     assert!((f.o-mirror.anchor).len()<0.080);
                 } else {assert!((f.o-mirror.anchor).len()<0.061);}
@@ -1119,7 +1138,7 @@ mod tests {
     }
 
     #[test]
-    fn hornet_mating_bow_has_a_circular_cap_and_original_sill_contacts() {
+    fn hornet_mating_bow_has_continuously_curved_sides_and_original_sill_contacts() {
         let bow=hornet_bow();
         for i in 0..bow.len()/2 {
             let a=bow[i];let b=bow[bow.len()-1-i];
@@ -1128,9 +1147,11 @@ mod tests {
         let offset=EYE-Type::F18.eye();
         for p in &bow[1..bow.len()-1] {
             let p=*p-offset;
-            assert!((p.x.hypot(p.y-0.910)-0.365).abs()<1e-9,"flattened canopy arch");
+            assert!(((p.x/0.380).powi(2)+((p.y-0.722)/0.553).powi(2)-1.0).abs()<1e-9,"flattened canopy arch");
         }
-        assert!((bow[bow.len()/2].y-bow[1].y-0.365).abs()<1e-9);
+        assert!((bow[bow.len()/2].y-bow[0].y-0.553).abs()<1e-9);
+        let quarter=hornet_arch(PI*0.25)-offset;
+        assert!(quarter.x<0.280 && quarter.y>1.10,"straight shoulder returned");
         let frame=canopy_frame(Type::F18);
         let front:Vec<_>=frame.v.chunks(crate::mesh::STRIDE)
             .map(|v|v3(v[0] as f64,v[1] as f64,v[2] as f64)-offset)
@@ -1192,7 +1213,7 @@ mod tests {
 
     #[test]
     fn all_three_mirror_panes_are_visible_from_the_design_eye() {
-        for kind in [Type::F18,Type::Su27] {
+        for kind in [Type::F18,Type::Su27,Type::F18E,Type::EA18G] {
             let m=hardware(kind);
             for mirror in mirror_mounts(kind) {
                 for x in [-0.85,-0.4,0.0,0.4,0.85] {for y in [-0.85,-0.4,0.0,0.4,0.85] {
@@ -1205,6 +1226,17 @@ mod tests {
                     }
                 }}
             }
+        }
+    }
+
+    #[test]
+    fn hornet_compass_brackets_are_rooted_in_the_actual_bow_and_mirrors_are_slender() {
+        for kind in [Type::F18,Type::F18E,Type::EA18G] {
+            let bow=canopy_frame(kind);
+            let(anchor,f)=compass::frame(kind);
+            assert!(anchor.x>0.25 && (f.o-anchor).len()<0.10);
+            assert!(bow.v.chunks(crate::mesh::STRIDE*3).any(|tri|blocked(anchor-V3::Z*0.08,anchor+V3::Z*0.08,tri)),"{kind:?}: compass bracket floats off the bow");
+            for mirror in mirror_mounts(kind){assert!(mirror.w/mirror.h>5.0,"mirror case is too broad");}
         }
     }
 

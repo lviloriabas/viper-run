@@ -28,6 +28,7 @@ mod math;
 mod mesh;
 mod mig29;
 mod hornet;
+mod superhornet;
 mod flightgear;
 mod su27;
 mod physio;
@@ -128,6 +129,7 @@ struct Opts {
     breakup: Option<sim::Breakup>,
     broken_gear: bool,
     damage_preview: bool,
+    stress_preview: bool,
     controls: bool,
     performance_overlay: Option<bool>,
     /// Show the controller prompts, for screenshots without a pad.
@@ -165,6 +167,7 @@ fn parse_opts() -> Opts {
         match args[i].as_str() {
             "--export-cockpit" => o.cockpit_export = Some(next(&mut i)),
             "--damage-preview" => o.damage_preview = true,
+            "--stress-preview" => o.stress_preview = true,
             "--host" => o.host=Some(next(&mut i)),
             "--host-game" => o.host_game=Some(next(&mut i)),
             "--join" => o.join=Some(next(&mut i)),
@@ -589,6 +592,7 @@ impl App {
         if let (true,Some(a))=(self.opts.damage_preview,self.aircraft.as_mut()) {
             a.battle=sim::BattleDamage{wing:0.7,side:-1.0,engine:0.5,airframe:0.35,fire:true,..Default::default()};
         }
+        if let (true,Some(a))=(self.opts.stress_preview,self.aircraft.as_mut()) {a.structure.damage=0.8;}
         if let (true, Some(a)) = (self.opts.irst, self.aircraft.as_ref()) {
             self.combat.toggle_irst(a);
         }

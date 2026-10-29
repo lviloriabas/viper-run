@@ -86,13 +86,17 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
     // Exterior review includes the exact post-partition meshes, rather than
     // only the embedded source before Rust adds slats and cockpit closures.
     for kind in crate::sim::Type::ALL.into_iter().filter(|k|k.modern()) {
-        let af=if kind.hornet(){crate::hornet::build()}else{crate::su27::build()};
+        let af=crate::hornet::build_for(kind);
         let mut parts=vec![("fixed".to_owned(),af.body),("canopy".to_owned(),af.canopy),("brake".to_owned(),af.brake)];
         for (i,s) in af.controls.into_iter().enumerate(){parts.push((format!("control-{i}"),s.mesh));}
         for (i,m) in af.stabs.into_iter().enumerate(){parts.push((format!("stabilator-{i}"),m));}
         for (i,m) in af.flaps.into_iter().enumerate(){parts.push((format!("flap-{i}"),m));}
         for (i,m) in af.rudders.into_iter().enumerate(){parts.push((format!("rudder-{i}"),m));}
         for (i,m) in af.gear.into_iter().enumerate(){parts.push((format!("gear-{i}"),m));}
+        let cfg=crate::combat::Config::for_jet(crate::combat::MissionKind::Dogfight,kind);
+        for (i,st) in crate::combat::Loadout::configure(&cfg).stations.iter().enumerate() {
+            parts.push((format!("store-{i}"),crate::props::review_store(st,kind)));
+        }
         let mut f=fs::File::create(root.join(format!("{}-airframe.vrm",kind.id())))?;
         f.write_all(b"VRM1")?;f.write_all(&(parts.len() as u32).to_le_bytes())?;
         for (name,m) in parts {
@@ -586,7 +590,7 @@ impl Cockpit {
             let mut m=modern::build(kind);
             mirror_faces.push(world::part(ctx,&extract_mirror_faces(&m)));
             blank_mirror_faces(&mut m);
-            let native=if kind.hornet(){crate::hornet::build().canopy}else{crate::su27::build().canopy};
+            let native=crate::hornet::build_for(kind).canopy;
             let mut shifted=native;
             let offset=EYE-kind.eye();
             for v in shifted.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
@@ -2214,7 +2218,8 @@ pub fn mirror_camera(a: &Aircraft) -> Camera {
     let ax = a.q.axes();
     let f = (ax.back * (8.0 * DEG).cos() + ax.up * (8.0 * DEG).sin()).norm();
     let r = f.cross(ax.up).norm();
-    Camera { eye: eye_world(a) + ax.up * 0.12, forward: f, right: r, up: r.cross(f).norm(), fov: MIRROR_FOV }
+    let height=if a.kind.hornet(){modern::mirror_capture_height(a.kind)}else{0.12};
+    Camera { eye: eye_world(a) + ax.up * height, forward: f, right: r, up: r.cross(f).norm(), fov: MIRROR_FOV }
 }
 
 /// A rear-view mirror `w` by `h` laid out by `place(x, y, depth)`: x along

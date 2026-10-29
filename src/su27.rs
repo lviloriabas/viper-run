@@ -32,6 +32,7 @@ pub fn build() -> Airframe {
             hinge:crate::articulation::Hinge{pivot:p,axis:((q-p)*side).norm(),drive:crate::articulation::Drive::Slat,side}});
     }
     a.body.v.extend(crate::hornet::exterior_tub(Type::Su27).v);
+    a.body.flat_nozzle_interiors(&NOZZLES,0.55);
     a
 }
 pub(crate) fn brake_hinge() -> V3 {

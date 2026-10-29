@@ -67,7 +67,11 @@ fn decode(data: &'static [u8]) -> Asset {
 fn asset(kind: Type) -> &'static Asset {
     static F18: OnceLock<Asset> = OnceLock::new();
     static SU27: OnceLock<Asset> = OnceLock::new();
-    match kind.base() {
+    static F18E: OnceLock<Asset> = OnceLock::new();
+    static EA18G: OnceLock<Asset> = OnceLock::new();
+    match kind {
+        Type::F18E => F18E.get_or_init(|| decode(include_bytes!("../assets/models/f18e.vrz"))),
+        Type::EA18G => EA18G.get_or_init(|| decode(include_bytes!("../assets/models/ea18g.vrz"))),
         Type::F18 => F18.get_or_init(|| decode(include_bytes!("../assets/models/f18.vrz"))),
         Type::Su27 => SU27.get_or_init(|| decode(include_bytes!("../assets/models/su27.vrz"))),
         _ => panic!("FlightGear asset requested for {kind:?}"),

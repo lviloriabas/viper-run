@@ -1,0 +1,62 @@
+[
+  {
+    "path": "EA-18G-yasim-set.xml",
+    "sha256": "eb1f3640fb8c032100cd317607cb7397820732a5c232a3253a3e4e20d092f425"
+  },
+  {
+    "path": "F-18F-yasim-set.xml",
+    "sha256": "dca635c8db67899e9602d339cdd7e81f90d7cfec23815e0f97a7e27143bb25a4"
+  },
+  {
+    "path": "Models/common.xml",
+    "sha256": "f220e89091bbfbe2b75ac96de60057dca918b19221017d5f847c40ead943a1c8"
+  },
+  {
+    "path": "Models/Diffuse.jpg",
+    "sha256": "dde1be9506f8e6469841301443654a64abb742e8caf6ec654a174d270f455b40"
+  },
+  {
+    "path": "Models/F-18F.ac",
+    "sha256": "cfa95a8fd66fe040a73f2d5db855e08b9facd7d850ebd033288887eff3673d1f"
+  },
+  {
+    "path": "Models/Liveries/VFA22.png",
+    "sha256": "1af441b0e3f403f0dcf950a198095d7721775da7d9b4acb284714b71a1fa049c"
+  },
+  {
+    "path": "Models/Liveries/VFA22.xml",
+    "sha256": "056bc1d1e540831fb34ad4c185e053558f88605b51ceada1558203995a40fead"
+  },
+  {
+    "path": "Models/LiveriesG/VAQ129.png",
+    "sha256": "0cc029afa3b15fecce8c4b4abaadc44620a0eec10efe36778154b67aa5d177aa"
+  },
+  {
+    "path": "Models/LiveriesG/VAQ129.xml",
+    "sha256": "ab27e3876d1ebad8fd5b9c229762758661cf94f648193b1da008b51d56d24f9b"
+  },
+  {
+    "path": "Models/PjedvajAutorization.png",
+    "sha256": "455cd2c374e09e932104a5f6053106e1ef582175d970be834f0451b6c3dc67fb"
+  },
+  {
+    "path": "Models/Stores/ALQ/ALQ218l.ac",
+    "sha256": "bb061fd0032a6a271a4493bd3b6dc3a73176698f5b199c8fc7681886a8c38e18"
+  },
+  {
+    "path": "Models/Stores/ALQ/ALQ218L.xml",
+    "sha256": "7bf21a5dba78f5e95dc0d88b76328526874783ddaf22ef6ba249622706462b87"
+  },
+  {
+    "path": "Models/Stores/ALQ/ALQ218r.ac",
+    "sha256": "4021ab78cae314e1090c9a236cbe1146ac3236f39a201ba9502c065956be5a29"
+  },
+  {
+    "path": "Models/Stores/ALQ/ALQ218R.xml",
+    "sha256": "149eeda9bebc3c02e08f4a75bfb33ad1243b5112cd9482b2a95b06208b4b51d8"
+  },
+  {
+    "path": "Systems/views.xml",
+    "sha256": "55914117b58160f232491daff30fee8e8b8a3cce2aff8a9d61e7c54e0e6266bc"
+  }
+]

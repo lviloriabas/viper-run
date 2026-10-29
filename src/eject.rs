@@ -193,7 +193,7 @@ impl Ejection {
         let canopy = Body { pos: a.pos, vel: a.vel + ax.up * 9.0 + ax.back * 2.0, q: a.q, spin: ax.right * -1.6, down: false };
         let rear=if a.kind==Type::EA18G {
             let mut operator=a.clone();operator.kind=Type::F18E;
-            operator.pos+=a.q.rotate(v3(0.0,0.12,1.25));
+            operator.pos+=a.q.rotate(crate::superhornet::REAR_EYE-crate::superhornet::EYE);
             Some(Box::new(Ejection::new(&operator)))
         }else{None};
         Ejection { kind: a.kind, spec, age: 0.0, pilot, canopy, seat: None, chute: 0.0, phase: Phase::Canopy, g_load: a.g_load, rear, landed_for: 0.0, fired: None, separate_at, rail: ax.up, sway: 0.0, separation_q: a.q }
@@ -281,7 +281,7 @@ impl Ejection {
         let previous_vel = self.pilot.vel;
         if let Some(rear)=&mut self.rear {
             let mut operator=a.clone();operator.kind=Type::F18E;
-            operator.pos+=a.q.rotate(v3(0.0,0.12,1.25));
+            operator.pos+=a.q.rotate(crate::superhornet::REAR_EYE-crate::superhornet::EYE);
             rear.step(dt,&operator);
         }
         self.age += dt;

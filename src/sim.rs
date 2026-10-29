@@ -140,27 +140,28 @@ impl Type {
     pub fn gear_flap_fraction(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>30.0/45.0,Type::Su27=>18.0/25.0,_=>1.0}}
     pub fn flap_angle(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 45.0, Type::Su27 => 25.0, _ => FLAP_MAX } }
     pub fn critical_alpha(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 42.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
-    pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18|Type::F18E|Type::EA18G => crate::hornet::EYE, Type::Su27 => crate::su27::EYE } }
+    pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18 => crate::hornet::EYE, Type::F18E|Type::EA18G=>crate::superhornet::EYE, Type::Su27 => crate::su27::EYE } }
     pub fn nozzles(self) -> &'static [V3] {
         const F16_NOZZLES:[V3;1]=[crate::airframe::NOZZLE_EXIT];
         const MIG_NOZZLES:[V3;2]={let n=crate::mig29::NOZZLE;[v3(-n.x,n.y,n.z),v3(n.x,n.y,n.z)]};
         match self { Type::F16 => &F16_NOZZLES,
             Type::Mig29 => &MIG_NOZZLES,
-            Type::F18|Type::F18E|Type::EA18G => &crate::hornet::NOZZLES, Type::Su27 => &crate::su27::NOZZLES }
+            Type::F18 => &crate::hornet::NOZZLES, Type::F18E|Type::EA18G=>&crate::superhornet::NOZZLES, Type::Su27 => &crate::su27::NOZZLES }
     }
     pub fn store_shift(self, at: V3) -> V3 {
-        match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18|Type::F18E|Type::EA18G => crate::hornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
+        match self { Type::F16 => V3::ZERO, Type::Mig29 => crate::mig29::store_shift(at), Type::F18 => crate::hornet::store_shift(at), Type::F18E|Type::EA18G=>crate::superhornet::store_shift(at), Type::Su27 => crate::su27::store_shift(at) }
     }
     /// Tyre radius used to place each rendered axle above its contact point.
     pub fn wheel_radius(self, i: usize) -> f64 {
         match self {
             Type::F16 => if i==0{0.22}else{0.35},
             Type::Mig29 => if i==0{0.285}else{0.42},
-            Type::F18|Type::F18E|Type::EA18G => if i==0{0.25}else{0.34},
+            Type::F18 => if i==0{0.25}else{0.34},
+            Type::F18E|Type::EA18G=>if i==0{0.27276}else{0.36640},
             Type::Su27 => if i==0{0.34}else{0.51},
         }
     }
-    pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18|Type::F18E|Type::EA18G => &F18_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
+    pub fn wheels(self) -> &'static [Wheel; 3] { match self { Type::F18 => &F18_WHEELS, Type::F18E|Type::EA18G=>&SUPER_WHEELS, Type::Su27 => &SU27_WHEELS, _ => &WHEELS } }
     pub fn landing_height(self) -> f64 { -self.wheels()[0].local.y - 0.10 }
     pub fn name(self) -> &'static str {
         match self {
@@ -301,7 +302,8 @@ impl Type {
         match self {
             Type::F16 => &COLLISION_POINTS,
             Type::Mig29 => &MIG_COLLISION_POINTS,
-            Type::F18|Type::F18E|Type::EA18G => &F18_CONTACTS,
+            Type::F18 => &F18_CONTACTS,
+            Type::F18E|Type::EA18G=>&SUPER_CONTACTS,
             Type::Su27 => &SU27_CONTACTS,
         }
     }
@@ -309,7 +311,8 @@ impl Type {
         match self {
             Type::F16 => (1.2, 4.8, 3.6),
             Type::Mig29 => (1.7, 5.68, 5.3),
-            Type::F18|Type::F18E|Type::EA18G => (1.4, 5.7, 3.5),
+            Type::F18 => (1.4, 5.7, 3.5),
+            Type::F18E|Type::EA18G=>(1.5,6.85,4.60),
             Type::Su27 => (2.1, 7.35, 6.6),
         }
     }
@@ -453,6 +456,11 @@ const SU27_WHEELS: [Wheel; 3] = [
     Wheel { name: "left main gear",local:v3(-2.1034784,-2.4314668,2.5654837),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
     Wheel { name: "right main gear",local:v3(2.1034784,-2.4314668,2.5654837),k:8.5e5,d:8.2e4,stroke:0.40,limit:6.8e5,brakes:true,steers:false },
 ];
+const SUPER_WHEELS:[Wheel;3]=[
+    Wheel{name:"nose gear",local:crate::superhornet::source_point(v3(-3.58,0.00159,0.0)),k:2.2e5,d:2.3e4,stroke:0.40,limit:3.2e5,brakes:false,steers:true},
+    Wheel{name:"left main gear",local:crate::superhornet::source_point(v3(2.48921,-0.01097,1.517205)),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false},
+    Wheel{name:"right main gear",local:crate::superhornet::source_point(v3(2.48921,-0.01097,-1.517205)),k:6.5e5,d:6.2e4,stroke:0.42,limit:5.2e5,brakes:true,steers:false},
+];
 
 /// Stiffening of the oleo's gas spring at the end of the stroke, and the
 /// tyre's own stiffness once the strut has bottomed (times `k`).
@@ -520,6 +528,18 @@ const SU27_CONTACTS:[ContactPoint;10]=[
     cp("left intake",v3(-1.15,-0.752,-0.860),0.08,false),cp("right intake",v3(1.15,-0.752,-0.860),0.08,false),
     cp("left fin",v3(-2.129,3.646,6.520),0.1,true),cp("right fin",v3(2.129,3.646,6.520),0.1,true),
     cp("left stabilator",v3(-4.819,-0.286,8.085),0.07,false),cp("right stabilator",v3(4.819,-0.286,8.085),0.07,false),
+];
+const SUPER_CONTACTS:[ContactPoint;10]=[
+    cp("nose",crate::superhornet::source_point(v3(-9.085,1.65,0.0)),0.1,false),
+    cp("canopy",crate::superhornet::source_point(v3(-3.0,3.474,0.0)),0.1,true),
+    cp("left wing",crate::superhornet::source_point(v3(3.6,2.1,6.59)),0.08,false),
+    cp("right wing",crate::superhornet::source_point(v3(3.6,2.1,-6.59)),0.08,false),
+    cp("left intake",crate::superhornet::source_point(v3(-0.85,1.05,1.0)),0.08,false),
+    cp("right intake",crate::superhornet::source_point(v3(-0.85,1.05,-1.0)),0.08,false),
+    cp("left fin",crate::superhornet::source_point(v3(5.8,5.138,1.6)),0.1,true),
+    cp("right fin",crate::superhornet::source_point(v3(5.8,5.138,-1.6)),0.1,true),
+    cp("left stabilator",crate::superhornet::source_point(v3(8.5,2.1,3.45)),0.07,false),
+    cp("right stabilator",crate::superhornet::source_point(v3(8.5,2.1,-3.45)),0.07,false),
 ];
 
 
@@ -1626,7 +1646,8 @@ impl Aircraft {
         let pivots = match self.kind {
             Type::F16 => &crate::airframe::GEAR_PIVOTS,
             Type::Mig29 => &crate::mig29::GEAR_PIVOTS,
-            Type::F18|Type::F18E|Type::EA18G => &crate::hornet::GEAR_PIVOTS,
+            Type::F18 => &crate::hornet::GEAR_PIVOTS,
+            Type::F18E|Type::EA18G=>&crate::superhornet::GEAR_PIVOTS,
             Type::Su27 => &crate::su27::GEAR_PIVOTS,
         };
         let (pivot, axis, swing) = pivots[i];
@@ -2579,13 +2600,14 @@ mod new_airframe_tests {
                         if kind==Type::F18{
                             assert!(!matches!(s.store,Store::Aim9x|Store::Aim120d));
                             if s.at.x.abs()<3.0{assert!(matches!(s.store,Store::Aim7|Store::Aim120));}
-                        }else{assert_ne!(s.store,Store::R77);}
+                        }else{assert!(matches!(s.store,Store::R73|Store::R27r|Store::R27t|Store::R77|Store::Fab250|Store::Fab500));}
                         let p=s.at+kind.store_shift(s.at);
                         assert!(p.is_finite() && p.x.abs()<=kind.span()*0.56);
                     }
                 }
             }
             assert!(!arsenal(kind,Family::SemiActive).is_empty());
+            assert!(!arsenal(kind,Family::ActiveRadar).is_empty());
         }
     }
     #[test]

@@ -123,3 +123,14 @@ fn engine_distance_and_damage_masks_have_no_effect_on_an_intact_cockpit() {
     a.battle.wing=0.8;a.battle.side=-1.0;a.battle.engine=0.5;a.battle.fire=true;
     let d=crate::world::damage_of(&a);assert!(d[0]>d[1] && d[2]>=0.8 && d[3]==0.0);
 }
+
+#[test]
+fn structural_fatigue_never_turns_into_weapon_impact_or_fire_masks() {
+    let mut a=Aircraft::new(&Mission::new());
+    a.structure.damage=0.85;
+    assert_eq!(crate::world::damage_of(&a),[0.0;4]);
+    a.battle.wing=0.7;a.battle.side=1.0;
+    let weapon=crate::world::damage_of(&a);
+    a.structure.damage=0.0;
+    assert_eq!(crate::world::damage_of(&a),weapon);
+}

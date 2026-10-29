@@ -65,6 +65,17 @@ impl Mesh {
             if sum.len()>1e-6{self.set_normal(i,sum.norm());}
         }
     }
+    /// Keep inward-facing nozzle walls and throat caps free of exterior UVs.
+    pub fn flat_nozzle_interiors(&mut self,exits:&[V3],radius:f64) {
+        for tri in self.v.chunks_mut(STRIDE*3) {
+            let mut p=V3::ZERO;let mut n=V3::ZERO;
+            for v in tri.chunks(STRIDE) {p+=v3(v[0] as f64,v[1] as f64,v[2] as f64)/3.0;n+=v3(v[3] as f64,v[4] as f64,v[5] as f64)/3.0;}
+            if exits.iter().any(|exit|{
+                let q=p-*exit;let radial=v3(q.x,q.y,0.0);
+                q.z> -1.0 && q.z<0.06 && radial.len()<radius && (n.dot(radial)< -0.025 || n.z>0.60 || radial.len()<radius*0.55)
+            }) {for v in tri.chunks_mut(STRIDE){v[6..9].copy_from_slice(&[0.07,0.08,0.085]);v[9..11].fill(-1.0);}}
+        }
+    }
 
     fn pos(&self, i: usize) -> V3 {
         let c = &self.v[i * STRIDE..];

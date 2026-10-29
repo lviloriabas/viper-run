@@ -31,10 +31,11 @@ The F/A-18C and Su-27SK have distinct exterior and cockpit models, flight
 polars, engine ratings, gear, flap schedules and weapon stations.
 [New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
 variant data, calibration and shared game approximations.
-The E/G use the compact Hornet exterior with their own mass, engines and
-front-panel UFCD. The Growler carries two occupants and sequences both seats.
-[Pending-task implementation and limits](docs/PENDING-TASKS.md) records these
-shared model approximations and the controls, damage and escape changes.
+The E/G have their own full-size exteriors adapted from the FlightGear Super
+Hornet, with rectangular intakes, separate canopy lengths and front-panel UFCD.
+The Growler carries two occupants, fixed ALQ-218 wingtip pods and ejects both seats.
+[Hornet geometry references and limits](docs/HORNET-CANOPY-SUPER.md) records the
+variant adaptations, canopy fittings, store clearances and distinct damage marks.
 
 ONLINE, CREATE GAME starts the server inside the game. No separate program or
 server address is needed. Friends on the same network open NEARBY and select
@@ -207,7 +208,7 @@ energy and alpha. Roll into the turn first, then pull through the valley.
 ## Missions
 
 Pick the mission on the start screen; ENGAGE then opens its setup screen.
-Every mission sets the airframe (F-16C, MiG-29S, F/A-18C or Su-27SK), the internal
+Every mission sets one of the six airframes, the internal
 fuel and, except free flight, the mission clock there. DOGFIGHT, STRIKE and
 FREE FLIGHT add the loadout and the opposition: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
 pylon pairs, the internal fuel, and the gross weight, stores drag and
@@ -315,8 +316,13 @@ ground. The result screen shows the kills or targets, the time and a rating.
   blind the moment it drops. The AIM-120C/D and R-77 ride the datalink
   while the radar holds the lock and turn their own radar on near the
   target; fired without a lock they go active off the rail, and if the lock
-  drops with the target still beyond 15 km they fly on blind and search
-  when they get there. The R-27T flies in MRM but shows the seeker circle.
+  drops before autonomous acquisition they continue toward the last
+  measured position extrapolated with its measured velocity. They cannot
+  follow unseen manoeuvres until their own seeker acquires. Destroyed,
+  crashed and structurally broken aircraft invalidate every missile track.
+  All six airframes offer Fox 1, Fox 2 and Fox 3 in the loadout selector;
+  the Su-27's R-77 is an explicit gameplay weapon-system upgrade. See the
+  [guidance rules and limits](docs/WEAPONS.md). The R-27T flies in MRM but shows the seeker circle.
 - The MiG-29S's OEPS-29 sight puts an IRST and a laser rangefinder in the
   ball ahead of the windscreen. `I` (d-pad left on a pad) switches the lock
   between the N019M radar and the IRST. The IRST searches 30 degrees either

@@ -11,7 +11,9 @@ CONTROLLER SETUP separa sensibilidad de vuelo (0.5 a 2.0), sensibilidad de vista
 (0.5 a 2.0), expo y zona muerta. El vuelo conserva toda la autoridad en los
 extremos y una respuesta simétrica. Los ajustes sobreviven al reinicio.
 
-Todas las parejas de armas, incluidas las puntas, admiten EMPTY. La fila del
+Todas las parejas de armas seleccionables, incluidas las puntas, admiten EMPTY.
+En el Growler las puntas alojan receptores ALQ-218 fijos y no son estaciones
+seleccionables de misiles. La fila del
 cañón selecciona tambor completo, tres cuartos, mitad, un cuarto o cero. El
 cañón permanece instalado. AUTO REFILL respeta la capacidad elegida; una carga
 sin armas ni munición sigue vacía. Las estaciones vacías no dibujan misiles.
@@ -58,28 +60,31 @@ Los morros y las zonas curvas seleccionadas reciben normales suavizadas con
 conservación de aristas. Se elimina el grano del F-16, se suaviza el contraste
 de sus líneas y se conserva la paleta plana de los materiales importados.
 El camuflaje y las insignias del Su-27 permanecen en sus imágenes originales
-adaptadas; no se incorporan imágenes de terceros nuevas.
+adaptadas. Las nuevas libreas E/G proceden del paquete de FlightGear documentado
+en [HORNET-CANOPY-SUPER.md](HORNET-CANOPY-SUPER.md).
 
 Hornet y Su-27 tienen un pozo de cabina opaco visible desde fuera, unido a los
 bordes reales de la canopy, con suelo y paredes de ambos lados. El renderer
-E/G selecciona ahora la familia Hornet en lugar de caer en el modelo F-16.
+E/G selecciona ahora sus exteriores propios en lugar de caer en el modelo F-16.
 Los mandos, HUD, instrumentos, espejos y páginas de esa familia se seleccionan
 también para E/G. El panel frontal E/G usa una UFCD electrónica y no las teclas
 físicas del C. La [Navy](https://www.navy.mil/Resources/Fact-Files/Display-FactFiles/Article/2166036/ea-18g-growler-airborne-electronic-attack-aircraft/ea-18g-growler-airborne-electronic-attack-aircraft/)
 identifica al Growler como una variante derivada del F/A-18F de dos tripulantes.
 Se muestran dos ocupantes y se secuencian dos asientos, empezando por el trasero.
 
-Límite de alcance: E/G mantienen el exterior compacto compartido de la familia
-Hornet y una reconstrucción simplificada de su panel delantero. No se ha
-añadido un modelo industrial completo E/F/G, una cabina posterior operable ni
-sistemas de guerra electrónica. La corrección de este TODO resuelve la falta
-de materiales y la selección incorrecta de geometría e instrumentos.
+La primera corrección compartía el exterior compacto del Hornet. La revisión
+[de modelos E/G y aros](HORNET-CANOPY-SUPER.md) lo sustituye por exteriores
+propios derivados de FlightGear, con canopy de uno o dos asientos y pods del
+Growler. El panel delantero sigue siendo una reconstrucción simplificada;
+la cabina posterior no es operable y no se simula guerra electrónica.
 
 El daño visual añade marcas persistentes en coordenadas del avión, con
 oscurecimiento, impactos y quemaduras por región dañada (alas, motores y
 estructura). Se combina con humo, fuego, flexión y desprendimientos existentes.
 Las marcas representan el estado de cada región, no una perforación geométrica
 individual por proyectil. `--damage-preview` permite capturarlas de forma repetible.
+La revisión posterior separa estas marcas de las grietas por fatiga estructural,
+que tienen su propio canal y la opción de captura `--stress-preview`.
 
 ## Fallo estructural y escape
 

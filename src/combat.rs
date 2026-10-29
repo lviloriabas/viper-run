@@ -14,6 +14,8 @@ use crate::terrain::{self, river_x};
 use crate::weapons::*;
 use std::collections::VecDeque;
 pub mod network;
+#[cfg(test)]
+mod missile_tests;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MissionKind {
@@ -317,6 +319,8 @@ pub fn tip_store(jet: Type) -> Store {
 /// pair; the R-27s, R-77s, FAB-500s or FAB-250s, singly or two on an
 /// MBD3-U2T tandem rack, on the inner pair, for up to 2,000 kg of bombs.
 fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
+    // The Growler's fixed ALQ-218 receivers occupy both wingtips.
+    if jet == Type::EA18G && pair == 0 { return &[None]; }
     match (jet.base(), pair) {
         (Type::F16, 0) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
@@ -327,10 +331,10 @@ fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
         (Type::F18, 0) => &[None, Some(Store::Aim9)],
         (Type::F18, 1 | 2) => &[None,Some(Store::Aim9),Some(Store::Aim7),Some(Store::Aim120),Some(Store::Mk82)],
         (Type::F18, _) => &[None,Some(Store::Aim7),Some(Store::Aim120)],
-        // Base Su-27SK has R-73/R-27, not the later R-77 integration.
+        // R-77 is a gameplay extension of the base Su-27SK weapon system.
         (Type::Su27, 0) => &[None, Some(Store::R73)],
         (Type::Su27, 1) => &[None,Some(Store::R73),Some(Store::Fab250)],
-        (Type::Su27, _) => &[None,Some(Store::R27r),Some(Store::R27t),Some(Store::Fab250),Some(Store::Fab500)],
+        (Type::Su27, _) => &[None,Some(Store::R27r),Some(Store::R27t),Some(Store::R77),Some(Store::Fab250),Some(Store::Fab500)],
         (Type::Mig29, 0) => &[None, Some(Store::R73), Some(Store::R60m)],
         (Type::Mig29, 1) => &[None],
         (Type::Mig29, 2) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250), Some(Store::Fab500)],
@@ -387,10 +391,6 @@ pub fn irst_sees(a: &Aircraft, t: &Aircraft, margin: f64) -> bool {
 
 /// How far a bomb's fragments reach a jet, m.
 const BOMB_FRAGMENTS: f64 = 120.0;
-
-/// Range at which an active missile's own radar finds a fighter, m: past
-/// it an AMRAAM or R-77 needs the datalink to know where to fly.
-const ACTIVE_RANGE: f64 = 15000.0;
 
 /// Launch rails, pylons and racks, kg: STORES_MASS less its two AIM-9s.
 const RAILS: f64 = STORES_MASS - 2.0 * 85.5;
@@ -472,6 +472,9 @@ impl Config {
                 _ => (None,None,None),
             };
         }
+        if jet == Type::EA18G && kind == MissionKind::Dogfight {
+            (c.outer, c.outboard, c.inboard) = (Some(Store::Aim9), Some(Store::Aim120), Some(Store::Aim7));
+        }
         c
     }
 
@@ -490,6 +493,7 @@ impl Config {
     pub fn set_jet(&mut self, jet: Type) {
         let min = self.fuel_is_min();
         self.jet = jet;
+        if jet == Type::EA18G { self.tips_empty = true; }
         if min {
             self.fuel = Config::fuel_choices(jet)[4];
         }
@@ -594,6 +598,7 @@ impl Station {
     /// Shared render/release origin. Imported hardpoints locate the centre
     /// of a store; missile meshes and guidance bodies use the nose as origin.
     pub fn position(&self,kind:Type)->V3 {
+        if matches!(kind,Type::F18E|Type::EA18G){return crate::superhornet::station_position(self);}
         if !matches!(kind,Type::F18|Type::Su27){return self.at+kind.store_shift(self.at)}
         let mut p=self.at+kind.store_shift(self.at);
         if !self.tip && self.at.x.abs()>0.1 {
@@ -618,6 +623,9 @@ impl Station {
     pub fn mounted(&self,a:&Aircraft)->V3 {
         let p=self.position(a.kind);p+V3::Y*a.flex_lift(p)
     }
+    pub fn mount_rotation(&self,kind:Type)->Quat {
+        if matches!(kind,Type::F18E|Type::EA18G){crate::superhornet::store_rotation(self)}else{Quat{w:1.0,x:0.0,y:0.0,z:0.0}}
+    }
 }
 impl Loadout {
     pub fn for_mission(kind: MissionKind) -> Loadout {
@@ -629,7 +637,7 @@ impl Loadout {
     /// round its pylon: a TER-9/A's one below and two on the shoulders, a
     /// tandem rack's one behind the other.
     pub fn configure(cfg: &Config) -> Loadout {
-        let mut stations = if cfg.tips_empty { Vec::new() } else { tips(cfg.tip).to_vec() };
+        let mut stations = if cfg.tips_empty || !has_pair(cfg.jet, 0) { Vec::new() } else { tips(cfg.tip).to_vec() };
         let mut racks = (0.0, 0.0);
         for (pick, x) in [(cfg.outer, 4.15), (cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
             let Some(rack) = pick else { continue };
@@ -1550,8 +1558,8 @@ impl Combat {
     /// Position and velocity of anything in the fight that is still alive.
     pub fn track(&self, who: Who, a: &Aircraft) -> Option<(V3, V3)> {
         match who {
-            Who::Player => (!self.player_dead).then_some((a.pos, a.vel)),
-            Who::Bandit(i) => self.bandits.get(i).filter(|b| b.alive).map(|b| (b.jet.pos, b.jet.vel)),
+            Who::Player => (!self.player_dead && !a.crashed && !a.ejected && !a.lost.any() && self.hull.dead.is_none()).then_some((a.pos, a.vel)),
+            Who::Bandit(i) => self.bandits.get(i).filter(|b| b.alive && !b.jet.crashed && !b.jet.ejected && !b.jet.lost.any() && b.hull.dead.is_none()).map(|b| (b.jet.pos, b.jet.vel)),
             Who::Ground(i) => self.sites.get(i).filter(|s| !s.dead).map(|s| (s.centre(), V3::ZERO)),
         }
     }
@@ -1569,7 +1577,7 @@ impl Combat {
     /// STT stops searching other aircraft. Display and lock share returns.
     pub fn radar_contact(&self, a: &Aircraft, i: usize) -> bool {
         let who = Who::Bandit(i);
-        self.bandits.get(i).is_some_and(|b| b.alive
+        self.bandits.get(i).is_some_and(|b| self.track(who, a).is_some()
             && self.enemy(Who::Player, who)
             && self.radar_sees(a, b.jet.pos, self.lock == Some(who))
             && self.radar_lock().is_none_or(|l| l == who))
@@ -1581,7 +1589,7 @@ impl Combat {
     fn candidates(&self, a: &Aircraft, ground: bool) -> Vec<(Who, f64)> {
         if self.irst && !ground {
             let look = self.helmet.unwrap_or(a.q.axes().forward);
-            let mut v: Vec<(Who, f64)> = self.bandits.iter().enumerate().filter(|(_, b)| b.alive && b.team != self.player_team && irst_sees(a, &b.jet, 1.0)).map(|(i, b)| {
+            let mut v: Vec<(Who, f64)> = self.bandits.iter().enumerate().filter(|(i, b)| self.track(Who::Bandit(*i), a).is_some() && b.team != self.player_team && irst_sees(a, &b.jet, 1.0)).map(|(i, b)| {
                 let r = b.jet.pos - a.pos;
                 (Who::Bandit(i), look.dot(r.norm()).clamp(-1.0, 1.0).acos() + r.len() / 400000.0)
             }).collect();
@@ -1604,7 +1612,7 @@ impl Combat {
                 consider(Who::Ground(i), s.centre(), 15000.0);
             }
         } else {
-            for (i, b) in self.bandits.iter().enumerate().filter(|(_, b)| b.alive && b.team != self.player_team) {
+            for (i, b) in self.bandits.iter().enumerate().filter(|(i, b)| self.track(Who::Bandit(*i), a).is_some() && b.team != self.player_team) {
                 if self.radar_sees(a, b.jet.pos, false) { consider(Who::Bandit(i), b.jet.pos, 74000.0); }
             }
         }
@@ -1878,10 +1886,11 @@ impl Combat {
         // semi-active one is not fired without it, an active one fired
         // without it searches with its own radar.
         // The IRST's track cues a heat seeker but guides no radar missile.
-        let lock = self.lock.filter(|w| matches!(w, Who::Bandit(_)));
+        let lock = self.lock.filter(|w| matches!(w, Who::Bandit(_)) && self.track(*w, a).is_some());
         let target = match spec.seeker {
-            Seeker::Infrared => self.seeker.or(if spec.loal { lock } else { None }),
-            Seeker::SemiActive | Seeker::Active => self.radar_lock().filter(|w| matches!(w, Who::Bandit(_))),
+            Seeker::Infrared => self.seeker.filter(|w| self.track(*w, a).is_some()).or(if spec.loal { lock } else { None }),
+            Seeker::SemiActive | Seeker::Active => self.radar_lock().filter(|w| lock == Some(*w)
+                && self.track(*w, a).is_some_and(|(pos, _)| self.radar_sees(a, pos, true))),
         };
         if spec.semi_active() && target.is_none() {
             self.events.push(Event::Lock { text: "NO LOCK".to_string() });
@@ -1892,7 +1901,9 @@ impl Combat {
         let pos = a.pos + a.q.rotate(st.mounted(a));
         let vel = a.vel - a.q.axes().up * kick;
         self.events.push(Event::Launch { pos, from: Who::Player, name: spec.call });
-        self.fire_missile(Missile::launch(spec, pos, vel, Who::Player, target));
+        let mut missile = Missile::launch(spec, pos, vel, Who::Player, target);
+        missile.cue(target.and_then(|w| self.track(w, a)), spec.infrared() && target.is_some() && self.seeker == target);
+        self.fire_missile(missile);
         self.seeker = None;
     }
 
@@ -1908,7 +1919,7 @@ impl Combat {
         let off = |p: V3| fwd.dot((p - a.pos).norm()).clamp(-1.0, 1.0).acos();
         if let Some(w) = self.acquiring {
             let seen = match w {
-                Who::Bandit(i) => self.bandits.get(i).is_some_and(|b| b.alive && if self.irst {
+                Who::Bandit(i) => self.bandits.get(i).is_some_and(|b| self.track(w, a).is_some() && if self.irst {
                     irst_sees(a, &b.jet, 1.0)
                 } else { self.radar_sees(a, b.jet.pos, false) }),
                 _ => false,
@@ -1927,7 +1938,7 @@ impl Combat {
         }
         if let Some(l) = self.lock {
             let keep = match (self.irst, l) {
-                (true, Who::Bandit(i)) => self.bandits.get(i).is_some_and(|b| b.alive && irst_sees(a, &b.jet, 1.15)),
+                (true, Who::Bandit(i)) => self.bandits.get(i).is_some_and(|b| self.track(l, a).is_some() && irst_sees(a, &b.jet, 1.15)),
                 (_, Who::Bandit(_)) => self.track(l, a).is_some_and(|(p, _)| self.radar_sees(a, p, true)),
                 _ => self.track(l, a).is_some_and(|(p, _)| off(p) < 70.0 * DEG && (p - a.pos).len() < 15000.0 && line_of_sight(a.pos, p + V3::Y * 3.0)),
             };
@@ -2182,22 +2193,36 @@ impl Combat {
                     self.team_shot_at = self.clock;
                     self.events.push(Event::Launch { pos, from: Who::Bandit(i), name: spec.name });
                     self.warn = 4.0;
-                    self.fire_missile(Missile::launch(spec, pos, vel, Who::Bandit(i), Some(target_who)));
+                    let mut missile = Missile::launch(spec, pos, vel, Who::Bandit(i), Some(target_who));
+                    missile.cue(Some((a.pos, a.vel)), spec.infrared());
+                    self.fire_missile(missile);
                 }
             }
         }
     }
 
     fn scored_kill(&mut self, who: Who, text: String) {
+        self.forget_target(who);
+        self.kills += 1;
+        self.points += 1500.0;
+        self.events.push(Event::Kill { text });
+    }
+
+    fn forget_target(&mut self, who: Who) {
+        let selected = self.lock == Some(who) || self.acquiring == Some(who) || self.seeker == Some(who);
         if self.lock == Some(who) {
             self.lock = None;
+        }
+        if self.acquiring == Some(who) {
+            self.acquiring = None;
         }
         if self.seeker == Some(who) {
             self.seeker = None;
         }
-        self.kills += 1;
-        self.points += 1500.0;
-        self.events.push(Event::Kill { text });
+        for missile in &mut self.missiles {
+            if missile.target == Some(who) { missile.lose_target(); }
+        }
+        if selected { self.shoot = false; }
     }
 
     fn kill_bandit(&mut self, i: usize) {
@@ -2400,6 +2425,7 @@ impl Combat {
         if self.networked { self.net_kills.push((self.player_hitter.unwrap_or(Who::Player), Who::Player)); }
         self.hp = 0.0;
         self.player_dead = true;
+        self.forget_target(Who::Player);
         self.death = cause;
         self.events.push(Event::Toast(cause.to_string()));
         let parts = damage::breakup(cause, self.rnd.next());
@@ -2507,56 +2533,54 @@ impl Combat {
         }
     }
 
+    /// Illumination/updates belong to the missile's actual launcher and target.
+    fn missile_supported(&self, m: &Missile, a: &Aircraft) -> bool {
+        let Some(who) = m.target else { return false };
+        let Some((pos, _)) = self.track(who, a) else { return false };
+        match m.from {
+            Who::Player => !self.player_dead && self.hull.dead.is_none() && !a.crashed && !a.ejected && !a.lost.any()
+                && self.radar_lock() == Some(who) && self.radar_sees(a, pos, true),
+            Who::Bandit(i) => self.bandits.get(i).is_some_and(|b| {
+                b.alive && b.hull.dead.is_none() && !b.jet.crashed && !b.jet.ejected && !b.jet.lost.any()
+                    && if b.remote { m.supported } else {
+                        b.radar_track && self.flight_target == who && match who {
+                            Who::Player => bandit_radar_sees(&b.jet, a, true),
+                            Who::Bandit(j) => self.bandits.get(j).is_some_and(|t| bandit_radar_sees(&b.jet, &t.jet, true)),
+                            Who::Ground(_) => false,
+                        }
+                    }
+            }),
+            Who::Ground(i) => self.sites.get(i).is_some_and(|s| !s.dead
+                && self.sites.iter().any(|radar| radar.kind == Kind::Radar && !radar.dead
+                    && (radar.pos - s.pos).len() < 300.0 && line_of_sight(radar.pos + V3::Y * 5.0, pos))),
+        }
+    }
+
     fn step_missiles(&mut self, dt: f64, a: &Aircraft) {
         let mut i = 0;
         while i < self.missiles.len() {
             let spec = self.missiles[i].spec;
-            // A player's AMRAAM or R-77 rides the datalink while the radar
-            // holds its target; if the lock goes before it is close enough to
-            // see the target with its own radar, it flies on blind and
-            // searches when it gets there.
-            if spec.active() && spec.datalink && self.missiles[i].from == Who::Player && self.missiles[i].target.is_some() && self.radar_lock() != self.missiles[i].target {
-                let far = self.missiles[i].target.and_then(|w| self.track(w, a)).is_none_or(|(p, _)| (p - self.missiles[i].pos).len() > ACTIVE_RANGE);
-                if far {
-                    self.missiles[i].target = None;
-                    self.missiles[i].tracking = false;
-                }
+            if self.missiles[i].target.is_some_and(|w| self.track(w, a).is_none()) {
+                self.missiles[i].lose_target();
             }
             // An active missile with no target searches with its own radar;
             // an AIM-9X fired with nothing to cue it, with its seeker.
             let searching = spec.active() || spec.infrared() && spec.loal;
-            if searching && self.missiles[i].target.is_none() && self.missiles[i].age > 1.5 {
+            if searching && self.missiles[i].target.is_none() && self.missiles[i].age > spec.drop + 0.15 {
                 let (mp, mv) = (self.missiles[i].pos, self.missiles[i].vel.norm());
                 let (reach, cone) = if spec.active() { (ACTIVE_RANGE, spec.acquire) } else { (8000.0, 20.0 * DEG) };
                 let source=self.missiles[i].from;
-                let mut candidates=self.bandits.iter().enumerate().filter(|(k,b)|b.alive&&self.enemy(source,Who::Bandit(*k)))
+                let mut candidates=self.bandits.iter().enumerate().filter(|(k,_)|self.track(Who::Bandit(*k),a).is_some()&&self.enemy(source,Who::Bandit(*k)))
                     .map(|(k,b)|(Who::Bandit(k),b.jet.pos-mp)).collect::<Vec<_>>();
-                if !self.player_dead&&self.enemy(source,Who::Player){candidates.push((Who::Player,a.pos-mp));}
+                if self.track(Who::Player,a).is_some()&&self.enemy(source,Who::Player){candidates.push((Who::Player,a.pos-mp));}
                 if let Some((who,_))=candidates.into_iter().filter(|(_,r)|r.len()<reach&&mv.dot(r.norm())>cone.cos()&&line_of_sight(mp,mp+*r))
                     .min_by(|x,y|x.1.len().total_cmp(&y.1.len())){
                     self.missiles[i].target=Some(who);self.missiles[i].tracking=true;
+                    let track = self.track(who, a);
+                    self.missiles[i].cue(track, true);
                 }
             }
-            // An R-27R or Sparrow goes blind once the player's radar drops its target.
-            if spec.semi_active() && self.missiles[i].from == Who::Player && self.radar_lock() != self.missiles[i].target {
-                self.missiles[i].tracking = false;
-            }
-            if let Who::Bandit(k) = self.missiles[i].from { if !self.bandits[k].remote {
-                let target_jet=self.missiles[i].target.and_then(|w|match w{Who::Player=>Some(a),Who::Bandit(j)=>self.bandits.get(j).map(|b|&b.jet),_=>None});
-                let held=self.bandits.get(k).is_some_and(|b|b.alive&&b.radar_track&&target_jet.is_some_and(|target|bandit_radar_sees(&b.jet,target,true)));
-                if !held && spec.semi_active() { self.missiles[i].tracking = false; }
-                if !held && spec.active() && spec.datalink && (self.missiles[i].pos - a.pos).len() > ACTIVE_RANGE {
-                    self.missiles[i].target = None;
-                    self.missiles[i].tracking = false;
-                }
-            }}
-            // A semi-active SAM goes blind when its radar dies.
-            if let Who::Ground(g) = self.missiles[i].from {
-                let launcher = self.sites[g].pos;
-                if !self.sites.iter().any(|s| s.kind == Kind::Radar && !s.dead && (s.pos - launcher).len() < 300.0) {
-                    self.missiles[i].tracking = false;
-                }
-            }
+            self.missiles[i].supported = self.missile_supported(&self.missiles[i], a);
             let target = self.missiles[i].target.and_then(|w| self.track(w, a));
             // A heat seeker looking at a target close to the sun sees the sun
             // instead: the old reticle seekers within a few degrees, the
@@ -3072,8 +3096,8 @@ mod tests {
 
     /// Launch rules by seeker: a Sparrow is not fired without a lock; an
     /// AMRAAM fired without one goes active and finds the bandit ahead; one
-    /// fired on a lock that is then dropped far out loses the datalink and
-    /// flies on blind; an AIM-9X with no tone takes the lock as its cue.
+    /// fired on a lock that is then dropped far out retains its inertial
+    /// estimate; an AIM-9X with no tone takes the lock as its cue.
     #[test]
     fn launch_rules_follow_the_seeker() {
         terrain::init();
@@ -3108,7 +3132,8 @@ mod tests {
         c.bandits[0].jet.pos = a.pos + a.q.axes().forward * 40000.0;
         c.lock = None;
         c.step_missiles(crate::sim::FIXED_DT, &a);
-        assert!(c.missiles[0].target.is_none() && !c.missiles[0].tracking, "no datalink without the lock");
+        assert!(!c.missiles[0].supported && c.missiles[0].tracking, "inertial flight survives datalink loss");
+        assert_eq!(c.missiles[0].target, Some(Who::Bandit(0)));
         let (c, _) = fire(Store::Aim9x, Some(Who::Bandit(0)));
         assert_eq!(c.missiles[0].target, Some(Who::Bandit(0)), "the AIM-9X locks on after launch");
         let (c, _) = fire(Store::Aim9, Some(Who::Bandit(0)));
@@ -3551,7 +3576,7 @@ mod tests {
     }
 
     #[test]
-    fn enemy_semi_active_and_midcourse_guidance_need_a_live_radar_track() {
+    fn enemy_radar_support_loss_preserves_active_inertial_guidance() {
         terrain::init();
         let mut mission = Mission::new();
         let mut c = Combat::new(MissionKind::Dogfight, &mut mission);
@@ -3567,9 +3592,10 @@ mod tests {
         assert!(c.missiles.iter().all(|m| m.tracking));
         c.bandits[0].alive = false;
         c.step_missiles(FIXED_DT_TEST, &a);
-        assert!(c.missiles.iter().all(|m| !m.tracking));
+        assert!(!c.missiles[0].tracking, "semi-active guidance needs illumination");
+        assert!(c.missiles[1].tracking && !c.missiles[1].supported, "active missile retains its inertial track");
         assert_eq!(c.missiles[0].target, Some(Who::Player));
-        assert_eq!(c.missiles[1].target, None);
+        assert_eq!(c.missiles[1].target, Some(Who::Player));
     }
 
     #[test]

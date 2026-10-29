@@ -100,10 +100,10 @@ impl Models {
         let handle = std::array::from_fn(|k| std::array::from_fn(|frame| part(&eject::handle_mesh(
             Type::ALL[k], frame as f64 / (eject::HANDLE_FRAMES - 1) as f64))));
         let chute=Type::ALL.map(|kind|part(&eject::chute_mesh(eject::spec(kind))));
-        let canopy=Type::ALL.map(|kind|match kind.base(){
+        let canopy=Type::ALL.map(|kind|match kind{
             Type::F16=>part(&frame.canopy),Type::Mig29=>part(&mig.canopy),
             Type::F18=>part(&crate::hornet::build().canopy),Type::Su27=>part(&crate::su27::build().canopy),
-            _=>unreachable!("base resolves Hornet variants"),
+            Type::F18E|Type::EA18G=>part(&crate::superhornet::build(kind).canopy),
         });
         Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, seat_stowed, deploying, landed, cord, drogue, seated, handle, chute, canopy }
     }
@@ -154,9 +154,31 @@ fn store_shape<'m>(m: &'m Models, store: Store) -> (&'m Part, f32, f32) {
     }
 }
 
+/// Exact CPU counterpart of the shared render shapes, for geometry review.
+pub fn review_store(st:&crate::combat::Station,kind:Type)->Mesh {
+    let(mut mesh,across,along)=if let Some(spec)=st.store.missile() {
+        let long=spec.length>3.3;
+        let base=if long{&AIM120C}else{&AIM9M};
+        let mut m=if long{aim120()}else{Mesh::new()};
+        if !long{airframe::aim9(&mut m,V3::ZERO);}
+        (m,spec.diameter/base.diameter,spec.length/base.length)
+    }else if let Some(b)=st.store.bomb(){(mk82(),b.diameter/MK82.diameter,b.length/MK82.length)}else{(mk82(),1.0,1.0)};
+    let q=st.mount_rotation(kind);let at=st.position(kind);
+    for v in mesh.v.chunks_mut(crate::mesh::STRIDE) {
+        let p=q.rotate(v3(v[0] as f64*across,v[1] as f64*across,v[2] as f64*along))+at;
+        let n=q.rotate(v3(v[3] as f64*across,v[4] as f64*across,v[5] as f64*along)).norm();
+        v[..3].copy_from_slice(&p.f32());v[3..6].copy_from_slice(&n.f32());
+    }
+    mesh
+}
+
 fn jet_model(a: &Aircraft, at: V3, eye: V3) -> M4 {
     let ax = a.q.axes();
     basis(ax.right, ax.up, ax.back, a.pos + a.q.rotate(at) - eye)
+}
+fn store_model(a:&Aircraft,st:&crate::combat::Station,eye:V3)->M4 {
+    let q=a.q.mul(st.mount_rotation(a.kind));let ax=q.axes();
+    basis(ax.right,ax.up,ax.back,a.pos+a.q.rotate(st.mounted(a))-eye)
 }
 
 impl Props for Scene<'_> {
@@ -181,7 +203,7 @@ impl Props for Scene<'_> {
                     continue;
                 }
                 let (part, across, along) = store_shape(m, st.store);
-                w.draw_prop(ctx, vp, part, stretch(jet_model(a, st.at + shift(a, st), eye), across, along), NONE);
+                w.draw_prop(ctx, vp, part, stretch(store_model(a,st,eye), across, along), NONE);
             }
         }
         for (i, b) in c.bandits.iter().enumerate().filter(|(_, b)| b.alive) {
@@ -192,7 +214,7 @@ impl Props for Scene<'_> {
             w.draw_jet(ctx, vp, cam, &b.jet, [i as f32, 0.0, 0.0, 1.0]);
             for st in b.stores.stations.iter().filter(|s| s.loaded && kept(&b.jet, s)) {
                 let (part, across, along) = store_shape(m, st.store);
-                w.draw_prop(ctx, vp, part, stretch(jet_model(&b.jet, st.at + shift(&b.jet, st), eye), across, along), NONE);
+                w.draw_prop(ctx, vp, part, stretch(store_model(&b.jet,st,eye), across, along), NONE);
             }
         }
         for wr in &c.wrecks {
