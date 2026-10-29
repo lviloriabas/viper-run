@@ -50,6 +50,8 @@ pub enum Action {
     PadExpo(bool),
     PadDeadLeft(bool),
     PadDeadRight(bool),
+    PadSensitivity(bool),
+    LookSensitivity(bool),
     PadRudderClick,
     PadFineAim,
     PadCalibrate,
@@ -63,6 +65,7 @@ pub enum Action {
     /// and 8, 2 outboard, 3 inboard), next fuel load, and take off.
     Station(u8),
     Fuel,
+    GunAmmo,
     Launch,
     /// Next airframe for the player, and for the bandits.
     Jet,
@@ -84,7 +87,7 @@ pub enum Action {
 
 impl Action {
     pub fn pad_setting(self) -> bool {
-        matches!(self, Self::PadSetup | Self::PadExpo(_) | Self::PadDeadLeft(_) | Self::PadDeadRight(_) | Self::PadRudderClick | Self::PadFineAim | Self::PadCalibrate | Self::PadReset)
+        matches!(self, Self::PadSetup | Self::PadExpo(_) | Self::PadDeadLeft(_) | Self::PadDeadRight(_) | Self::PadSensitivity(_) | Self::LookSensitivity(_) | Self::PadRudderClick | Self::PadFineAim | Self::PadCalibrate | Self::PadReset)
     }
 }
 
@@ -95,6 +98,24 @@ pub struct Button {
     pub w: f32,
     pub h: f32,
     pub action: Action,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SliderSetting { Mouse, Fov, Expo, DeadLeft, DeadRight, Flight, Look }
+
+#[derive(Clone, Copy)]
+pub struct Slider {
+    pub rect: [f32; 4],
+    pub setting: SliderSetting,
+}
+impl Slider {
+    pub fn hit(self, x: f32, y: f32) -> bool {
+        let [bx, by, w, h] = self.rect;
+        x >= bx && x <= bx + w && y >= by && y <= by + h
+    }
+    pub fn fraction(self, x: f32) -> f64 {
+        ((x - self.rect[0]) / self.rect[2]).clamp(0.0, 1.0) as f64
+    }
 }
 
 impl Button {
@@ -122,6 +143,7 @@ pub struct Ui<'a> {
     pub h: f32,
     pub s: f32,
     pub buttons: Vec<Button>,
+    pub sliders: Vec<Slider>,
     pub selected: usize,
     pub mouse: (f32, f32),
     /// A controller is connected: control lists show its bindings.
@@ -795,7 +817,7 @@ impl<'a> Ui<'a> {
         let fuel = if cfg.fuel_is_min() { format!("{} {unit}  MINIMUM", (fuel_kg * per_kg).round() as i64) } else { format!("{} {unit}  {}%", (fuel_kg * per_kg).round() as i64, (cfg.fuel * 100.0).round() as i64) };
         let mut rows: Vec<(&str, String, Option<Action>)> = vec![("AIRFRAME", cfg.jet.name().to_string(), Some(Action::Jet))];
         if armed {
-            rows.push((tip, cfg.tip.pair().to_string(), Some(Action::Station(0))));
+            rows.push((tip, if cfg.tips_empty { "EMPTY".into() } else { cfg.tip.pair().into() }, Some(Action::Station(0))));
             // The MiG has no stations 2 and 8.
             if crate::combat::has_pair(cfg.jet, 1) {
                 rows.push(("STA 2 / 8", name(cfg.outer).to_string(), Some(Action::Station(1))));
@@ -805,7 +827,7 @@ impl<'a> Ui<'a> {
         }
         rows.push(("INTERNAL FUEL", fuel, Some(Action::Fuel)));
         if armed {
-            rows.push((gun.name, format!("{} ROUNDS {ammo}", gun.rounds), None));
+            rows.push((gun.name, format!("{} ROUNDS {ammo}", cfg.gun_rounds.unwrap_or(gun.rounds).min(gun.rounds)), Some(Action::GunAmmo)));
             rows.push((crate::weapons::dispenser_of(cfg.jet), format!("{} CHAFF  {} FLARES", crate::weapons::CHAFF, crate::weapons::FLARES), None));
         }
         // Free flight never has a clock; instead its weapons can refill.
@@ -1181,6 +1203,11 @@ impl<'a> Ui<'a> {
             let (tx, tw) = (m + bw + 4.0 * s, w - 2.0 * m - 2.0 * bw - 8.0 * s);
             ui.cv.rect(tx, by + 7.0 * s, tw, 2.0, LINE_HOT);
             ui.cv.rect(tx + tw * t as f32 - 2.0 * s, by + 3.0 * s, 4.0 * s, 9.0 * s, ACID);
+            ui.sliders.push(Slider { rect: [tx, by, tw, 16.0 * s], setting: match down {
+                Action::FovDown => SliderSetting::Fov,
+                _ if ui.pad => SliderSetting::Expo,
+                _ => SliderSetting::Mouse,
+            }});
             ui.button("+", "", w - m - bw, by, false, up);
         };
         if self.pad {
@@ -1241,21 +1268,31 @@ impl<'a> Ui<'a> {
         let slider = |ui: &mut Ui, row: f32, label: &str, value: f64, range: f64, down: Action, up: Action| {
             let width = w * 0.45;
             ui.cv.text(label, left, row, sm, CREAM, Align::Left);
-            ui.cv.text(&format!("{:.0}%", value * 100.0), left + width, row, sm, GREEN, Align::Right);
+            let gain = matches!(down, Action::PadSensitivity(_) | Action::LookSensitivity(_));
+            ui.cv.text(&if gain { format!("{:.1}X", value + 0.5) } else { format!("{:.0}%", value * 100.0) }, left + width, row, sm, GREEN, Align::Right);
             ui.button("-", "", left, row + 7.0 * s, false, down);
             let bw = ui.button_width("+", "");
             let bx = left + bw + 5.0 * s;
             let bar = width - 2.0 * bw - 10.0 * s;
             ui.cv.rect(bx, row + 14.0 * s, bar, 1.0, LINE_HOT);
             ui.cv.rect(bx + bar * (value / range) as f32 - s, row + 10.0 * s, 2.0 * s, 9.0 * s, ACID);
+            ui.sliders.push(Slider { rect: [bx, row + 7.0 * s, bar, 16.0 * s], setting: match down {
+                Action::PadDeadLeft(_) => SliderSetting::DeadLeft,
+                Action::PadDeadRight(_) => SliderSetting::DeadRight,
+                Action::PadSensitivity(_) => SliderSetting::Flight,
+                Action::LookSensitivity(_) => SliderSetting::Look,
+                _ => SliderSetting::Expo,
+            }});
             ui.button("+", "", left + width - bw, row + 7.0 * s, false, up);
         };
         if !pad.calibrating() {
             slider(self, y + 49.0 * s, "LEFT DEAD ZONE", st.pad_dead_left, crate::settings::DEAD_ZONE_MAX, Action::PadDeadLeft(false), Action::PadDeadLeft(true));
             slider(self, y + 80.0 * s, "RIGHT DEAD ZONE", st.pad_dead_right, crate::settings::DEAD_ZONE_MAX, Action::PadDeadRight(false), Action::PadDeadRight(true));
             slider(self, y + 111.0 * s, "CENTER SOFTNESS (EXPO)", st.expo, 1.0, Action::PadExpo(false), Action::PadExpo(true));
-            self.button(if st.pad_fine_aim { "[X] FINE AIM WITH ZOOM" } else { "[ ] FINE AIM WITH ZOOM" }, "", left, y + 140.0 * s, false, Action::PadFineAim);
-            self.button(if st.pad_rudder_click { "[X] X OR L3 FOR RUDDER" } else { "[ ] X OR L3 FOR RUDDER" }, "", left, y + 162.0 * s, false, Action::PadRudderClick);
+            slider(self, y + 142.0 * s, "FLIGHT SENSITIVITY", st.pad_sensitivity - 0.5, 1.5, Action::PadSensitivity(false), Action::PadSensitivity(true));
+            slider(self, y + 173.0 * s, "LOOK SENSITIVITY", st.look_sensitivity - 0.5, 1.5, Action::LookSensitivity(false), Action::LookSensitivity(true));
+            self.button(if st.pad_fine_aim { "[X] FINE AIM WITH ZOOM" } else { "[ ] FINE AIM WITH ZOOM" }, "", left, y + 204.0 * s, false, Action::PadFineAim);
+            self.button(if st.pad_rudder_click { "[X] X OR L3 FOR RUDDER" } else { "[ ] X OR L3 FOR RUDDER" }, "", left, y + 226.0 * s, false, Action::PadRudderClick);
         } else {
             self.cv.paragraph("LET GO OF BOTH STICKS. Calibration measures each stick separately. Keep the controller still until it finishes.", left, y + 65.0 * s, w * 0.45, sm, 1.6, AMBER);
         }
@@ -1265,7 +1302,7 @@ impl<'a> Ui<'a> {
             "Hold X or click and hold L3, then move left / right for rudder. X + L3 releases chaff / flare."
         } else {
             "Hold X and move left / right for rudder. Enable L3 above to use either button. L3 releases chaff / flare."
-        }, left, y + 190.0 * s, w * 0.45, sm, 1.4, DIM);
+        }, left, y + 250.0 * s, w * 0.45, sm, 1.4, DIM);
 
         self.cv.text("LIVE INPUT: LEFT / RIGHT", right, y + 49.0 * s, sm, CREAM, Align::Left);
         for (i, (raw, filtered, dead)) in [(pad.raw.left, st.flight_stick(pad.state.left, 0.0), st.pad_dead_left), (pad.raw.right, (crate::settings::stick_expo(pad.state.right.0, 0.5), crate::settings::stick_expo(pad.state.right.1, 0.5)), st.pad_dead_right)].into_iter().enumerate() {
@@ -1281,8 +1318,8 @@ impl<'a> Ui<'a> {
         self.cv.text("GREEN: FLIGHT / LOOK OUTPUT", right, y + 159.0 * s, sm, GREEN, Align::Left);
         self.cv.text(&format!("RAW DRIFT  L {:.1}%  R {:.1}%", pad.raw.left.0.hypot(pad.raw.left.1) * 100.0, pad.raw.right.0.hypot(pad.raw.right.1) * 100.0), right, y + 176.0 * s, sm, CREAM, Align::Left);
         self.cv.paragraph("Lower dead zone until small movements register. If the green dot moves at rest, raise it or calibrate. More softness gives finer corrections near center. Full travel keeps full authority.", right, y + 194.0 * s, w * 0.44, sm, 1.4, DIM);
-        self.button(if pad.calibrating() { "CANCEL CALIBRATION" } else { "AUTO CALIBRATE DRIFT" }, "", left, y + 245.0 * s, false, Action::PadCalibrate);
-        self.cv.paragraph(&pad.calibration_message(now), left, y + 270.0 * s, w - 24.0 * s, sm, 1.4, AMBER);
+        self.button(if pad.calibrating() { "CANCEL CALIBRATION" } else { "AUTO CALIBRATE DRIFT" }, "", right, y + 245.0 * s, false, Action::PadCalibrate);
+        self.cv.paragraph(&pad.calibration_message(now), right, y + 270.0 * s, w * 0.44, sm, 1.4, AMBER);
         self.button("BACK", "ESC", left, y + h - 26.0 * s, false, Action::PadSetup);
         if !pad.calibrating() {
             let bw = self.button_width("RESET CONTROLLER", "");

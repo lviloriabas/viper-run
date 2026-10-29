@@ -39,7 +39,7 @@ fn main() {
     };
     match linked {
         Some(f) => println!("cargo:rustc-link-arg-bins={}", out.join(f).display()),
-        None => println!("cargo:warning=no resource compiler (windres or zig) found; exe has no icon"),
+        None => panic!("Windows releases require windres or zig rc to embed the application icon"),
     }
 }
 

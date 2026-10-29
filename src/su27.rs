@@ -23,13 +23,15 @@ pub const GEAR_PIVOTS: [(V3, V3, f64); 3] = [
 ];
 pub fn build() -> Airframe {
     let mut a=crate::flightgear::build(Type::Su27);
+    a.body.round_shading(|p|p.z < -4.7 && p.x.abs()<0.9 || p.z>5.8 && p.y<0.7 && p.x.abs()<1.9);
     for side in [-1.0,1.0] {
         let p=v3(side*2.2,0.3464,0.14);let q=v3(side*7.15,0.3464,4.2485);
         let n=v3(-side*0.83,0.0,1.0);
-        let(fixed,slat)=crate::articulation::extract(a.body,&[(n,n.dot(p)),(-V3::X*side,-2.2),(V3::X*side,7.15)]);
+        let(fixed,slat)=crate::articulation::extract(a.body,&[(n,n.dot(p)),(-V3::X*side,-2.2),(V3::X*side,7.15),(-V3::Y,-0.18),(V3::Y,0.60)]);
         a.body=fixed;a.controls.push(crate::articulation::Surface{mesh:slat,
             hinge:crate::articulation::Hinge{pivot:p,axis:((q-p)*side).norm(),drive:crate::articulation::Drive::Slat,side}});
     }
+    a.body.v.extend(crate::hornet::exterior_tub(Type::Su27).v);
     a
 }
 pub(crate) fn brake_hinge() -> V3 {

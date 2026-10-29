@@ -1,7 +1,7 @@
 # VIPER RUN
 
-A self-contained retro cockpit flight game with four selectable aircraft:
-F-16C Block 50, MiG-29S, F/A-18C Hornet and Su-27SK. Fly the Cold River gorge,
+A self-contained retro cockpit flight game with six selectable aircraft:
+F-16C Block 50, MiG-29S, F/A-18C Hornet, Su-27SK, F/A-18E and EA-18G. Fly the Cold River gorge,
 train in flight school, fight AI, strike ground targets or fly a runway circuit.
 Online rooms add PVP dogfights and team combat, plus cooperative combat,
 strike, escort and air defense for up to eight pilots on LAN or the Internet.
@@ -31,6 +31,10 @@ The F/A-18C and Su-27SK have distinct exterior and cockpit models, flight
 polars, engine ratings, gear, flap schedules and weapon stations.
 [New aircraft references and limitations](docs/NEW-AIRFRAMES.md) describe the
 variant data, calibration and shared game approximations.
+The E/G use the compact Hornet exterior with their own mass, engines and
+front-panel UFCD. The Growler carries two occupants and sequences both seats.
+[Pending-task implementation and limits](docs/PENDING-TASKS.md) records these
+shared model approximations and the controls, damage and escape changes.
 
 ONLINE, CREATE GAME starts the server inside the game. No separate program or
 server address is needed. Friends on the same network open NEARBY and select
@@ -155,6 +159,9 @@ full authority at the rim. New settings start at 65%; previously saved values
 are retained. **FINE AIM WITH ZOOM** adds center softness while holding zoom
 and can be switched off. Flight inputs have no added smoothing delay.
 The right stick also has a soft center for finer helmet / camera adjustment.
+FLIGHT SENSITIVITY and LOOK SENSITIVITY adjust the two stick responses
+independently from 0.5x to 2x. Flight response keeps full authority at the rim.
+Every settings slider supports clicking and dragging as well as its buttons.
 
 **X OR L3 FOR RUDDER** keeps X plus left stick and optionally enables click
 and hold L3 plus left stick at the same time in COMBAT. L3 means the stick's
@@ -187,7 +194,7 @@ pilot rudder authority near it; unloading restores those controls.
 
 Hold Alt to inspect the pilot, consoles, wings and tail from the seat; release
 it to return to the forward view. In chase view Alt and the mouse orbit the
-external camera. The default cockpit FOV is 58 degrees (45 to 72 in the
+external camera. The default cockpit FOV is 58 degrees (40 to 95 in the
 drawer), mouse sensitivity starts at 2.8x (0.5x to 5x) and INVERT PITCH flips
 every pitch input at once: mouse Y, W / S and the controller's left stick.
 Opening the drawer pauses the flight; closing it restores the previous flying or frozen state. RESTART and MAIN MENU are available in the drawer during a sortie. Settings and the best
@@ -204,8 +211,11 @@ Every mission sets the airframe (F-16C, MiG-29S, F/A-18C or Su-27SK), the intern
 fuel and, except free flight, the mission clock there. DOGFIGHT, STRIKE and
 FREE FLIGHT add the loadout and the opposition: the stores on the outboard (stations 3 and 7) and inboard (4 and 6)
 pylon pairs, the internal fuel, and the gross weight, stores drag and
-thrust-to-weight that result. The wingtip AIM-9s, the 511 rounds of the gun and
-30 chaff and 30 flares always come along. The fuel steps down from full
+thrust-to-weight that result. Every weapon pair can be EMPTY, including the
+wingtips. Select the gun row to choose full, 75%, 50%, 25% or zero ammunition;
+the gun stays installed. Omitted cartridges and fired ammunition change mass,
+with empty cases retained. Auto refill respects the chosen load, including zero.
+The dispensers carry 30 chaff and 30 flares. The fuel steps down from full
 through 75, 50 and 25 % to the minimum a jet may start with: 1,000 lb in
 the F-16C, the Block 40+ minimum fuel, and an estimated 550 kg in the MiG,
 whose setup reads in kilograms like its gauges.

@@ -116,7 +116,7 @@ fn layout(kind: Type) -> Vec<Instrument> {
         let mut v=vec![
             display_face(-0.262, 0.885, 0.245, 0.245, R_MFD_L, true),
             display_face(0.262, 0.885, 0.245, 0.245, R_MFD_R, true),
-            Instrument{x:0.0,y:0.910,w:0.238,h:0.264,rect:UFC,shape:Shape::Ufc},
+            Instrument{x:0.0,y:0.910,w:0.238,h:0.264,rect:UFC,shape:if kind==Type::F18 {Shape::Ufc}else{Shape::Display(false)}},
             label(0.0, 0.770, 0.210, 0.080, HUD_CONTROL),
             display_face(0.0, 0.635, 0.225, 0.225, R_HSI, true),
             label(-0.310, 0.660, 0.290, 0.200, IFEI),
@@ -148,7 +148,7 @@ pub(super) fn hud_glass(kind:Type)->[V3;4] {
 // Projector controls are on the front of its housing, above the main board.
 fn mount(kind: Type, item: &Instrument) -> Frame {
     let mut f = instrument(kind, item.x, item.y);
-    if kind==Type::F18 && item.rect.x==UFC.x && item.rect.y==UFC.y {
+    if kind.hornet() && item.rect.x==UFC.x && item.rect.y==UFC.y {
         f.o += f.z*0.045;
     }
     if kind==Type::Su27 && item.rect.x==HUD_CONTROL.x && item.rect.y==HUD_CONTROL.y {
@@ -702,7 +702,7 @@ fn hardware(kind:Type)->Mesh {
         }
         curved_mirror_roundness(&mut m,mirror.w,mirror.h,
             &|x,y,d|mirror_point(kind,&mirror,x,y,d),DARK,MirrorSampling::Reflection(cockpit_eye(kind)),
-            if kind==Type::F18{0.45}else{0.25});
+            if kind.hornet(){0.45}else{0.25});
     }
     compass::housing(&mut m,kind);
     let back=native(aft,PI/2.0);
@@ -732,7 +732,7 @@ fn nearest_on_bow(point:V3)->V3 {
 }
 fn canopy_frame(kind:Type)->Mesh {
     let mut frame=crate::flightgear::cockpit_mesh(kind,"frame");
-    if kind==Type::F18 {
+    if kind.hornet() {
         let offset=EYE-kind.eye();
         // Replace only the old forward bow. The windshield/sill rails
         // terminate at its feet and remain connected to the new section.
@@ -772,7 +772,7 @@ fn mirror_point(kind:Type,mirror:&MirrorMount,x:f64,y:f64,d:f64)->V3 {
 fn mirror_support(kind:Type,_index:usize,mirror:&MirrorMount,t:f64)->(V3,V3) {
     let (x,y)=(t*mirror.w,0.0);
     let hinge=mirror_point(kind,mirror,x,y,-0.020);
-    let foot=if kind==Type::F18 {nearest_on_bow(hinge)+V3::Z*0.042}
+    let foot=if kind.hornet() {nearest_on_bow(hinge)+V3::Z*0.042}
         else{source_bow_support(kind,hinge)};
     (foot,hinge)
 }
@@ -782,7 +782,7 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         let side=if i==0{-1.0}else{1.0};
         let crown=i==1;
         let offset=EYE-kind.eye();
-        let (anchor,radial,hint,w,h)=if kind==Type::F18 {
+        let (anchor,radial,hint,w,h)=if kind.hornet() {
             let phi=if crown{PI/2.0}else if side>0.0{38.0*DEG}else{PI-38.0*DEG};
             let radial=v3(phi.cos(),phi.sin(),0.0);
             (hornet_arch(phi),radial,
@@ -798,9 +798,9 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
         };
         // Hornet cases sit inside the bow, on its aft lip, with the outer
         // rim against the joint instead of standing above it on stalks.
-        let inset=if kind==Type::F18{-h*0.5-0.015}else if crown{0.012}else{0.008};
+        let inset=if kind.hornet(){-h*0.5-0.015}else if crown{0.012}else{0.008};
         let centre=anchor+radial*inset
-            +V3::Z*(if kind==Type::F18{0.063}else if crown{0.020}else{0.030});
+            +V3::Z*(if kind.hornet(){0.063}else if crown{0.020}else{0.030});
         let rear=v3(if crown{0.0}else{side*0.38},0.12,1.0).norm();
         let normal=((cockpit_eye(kind)-centre).norm()+rear).norm();
         let x=(hint-normal*hint.dot(normal)).norm();
@@ -810,7 +810,7 @@ fn mirror_mounts(kind:Type)->[MirrorMount;3] {
 }
 /// Main levers and selector respond to the same commands as the flight model.
 pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
-    let f = instrument(kind, if kind==Type::F18{-0.340}else{-0.405}, if kind==Type::F18{0.475}else{0.580});
+    let f = instrument(kind, if kind.hornet(){-0.340}else{-0.405}, if kind.hornet(){0.475}else{0.580});
     m.block(&f.at(0.0, 0.0, 0.012), v3(0.018, 0.048, 0.012), DARK);
     let base = f.p(0.0, mix(0.030, -0.030, h.gear), 0.024);
     let tip = base + f.z * 0.065;
@@ -834,7 +834,7 @@ pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
         m.capsule(at, to, 0.0027, 0.0027, METALC, 6);
         m.ellipsoid(to, v3(0.005, 0.005, 0.008), col, 4, 8);
     };
-    switch(m, v3(if kind==Type::F18{-0.337}else{-0.447}, if kind==Type::F18{0.644}else{0.633}, -3.805), h.flaps, DARK);
+    switch(m, v3(if kind.hornet(){-0.337}else{-0.447}, if kind.hornet(){0.644}else{0.633}, -3.805), h.flaps, DARK);
     // Speedbrake rocker on the outboard side of the moving throttle grip.
     let throttle = v3(if kind==Type::Su27{-0.475}else{-0.355}, 0.747, -3.40 - h.throttle * 0.22);
     switch(m, throttle, h.airbrake, Rgb(0.50, 0.51, 0.48));
@@ -854,7 +854,7 @@ pub(super) fn moving_controls(m: &mut Mesh, kind: Type, h: &Hands) {
         );
     }
     let f = Frame {
-        o: v3(if kind==Type::F18{0.337}else{0.445}, if kind==Type::F18{0.644}else{0.635}, -3.485),
+        o: v3(if kind.hornet(){0.337}else{0.445}, if kind.hornet(){0.644}else{0.635}, -3.485),
         x: v3(1.0,0.24,0.0).norm(),
         y: -V3::Z,
         z: v3(-0.24,1.0,0.0).norm(),
@@ -899,6 +899,17 @@ pub fn hornet_instruments(
         cv.text(label,r.x+127.0,y+5.0,0.8,GREEN,Align::Center);
     }
     cv.text("305.0   127.5",r.x+80.0,r.y+155.0,0.8,GREEN,Align::Center);
+    if a.kind != Type::F18 {
+        // E/G Block II front station: a touch UFCD, without the C's raised keys.
+        cv.rect(r.x,r.y,r.w,r.h,rgba(0x01,0x0a,0x06,1.0));
+        cv.text("UFCD",r.x+80.0,r.y+8.0,1.0,GREEN,Align::Center);
+        cv.text(&format!("{} {:03.0}",c.mode.label(),a.heading),r.x+80.0,r.y+26.0,1.0,GREEN,Align::Center);
+        for (i,label) in ["COM1 305.0","COM2 127.5","TCN  001 X","ILS  CH 01","IFF  MODE C"].iter().enumerate() {
+            let y=r.y+46.0+i as f32*22.0;
+            cv.stroke_rect(r.x+8.0,y,144.0,19.0,1.0,DIM);
+            cv.text(label,r.x+80.0,y+6.0,0.85,GREEN,Align::Center);
+        }
+    }
     let r = HUD_CONTROL;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x24, 0x2a, 0x2a, 1.0));
     for (i, name) in ["HUD", "BRT", "DAY", "ATT", "ALT"].into_iter().enumerate() {

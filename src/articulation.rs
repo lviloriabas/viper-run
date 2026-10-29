@@ -21,16 +21,21 @@ impl Hinge {
 /// Clip a triangle soup on a plane, interpolating the original UV and colour.
 /// Both halves receive an unpainted hinge closure, never a duplicate outer skin.
 pub fn split(mesh:Mesh,n:V3,d:f64)->(Mesh,Mesh) {
-    let mut halves=[Mesh::new(),Mesh::new()];let mut rim:Vec<V3>=Vec::new();
+    let mut halves=[Mesh::new(),Mesh::new()];let mut segments:Vec<(V3,V3)>=Vec::new();
     for tri in mesh.v.chunks_exact(STRIDE*3) {
         let vs:Vec<[f32;STRIDE]>=tri.chunks_exact(STRIDE).map(|v|v.try_into().unwrap()).collect();
         let pos=|v:&[f32;STRIDE]|v3(v[0] as f64,v[1] as f64,v[2] as f64);
         let ds:Vec<_>=vs.iter().map(|v|pos(v).dot(n)-d).collect();
-        if ds.iter().any(|v|v.abs()<1e-8) && ds.iter().any(|v|v.abs()>1e-8) {
-            for (v,dd) in vs.iter().zip(&ds) {
-                let p=pos(v);
-                if dd.abs()<1e-8&&!rim.iter().any(|q|(*q-p).len()<1e-5){rim.push(p);}
-            }
+        let mut cut:Vec<V3>=Vec::new();
+        for i in 0..3 {
+            let (a,b)=(pos(&vs[i]),pos(&vs[(i+1)%3]));
+            let (da,db)=(ds[i],ds[(i+1)%3]);
+            let p=if da.abs()<1e-8 {Some(a)} else if da*db < -1e-16 {Some(a.lerp(b,da/(da-db)))} else {None};
+            if let Some(p)=p {if !cut.iter().any(|q|(*q-p).len()<1e-5){cut.push(p);}}
+        }
+        if cut.len()==2 && ds.iter().any(|v|v.abs()>1e-8) {
+            let (a,b)=(cut[0],cut[1]);
+            if !segments.iter().any(|(c,d)| ((a-*c).len()<1e-5&&(b-*d).len()<1e-5)||((a-*d).len()<1e-5&&(b-*c).len()<1e-5)) {segments.push((a,b));}
         }
         for (k,sign) in [1.0,-1.0].into_iter().enumerate() {
             let mut poly=Vec::new();
@@ -41,8 +46,6 @@ pub fn split(mesh:Mesh,n:V3,d:f64)->(Mesh,Mesh) {
                     let t=da/(da-db);let mut v=[0.0;STRIDE];
                     for j in 0..STRIDE {v[j]=(a[j] as f64+(b[j]-a[j]) as f64*t) as f32;}
                     let nn=v3(v[3] as f64,v[4] as f64,v[5] as f64).norm();v[3..6].copy_from_slice(&nn.f32());
-                    let p=pos(&v);
-                    if k==0 && !rim.iter().any(|q|(*q-p).len()<1e-5){rim.push(p);}
                     poly.push(v);
                 }
             }
@@ -54,14 +57,43 @@ pub fn split(mesh:Mesh,n:V3,d:f64)->(Mesh,Mesh) {
             }
         }
     }
-    if rim.len()>=3 {
-        let centre=rim.iter().fold(V3::ZERO,|a,b|a+*b)/rim.len() as f64;
-        let x=(rim[0]-centre).norm();let y=n.norm().cross(x);
-        rim.sort_by(|a,b|{let a=*a-centre;let b=*b-centre;a.dot(y).atan2(a.dot(x)).total_cmp(&b.dot(y).atan2(b.dot(x)))});
-        halves[0].polygon(&rim,Rgb(0.30,0.33,0.34));
-        rim.reverse();halves[1].polygon(&rim,Rgb(0.30,0.33,0.34));
+    // Each connected cut loop gets its own cap. Angular sorting all cut
+    // points joined unrelated wings, nacelles and concave rims with long bars.
+    while let Some((a,b))=segments.pop() {
+        let mut rim=vec![a,b];
+        while (rim[0]-*rim.last().unwrap()).len()>1e-5 {
+            let end=*rim.last().unwrap();
+            let Some(i)=segments.iter().position(|(p,q)|(*p-end).len()<1e-5||(*q-end).len()<1e-5) else {break};
+            let(p,q)=segments.swap_remove(i);rim.push(if(p-end).len()<1e-5{q}else{p});
+        }
+        if rim.len()<4 || (rim[0]-*rim.last().unwrap()).len()>1e-5 {continue;}
+        rim.pop();
+        cap(&mut halves,&mut rim,n.norm());
     }
     let [a,b]=halves;(a,b)
+}
+
+fn cap(halves:&mut [Mesh;2],rim:&mut Vec<V3>,n:V3) {
+    let area=(0..rim.len()).map(|i|rim[i].cross(rim[(i+1)%rim.len()]).dot(n)).sum::<f64>();
+    if area<0.0{rim.reverse();}
+    while rim.len()>3 {
+        let len=rim.len();
+        let Some(i)=(0..len).find(|&i| {
+            let(a,b,c)=(rim[(i+len-1)%len],rim[i],rim[(i+1)%len]);
+            if(b-a).cross(c-b).dot(n)<=1e-8{return false;}
+            !(0..len).filter(|&j|j!=i&&j!=(i+len-1)%len&&j!=(i+1)%len).any(|j| {
+                let p=rim[j];
+                (b-a).cross(p-a).dot(n)>-1e-10 && (c-b).cross(p-b).dot(n)>-1e-10 && (a-c).cross(p-c).dot(n)>-1e-10
+            })
+        }) else {
+            // Collinear samples are common in triangulated source skins.
+            if let Some(i)=(0..len).find(|&i|(rim[i]-rim[(i+len-1)%len]).cross(rim[(i+1)%len]-rim[i]).len()<1e-8){rim.remove(i);continue;}
+            return;
+        };
+        let(a,b,c)=(rim[(i+len-1)%len],rim[i],rim[(i+1)%len]);
+        halves[0].tri(a,b,c,Rgb(0.30,0.33,0.34));halves[1].tri(c,b,a,Rgb(0.30,0.33,0.34));rim.remove(i);
+    }
+    if rim.len()==3 && (rim[1]-rim[0]).cross(rim[2]-rim[0]).len()>1e-8 {halves[0].tri(rim[0],rim[1],rim[2],Rgb(0.30,0.33,0.34));halves[1].tri(rim[2],rim[1],rim[0],Rgb(0.30,0.33,0.34));}
 }
 /// The intersection of half spaces is the movable region. Everything outside
 /// is retained once in the fixed mesh, including closed cut boundaries.
@@ -73,6 +105,17 @@ pub fn extract(mesh:Mesh,planes:&[(V3,f64)])->(Mesh,Mesh) {
 #[cfg(test)]
 mod tests {
     use super::*; use crate::mesh::Frame;
+    #[test]
+    fn cut_caps_never_bridge_disconnected_skins() {
+        let mut m=Mesh::new();
+        for x in [-3.0,3.0] {m.block(&Frame{o:v3(x,0.0,0.0),x:V3::X,y:V3::Y,z:V3::Z},v3(1.0,0.2,1.0),Rgb(0.6,0.6,0.6));}
+        let(a,b)=split(m,V3::Z,0.0);
+        for m in [a,b] {for tri in m.v.chunks_exact(STRIDE*3) {
+            let lo=tri.chunks(STRIDE).map(|v|v[0]).fold(f32::INFINITY,f32::min);
+            let hi=tri.chunks(STRIDE).map(|v|v[0]).fold(f32::NEG_INFINITY,f32::max);
+            assert!(hi-lo<2.01,"cap bridges separate components");
+        }}
+    }
     #[test] fn clipped_skin_keeps_uv_and_has_no_outer_overlap() {
         let mut m=Mesh::new();m.block(&Frame{o:V3::ZERO,x:V3::X,y:V3::Y,z:V3::Z},v3(1.0,0.1,1.0),Rgb(1.0,1.0,1.0));
         for v in m.v.chunks_mut(STRIDE){v[9]=(v[0]+1.0)*0.5;v[10]=(v[2]+1.0)*0.5;}

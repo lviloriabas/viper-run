@@ -39,6 +39,8 @@ pub struct Gun {
     pub damage: f64,
     /// Mass the jet loses per round, kg.
     pub expended: f64,
+    /// Complete loaded cartridge, including the case retained by linkless feeds.
+    pub cartridge_mass: f64,
     /// Muzzle in body axes.
     pub port: V3,
 }
@@ -57,6 +59,7 @@ pub const M61A1: Gun = Gun {
     k: 0.5 * 1.225 * 0.28 * 3.14e-4 / 0.10,
     damage: 8.0,
     expended: 0.14,
+    cartridge_mass: 0.26,
     port: v3(-0.72, 0.52, -3.40),
 };
 
@@ -73,6 +76,7 @@ pub const GSH301: Gun = Gun {
     k: 0.5 * 1.225 * 0.28 * 7.07e-4 / 0.39,
     damage: 24.0,
     expended: 0.39 + 0.16,
+    cartridge_mass: 0.84,
     port: v3(-0.63, 0.69, -3.40),
 };
 
@@ -724,7 +728,7 @@ pub enum Fate {
     /// The proximity fuze fired at this point and miss distance.
     Burst(V3, f64),
     Ground(V3),
-    /// Self-destruct, or too slow to fly on.
+    /// Battery/time-limit self-destruct (model-specific life is an estimate).
     Spent(V3),
 }
 
@@ -815,7 +819,7 @@ impl Missile {
                 lateral = omega.cross(r / range) * (s.nav * closing);
             }
         }
-        if guided {
+        if guided && (self.tracking && target.is_some() || thrust > 0.0) {
             // Lift that keeps the flight path from sagging under gravity.
             lateral += V3::Y * G0 - dir * (dir.y * G0);
         }
@@ -847,7 +851,7 @@ impl Missile {
         if let Some(p) = ground_crossing(p0, self.pos, floor) {
             return Fate::Ground(p);
         }
-        if self.age > s.life || (burn > 2.0 && thrust == 0.0 && self.vel.len() < MIN_MACH * atm.sound) {
+        if self.age > s.life {
             return Fate::Spent(self.pos);
         }
         Fate::Flying
@@ -867,7 +871,6 @@ fn terrain_masked(a: V3, b: V3, floor: &dyn Fn(f64, f64) -> f64) -> bool {
 /// Below this Mach number after burnout a missile can no longer pull the
 /// g to stay on a manoeuvring target and is written off, as launch-zone
 /// tables do; it is what makes the published ranges shrink low down.
-const MIN_MACH: f64 = 1.0;
 
 /// Countermeasure load, chaff and flare cartridges: the F-16's ALE-47, and
 /// the MiG-29's two 30-round BVP-30-26M dispensers in the fin-root
@@ -928,6 +931,10 @@ pub fn fly_out(spec: &'static Spec, pos: V3, vel: V3, tp: V3, tv: V3, floor: &dy
     let mut t = 0.0;
     while t < spec.life {
         t += dt;
+        // A firing solution requires terminal manoeuvring energy. A real
+        // shot below this margin keeps falling/flying until impact or timeout.
+        let motor_end = spec.drop + spec.motor.iter().map(|&(_, t)| t).sum::<f64>();
+        if t > motor_end && m.vel.len() < atmosphere_at(m.pos.y).sound { return None; }
         let target = (tp + tv * t, tv);
         match m.step(dt, Some(target), floor) {
             Fate::Flying => {}

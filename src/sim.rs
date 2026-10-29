@@ -139,7 +139,7 @@ impl Type {
     pub fn flap_drag(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>0.085,Type::Su27=>0.045,_=>FLAP_CD}}
     pub fn gear_flap_fraction(self)->f64{match self{Type::F18|Type::F18E|Type::EA18G =>30.0/45.0,Type::Su27=>18.0/25.0,_=>1.0}}
     pub fn flap_angle(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 45.0, Type::Su27 => 25.0, _ => FLAP_MAX } }
-    pub fn critical_alpha(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 35.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
+    pub fn critical_alpha(self) -> f64 { match self { Type::F18|Type::F18E|Type::EA18G => 42.0, Type::Su27 => 29.0, _ => ALPHA_CRIT } }
     pub fn eye(self) -> V3 { match self { Type::F16 => crate::airframe::EYE, Type::Mig29 => crate::mig29::EYE, Type::F18|Type::F18E|Type::EA18G => crate::hornet::EYE, Type::Su27 => crate::su27::EYE } }
     pub fn nozzles(self) -> &'static [V3] {
         const F16_NOZZLES:[V3;1]=[crate::airframe::NOZZLE_EXIT];
@@ -267,14 +267,15 @@ impl Type {
         match self {
             Type::F16 => (ALPHA_LIMITER, ALPHA_MAX),
             Type::Mig29 => (22.0, 25.0),
-            Type::F18|Type::F18E|Type::EA18G => (27.0, 30.0),
+            Type::F18|Type::F18E|Type::EA18G => (32.0, 38.0),
             Type::Su27 => (24.0, 26.0),
         }
     }
     /// Positive load limit at a gross weight (kg).
     pub fn g_limit(self, mass: f64, mach: f64) -> f64 {
         match self {
-            Type::F18|Type::F18E|Type::EA18G => (7.5_f64 * 14515.0 / mass.max(14515.0)).clamp(4.5, 7.5),
+            Type::F18 => (7.5_f64 * 14515.0 / mass.max(14515.0)).clamp(4.5, 7.5),
+            Type::F18E|Type::EA18G => (7.5_f64 * 19496.0 / mass.max(19496.0)).clamp(4.5, 7.5),
             Type::Su27 if mass > 26000.0 => 8.0,
             Type::Mig29 if mach > 0.85 => 7.0,
             Type::Mig29 if mass > 14200.0 => 8.0,
@@ -1431,7 +1432,7 @@ impl Aircraft {
     /// number), ground effect and sideslip lower it a little; a fast pitch-up
     /// briefly delays separation (dynamic stall).
     fn critical_alpha(&self, f: &Flow) -> f64 {
-        let compressibility = 1.0 - 0.22 * smoothstep(0.45, 0.95, f.mach);
+        let compressibility = 1.0 - (if self.kind.hornet() { 0.10 } else { 0.22 }) * smoothstep(0.45, 0.95, f.mach);
         let thin_air = 1.5 * smoothstep(4000.0, 15000.0, self.pos.y);
         let ground = 2.5 * (1.0 - smoothstep(0.0, 1.0, f.h_over_b));
         let slip = 0.2 * f.beta.abs();

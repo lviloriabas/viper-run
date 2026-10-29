@@ -536,7 +536,7 @@ fn paint(view: View, z: f64, a: f64, camo: Option<&Scheme>) -> [f32; 3] {
             let lef = wing && (z - (wing_le40(x.abs()) + 0.38)).abs() < 0.04;
             let spine_line = top && (x.abs() - 0.32).abs() < 0.04 && z > -1.3 && z < 4.0;
             if (on_body && frame) || flaperon || lef || spine_line {
-                c = c.map(|v| v * 0.72);
+                c = c.map(|v| v * 0.84);
             }
             c
         }
@@ -594,14 +594,14 @@ fn paint(view: View, z: f64, a: f64, camo: Option<&Scheme>) -> [f32; 3] {
             let rudder = z > 3.6 && y > FIN_ROOT_Y && (z - fin_point((y - FIN_ROOT_Y) / (FIN_TIP_Y - FIN_ROOT_Y), RUDDER_HINGE, 0.0).z).abs() < 0.04;
             let chine = (y - (s.yc - 0.2)).abs() < 0.02 && z > -5.0 && z < 3.0;
             if frame || rudder || chine {
-                c = c.map(|v| v * 0.72);
+                c = c.map(|v| v * 0.84);
             }
             c
         }
     }
 }
 
-/// Paints the four views into the skin texture, with a little grain.
+/// Paints the four views into the skin texture, in flat palette colours.
 fn paint_skin(camo: Option<&Scheme>) -> Vec<u8> {
     let mut out = vec![0u8; SKIN_W * SKIN_H * 4];
     for py in 0..SKIN_H {
@@ -619,10 +619,10 @@ fn paint_skin(camo: Option<&Scheme>) -> Vec<u8> {
             let f = (v * 2.0).fract();
             let a = if side { SIDE_Y.0 - f * (SIDE_Y.0 - SIDE_Y.1) } else { f * 2.0 * PLAN_X - PLAN_X };
             let c = paint(view, z, a, camo);
-            let grain = ((px * 7 + py * 13) % 5) as f32 - 2.0;
+
             let o = (py * SKIN_W + px) * 4;
             for k in 0..3 {
-                out[o + k] = (c[k] + grain).clamp(0.0, 255.0) as u8;
+                out[o + k] = c[k].clamp(0.0, 255.0) as u8;
             }
             out[o + 3] = 255;
         }

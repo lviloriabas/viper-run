@@ -45,6 +45,15 @@ fn flaperon_local(a: &Aircraft, side: f64) -> M4 {
     rotate_about(v3(0.0, hy, hz), Quat::axis_angle(V3::X, angle))
 }
 
+pub fn damage_of(a: &Aircraft) -> [f32; 4] {
+    let d = a.battle;
+    let wear = a.structure.damage.clamp(0.0, 1.0);
+    [(d.wing * if d.side <= 0.0 { 1.0 } else { 0.2 }).max(wear) as f32,
+     (d.wing * if d.side >= 0.0 { 1.0 } else { 0.2 }).max(wear) as f32,
+     (d.engine + if d.fire { 0.35 } else { 0.0 }).min(1.0) as f32,
+     d.airframe.max(wear * 0.4) as f32]
+}
+
 pub fn sun_dir() -> V3 {
     SUN.norm()
 }
@@ -419,6 +428,8 @@ uniform float u_glow;
 uniform float u_cutout;
 uniform vec4 u_paint;
 uniform vec4 u_cut;
+uniform vec4 u_damage;
+uniform vec4 u_flex;
 uniform float u_flex_aft;
 uniform sampler2D u_tex;
 out vec4 frag;
@@ -465,6 +476,24 @@ void main() {
         vec3 paint = dark > 0.75 ? vec3(0.34, 0.40, 0.47) : (mid > 0.15 ? vec3(0.52, 0.60, 0.67) : vec3(0.72, 0.77, 0.80));
         base = paint * (v_color.g / 0.72);
     }
+    // Damage stays fixed in body space and follows the affected system.
+    float wing_damage = v_local.x < 0.0 ? u_damage.x : u_damage.y;
+    float wing_center = (u_cut.w + u_flex.w) * 0.5;
+    vec2 wing_point = vec2((abs(v_local.x) - wing_center) / max((u_flex.w - u_cut.w) * 0.5, 0.8),
+                           (v_local.z - u_flex_aft * 0.5) / max(u_flex_aft * 0.33, 0.9));
+    float wing_patch = 1.0 - smoothstep(0.35, 1.0, length(wing_point));
+    vec3 engine_point = vec3(v_local.x / 1.65, (v_local.y - 0.15) / 0.95,
+                            (v_local.z - u_flex_aft - 1.2) / 2.0);
+    float engine_patch = 1.0 - smoothstep(0.25, 1.0, length(engine_point));
+    vec3 body_point = (v_local - vec3(0.0, 0.35, 0.4)) / vec3(0.95, 0.9, 2.8);
+    float body_patch = 1.0 - smoothstep(0.30, 1.0, length(body_point));
+    float damage = max(wing_patch * wing_damage, max(engine_patch * u_damage.z, body_patch * u_damage.w));
+    vec3 cell = floor(v_local * 12.0);
+    float scar = fract(sin(dot(cell, vec3(17.13, 91.7, 41.3))) * 43758.5453);
+    float burn = smoothstep(0.08, 0.65, damage);
+    base = mix(base, vec3(0.12, 0.105, 0.09), burn * 0.82);
+    float hole = step(0.994, scar) * smoothstep(0.08, 0.40, damage);
+    base = mix(base, vec3(0.025, 0.03, 0.035), hole);
     // Repaint 2 tints everything (burnt wrecks); aggressors wear their own
     // skin texture instead (World::draw_jet).
     if (u_paint.w > 1.5) base *= u_paint.rgb;
@@ -610,6 +639,7 @@ pub struct AirU {
     /// is gone (the falling piece) instead of the rest, and the span station
     /// of the break.
     pub cut: [f32; 4],
+    pub damage: [f32; 4],
 }
 #[repr(C)]
 struct PostU {
@@ -848,7 +878,7 @@ impl World {
         let gate_bind = Bindings { vertex_buffers: vec![gfx::immutable_vb(ctx, &gv)], index_buffer: gfx::immutable_ib(ctx, &gi), images: vec![] };
 
         // Exterior aircraft.
-        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float4), ("u_flex_aft", Float1), ("u_paint", Float4), ("u_cut", Float4)];
+        let air_u = [("u_vp", Mat4), ("u_model", Mat4), ("u_sun", Float3), ("u_fog", Float3), ("u_alpha", Float1), ("u_glow", Float1), ("u_cutout", Float1), ("u_flex", Float4), ("u_flex_aft", Float1), ("u_paint", Float4), ("u_cut", Float4), ("u_damage", Float4)];
         let s = gfx::shader(ctx, VS_AIR, FS_AIR, &["u_tex"], &air_u);
         let skin_params = TextureParams { width: airframe::SKIN_W as u32, height: airframe::SKIN_H as u32, format: TextureFormat::RGBA8, wrap: TextureWrap::Clamp, min_filter: FilterMode::Nearest, mag_filter: FilterMode::Nearest, mipmap_filter: MipmapFilterMode::Nearest, allocate_mipmaps: true, ..Default::default() };
         let skin = ctx.new_texture_from_data_and_format(&airframe.skin, skin_params);
@@ -1063,9 +1093,9 @@ impl World {
         if let Some(a) = aircraft {
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else { (a.kind.index()+1) as f32 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4], cut: cut_of(a) };
+            let base = AirU { vp, model, sun, fog: FOG, alpha: 1.0, glow: 0.0, cutout: if !cockpit { 0.0 } else { (a.kind.base().index()+1) as f32 }, flex: a.flex().0, flex_aft: a.flex().1, paint: [0.0; 4], cut: cut_of(a), damage: damage_of(a) };
             ctx.apply_pipeline(&self.air);
-            if matches!(a.kind,Type::F18|Type::Su27) {
+            if a.kind.modern() {
                 self.draw_twin(ctx,a,&base,&model,false);
             } else if a.kind == Type::Mig29 {
                 // The player's canopy is glass from outside (below) and gone from the seat.
@@ -1104,6 +1134,10 @@ impl World {
                 // Crew placement follows the aircraft's actual seat and design eye.
                 let seat = basis(V3::X,V3::Y,V3::Z,crate::cockpit::design_eye(a)-airframe::EYE);
                 self.draw_part(ctx, &self.crew, &base, &mat_mul(&model, &seat));
+                if a.kind==Type::EA18G {
+                    let rear=basis(V3::X,V3::Y,V3::Z,crate::cockpit::design_eye(a)-airframe::EYE+v3(0.0,0.12,1.25));
+                    self.draw_part(ctx,&self.crew,&base,&mat_mul(&model,&rear));
+                }
             }
             // The flame sits between the plume's shock diamonds and its sheath.
             self.fx.draw(ctx, vp, Layer::PlumeCore);
@@ -1145,7 +1179,7 @@ impl World {
             let canopy = self.twin(a.kind).map(|p|&p.canopy).unwrap_or(if a.kind==Type::Mig29 {&self.mig_canopy}else{&self.canopy});
             let ax = a.q.axes();
             let model = basis(ax.right, ax.up, ax.back, a.pos - cam.eye);
-            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4], cut: NO_CUT };
+            let u = AirU { vp, model, sun, fog: FOG, alpha: 0.42, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint: [0.0; 4], cut: NO_CUT, damage: [0.0; 4] };
             ctx.apply_pipeline(&self.glass_front);
             self.draw_part(ctx, canopy, &u, &model);
             ctx.apply_pipeline(&self.glass_back);
@@ -1179,9 +1213,9 @@ impl World {
         let ax = a.q.axes();
         let rel = a.pos - cam.eye;
         let model = basis(ax.right, ax.up, ax.back, rel);
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint, cut: cut_of(a) };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: a.flex().0, flex_aft: a.flex().1, paint, cut: cut_of(a), damage: damage_of(a) };
         ctx.apply_pipeline(&self.air);
-        if matches!(a.kind,Type::F18|Type::Su27) {
+        if a.kind.modern() {
             self.draw_twin(ctx,a,&base,&model,true);return;
         }
         if a.kind == Type::Mig29 {
@@ -1323,7 +1357,7 @@ impl World {
         let c = piece.centre(kind);
         let model = mat_mul(&basis(ax.right, ax.up, ax.back, pos - cam.eye), &basis(V3::X, V3::Y, V3::Z, -c));
         let (root, tip, aft) = kind.flex_span();
-        let mut base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [0.0, 0.0, root as f32, tip as f32], flex_aft: aft as f32, paint, cut: NO_CUT };
+        let mut base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: [0.0, 0.0, root as f32, tip as f32], flex_aft: aft as f32, paint, cut: NO_CUT, damage: [0.0; 4] };
         ctx.apply_pipeline(&self.air);
         match piece {
             Piece::Wing(i) => {
@@ -1345,7 +1379,7 @@ impl World {
     /// A prop part (store, missile, bomb or ground target) at a model
     /// transform relative to the eye.
     pub fn draw_prop(&self, ctx: &mut dyn RenderingBackend, vp: M4, part: &Part, model: M4, paint: [f32; 4]) {
-        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint, cut: NO_CUT };
+        let base = AirU { vp, model, sun: sun_dir().f32(), fog: FOG, alpha: 1.0, glow: 0.0, cutout: 0.0, flex: NO_FLEX, flex_aft: 0.0, paint, cut: NO_CUT, damage: [0.0; 4] };
         ctx.apply_pipeline(&self.air);
         self.draw_part(ctx, part, &base, &model);
     }

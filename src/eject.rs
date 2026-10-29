@@ -156,6 +156,10 @@ pub struct Ejection {
     /// Main canopy filled, 0 to 1.
     pub chute: f64,
     pub phase: Phase,
+    /// Proper acceleration along the pilot's head/feet axis, for physiology.
+    pub g_load: f64,
+    /// Growler rear operator, sequenced before the pilot under a shared canopy.
+    pub rear: Option<Box<Ejection>>,
     /// Seconds since the boots touched.
     pub landed_for: f64,
     /// When the seat leaves, set on firing.
@@ -187,7 +191,12 @@ impl Ejection {
         let pilot = Body { pos: a.pos + a.q.rotate(seat_point(a) + V3::Y * HARNESS), vel: a.vel, q: a.q, spin: V3::ZERO, down: false };
         // Thrusters throw the canopy up and back; the air takes it from there.
         let canopy = Body { pos: a.pos, vel: a.vel + ax.up * 9.0 + ax.back * 2.0, q: a.q, spin: ax.right * -1.6, down: false };
-        Ejection { kind: a.kind, spec, age: 0.0, pilot, canopy, seat: None, chute: 0.0, phase: Phase::Canopy, landed_for: 0.0, fired: None, separate_at, rail: ax.up, sway: 0.0, separation_q: a.q }
+        let rear=if a.kind==Type::EA18G {
+            let mut operator=a.clone();operator.kind=Type::F18E;
+            operator.pos+=a.q.rotate(v3(0.0,0.12,1.25));
+            Some(Box::new(Ejection::new(&operator)))
+        }else{None};
+        Ejection { kind: a.kind, spec, age: 0.0, pilot, canopy, seat: None, chute: 0.0, phase: Phase::Canopy, g_load: a.g_load, rear, landed_for: 0.0, fired: None, separate_at, rail: ax.up, sway: 0.0, separation_q: a.q }
     }
 
     /// Seconds the seat has been away from the jet, or None before it fires.
@@ -250,10 +259,31 @@ impl Ejection {
         self.away().is_some_and(|t| t >= self.rocket_start() && t < self.rocket_start() + self.spec.rocket.0)
     }
 
+    /// ACES mode 1 goes straight to the main; high/fast ACES and NACES
+    /// use a drogue, while K-36 deploys its stabilising boom chutes.
+    pub fn drogue(&self) -> f64 {
+        if self.phase != Phase::Seat { return 0.0; }
+        let needed = self.kind != Type::F16 || self.separate_at == self.spec.separate.1 || self.pilot.pos.y > self.spec.hold;
+        if !needed { return 0.0; }
+        smoothstep(0.12, 0.45, self.away().unwrap_or(0.0))
+    }
+
+    pub fn drogue_frame(&self) -> Frame {
+        let up = (-self.pilot.vel).norm_or(V3::Y);
+        let x = V3::Z.cross(up).norm_or(V3::X);
+        Frame { o: self.pilot.pos + self.pilot.q.axes().up * 0.85, x, y: up, z: x.cross(up) }
+    }
+
     /// One step. `a` is the jet the seat rides out of until it fires.
     /// Returns a toast when the sequence moves on.
     pub fn step(&mut self, dt: f64, a: &Aircraft) -> Option<&'static str> {
         let s = self.spec;
+        let previous_vel = self.pilot.vel;
+        if let Some(rear)=&mut self.rear {
+            let mut operator=a.clone();operator.kind=Type::F18E;
+            operator.pos+=a.q.rotate(v3(0.0,0.12,1.25));
+            rear.step(dt,&operator);
+        }
         self.age += dt;
         // The canopy flies off as a plate, tumbling, and lands where it lands.
         self.canopy.fly(dt, 60.0, 1.2, 0.3);
@@ -264,15 +294,15 @@ impl Ejection {
                 self.pilot.pos = a.pos + a.q.rotate(seat_point(a) + V3::Y * HARNESS);
                 self.pilot.vel = a.vel;
                 self.pilot.q = a.q;
-                if self.age >= s.canopy_lead {
+                if self.age >= s.canopy_lead + if self.rear.is_some() {0.4} else {0.0} {
                     let ax = a.q.axes();
                     self.rail = (ax.up * s.rails.cos() + ax.back * s.rails.sin()).norm();
                     self.pilot.vel = a.vel + self.rail * s.catapult;
                     // The seat pitches back off the rails into the wind.
-                    self.pilot.spin = ax.right * -0.9;
+                    self.pilot.spin = ax.right * -0.25;
                     self.fired = Some(self.age);
                     self.phase = Phase::Seat;
-                    toast = Some(if self.kind.russian() { "K-36DM // SEAT AWAY, BOOMS OUT" } else if self.kind==Type::F18 { "SJU-17 // SEAT AWAY" } else { "ACES II // SEAT AWAY" });
+                    toast = Some(if self.kind.russian() { "K-36DM // SEAT AWAY, BOOMS OUT" } else if self.kind.hornet() { "SJU-17 // SEAT AWAY" } else { "ACES II // SEAT AWAY" });
                 }
             }
             Phase::Seat => {
@@ -281,7 +311,12 @@ impl Ejection {
                     self.pilot.vel = self.pilot.vel + self.rail * (s.rocket.1 * G0 * dt);
                 }
                 let (ms, mp) = s.mass;
-                self.pilot.fly(dt, ms + mp, s.cda.1, HARNESS);
+                let drogue = self.drogue();
+                let damping = 1.0 + drogue * 7.0 + if self.kind.russian() { 3.0 } else { 0.0 };
+                let up = (V3::Y * 0.65 - self.pilot.vel.norm_or(-V3::Y) * 0.75).norm_or(V3::Y);
+                let restoring = self.pilot.q.axes().up.cross(up) * (3.0 + 7.0 * drogue);
+                self.pilot.spin += (restoring - self.pilot.spin * damping) * dt;
+                self.pilot.fly(dt, ms + mp, mix(s.cda.0, s.cda.1, drogue.max(if self.kind.russian() { 1.0 } else { 0.0 })), HARNESS);
                 // Above the hold height the pilot rides the seat down on its
                 // drogue (or booms) before the main canopy can open.
                 let high = self.pilot.pos.y > s.hold;
@@ -324,8 +359,26 @@ impl Ejection {
                 }
             }
         }
+        if dt > 0.0 {
+            self.g_load = if self.phase == Phase::Canopy { a.g_load } else if self.pilot.down { 1.0 }
+                else { ((self.pilot.vel - previous_vel) / dt + V3::Y * G0).dot(self.pilot.q.axes().up) / G0 };
+        }
         toast
     }
+}
+
+/// Small stabilising canopy and suspension, in a wind-aligned frame rooted
+/// on the headbox. K-36 booms retain their own geometry on the seat mesh.
+pub fn drogue_mesh() -> Mesh {
+    let mut m = Mesh::new();
+    let top = v3(0.0, 3.65, 0.0);
+    for i in 0..12 {
+        let point = |j: usize| { let a = j as f64 * TAU / 12.0; v3(a.cos() * 0.62, 3.25, a.sin() * 0.62) };
+        let (a, b) = (point(i), point(i + 1));
+        m.tri(top, a, b, if i % 2 == 0 { WHITE } else { OLIVE });
+        m.capsule(V3::ZERO, a, 0.006, 0.006, WHITE, 3);
+    }
+    m
 }
 
 fn blend_attitude(a: Quat, b: Quat, t: f64) -> Quat {

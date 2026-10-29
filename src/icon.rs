@@ -6,6 +6,48 @@
 /// with nearest neighbour, so large icons keep the chunky retro look.
 const MAX_ART: usize = 64;
 
+/// Stable taskbar identity, including after moving or renaming the portable EXE.
+#[cfg(windows)]
+pub fn set_app_id() {
+    #[link(name = "shell32")]
+    unsafe extern "system" { fn SetCurrentProcessExplicitAppUserModelID(id: *const u16) -> i32; }
+    let id: Vec<u16> = "lviloriabas.ViperRun\0".encode_utf16().collect();
+    unsafe { SetCurrentProcessExplicitAppUserModelID(id.as_ptr()); }
+}
+
+/// Set both window and class icons from the compiled multi-size resource.
+/// Explorer can consult the class icon when grouping a fullscreen window.
+#[cfg(windows)]
+pub fn install_windows_icon() {
+    use std::ffi::c_void;
+    #[link(name="user32")]
+    unsafe extern "system" {
+        fn EnumWindows(callback: unsafe extern "system" fn(isize,isize)->i32, arg:isize)->i32;
+        fn GetWindowThreadProcessId(hwnd:*mut c_void,pid:*mut u32)->u32;
+        fn LoadImageW(module:*mut c_void,name:*const u16,kind:u32,w:i32,h:i32,flags:u32)->isize;
+        fn SendMessageW(hwnd:isize,msg:u32,wp:usize,lp:isize)->isize;
+        fn SetClassLongPtrW(hwnd:isize,index:i32,value:isize)->usize;
+    }
+    #[link(name="kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleW(name:*const u16)->*mut c_void;
+        fn GetCurrentProcessId()->u32;
+    }
+    unsafe extern "system" fn visit(hwnd:isize,arg:isize)->i32 {
+        unsafe {
+            let mut pid=0;GetWindowThreadProcessId(hwnd as *mut c_void,&mut pid);
+            if pid!=arg as u32{return 1;}
+            let module=GetModuleHandleW(std::ptr::null());
+            for (size,slot,class) in [(32,1,-14),(16,0,-34)] {
+                let icon=LoadImageW(module,1usize as *const u16,1,size,size,0x8000);
+                if icon!=0 { SendMessageW(hwnd,0x0080,slot,icon);SetClassLongPtrW(hwnd,class,icon); }
+            }
+        }
+        1
+    }
+    unsafe {EnumWindows(visit,GetCurrentProcessId() as isize);}
+}
+
 // Main menu colours (see ui.rs).
 const INK: u32 = 0x050807;
 const PANEL: u32 = 0x0a110e;

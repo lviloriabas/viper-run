@@ -16,6 +16,8 @@ mod combat;
 mod cockpit;
 mod damage;
 mod eject;
+#[cfg(test)]
+mod pending_tests;
 mod font;
 mod fx;
 mod gamepad;
@@ -125,6 +127,7 @@ struct Opts {
     /// Parts broken off the jet at the start, to show it coming apart.
     breakup: Option<sim::Breakup>,
     broken_gear: bool,
+    damage_preview: bool,
     controls: bool,
     performance_overlay: Option<bool>,
     /// Show the controller prompts, for screenshots without a pad.
@@ -161,6 +164,7 @@ fn parse_opts() -> Opts {
         };
         match args[i].as_str() {
             "--export-cockpit" => o.cockpit_export = Some(next(&mut i)),
+            "--damage-preview" => o.damage_preview = true,
             "--host" => o.host=Some(next(&mut i)),
             "--host-game" => o.host_game=Some(next(&mut i)),
             "--join" => o.join=Some(next(&mut i)),
@@ -264,7 +268,7 @@ fn parse_opts() -> Opts {
                 }
             }
             "--help" | "-h" => {
-                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27] [--bandits f16|mig29|f18|su27] [--weapon nav|gun|aim9|aim120|mk82]");
+                println!("viper-run [--autostart] [--chase] [--shot FILE.png] [--frames N] [--look YAW,PITCH] [--sim SECONDS] [--input pull,left,right,yawleft,yawright,throttle,ab,brake,nolimit,fire,lock,irst,auto] [--screen pause|freeze|win|crash|timeout|shotdown|menu] [--vision RETINA,RED,GLOC] [--mach M] [--break left|right|tail] [--controls] [--pad] [--performance|--no-performance] [--zoom K] [--mission gates|dogfight|strike|airfield|free] [--jet f16|mig29|f18|su27|f18e|ea18g] [--bandits f16|mig29|f18|su27|f18e|ea18g] [--weapon nav|gun|aim9|aim120|mk82] [--damage-preview]");
                 println!("Flight school: --tutorial controls|flight|weapons|takeoff|landing");
                 println!("Online: --host-game BIND:PORT (embedded server) | --host ADDRESS:PORT (direct UDP) | --join INVITATION [--directory ADDRESS:PORT] [--callsign NAME] [--online-mode dogfight|teams|combat|strike|escort|defense] [--ready] [--launch-when-ready]");
                 println!("Model review: --export-cockpit DIRECTORY exports the assembled meshes for Blender");
@@ -390,6 +394,8 @@ struct App {
     pages: [Page; 2],
     hands: Hands,
     buttons: Vec<Button>,
+    sliders: Vec<ui::Slider>,
+    dragging: Option<ui::Slider>,
     selected: usize,
     win: (f32, f32),
 
@@ -529,6 +535,8 @@ impl App {
             pages: [Page::Fcr, Page::Eng],
             hands: Hands { throttle: 0.82, ..Default::default() },
             buttons: Vec::new(),
+            sliders: Vec::new(),
+            dragging: None,
             selected: 0,
             win: (w, h),
             opts,
@@ -577,6 +585,9 @@ impl App {
             a.gear=1.0;
             a.gear_broken=[true;3];
             self.combat.shed_gear(a);
+        }
+        if let (true,Some(a))=(self.opts.damage_preview,self.aircraft.as_mut()) {
+            a.battle=sim::BattleDamage{wing:0.7,side:-1.0,engine:0.5,airframe:0.35,fire:true,..Default::default()};
         }
         if let (true, Some(a)) = (self.opts.irst, self.aircraft.as_ref()) {
             self.combat.toggle_irst(a);
@@ -804,6 +815,8 @@ impl App {
     }
 
     fn go_menu(&mut self) {
+        self.dragging = None;
+        self.sliders.clear();
         self.multiplayer.disconnect(&self.audio);
         self.training = None;
         self.opts.tutorial = None;
@@ -821,6 +834,7 @@ impl App {
             return;
         }
         self.controls_open = open;
+        self.dragging = None;
         self.pad_setup_open = false;
         self.pad.cancel_calibration();
         self.selected = 0;
@@ -886,6 +900,8 @@ impl App {
                 self.selected = 0;
             },
             Action::PadExpo(up) => self.settings.expo = clamp(((self.settings.expo + if up { 0.05 } else { -0.05 }) * 100.0).round() / 100.0, 0.0, 1.0),
+            Action::PadSensitivity(up) => self.settings.pad_sensitivity = clamp((self.settings.pad_sensitivity * 10.0 + if up { 1.0 } else { -1.0 }).round() / 10.0, 0.5, 2.0),
+            Action::LookSensitivity(up) => self.settings.look_sensitivity = clamp((self.settings.look_sensitivity * 10.0 + if up { 1.0 } else { -1.0 }).round() / 10.0, 0.5, 2.0),
             Action::PadDeadLeft(up) => self.settings.pad_dead_left = clamp(((self.settings.pad_dead_left + if up { 0.01 } else { -0.01 }) * 100.0).round() / 100.0, 0.0, settings::DEAD_ZONE_MAX),
             Action::PadDeadRight(up) => self.settings.pad_dead_right = clamp(((self.settings.pad_dead_right + if up { 0.01 } else { -0.01 }) * 100.0).round() / 100.0, 0.0, settings::DEAD_ZONE_MAX),
             Action::PadRudderClick => self.settings.pad_rudder_click = !self.settings.pad_rudder_click,
@@ -902,6 +918,8 @@ impl App {
                 self.settings.pad_dead_right = defaults.pad_dead_right;
                 self.settings.pad_rudder_click = defaults.pad_rudder_click;
                 self.settings.pad_fine_aim = defaults.pad_fine_aim;
+                self.settings.pad_sensitivity = defaults.pad_sensitivity;
+                self.settings.look_sensitivity = defaults.look_sensitivity;
                 self.pad.calibration_status = "CONTROLLER DEFAULTS RESTORED.";
             },
             // Every sortie goes through its setup screen first.
@@ -916,6 +934,7 @@ impl App {
             },
             Action::Station(i) => self.config.cycle(i),
             Action::Fuel => self.config.cycle_fuel(),
+            Action::GunAmmo => self.config.cycle_ammo(),
             Action::Menu => {
                 self.controls_open = false;
                 self.controls_was_flying = false;
@@ -1314,7 +1333,8 @@ impl App {
     /// camera, and springs back to the forward view when released.
     fn update_pad_look(&mut self, dt: f64) {
         let (x, y) = self.pad.state.right;
-        let (x, y) = (settings::stick_expo(x, 0.5), settings::stick_expo(y, 0.5));
+        let gain = self.settings.look_sensitivity;
+        let (x, y) = (settings::stick_expo(x, 0.5) * gain, settings::stick_expo(y, 0.5) * gain);
         let r = 1.0 - (-dt * 10.0).exp();
         self.pad_look.0 += (x - self.pad_look.0) * r;
         self.pad_look.1 += (y - self.pad_look.1) * r;
@@ -1327,7 +1347,7 @@ impl App {
             return;
         }
         let (lx, ly) = self.pad_look;
-        self.look = (lx * 150.0 * DEG, clamp(LOOK_PITCH + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
+        self.look = (clamp(lx * 150.0 * DEG,-155.0*DEG,155.0*DEG), clamp(LOOK_PITCH + ly * 75.0 * DEG, -85.0 * DEG, 85.0 * DEG));
         self.chase_look = (-lx * PI, -ly * 60.0 * DEG);
     }
 
@@ -1335,7 +1355,8 @@ impl App {
     /// framed shot holds without keeping the stick deflected.
     fn update_frozen_look(&mut self, dt: f64) {
         let (x, y) = self.pad.state.right;
-        let (x, y) = (settings::stick_expo(x, 0.5), settings::stick_expo(y, 0.5));
+        let gain = self.settings.look_sensitivity;
+        let (x, y) = (settings::stick_expo(x, 0.5) * gain, settings::stick_expo(y, 0.5) * gain);
         self.pad_look = (0.0, 0.0);
         if self.view == View::Cockpit {
             self.look.0 = clamp(self.look.0 + x * 1.6 * dt, -155.0 * DEG, 155.0 * DEG);
@@ -1379,7 +1400,15 @@ impl App {
         let folded = (0..3).find(|&i| a.gear_broken[i] && !broken[i]);
         let sparks = (a.skid > 3.0 && !a.crashed && (m.elapsed * 30.0).fract() < dt * 30.0).then_some(a.skid_at);
         let (glocs, gcas) = (self.pilot.glocs, self.pilot.gcas);
-        self.pilot.update(dt, a);
+        if let Some(e) = &self.ejection {
+            let mut body = a.clone();
+            body.pos = e.pilot.pos;
+            body.q = e.pilot.q;
+            body.g_load = e.g_load;
+            self.pilot.update(dt, &body);
+        } else {
+            self.pilot.update(dt, a);
+        }
         if let Some(i) = folded {
             self.flash_toast(&format!("{} DETACHED", sim::WHEELS[i].name.to_uppercase()), 2.4);
             self.kick = self.kick.max(0.6);
@@ -1443,14 +1472,13 @@ impl App {
         }
         // A wing that broke off in flight: the pieces fly and the rest falls.
         let a = self.aircraft.as_ref().unwrap();
-        if a.lost.any() && !a.crashed {
+        if a.lost.any() && !a.crashed && !self.falling {
             self.combat.break_up(a, a.lost);
             let what = a.structure.failed.unwrap_or("airframe");
             self.falling = true;
-            self.begin_finish(Outcome::Crash);
-            self.flash_toast(&format!("{} // STRUCTURAL FAILURE", what.to_uppercase()), 2.6);
-            return;
+            self.flash_toast(&format!("{} // STRUCTURAL FAILURE, EJECT", what.to_uppercase()), 5.0);
         }
+        let a = self.aircraft.as_ref().unwrap();
         if a.crashed {
             self.begin_finish(Outcome::Crash);
             return;
@@ -1524,7 +1552,8 @@ impl App {
         if a.crashed && !self.eject_wreck {
             self.eject_wreck = true;
             self.crash_time = self.time;
-            self.audio.crash(a.impact_water);
+            let distance=(a.pos-self.ejection.as_ref().unwrap().pilot.pos).len();
+            self.audio.crash_gain(a.impact_water,audio::distance_gain(distance));
             self.world.fx.explode(a);
         }
         let e = self.ejection.as_ref().unwrap();
@@ -1577,29 +1606,26 @@ impl App {
             if self.ejection.is_some() {
                 return false;
             }
-            // Shot down with the pilot alive: the jet comes apart and he
-            // goes out of it.
-            if self.combat.death != "PILOT KILLED" {
+            // A conscious survivor chooses when to pull the handle, even
+            // after a wing is lost. Keep flight and cockpit input running.
+            if self.combat.death != "PILOT KILLED" && !self.falling {
                 let lost = self.combat.player_lost;
                 let a = self.aircraft.as_mut().unwrap();
                 if lost.any() {
                     a.lose(lost);
                     self.falling = true;
-                } else {
-                    a.crashed = true;
-                    a.impact_speed = a.speed;
-                    a.collision_label = "shot down";
-                    self.eject_wreck = true;
-                    self.crash_time = self.time;
-                    self.audio.crash(false);
                 }
+                self.falling = true;
                 self.flash_color = [255, 100, 58];
                 self.flash = 0.8;
-                self.eject();
+                self.flash_toast("AIRFRAME LOST // PULL EJECTION HANDLE", 5.0);
                 return false;
             }
-            self.begin_finish(Outcome::ShotDown);
-            return true;
+            if self.combat.death == "PILOT KILLED" {
+                self.begin_finish(Outcome::ShotDown);
+                return true;
+            }
+            return false;
         }
         if self.combat.won() {
             self.begin_finish(Outcome::Win);
@@ -1791,8 +1817,10 @@ impl App {
         }
         let course = v3(p.vel.x, 0.0, p.vel.z);
         let back = if course.len() > 1.0 { -course.norm() } else { p.q.axes().back };
-        let center = p.pos + V3::Y * (0.4 + 3.6 * e.chute);
-        let mut off = back * (7.0 + 9.0 * e.chute) + V3::Y * (1.5 + 2.5 * e.chute);
+        let pair=e.rear.as_ref().map(|rear|rear.pilot.pos);
+        let spread=pair.map_or(0.0,|other|(other-p.pos).len());
+        let center = pair.map_or(p.pos,|other|p.pos.lerp(other,0.5)) + V3::Y * (0.4 + 3.6 * e.chute);
+        let mut off = back * (7.0 + 9.0 * e.chute + spread * 0.9) + V3::Y * (1.5 + 2.5 * e.chute + spread * 0.25);
         off = Quat::axis_angle(V3::Y, self.chase_look.0).rotate(off);
         let side = off.cross(V3::Y).norm();
         off = Quat::axis_angle(side, -self.chase_look.1).rotate(off);
@@ -1860,11 +1888,26 @@ impl App {
         self.ctx.end_render_pass();
     }
 
+    fn set_slider(&mut self, slider: ui::Slider, x: f32) {
+        use ui::SliderSetting::*;
+        let t = slider.fraction(x);
+        let snap = |v: f64, step: f64| (v / step).round() * step;
+        match slider.setting {
+            Mouse => self.settings.sensitivity = snap(0.5 + 4.5 * t, 0.1),
+            Fov => self.settings.fov = (settings::FOV_MIN + (settings::FOV_MAX - settings::FOV_MIN) * t).round(),
+            Expo => self.settings.expo = snap(t, 0.01),
+            DeadLeft => self.settings.pad_dead_left = snap(settings::DEAD_ZONE_MAX * t, 0.01),
+            DeadRight => self.settings.pad_dead_right = snap(settings::DEAD_ZONE_MAX * t, 0.01),
+            Flight => self.settings.pad_sensitivity = snap(0.5 + 1.5 * t, 0.1),
+            Look => self.settings.look_sensitivity = snap(0.5 + 1.5 * t, 0.1),
+        }
+    }
+
     fn current_camera(&self) -> Camera {
         match (&self.aircraft, self.state) {
             (_, State::Attract | State::Loadout | State::School | State::Network) | (None, _) => self.attract_camera(self.attract_time),
             (Some(_), _) if self.ejection.is_some() => self.eject_camera(self.ejection.as_ref().unwrap()),
-            (Some(a), _) if a.crashed || a.lost.any() => self.wreck_camera(a),
+            (Some(a), _) if a.crashed => self.wreck_camera(a),
             (Some(a), _) => {
                 if self.view == View::Chase {
                     self.chase_camera(a)
@@ -1880,7 +1923,7 @@ impl App {
         let mut p = Params::default();
         if let (Some(a), true) = (&self.aircraft, active) {
             let speed = a.speed as f32;
-            p = Params::jet(a.kind, a.rpm as f32, a.afterburner_visual as f32);
+            p = Params::jet(a.kind, if a.crashed { 0.0 } else { a.rpm as f32 }, if a.crashed { 0.0 } else { a.afterburner_visual as f32 });
             // Separated flow roars and shudders through the airframe.
             let buffet = a.buffet as f32;
             p.wind_gain = (speed / 330.0 * 0.055).clamp(0.0, 0.07) + buffet * 0.03;
@@ -1895,6 +1938,22 @@ impl App {
                 let locked = self.combat.seeker.is_some();
                 p.seeker_gain = if locked { 0.035 } else { 0.014 };
                 p.seeker_freq = if locked { 1250.0 } else { 380.0 + 40.0 * (self.time * 23.0).sin() as f32 };
+            }
+            if let Some(e) = &self.ejection {
+                let distance = (a.pos - e.pilot.pos).len();
+                let gain = audio::distance_gain(distance);
+                p.eng_gain *= gain;
+                p.whine_gain *= gain;
+                p.rumble_gain *= gain;
+                p.gun *= gain;
+                p.seeker_gain = 0.0;
+                p.wind_gain = (e.pilot.vel.len() as f32 / 160.0 * 0.06).clamp(0.0, 0.09);
+                p.wind_freq = 500.0 + e.pilot.vel.len() as f32 * 10.0;
+                let direction = (a.pos - e.pilot.pos).norm();
+                let away = (a.vel - e.pilot.vel).dot(direction);
+                let doppler = (340.0 / (340.0 + away).max(180.0)).clamp(0.5, 1.5) as f32;
+                p.eng_freq *= doppler;
+                p.whine_freq *= doppler;
             }
         }
         p.master = if self.settings.muted || !active && self.state != State::Result { 0.0 } else { 0.5 };
@@ -2085,7 +2144,7 @@ impl EventHandler for App {
                     self.accumulator = 0.0;
                 }
                 if let (Some(a), false) = (&self.aircraft, self.settings.muted) {
-                    props::rwr_tones(&self.combat, a, &self.audio, &mut self.rwr_voice, dt);
+                    if !a.ejected { props::rwr_tones(&self.combat, a, &self.audio, &mut self.rwr_voice, dt); }
                 }
                 if let Some(a) = &self.aircraft {
                     if self.pilot.breaths != self.breaths {
@@ -2253,7 +2312,7 @@ impl EventHandler for App {
             }
             let s = ui::ui_scale(w, h);
             if self.opts.layout_check && cv.layout_audit.is_none() { cv.layout_audit=Some(menu_layout::Audit::default()); }
-            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout, click_rudder: self.settings.click_rudder() };
+            let mut u = Ui { cv, w, h, s, buttons: Vec::new(), sliders: Vec::new(), selected: self.selected, mouse: if pad { (-1000.0, -1000.0) } else { self.mouse_pos }, pad, layout: self.settings.pad_layout, click_rudder: self.settings.click_rudder() };
             if !self.controls_open {
                 match self.state {
                     State::Attract => u.start_screen(self.settings.muted || !self.audio.available, &self.best, self.time, self.settings.pitch, self.kind, &self.config, self.settings.clock),
@@ -2279,6 +2338,7 @@ impl EventHandler for App {
                 }
             }
             buttons.append(&mut u.buttons);
+            self.sliders = u.sliders;
             if let Some(audit)=cv.layout_audit.take() {
                 let issues=audit.issues(w,h);
                 if !issues.is_empty() {
@@ -2371,6 +2431,9 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        if let Some(slider) = self.dragging {
+            self.set_slider(slider, x);
+        }
         if (x - self.mouse_pos.0).abs() + (y - self.mouse_pos.1).abs() > 6.0 {
             self.pad_active = false;
         }
@@ -2400,6 +2463,11 @@ impl EventHandler for App {
             return;
         }
         if button == MouseButton::Left {
+            if let Some(slider) = self.sliders.iter().find(|s| s.hit(x, y)).copied() {
+                self.dragging = Some(slider);
+                self.set_slider(slider, x);
+                return;
+            }
             if let Some(b) = self.buttons.iter().find(|b| b.hit(x, y)).copied() {
                 self.act(b.action);
             }
@@ -2571,7 +2639,7 @@ impl EventHandler for App {
 
     fn mouse_button_up_event(&mut self, button: MouseButton, _x: f32, _y: f32) {
         match button {
-            MouseButton::Left => self.trigger_mouse = false,
+            MouseButton::Left => { self.trigger_mouse = false; if self.dragging.take().is_some() { self.save(); } },
             MouseButton::Right => self.zoom_mouse = false,
             _ => {}
         }
@@ -2591,6 +2659,7 @@ impl EventHandler for App {
     fn window_minimized_event(&mut self) {
         if self.opts.shot.is_some() || self.opts.bench.is_some() { return; }
         self.keys.clear();
+        if self.dragging.take().is_some() { self.save(); }
         self.pause();
         self.grab(false);
         self.trigger_mouse = false;
@@ -2627,7 +2696,11 @@ fn main() {
         platform: conf::Platform { swap_interval: Some(if bench { 0 } else { 1 }), ..Default::default() },
         ..Default::default()
     };
+    #[cfg(windows)]
+    icon::set_app_id();
     miniquad::start(conf, move || {
+        #[cfg(windows)]
+        icon::install_windows_icon();
         let mut app = App::new(opts);
         let (w, h) = window::screen_size();
         app.resize_event(w, h);

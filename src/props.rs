@@ -34,6 +34,7 @@ pub struct Models {
     deploying: [[[Part; 2]; crate::eject::DEPLOY_FRAMES]; Type::ALL.len()],
     landed: [[[Part; 2]; crate::eject::LANDING_FRAMES]; Type::ALL.len()],
     cord: Part,
+    drogue: Part,
     seated: [[[Part; 2]; crate::eject::HANDLE_FRAMES]; Type::ALL.len()],
     handle: [[Part; crate::eject::HANDLE_FRAMES]; Type::ALL.len()],
     chute: [Part; Type::ALL.len()],
@@ -92,6 +93,7 @@ impl Models {
         let landed = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
             part(&eject::landed_mesh(Type::ALL[k], fp != 0, frame)))));
         let cord = part(&eject::cord_mesh());
+        let drogue = part(&eject::drogue_mesh());
         let seated = std::array::from_fn(|k| std::array::from_fn(|frame| std::array::from_fn(|fp|
             part(&eject::pilot_mesh(Type::ALL[k], false, fp != 0,
                 frame as f64 / (eject::HANDLE_FRAMES - 1) as f64)))));
@@ -103,7 +105,7 @@ impl Models {
             Type::F18=>part(&crate::hornet::build().canopy),Type::Su27=>part(&crate::su27::build().canopy),
             _=>unreachable!("base resolves Hornet variants"),
         });
-        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, seat_stowed, deploying, landed, cord, seated, handle, chute, canopy }
+        Models { tips: [part(&frame.tips[0]), part(&frame.tips[1])], aim9: part(&a9), aim120: part(&aim120()), mk82: part(&mk82()), sites, ruin: part(&targets::bridge_ruin()), seat, seat_stowed, deploying, landed, cord, drogue, seated, handle, chute, canopy }
     }
 }
 
@@ -197,18 +199,25 @@ impl Props for Scene<'_> {
             w.draw_jet(ctx, vp, cam, &wr.jet, BURNT);
         }
         if let Some(e) = self.ejection {
+          for (e,main) in std::iter::once((e,true)).chain(e.rear.as_deref().map(|rear|(rear,false))) {
             use crate::eject::Phase;
+            let first_person=self.first_person && main;
             let k=e.kind.index();
             let at = |b: &crate::eject::Body| {
                 let ax = b.q.axes();
                 basis(ax.right, ax.up, ax.back, b.pos - eye)
             };
-            w.draw_prop(ctx, vp, &m.canopy[k], at(&e.canopy), NONE);
+            if main {w.draw_prop(ctx, vp, &m.canopy[k], at(&e.canopy), NONE);}
             let hanging = matches!(e.phase, Phase::Chute | Phase::Landed);
+            let drogue = e.drogue();
+            if drogue > 0.01 {
+                let f = e.drogue_frame();
+                w.draw_prop(ctx, vp, &m.drogue, basis(f.x * drogue, f.y * drogue, f.z * drogue, f.o - eye), NONE);
+            }
             let frame = (e.handle_pull() * (crate::eject::HANDLE_FRAMES - 1) as f64).round() as usize;
-            let pilot = if e.phase == Phase::Landed { &m.landed[k][e.landing_frame()][self.first_person as usize] }
-                else if hanging { &m.deploying[k][e.deployment_frame()][self.first_person as usize] } else { &m.seated[k][frame][self.first_person as usize] };
-            if e.phase != Phase::Canopy || !self.first_person {
+            let pilot = if e.phase == Phase::Landed { &m.landed[k][e.landing_frame()][first_person as usize] }
+                else if hanging { &m.deploying[k][e.deployment_frame()][first_person as usize] } else { &m.seated[k][frame][first_person as usize] };
+            if e.phase != Phase::Canopy || !first_person {
                 w.draw_prop(ctx, vp, pilot, at(&e.pilot), NONE);
             }
             match &e.seat {
@@ -216,7 +225,7 @@ impl Props for Scene<'_> {
                     w.draw_prop(ctx, vp, &m.seat[k], at(seat), NONE);
                     w.draw_prop(ctx, vp, &m.handle[k][crate::eject::HANDLE_FRAMES - 1], at(seat), NONE);
                 }
-                None if e.phase != Phase::Canopy || !self.first_person => {
+                None if e.phase != Phase::Canopy || !first_person => {
                     let seat=if e.phase==Phase::Canopy{&m.seat_stowed[k]}else{&m.seat[k]};
                     w.draw_prop(ctx, vp, seat, at(&e.pilot), NONE);
                     w.draw_prop(ctx, vp, &m.handle[k][frame], at(&e.pilot), NONE);
@@ -235,6 +244,7 @@ impl Props for Scene<'_> {
                     w.draw_prop(ctx, vp, &m.cord, basis(f.x, f.y, f.z, f.o - eye), NONE);
                 }
             }
+          }
         }
         for d in &c.debris {
             w.draw_debris(ctx, vp, cam, d.kind, d.piece, d.pos, d.q, if d.burnt { BURNT } else { NONE });

@@ -9,9 +9,16 @@ set -e
 cd "$(dirname "$0")"
 
 if command -v cargo-zigbuild >/dev/null 2>&1; then
+    zig_real=$(command -v zig)
+    case "${CARGO_TARGET_DIR:-target}" in
+        /*) zig_tools="${CARGO_TARGET_DIR}/viper-build-tools" ;;
+        *) zig_tools="$PWD/${CARGO_TARGET_DIR:-target}/viper-build-tools" ;;
+    esac
+    mkdir -p "$zig_tools"
+    ln -sf "$PWD/tools/zig-driver.sh" "$zig_tools/zig"
     # glibc 2.17 keeps the Linux binary runnable on old distributions.
-    cargo zigbuild --release --bins --target x86_64-unknown-linux-gnu.2.17
-    cargo zigbuild --release --bins --target x86_64-pc-windows-gnu
+    env VIPER_REAL_ZIG="$zig_real" PATH="$zig_tools:$PATH" cargo zigbuild --release --bins --target x86_64-unknown-linux-gnu.2.17
+    env VIPER_REAL_ZIG="$zig_real" PATH="$zig_tools:$PATH" cargo zigbuild --release --bins --target x86_64-pc-windows-gnu
 else
     cargo build --release --bins --target x86_64-unknown-linux-gnu
     cargo build --release --bins --target x86_64-pc-windows-gnu

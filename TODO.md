@@ -7,6 +7,25 @@
 - (ninguna)
 
 ## Completadas
+
+Revisión del 29 de octubre de 2026: [implementación, fuentes y límites](docs/PENDING-TASKS.md), [validación](docs/VALIDATION.md).
+
+- [x] Corregir alertas de compilación y warnings de código, debe quedar en el agents.md que se corrijan todos los warnings y alertas de compilación.
+- [x] El app perdió su icono en barra de tareas, corregir.
+- [x] Ajustar el limitador de G y AOA para que sea más realista, incluyendo el efecto de la velocidad y altitud en el desempeño del avión. Tener en cuenta que probablemente existe el limite para evitar un flat spin o perdida, en el F-18 actualmente está muy restrigido, debe cumplir su función en todos, pero sin ser muy restrictivo.
+- [x] Los slats del S-27 tienen errores de geometría, el airbarke tiene una barra rara al desplegarse. Simplifica más la geometría del avión, se ve muy cónica, puedes redondear las partes que se pueden redondeear, busca texturas similares para todos los aviones y simplificalas, me gusta el estandar del su-27 para los demás y quiero que todos los aviones tengan un estilo similar, no tan realista, pero consistente, de la calidad del su-27.
+- [x] Las texturas para el super hornet y growler no están, corregir. Probablemente las cabinas de los growlers y super hornets son parecidas, pero verifica, y ciertas cosas muy parecidas al hornet.
+- [x] Mejora el sistema de daños visuales
+- [x] Permite ejectar si hay daño estructural, actualmente se pone la cámara desde afuera, no la cambies, dejala en la cabina y permite eyectar, simula el gloc en daño estructural si es lógico, actualmente se pone y ya.
+- [x] Investiga que pasa con los misiles actuales al no llegar al objetivo, si se quedan en el aire, caen, explotan, etc. y simula eso.
+- [x] Permite cambiar la cantidad de munición de cañones.
+- [x] El slider de fov y cualquier slider debe poder arrastrarse.
+- [x] Permite cambiar la sensibilidad del mouse y del joystick.
+- [x] Permite tener loadouts limpias, sin armas, para poder hacer misiones de vuelo libre sin armas. Por ahora no permites quitar el de los wingtips. El cañón siempre estará instalado, pero se puede quitar la munición.
+- [x] Simula el cambio de peso por munición de cañon.
+- [x] Simula la estabilización de las sillas y el drag chute que se usa para estabilizar la silla de eyección, actualmente no hay drag chute y la silla se mueve mucho. Busca las alturas de despliegue del paracaidas, esto para todos los aviones.
+- [x] Corrige las vistas desde afuera de las cabinas, tienen huecos para el su-27, revisa los demás.
+- [x] El sonido debe escucharlo el piloto, si se eyecta el avión se aleja y el sonido se va perdiendo, revisa que esté implementado, si no, implementa.
 - [x] Afinar las plantas, motores, estabilizadores, cabinas y detalles exteriores del F/A-18C y Su-27SK con referencias 3D y ortográficas; conservar el estilo del F-16 y MiG-29.
 - [x] Corregir la proporción de pantallas y placas, añadir indicaciones activas y animar los mandos de ambas cabinas con las teclas y el mando existentes.
 - [x] Reconstruir los exteriores del F/A-18C y Su-27SK adaptando las mallas editables de FlightGear y verificando vistas ortográficas, con superficies móviles, aerofrenos dorsales, camuflaje y detalles en tercera persona.

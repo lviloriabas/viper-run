@@ -49,6 +49,23 @@ impl Mesh {
         self.v.clear();
     }
 
+    /// Smooth only neighbouring curved faces, preserving creases, UVs and
+    /// silhouette. Import normals otherwise make each radome ring look conical.
+    pub fn round_shading(&mut self, region: impl Fn(V3) -> bool) {
+        use std::collections::BTreeMap;
+        let key=|p:V3|[(p.x*10000.0).round() as i32,(p.y*10000.0).round() as i32,(p.z*10000.0).round() as i32];
+        let mut adjacent:BTreeMap<[i32;3],Vec<V3>>=BTreeMap::new();
+        for i in 0..self.count() {
+            let p=self.pos(i);if region(p){adjacent.entry(key(p)).or_default().push(self.normal(i));}
+        }
+        for i in 0..self.count() {
+            let p=self.pos(i);if !region(p){continue;}
+            let old=self.normal(i);
+            let sum=adjacent[&key(p)].iter().filter(|n|n.dot(old)>0.70).fold(V3::ZERO,|a,b|a+*b);
+            if sum.len()>1e-6{self.set_normal(i,sum.norm());}
+        }
+    }
+
     fn pos(&self, i: usize) -> V3 {
         let c = &self.v[i * STRIDE..];
         v3(c[0] as f64, c[1] as f64, c[2] as f64)

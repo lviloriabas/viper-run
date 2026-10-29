@@ -95,6 +95,53 @@ pub(super) fn step(app: &mut App, frame: u32) -> bool {
         19 => { assert!(app.controls_open); key(app, KeyCode::Escape); assert_eq!(app.state, State::Frozen); },
         20 => key(app, KeyCode::K),
         21 => select(app, Action::Menu, 0),
+        22 => key(app, KeyCode::K),
+        23 => {
+            let f=app.sliders.iter().find(|s|s.setting==crate::ui::SliderSetting::Fov).copied().unwrap();
+            app.mouse_button_down_event(MouseButton::Left,f.rect[0],f.rect[1]+4.0);
+            app.mouse_motion_event(f.rect[0]+f.rect[2]+100.0,f.rect[1]-100.0);
+            assert_eq!(app.settings.fov,crate::settings::FOV_MAX);
+            app.mouse_button_up_event(MouseButton::Left,0.0,0.0);
+            app.mouse_motion_event(f.rect[0],f.rect[1]);
+            assert_eq!(app.settings.fov,crate::settings::FOV_MAX,"release must end capture");
+            select(app,Action::PadSetup,0);
+        },
+        24 => {
+            for setting in [crate::ui::SliderSetting::Flight,crate::ui::SliderSetting::Look,crate::ui::SliderSetting::DeadLeft,crate::ui::SliderSetting::DeadRight,crate::ui::SliderSetting::Expo] {
+                let f=app.sliders.iter().find(|s|s.setting==setting).copied().unwrap();
+                app.mouse_button_down_event(MouseButton::Left,f.rect[0],f.rect[1]+4.0);
+                app.mouse_motion_event(f.rect[0]+f.rect[2]*0.5,f.rect[1]);
+                app.mouse_button_up_event(MouseButton::Left,0.0,0.0);
+            }
+            assert_eq!(app.settings.pad_sensitivity,1.3);
+            assert_eq!(app.settings.look_sensitivity,1.3);
+            assert!((app.settings.expo-0.5).abs()<0.001);
+            app.act(Action::PadReset);select(app,Action::PadSetup,0);
+            println!("PASS draggable FOV, sensitivity and dead-zone sliders, pointer capture and release");
+        },
+        25 => key(app,KeyCode::Escape),
+        26 => select(app,Action::Pick(MissionKind::Free),0),
+        27 => {
+            for pair in 0..4 {for _ in 0..16 {
+                let empty=match pair{0=>app.config.tips_empty,1=>app.config.outer.is_none(),2=>app.config.outboard.is_none(),_=>app.config.inboard.is_none()};
+                if empty{break;}app.act(Action::Station(pair));
+            }}
+            for _ in 0..5{if app.config.gun_rounds==Some(0){break;}app.act(Action::GunAmmo);}
+            select(app,Action::Launch,0);
+            assert!(app.combat.loadout.stations.is_empty());assert_eq!(app.combat.loadout.rounds,0);
+        },
+        28 => {
+            app.aircraft.as_mut().unwrap().lose(crate::sim::Breakup{wing:[true,false],tail:false});
+            app.step(crate::sim::FIXED_DT,crate::sim::Input::default());
+            assert_eq!(app.state,State::Flying);assert!(app.ejection.is_none());
+            assert!(matches!(app.view,crate::View::Cockpit));
+            let cam=app.current_camera();
+            assert!((cam.eye-app.aircraft.as_ref().unwrap().pos).len()<10.0,"camera jumped outside");
+            app.opts.eject=true;app.fight(0.6);app.opts.eject=false;
+            assert!(app.ejection.is_some(),"structural failure must still permit the handle");
+            println!("PASS clean loadout, zero ammunition and manual ejection from the damaged cockpit");
+            app.go_menu();
+        },
         _ => {
             assert!(!app.controls_open && app.state == State::Attract);
             println!("PASS configuration resumes flying/frozen states and Main Menu works");

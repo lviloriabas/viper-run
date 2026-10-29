@@ -318,20 +318,20 @@ pub fn tip_store(jet: Type) -> Store {
 /// MBD3-U2T tandem rack, on the inner pair, for up to 2,000 kg of bombs.
 fn pylon_choices(jet: Type, pair: u8) -> &'static [Option<Store>] {
     match (jet.base(), pair) {
-        (Type::F16, 0) => &[Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
+        (Type::F16, 0) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 1) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d)],
         (Type::F16, 2) => &[None, Some(Store::Aim9), Some(Store::Aim9x), Some(Store::Aim120), Some(Store::Aim120d), Some(Store::Aim7), Some(Store::Mk82), Some(Store::Mk82Ter)],
         (Type::F16, _) => &[None, Some(Store::Mk82), Some(Store::Mk82Ter)],
         // F/A-18C Lot 20: wingtip rails accept Sidewinders only; the
         // fuselage cheeks (4/6) accept Sparrow/AMRAAM, never bombs.
-        (Type::F18, 0) => &[Some(Store::Aim9)],
+        (Type::F18, 0) => &[None, Some(Store::Aim9)],
         (Type::F18, 1 | 2) => &[None,Some(Store::Aim9),Some(Store::Aim7),Some(Store::Aim120),Some(Store::Mk82)],
         (Type::F18, _) => &[None,Some(Store::Aim7),Some(Store::Aim120)],
         // Base Su-27SK has R-73/R-27, not the later R-77 integration.
-        (Type::Su27, 0) => &[Some(Store::R73)],
+        (Type::Su27, 0) => &[None, Some(Store::R73)],
         (Type::Su27, 1) => &[None,Some(Store::R73),Some(Store::Fab250)],
         (Type::Su27, _) => &[None,Some(Store::R27r),Some(Store::R27t),Some(Store::Fab250),Some(Store::Fab500)],
-        (Type::Mig29, 0) => &[Some(Store::R73), Some(Store::R60m)],
+        (Type::Mig29, 0) => &[None, Some(Store::R73), Some(Store::R60m)],
         (Type::Mig29, 1) => &[None],
         (Type::Mig29, 2) => &[None, Some(Store::R73), Some(Store::R60m), Some(Store::R77), Some(Store::Fab250), Some(Store::Fab500)],
         (Type::Mig29, _) => &[None, Some(Store::R27r), Some(Store::R27t), Some(Store::R77), Some(Store::Fab500), Some(Store::Fab250), Some(Store::Fab250Twin)],
@@ -411,6 +411,9 @@ pub struct Station {
 pub struct Config {
     /// Stations 1 and 9, the wingtips (the MiG's outer pylons).
     pub tip: Store,
+    pub tips_empty: bool,
+    /// None selects the airframe's full drum; Some(0) keeps an empty gun.
+    pub gun_rounds: Option<u32>,
     /// Stations 2 and 8, outboard under the F-16's wing.
     pub outer: Option<Store>,
     /// Stations 3 and 7.
@@ -437,7 +440,7 @@ impl Config {
             MissionKind::Strike => (None, Some(Store::Mk82), Some(Store::Mk82), 1.0),
             MissionKind::Free => (None, Some(Store::Aim120), Some(Store::Mk82), 1.0),
         };
-        Config { tip: Store::Aim9, outer, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind), refill: false }
+        Config { tip: Store::Aim9, tips_empty: false, gun_rounds: None, outer, outboard, inboard, fuel, jet: Type::F16, aggressor: Type::Mig29, threats: Threats::for_mission(kind), refill: false }
     }
 
     /// The mission's stores as the given airframe carries them: the MiG-29S's
@@ -518,7 +521,7 @@ impl Config {
     pub fn cycle(&mut self, pair: u8) {
         let order = pylon_choices(self.jet, pair);
         let current = match pair {
-            0 => Some(self.tip),
+            0 => if self.tips_empty { None } else { Some(self.tip) },
             1 => self.outer,
             2 => self.outboard,
             _ => self.inboard,
@@ -526,7 +529,7 @@ impl Config {
         let i = order.iter().position(|s| *s == current).unwrap_or(0);
         let next = order[(i + 1) % order.len()];
         match pair {
-            0 => self.tip = next.unwrap_or(tip_store(self.jet)),
+            0 => { self.tips_empty = next.is_none(); self.tip = next.unwrap_or(tip_store(self.jet)); },
             1 => self.outer = next,
             2 => self.outboard = next,
             _ => self.inboard = next,
@@ -544,6 +547,14 @@ impl Config {
         let choices = Config::fuel_choices(self.jet);
         let i = choices.iter().position(|&f| (f - self.fuel).abs() < 0.005).unwrap_or(0);
         self.fuel = choices[(i + 1) % choices.len()];
+    }
+
+    pub fn cycle_ammo(&mut self) {
+        let full = gun_of(self.jet).rounds;
+        let choices = [full, full * 3 / 4, full / 2, full / 4, 0];
+        let i = choices.iter().position(|&n| n == self.gun_rounds.unwrap_or(full).min(full)).unwrap_or(0);
+        let next = choices[(i + 1) % choices.len()];
+        self.gun_rounds = if next == full { None } else { Some(next) };
     }
 
     /// The fuel load is the minimum.
@@ -565,6 +576,7 @@ pub struct Loadout {
     /// The racks' mass (kg) and drag, which stay on when the bombs go.
     racks: (f64, f64),
     pub gun: &'static Gun,
+    pub initial_rounds: u32,
     pub rounds: u32,
     pub chaff: u32,
     pub flares: u32,
@@ -617,7 +629,7 @@ impl Loadout {
     /// round its pylon: a TER-9/A's one below and two on the shoulders, a
     /// tandem rack's one behind the other.
     pub fn configure(cfg: &Config) -> Loadout {
-        let mut stations = tips(cfg.tip).to_vec();
+        let mut stations = if cfg.tips_empty { Vec::new() } else { tips(cfg.tip).to_vec() };
         let mut racks = (0.0, 0.0);
         for (pick, x) in [(cfg.outer, 4.15), (cfg.outboard, 3.50), (cfg.inboard, 2.30)] {
             let Some(rack) = pick else { continue };
@@ -652,7 +664,8 @@ impl Loadout {
             }
         }
         let gun = gun_of(cfg.jet);
-        Loadout { stations, racks, gun, rounds: gun.rounds, chaff: CHAFF, flares: FLARES }
+        let rounds = cfg.gun_rounds.unwrap_or(gun.rounds).min(gun.rounds);
+        Loadout { stations, racks, gun, initial_rounds: rounds, rounds, chaff: CHAFF, flares: FLARES }
     }
 
     pub fn count(&self, store: Store) -> u32 {
@@ -680,9 +693,13 @@ impl Loadout {
         self.next_for(mode).or_else(|| self.stations.iter().rposition(|s| s.store.mode() == mode)).map(|i| self.stations[i].store)
     }
 
-    /// Mass on the stations, with the spent ammunition taken off.
+    /// Stores relative to the flight model's full-drum reference mass.
+    /// Remove complete cartridges left out at setup, then only projectile
+    /// and propellant when firing (linkless feeds retain the empty cases).
     pub fn mass(&self) -> f64 {
-        RAILS + self.racks.0 + self.stations.iter().filter(|s| s.loaded).map(|s| s.store.mass()).sum::<f64>() - (self.gun.rounds - self.rounds) as f64 * self.gun.expended
+        RAILS + self.racks.0 + self.stations.iter().filter(|s| s.loaded).map(|s| s.store.mass()).sum::<f64>()
+            - self.gun.rounds.saturating_sub(self.initial_rounds) as f64 * self.gun.cartridge_mass
+            - self.initial_rounds.saturating_sub(self.rounds) as f64 * self.gun.expended
     }
 
     /// Mass hung on the underwing pylons, which lowers the flutter speed.
@@ -1325,8 +1342,8 @@ impl Combat {
                 self.events.push(Event::Toast(format!("REFILL // {}", k.name())));
             }
         }
-        if l.rounds == 0 {
-            l.rounds = l.gun.rounds;
+        if l.rounds == 0 && l.initial_rounds > 0 {
+            l.rounds = l.initial_rounds;
             self.events.push(Event::Toast(format!("REFILL // {}", l.gun.name)));
         }
         if l.chaff == 0 && l.flares == 0 {

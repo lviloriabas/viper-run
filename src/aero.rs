@@ -354,7 +354,8 @@ pub fn thrust(kind: Type, power: f64, mach: f64, altitude_m: f64) -> f64 {
     let (mil_sl, max_sl, inlet) = match kind {
         Type::F16 => (MIL_THRUST, MAX_THRUST, inlet_factor(mach)),
         Type::Mig29 => (aero_mig29::MIL_THRUST, aero_mig29::MAX_THRUST, aero_mig29::inlet_factor(mach)),
-        Type::F18|Type::F18E|Type::EA18G => (crate::aero_hornet::MIL_THRUST,crate::aero_hornet::MAX_THRUST,crate::aero_hornet::inlet_factor(mach)),
+        Type::F18 => (crate::aero_hornet::MIL_THRUST,crate::aero_hornet::MAX_THRUST,crate::aero_hornet::inlet_factor(mach)),
+        Type::F18E|Type::EA18G => (28000.0*4.448222,44000.0*4.448222,crate::aero_hornet::inlet_factor(mach)),
         Type::Su27 => (crate::aero_su27::MIL_THRUST,crate::aero_su27::MAX_THRUST,crate::aero_su27::inlet_factor(mach)),
     };
     let ft = altitude_m / 0.3048;

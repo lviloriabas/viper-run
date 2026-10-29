@@ -631,7 +631,7 @@ impl ActorState {
                 a.surf_pitch as f32,
                 a.surf_roll as f32,
                 a.surf_yaw as f32,
-                0.0,
+                (l.initial_rounds + 1) as f32,
                 0.0,
             ],
             flags: (a.on_ground as u16)
@@ -710,7 +710,8 @@ impl ActorState {
         a.pitch = axes.forward.y.clamp(-1.0, 1.0).asin() * RAD;
         a.bank = (-axes.right.y).atan2(axes.up.y) * RAD;
         l.gun = gun_of(kind);
-        l.rounds = self.rounds.min(l.gun.rounds);
+        l.initial_rounds = if self.systems[13] >= 1.0 { (self.systems[13] as u32 - 1).min(l.gun.rounds) } else { l.gun.rounds };
+        l.rounds = self.rounds.min(l.initial_rounds);
         l.chaff = self.chaff;
         l.flares = self.flares;
         l.stations = self
@@ -751,6 +752,24 @@ impl ActorState {
                 .all(|n| n.is_finite())
             && self.q.iter().map(|q| q * q).sum::<f32>() > 0.5
             && self.q.iter().map(|q| q * q).sum::<f32>() < 1.5
+    }
+}
+
+#[cfg(test)]
+mod ammo_snapshot_tests {
+    use super::*;
+    #[test]
+    fn partial_and_empty_drums_keep_their_mass_across_snapshot_application() {
+        for kind in Type::ALL {for count in [0,50] {
+            let mut cfg=Config::for_jet(MissionKind::Free,kind);cfg.gun_rounds=Some(count);
+            let a=spawn_type(kind,v3(0.0,4000.0,0.0),0.0,150.0);
+            let l=Loadout::configure(&cfg);
+            let wire=ActorState::new(0,None,0,&a,&l,100.0,true,Mode::Gun,None,None);
+            let mut target=a.clone();let mut stores=Loadout::for_mission(MissionKind::Free);
+            wire.apply(&mut target,&mut stores);
+            assert_eq!((stores.initial_rounds,stores.rounds),(count,count));
+            assert!((stores.mass()-l.mass()).abs()<1e-8);
+        }}
     }
 }
 #[derive(Serialize, Deserialize)]

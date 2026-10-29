@@ -1,10 +1,10 @@
 from pathlib import Path
-import argparse,subprocess,json,time,hashlib
+import argparse,subprocess,json,time,hashlib,os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def cases(full=False):
     missions=['gates','dogfight','strike','airfield','free']
-    jets=['f16','mig29','f18','su27']
+    jets=['f16','mig29','f18','su27','f18e','ea18g']
     if full:
         for jet in jets:
             for mission in missions:
@@ -47,13 +47,18 @@ def main():
     exe=args.exe.resolve();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     (out/'layout-metadata.json').write_text(json.dumps({'exe':exe.name,'sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'sizes':args.sizes,'prompts':args.prompts,'full':args.full,'filter':args.filter},indent=2),encoding='utf-8')
     results=[];start=time.time()
+    startup=None
+    if os.name=='nt':
+        startup=subprocess.STARTUPINFO()
+        startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow=0
     jobs=[(size,pad,name,flags) for size in args.sizes.split(',') for pad in args.prompts.split(',') for name,flags in cases(args.full) if not args.filter or args.filter in name]
     def check(job):
         size,pad,name,flags=job
         label=f'{name}-{size}-{pad}';shot=out/(label+'.png')
         cmd=[str(exe),'--layout-check','--shot',str(shot),'--frames','1','--size',size,'--no-performance',*flags]+(['--pad'] if pad=='controller' else [])
         try:
-            r=subprocess.run(cmd,cwd=exe.parent,capture_output=True,text=True,timeout=45)
+            r=subprocess.run(cmd,cwd=exe.parent,capture_output=True,text=True,timeout=45,startupinfo=startup)
             log=r.stdout+r.stderr;passed=r.returncode==0 and shot.is_file() and 'PASS menu layout:' in log
         except subprocess.TimeoutExpired as e:passed=False;log=str(e)
         (out/(label+'.txt')).write_text(log,encoding='utf-8')

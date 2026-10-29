@@ -25,6 +25,7 @@ pub struct Airframe {
 }
 pub fn build() -> Airframe {
     let mut a = crate::flightgear::build(Type::F18);
+    a.body.round_shading(|p|p.z < -4.9 && p.x.abs()<0.85);
     for side in [-1.0,1.0] {
         let p=v3(side*1.5,0.447,0.45);let q=v3(side*5.55,0.447,1.908);
         let n=v3(-side*0.36,0.0,1.0);
@@ -136,7 +137,36 @@ pub fn build() -> Airframe {
         (v3(1.0,0.0,taper),0.40+taper*4.90),
         (v3(-1.0,0.0,taper),0.40+taper*4.90),(-V3::Y,-0.54)]);
     a.body=fixed;
+    a.body.v.extend(exterior_tub(Type::F18).v);
     a
+}
+
+/// An opaque cockpit well below the transparent canopy, in exterior axes.
+/// Both sides are present so steep external views never see terrain through
+/// the fuselage. The detailed first-person boards remain in cockpit space.
+pub fn exterior_tub(kind:Type)->Mesh {
+    let base=kind.base();
+    let (front,aft)=crate::flightgear::canopy_range(base);
+    let floor=kind.eye().y-0.95;
+    let mut m=Mesh::new();
+    let wall=Rgb(0.11,0.14,0.15);
+    let mut quad=|a,b,c,d|{m.quad(a,b,c,d,wall);m.quad(d,c,b,a,wall);};
+    for k in 0..32 {
+        let z0=mix(front+0.002,aft-0.002,k as f64/32.0);
+        let z1=mix(front+0.002,aft-0.002,(k+1) as f64/32.0);
+        let(w0,s0,_)=crate::flightgear::canopy_section(base,z0);
+        let(w1,s1,_)=crate::flightgear::canopy_section(base,z1);
+        for side in [-1.0,1.0] {
+            let a=v3(side*w0,s0,z0);let b=v3(side*w1,s1,z1);
+            quad(a,b,v3(b.x,floor,z1),v3(a.x,floor,z0));
+        }
+        quad(v3(-w0,floor,z0),v3(w0,floor,z0),v3(w1,floor,z1),v3(-w1,floor,z1));
+    }
+    for z in [front+0.002,aft-0.002] {
+        let(w,s,_)=crate::flightgear::canopy_section(base,z);
+        quad(v3(-w,floor,z),v3(w,floor,z),v3(w,s,z),v3(-w,s,z));
+    }
+    m
 }
 /// Lowest skin hit at a wing station. Pylon roots penetrate it by 8 mm.
 fn skin_bottom(m:&Mesh,x:f64,z:f64)->f64 {

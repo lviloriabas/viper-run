@@ -18,6 +18,10 @@ mod compass;
 mod hud;
 mod mig;
 mod modern;
+fn modern_slot(kind: crate::sim::Type) -> Option<usize> {
+    use crate::sim::Type::*;
+    match kind {F18=>Some(0),Su27=>Some(1),F18E=>Some(2),EA18G=>Some(3),_=>None}
+}
 mod pilot;
 
 /// Export the exact assembled cockpit and moving pilot for Blender inspection.
@@ -25,8 +29,8 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
     use std::{fs, io::Write};
     let root = std::path::Path::new(path);
     fs::create_dir_all(root)?;
-    for kind in [crate::sim::Type::F18, crate::sim::Type::Su27,crate::sim::Type::Mig29] {
-        let name=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>"f18",crate::sim::Type::Su27=>"su27",_=>"mig29"};
+    for kind in crate::sim::Type::ALL.into_iter().filter(|k|*k!=crate::sim::Type::F16) {
+        let name=kind.id();
         let mut hardware=Mesh::new();
         if kind==crate::sim::Type::Mig29{mig::build_static(&mut hardware);}else{hardware=modern::build(kind);}
         let mut parts = vec![("hardware".to_owned(), hardware)];
@@ -58,8 +62,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
     }
     let mut parts=Vec::new();
     for kind in crate::sim::Type::ALL {
-        let jet=match kind{crate::sim::Type::F16=>"f16",crate::sim::Type::Mig29=>"mig29",
-            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>"f18",_=>"su27"};
+        let jet=kind.id();
         for (phase,pull,deploy) in [("rest",0.0,None),("pulled",1.0,None),
             ("separating",1.0,Some(crate::eject::DEPLOY_FRAMES/2)),
             ("hanging",1.0,Some(crate::eject::DEPLOY_FRAMES-1))] {
@@ -80,6 +83,25 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
         for n in m.v{f.write_all(&n.to_le_bytes())?;}
     }
     f.write_all(&0u32.to_le_bytes())?;
+    // Exterior review includes the exact post-partition meshes, rather than
+    // only the embedded source before Rust adds slats and cockpit closures.
+    for kind in crate::sim::Type::ALL.into_iter().filter(|k|k.modern()) {
+        let af=if kind.hornet(){crate::hornet::build()}else{crate::su27::build()};
+        let mut parts=vec![("fixed".to_owned(),af.body),("canopy".to_owned(),af.canopy),("brake".to_owned(),af.brake)];
+        for (i,s) in af.controls.into_iter().enumerate(){parts.push((format!("control-{i}"),s.mesh));}
+        for (i,m) in af.stabs.into_iter().enumerate(){parts.push((format!("stabilator-{i}"),m));}
+        for (i,m) in af.flaps.into_iter().enumerate(){parts.push((format!("flap-{i}"),m));}
+        for (i,m) in af.rudders.into_iter().enumerate(){parts.push((format!("rudder-{i}"),m));}
+        for (i,m) in af.gear.into_iter().enumerate(){parts.push((format!("gear-{i}"),m));}
+        let mut f=fs::File::create(root.join(format!("{}-airframe.vrm",kind.id())))?;
+        f.write_all(b"VRM1")?;f.write_all(&(parts.len() as u32).to_le_bytes())?;
+        for (name,m) in parts {
+            f.write_all(&(name.len() as u32).to_le_bytes())?;f.write_all(name.as_bytes())?;
+            f.write_all(&(m.v.len() as u32).to_le_bytes())?;
+            for n in m.v{f.write_all(&n.to_le_bytes())?;}
+        }
+        f.write_all(&0u32.to_le_bytes())?;
+    }
     Ok(())
 }
 
@@ -293,7 +315,7 @@ const WELL_DEPTH: f64 = 0.32;
 pub const HUD_GLASS: [V3; 4] = [v3(-0.10, 1.078, -4.012), v3(0.10, 1.078, -4.012), v3(0.10, 1.35, -3.958), v3(-0.10, 1.35, -3.958)];
 /// Fixed readout positions adapt to the aperture; aiming directions do not.
 fn fixed_hud_coords(kind:crate::sim::Type,x:f64,y:f64)->(f64,f64) {
-    (if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {x*0.90} else {x},match kind {
+    (if kind.modern() {x*0.90} else {x},match kind {
         crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>y*0.68-50.0,
         crate::sim::Type::Su27=>y*0.72,
         _=>y,
@@ -301,7 +323,7 @@ fn fixed_hud_coords(kind:crate::sim::Type,x:f64,y:f64)->(f64,f64) {
 }
 fn glass_points(kind: crate::sim::Type) -> [V3; 4] {
     match kind {
-        crate::sim::Type::F18 | crate::sim::Type::Su27 => modern::hud_glass(kind),
+        crate::sim::Type::F18 | crate::sim::Type::F18E | crate::sim::Type::EA18G | crate::sim::Type::Su27 => modern::hud_glass(kind),
         _ => HUD_GLASS,
     }
 }
@@ -501,9 +523,9 @@ pub struct Cockpit {
     canopy: Part,
     /// The MiG-29's cockpit: its own tub, panel and canopy, in the same space.
     mig: [Part; 3],
-    extra: [[Part;3];2],
+    extra: [[Part;3];4],
     mirror_faces: Vec<Part>,
-    source: [Vec<Part>;2],
+    source: [Vec<Part>;4],
     hud_glass: [Part; 4],
     pub atlas: gfx::Target,
     atlas_pass: RenderPass,
@@ -560,17 +582,17 @@ impl Cockpit {
             p.bind.images = vec![atlas_tex];
             p
         });
-        let extra=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
+        let extra=[crate::sim::Type::F18,crate::sim::Type::Su27,crate::sim::Type::F18E,crate::sim::Type::EA18G].map(|kind|{
             let mut m=modern::build(kind);
             mirror_faces.push(world::part(ctx,&extract_mirror_faces(&m)));
             blank_mirror_faces(&mut m);
-            let native=if kind==crate::sim::Type::F18{crate::hornet::build().canopy}else{crate::su27::build().canopy};
+            let native=if kind.hornet(){crate::hornet::build().canopy}else{crate::su27::build().canopy};
             let mut shifted=native;
             let offset=EYE-kind.eye();
             for v in shifted.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
             [world::part(ctx,&m),world::part(ctx,&self::faces(&m)),world::part(ctx,&shifted)].map(|mut p|{p.bind.images=vec![atlas_tex];p})
         });
-        let source=[crate::sim::Type::F18,crate::sim::Type::Su27].map(|kind|{
+        let source=[crate::sim::Type::F18,crate::sim::Type::Su27,crate::sim::Type::F18E,crate::sim::Type::EA18G].map(|kind|{
             crate::flightgear::textures(kind).iter().map(|t|{
                 let mut mesh=Mesh{v:t.mesh.v.clone()};let offset=EYE-kind.eye();
                 for v in mesh.v.chunks_mut(crate::mesh::STRIDE){v[0]+=offset.x as f32;v[1]+=offset.y as f32;v[2]+=offset.z as f32;}
@@ -605,7 +627,7 @@ impl Cockpit {
         let kind=aircraft.kind;
         let mig=kind.russian();
         let (statics,canopy)=match kind {
-            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>(&self.extra[0][0],&self.extra[0][2]),
+            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>{let i=modern_slot(kind).unwrap();(&self.extra[i][0],&self.extra[i][2])},
             crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][2]),
             crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[2]),
             crate::sim::Type::F16=>(&self.statics,&self.canopy),
@@ -619,13 +641,13 @@ impl Cockpit {
         ctx.apply_bindings(&statics.bind);
         ctx.apply_uniforms(UniformsSource::table(&u));
         ctx.draw(0, statics.count, 1);
-        if let Some(i)=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+        if let Some(i)=modern_slot(kind){
             for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
         }
 
 
         self.dynamic.clear();
-        if kind == crate::sim::Type::F18 {
+        if kind.hornet() {
             pilot::build_dynamic_twin(&mut self.dynamic,hands,false);
         } else if kind==crate::sim::Type::Su27 {
             pilot::build_dynamic_twin(&mut self.dynamic,hands,true);
@@ -634,7 +656,7 @@ impl Cockpit {
         } else {
             pilot::build_dynamic(&mut self.dynamic, hands);
         }
-        if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27) {
+        if kind.modern() {
             modern::moving_controls(&mut self.dynamic,kind,hands);
         }
         compass::dynamic(&mut self.dynamic,kind,aircraft.heading,aircraft.pitch,aircraft.bank);
@@ -667,7 +689,7 @@ impl Cockpit {
     /// `res` is the pass size in pixels; `gloc` matches the post pass.
     pub fn draw_faces(&self, ctx: &mut dyn RenderingBackend, cam_b: &Camera, aspect: f64, res: [f32; 2], gloc: f32, kind: crate::sim::Type, mirror_texture:Option<TextureId>) {
         let (statics,faces)=match kind {
-            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>(&self.extra[0][0],&self.extra[0][1]),
+            crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>{let i=modern_slot(kind).unwrap();(&self.extra[i][0],&self.extra[i][1])},
             crate::sim::Type::Su27=>(&self.extra[1][0],&self.extra[1][1]),
             crate::sim::Type::Mig29=>(&self.mig[0],&self.mig[1]),
             crate::sim::Type::F16=>(&self.statics,&self.faces),
@@ -683,7 +705,7 @@ impl Cockpit {
         ctx.draw(0, self.dyn_count as i32, 1);
         ctx.apply_pipeline(&self.face_pip);
         ctx.apply_uniforms(UniformsSource::table(&FaceU { vp, eye, res, gloc }));
-        if let Some(i)=match kind{crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(0),crate::sim::Type::Su27=>Some(1),_=>None}{
+        if let Some(i)=modern_slot(kind){
             for p in &self.source[i]{ctx.apply_bindings(&p.bind);ctx.draw(0,p.count,1);}
         }
         ctx.apply_bindings(&faces.bind);
@@ -692,8 +714,7 @@ impl Cockpit {
         ctx.apply_bindings(&self.dyn_face_bind);
         ctx.draw(0, self.dyn_face_count as i32, 1);
         if let (Some(texture),Some(i))=(mirror_texture,match kind{
-            crate::sim::Type::Mig29=>Some(0),crate::sim::Type::F18|crate::sim::Type::F18E|crate::sim::Type::EA18G=>Some(1),
-            crate::sim::Type::Su27=>Some(2),_=>None}) {
+            crate::sim::Type::Mig29=>Some(0),_=>modern_slot(kind).map(|i|i+1)}) {
             let part=&self.mirror_faces[i];
             let bind=Bindings{images:vec![texture],..part.bind.clone()};
             ctx.apply_bindings(&bind);
@@ -1037,7 +1058,7 @@ mod geometry_tests {
                     crate::sim::Type::Mig29=>pilot::build_dynamic_mig(&mut m,&h),
                     _=>pilot::build_dynamic_twin(&mut m,&h,kind.russian()),
                 }
-                if matches!(kind,crate::sim::Type::F18|crate::sim::Type::Su27){modern::moving_controls(&mut m,kind,&h);}
+                if kind.modern(){modern::moving_controls(&mut m,kind,&h);}
                 compass::dynamic(&mut m,kind,0.0,0.0,0.0);
                 assert!(m.count()<=DYN_CAP,"{kind:?}: {} vertices",m.count());
             }
@@ -1536,7 +1557,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     // AOA indexer: high, on-speed, low chevrons.
     let r = R_AOA;
     cv.rect(r.x, r.y, r.w, r.h, rgba(0x12, 0x1b, 0x1c, 1.0));
-    let (on_low,on_high)=if a.kind==crate::sim::Type::F18{(7.4,8.8)}else{(11.0,14.0)};
+    let (on_low,on_high)=if a.kind.hornet(){(7.4,8.8)}else{(11.0,14.0)};
     let (hi,on_speed,lo)=(a.alpha_deg>on_high,a.alpha_deg>=on_low && a.alpha_deg<=on_high,a.alpha_deg<on_low);
     let cx = r.x + r.w / 2.0;
     cv.polyline(&[[cx - 14.0, r.y + 14.0], [cx, r.y + 34.0], [cx + 14.0, r.y + 14.0]], 5.0, false, if hi { rgba(0xff, 0x5f, 0x46, 1.0) } else { rgba(0x60, 0x38, 0x2c, 1.0) });
@@ -1649,7 +1670,7 @@ fn draw_instruments(cv: &mut Canvas, a: &Aircraft, m: &Mission, pages: [Page; 2]
     if a.kind.russian() {
         mig::draw(cv, a, &ad, m, c);
     }
-    if a.kind==crate::sim::Type::F18{modern::hornet_instruments(cv,a,&ad,m,time,c);}
+    if a.kind.hornet(){modern::hornet_instruments(cv,a,&ad,m,time,c);}
     if a.kind==crate::sim::Type::Su27{modern::flanker_instruments(cv,a,c);}
     compass::draw(cv);
 }
@@ -1886,7 +1907,7 @@ pub fn draw_hud(cv: &mut Canvas, a: &Aircraft, m: &Mission, cam: &Camera, body: 
     // Keep moving attitude bars out of the fixed data columns.
     let ladder_clip: Vec<_> = [(-49.0, -79.0), (49.0, -79.0), (49.0, 134.0), (-49.0, 134.0)]
         .into_iter().filter_map(|(x, y)| at(x, y)).collect();
-    if a.kind == crate::sim::Type::F18 {
+    if a.kind.hornet() {
         // Keep the horizon ladder inside the glass and between data columns.
         let centre=glass.iter().map(|p|p[0]).sum::<f32>()/4.0;
         cv.set_clip(Some(glass.iter().map(|p|[centre+(p[0]-centre)*0.40,p[1]]).collect()));

@@ -343,6 +343,9 @@ def generate(source,out):
             path=source/"su27/Models/Su-27.ac"; USED.add(path)
             for o,vs in flatten(read_ac(path)):
                 name=o.name
+                # This source rod has its own linkage animation. Baking it
+                # into the rotating door produced a long bar through the spine.
+                if name=="SpeedbrakePushrod":continue
                 if name.startswith("canopy"):part="canopy"
                 elif "Elevon" in name:part="stab0" if "Left" in name else "stab1"
                 elif "Flaperon" in name:part="flap0" if "Left" in name else "flap1"

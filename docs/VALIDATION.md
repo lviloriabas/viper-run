@@ -1,5 +1,72 @@
 # Validation
 
+## Pending TODO completed, 29 October 2026
+
+All 16 open items are implemented and marked complete in TODO.md. Behavior,
+research references and model limitations are recorded in
+[PENDING-TASKS.md](PENDING-TASKS.md). The final distributions include draggable
+settings, separate flight/look sensitivity, empty tip stations, adjustable gun
+ammunition and mass, adaptive Hornet protection, persistent regional damage,
+manual escape after structural failure, stabilising drogues, two Growler seats,
+pilot-relative audio, ballistic spent missiles, corrected Su-27 cuts and brake,
+Hornet-family E/G materials and instruments, opaque cockpit wells and Windows
+window/class icons. E/G retain the shared compact Hornet exterior and a simplified
+front panel; the limitations document defines that scope.
+
+Final validation:
+
+- Rust: 332 game tests and 16 server tests passed, with no failures or ignored
+  tests. Release builds for Linux and Windows completed with no warnings.
+- Python: all 10 importer tests and three warning-speaker DSP tests passed.
+- Native UI checks passed on Linux and Windows, including actual pointer drag,
+  clamping outside the slider, release, clean loadout and manual ejection after
+  structural failure. Windows future-UI checks also passed.
+- All 144 layout cases passed: 42 Linux and 42 Windows settings/controller cases
+  at 640x360, 1280x720 and 1920x1080, plus 60 Linux loadout cases at 640x360 across
+  all six aircraft, five missions and both prompt styles.
+- The native visual matrix produced 27 Linux and 27 Windows captures of panels,
+  exterior canopy wells, damage and drogues, including the Su-27 slats and brake.
+  All six Windows aircraft views were visually reviewed in contact sheets.
+- Blender produced four editable scenes and 16 top/side/front/quarter renders.
+  Ten mesh exports from the final Linux binary are byte-identical to the meshes
+  in those reviewed scenes.
+- Real Linux game processes passed direct UDP, external TCP relay and embedded
+  TCP host dogfights. Native Windows passed the embedded host dogfight. Reports
+  verify remote input, frames, simulation ticks, gun inventory consumption and
+  disabled microphone capture. These are loopback checks, not two-PC/router tests.
+- Windows PE resources contain 16, 24, 32, 48, 64 and 256 px icons. A native HWND
+  probe confirmed nonzero small/large window and class icons.
+- The four distribution checksums match `dist/SHA256SUMS.txt`; the inspected local
+  Windows copy is identical to the distributed executable.
+
+One Linux multiplayer run timed out while other native graphics suites were
+active. Serial execution passed all three transports with the original deadlines
+and assertions. No test was skipped or relaxed. Logs and Linux captures are in
+`target/todo-review/`; native Windows evidence is in this chat's local
+`todo-review/` artifact directory. The definitive multiplayer log is
+`target/todo-review/multiplayer-linux-final.log`.
+
+Resource review:
+
+| Resource | Before | Final |
+| --- | ---: | ---: |
+| Su-27 source brake triangles | 116 | 100 |
+| Su-27 raw model bytes | 29,177,391 | 29,175,279 |
+| Su-27 packed model bytes | 6,999,266 | 6,998,954 |
+| Linux game bytes | 12,961,536 | 12,991,624 |
+| Windows game bytes | 12,769,792 | 12,798,976 |
+
+The assembled reviewed airframes contain 9,033 triangles for each Hornet-family
+variant and 9,826 for Su-27, including gear and movable parts. No new raster
+texture is added. Other imported packed resources retain their original bytes.
+
+Final game SHA-256:
+
+- Linux: `e05c8ba00b4a4a04fff6b6b47c151f17fea8c318ce04f4d0898becc3980b72e8`.
+- Windows: `d05e1a142481a137ccedcaa3f50770c0cf0ae2924885a1b15a3a83d979b3c4c9`.
+
+The sections below retain their historical snapshot hashes and validation scope.
+
 ## Integrated controller precision, audio and multiplayer, 28 October 2026
 
 Final distributions contain the controller setup page, optional resting-drift

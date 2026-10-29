@@ -6,6 +6,11 @@ use std::sync::{Arc, Mutex};
 
 pub const RATE: u32 = 44100;
 
+/// Smooth free-field attenuation, with a near-field reference of 85 metres.
+pub fn distance_gain(distance: f64) -> f32 {
+    (1.0 / (1.0 + (distance.max(0.0) / 85.0).powi(2))) as f32
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct Params {
     pub master: f32,
@@ -222,7 +227,7 @@ struct Synth {
     speech: Option<Speech>,
     chat: VoiceBus,
     voices: Vec<Voice>,
-    crash: Option<u32>,
+    crash: Option<(u32, f32)>,
     bursts: Vec<Burst>,
 }
 
@@ -361,7 +366,7 @@ impl Synth {
             }
             self.bursts.retain(|b| b.t < b.len);
 
-            if let Some(n) = self.crash {
+            if let Some((n, gain)) = self.crash {
                 let total = (RATE as f32 * 1.4) as u32;
                 let t = n as f32 / total as f32;
                 if n % 64 == 0 {
@@ -369,8 +374,8 @@ impl Synth {
                     self.crash_lp.set(true, f, 0.7);
                 }
                 let w = self.white();
-                v += self.crash_lp.run(w * (1.0 - t).powf(2.2) * 0.8) * 0.5;
-                self.crash = if n + 1 < total { Some(n + 1) } else { None };
+                v += self.crash_lp.run(w * (1.0 - t).powf(2.2) * 0.8) * 0.5 * gain;
+                self.crash = if n + 1 < total { Some((n + 1, gain)) } else { None };
             }
             if let Some(voice) = &mut self.speech {
                 if let Some(sample) = voice.next() { v = v * 0.48 + sample * 0.48; }
@@ -437,18 +442,19 @@ impl Audio {
 
     /// Impact: the noise sweep, a deep boom and two secondary blasts; a
     /// hissing splash instead on water.
-    pub fn crash(&self, water: bool) {
-        if let Ok(mut s) = self.synth.lock() {
-            s.crash = Some(0);
-        }
+    pub fn crash(&self, water: bool) { self.crash_gain(water, 1.0); }
+
+    pub fn crash_gain(&self, water: bool, gain: f32) {
+        let gain=gain.clamp(0.0,1.0);
+        if let Ok(mut s) = self.synth.lock() { s.crash = Some((0, gain)); }
         if water {
-            self.burst(1.4, 1.1, 6000.0, 500.0, 0.0);
-            self.burst(0.9, 3.0, 260.0, 40.0, 0.0);
+            self.burst(1.4, 1.1*gain, 6000.0, 500.0, 0.0);
+            self.burst(0.9, 3.0*gain, 260.0, 40.0, 0.0);
             return;
         }
-        self.burst(1.8, 5.0, 320.0, 32.0, 0.0);
-        self.burst(0.9, 2.4, 1100.0, 90.0, 0.42);
-        self.burst(1.1, 2.0, 900.0, 70.0, 0.95);
+        self.burst(1.8, 5.0*gain, 320.0, 32.0, 0.0);
+        self.burst(0.9, 2.4*gain, 1100.0, 90.0, 0.42);
+        self.burst(1.1, 2.0*gain, 900.0, 70.0, 0.95);
     }
 
     /// Sonic boom: the N-wave's two pressure jumps, bow shock then tail

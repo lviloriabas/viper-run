@@ -36,6 +36,8 @@ pub fn stick_expo(x: f64, e: f64) -> f64 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     pub sensitivity: f64,
+    pub pad_sensitivity: f64,
+    pub look_sensitivity: f64,
     pub pitch: PitchSource,
     /// Flips every pitch input: mouse, W / S and the controller.
     pub invert_pitch: bool,
@@ -62,7 +64,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { sensitivity: 2.8, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.65, pad_dead_left: 0.10, pad_dead_right: 0.10, pad_rudder_click: false, pad_fine_aim: true, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, tutorial_completed: 0, keys: Keymap::default() }
+        Settings { sensitivity: 2.8, pad_sensitivity: 1.0, look_sensitivity: 1.0, pitch: PitchSource::Mouse, invert_pitch: false, pad_layout: PadLayout::Combat, expo: 0.65, pad_dead_left: 0.10, pad_dead_right: 0.10, pad_rudder_click: false, pad_fine_aim: true, fov: 58.0, muted: false, fullscreen: false, performance_overlay: true, clock: true, tutorial_completed: 0, keys: Keymap::default() }
     }
 }
 
@@ -74,7 +76,11 @@ impl Settings {
     /// Shape positions without adding input latency or losing full authority.
     pub fn flight_stick(&self, (x, y): (f64, f64), zoom: f64) -> (f64, f64) {
         let e = if self.pad_fine_aim { self.expo + (0.85 - self.expo).max(0.0) * zoom.clamp(0.0, 1.0) } else { self.expo };
-        (stick_expo(x, e), stick_expo(y, e))
+        let response = |v| {
+            let v = stick_expo(v, e);
+            v * self.pad_sensitivity / (1.0 + (self.pad_sensitivity - 1.0) * v.abs())
+        };
+        (response(x), response(y))
     }
 }
 
@@ -110,6 +116,8 @@ fn parse(entries: Vec<(String, String)>) -> (Settings, Best) {
         let num = v.parse::<f64>().ok().filter(|n| n.is_finite());
         match (k.as_str(), num) {
             ("sensitivity", Some(n)) => s.sensitivity = clamp(n, 0.5, 5.0),
+            ("pad_sensitivity", Some(n)) => s.pad_sensitivity = clamp(n, 0.5, 2.0),
+            ("look_sensitivity", Some(n)) => s.look_sensitivity = clamp(n, 0.5, 2.0),
             ("fov", Some(n)) => s.fov = clamp(n, FOV_MIN, FOV_MAX),
             ("expo", Some(n)) => s.expo = clamp(n, 0.0, 1.0),
             ("pad_dead_left", Some(n)) => s.pad_dead_left = clamp(n, 0.0, DEAD_ZONE_MAX),
@@ -154,12 +162,22 @@ fn encode(s: &Settings, b: &Best) -> String {
         "sensitivity={:.1}\nexpo={:.2}\npitch={}\ninvert_pitch={}\npad_layout={}\nfov={}\nmuted={}\nfullscreen={}\nperformance_overlay={}\nclock={}\nbest_score={}\nbest_time={:.3}\n",
         s.sensitivity, s.expo, if s.pitch == PitchSource::Keys { "keys" } else { "mouse" }, s.invert_pitch, if s.pad_layout == PadLayout::Classic { "classic" } else { "combat" }, s.fov.round(), s.muted, s.fullscreen, s.performance_overlay, s.clock, b.score.round(), b.time
     );
-    text + &format!("tutorial_completed={}\npad_dead_left={:.2}\npad_dead_right={:.2}\npad_rudder_click={}\npad_fine_aim={}\n", s.tutorial_completed, s.pad_dead_left, s.pad_dead_right, s.pad_rudder_click, s.pad_fine_aim) + &s.keys.save()
+    text + &format!("tutorial_completed={}\npad_dead_left={:.2}\npad_dead_right={:.2}\npad_rudder_click={}\npad_fine_aim={}\npad_sensitivity={:.2}\nlook_sensitivity={:.2}\n", s.tutorial_completed, s.pad_dead_left, s.pad_dead_right, s.pad_rudder_click, s.pad_fine_aim, s.pad_sensitivity, s.look_sensitivity) + &s.keys.save()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sensitivity_settings_round_trip_and_reject_nonfinite_values() {
+        let s=Settings{pad_sensitivity:1.7,look_sensitivity:0.6,sensitivity:4.2,..Settings::default()};
+        let entries=encode(&s,&Best::default()).lines().filter_map(|l|l.split_once('='))
+            .map(|(k,v)|(k.to_owned(),v.to_owned())).collect();
+        let restored=parse(entries).0;
+        assert_eq!(restored,s);
+        let invalid=parse(vec![("pad_sensitivity".into(),"NaN".into()),("look_sensitivity".into(),"inf".into())]).0;
+        assert_eq!(invalid.pad_sensitivity,1.0);assert_eq!(invalid.look_sensitivity,1.0);
+    }
     #[test]
     fn performance_switch_survives_save_and_older_settings() {
         let old = parse(vec![("fov".into(), "72".into())]).0;

@@ -22,6 +22,11 @@ config=(OUT/'config').resolve()
 config.mkdir(parents=True,exist_ok=True)
 env={**os.environ,'DISPLAY':':0','LIBGL_ALWAYS_SOFTWARE':'1',
      'APPDATA':str(config),'XDG_CONFIG_HOME':str(config)}
+startup=None
+if os.name=='nt':
+    startup=subprocess.STARTUPINFO()
+    startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow=0
 def run_case(mode,relay=False,embedded=False):
     stem=mode+('-embedded' if embedded else '-tcp-relay' if relay else '-direct')
     inv=OUT/(stem+'.invite'); inv.unlink(missing_ok=True)
@@ -30,7 +35,7 @@ def run_case(mode,relay=False,embedded=False):
     hub=None;hubarg=[]
     if relay:
         probe=socket.socket(socket.AF_INET,socket.SOCK_STREAM);probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
-        hub=subprocess.Popen([SERVER,f'127.0.0.1:{port}'],cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=env)
+        hub=subprocess.Popen([SERVER,f'127.0.0.1:{port}'],cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,env=env,startupinfo=startup)
         try:
             deadline=time.monotonic()+4
             while time.monotonic()<deadline:
@@ -46,7 +51,7 @@ def run_case(mode,relay=False,embedded=False):
         hubarg=['--directory',f'127.0.0.1:{port}']
     common=['--size','640x360','--no-performance','--weapon','gun','--input','fire']
     with (OUT/(stem+'-host.log')).open('w') as hl,(OUT/(stem+'-client.log')).open('w') as cl:
-        host=subprocess.Popen([EXE,'--host-game' if embedded else '--host','127.0.0.1:0','--callsign','Lead','--jet','f18','--online-mode',mode,'--launch-when-ready','--invite-file',str(inv),'--net-report',str(hreport),'--exit-after','13',*hubarg,*common],cwd=ROOT,env=env,stdout=hl,stderr=hl)
+        host=subprocess.Popen([EXE,'--host-game' if embedded else '--host','127.0.0.1:0','--callsign','Lead','--jet','f18','--online-mode',mode,'--launch-when-ready','--invite-file',str(inv),'--net-report',str(hreport),'--exit-after','13',*hubarg,*common],cwd=ROOT,env=env,stdout=hl,stderr=hl,startupinfo=startup)
         client=None
         try:
             deadline=time.monotonic()+8
@@ -54,7 +59,7 @@ def run_case(mode,relay=False,embedded=False):
             assert inv.exists(),f'{stem}: invitation not written'
             invite=inv.read_text().strip()
             assert invite.startswith('relay+tcp:') if relay or embedded else not invite.startswith('relay'), invite
-            client=subprocess.Popen([EXE,'--join',invite,'--callsign','Wing','--jet','su27','--ready','--net-report',str(creport),'--exit-after','9',*common],cwd=ROOT,env=env,stdout=cl,stderr=cl)
+            client=subprocess.Popen([EXE,'--join',invite,'--callsign','Wing','--jet','su27','--ready','--net-report',str(creport),'--exit-after','9',*common],cwd=ROOT,env=env,stdout=cl,stderr=cl,startupinfo=startup)
             assert client.wait(timeout=22)==0,f'{stem}: client exited abnormally'
             assert host.wait(timeout=12)==0,f'{stem}: host exited abnormally'
         finally:
