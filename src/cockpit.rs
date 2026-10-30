@@ -49,7 +49,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
         if kind!=crate::sim::Type::Mig29{modern::moving_controls(&mut pilot, kind, &hands);}
         compass::dynamic(&mut pilot,kind,0.0,0.0,0.0);
         parts.push(("pilot-controls".to_owned(), pilot));
-        let mut f = fs::File::create(root.join(format!("{name}-cockpit.vrm")))?;
+          let mut f = std::io::BufWriter::new(fs::File::create(root.join(format!("{name}-cockpit.vrm")))?);
         f.write_all(b"VRM1")?;
         f.write_all(&(parts.len() as u32).to_le_bytes())?;
         for (name, m) in parts {
@@ -59,6 +59,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
             for n in m.v { f.write_all(&n.to_le_bytes())?; }
         }
         f.write_all(&0u32.to_le_bytes())?;
+          f.flush()?;
     }
     let mut parts=Vec::new();
     for kind in crate::sim::Type::ALL {
@@ -75,7 +76,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
             }
         }
     }
-    let mut f=fs::File::create(root.join("ejection.vrm"))?;
+      let mut f=std::io::BufWriter::new(fs::File::create(root.join("ejection.vrm"))?);
     f.write_all(b"VRM1")?;f.write_all(&(parts.len() as u32).to_le_bytes())?;
     for (name,m) in parts {
         f.write_all(&(name.len() as u32).to_le_bytes())?;f.write_all(name.as_bytes())?;
@@ -83,11 +84,28 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
         for n in m.v{f.write_all(&n.to_le_bytes())?;}
     }
     f.write_all(&0u32.to_le_bytes())?;
+      f.flush()?;
     // Exterior review includes the exact post-partition meshes, rather than
     // only the embedded source before Rust adds slats and cockpit closures.
-    for kind in crate::sim::Type::ALL.into_iter().filter(|k|k.modern()) {
-        let af=crate::hornet::build_for(kind);
-        let mut parts=vec![("fixed".to_owned(),af.body),("canopy".to_owned(),af.canopy),("brake".to_owned(),af.brake)];
+      for kind in crate::sim::Type::ALL {
+          let mut tip_meshes=None;
+          let af=match kind {
+              crate::sim::Type::F16=>{
+                  let f=crate::airframe::build();
+                  let body=f.exterior;tip_meshes=Some(f.tips);
+                  let mut brake=Mesh::new();for m in f.brakes{brake.v.extend(m.v);}
+                  let mut gear=f.gear;gear[0].v.extend(f.gear_doors.into_iter().flat_map(|m|m.v));
+                  crate::hornet::Airframe{body,canopy:f.canopy,stabs:f.stab,flaps:f.flaperons,
+                      rudders:[f.rudder,Mesh::new()],brake,gear,controls:f.slats}
+              }
+              crate::sim::Type::Mig29=>{
+                  let f=crate::mig29::build();let mut brake=Mesh::new();for m in f.brakes{brake.v.extend(m.v);}
+                  crate::hornet::Airframe{body:f.body,canopy:f.canopy,stabs:f.stabs,flaps:[Mesh::new(),Mesh::new()],
+                      rudders:[Mesh::new(),Mesh::new()],brake,gear:f.gear,controls:f.controls}
+              }
+              _=>crate::hornet::build_for(kind),
+          };
+          let mut parts=vec![("fixed".to_owned(),af.body),("canopy".to_owned(),af.canopy),("brake".to_owned(),af.brake)];
         for (i,s) in af.controls.into_iter().enumerate(){parts.push((format!("control-{i}"),s.mesh));}
         for (i,m) in af.stabs.into_iter().enumerate(){parts.push((format!("stabilator-{i}"),m));}
         for (i,m) in af.flaps.into_iter().enumerate(){parts.push((format!("flap-{i}"),m));}
@@ -95,9 +113,12 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
         for (i,m) in af.gear.into_iter().enumerate(){parts.push((format!("gear-{i}"),m));}
         let cfg=crate::combat::Config::for_jet(crate::combat::MissionKind::Dogfight,kind);
         for (i,st) in crate::combat::Loadout::configure(&cfg).stations.iter().enumerate() {
-            parts.push((format!("store-{i}"),crate::props::review_store(st,kind)));
+              let mesh=if st.tip && kind==crate::sim::Type::F16 {
+                  Mesh{v:tip_meshes.as_ref().unwrap()[i.min(1)].v.clone()}
+              }else{crate::props::review_store(st,kind)};
+              parts.push((format!("store-{i}"),mesh));
         }
-        let mut f=fs::File::create(root.join(format!("{}-airframe.vrm",kind.id())))?;
+          let mut f=std::io::BufWriter::new(fs::File::create(root.join(format!("{}-airframe.vrm",kind.id())))?);
         f.write_all(b"VRM1")?;f.write_all(&(parts.len() as u32).to_le_bytes())?;
         for (name,m) in parts {
             f.write_all(&(name.len() as u32).to_le_bytes())?;f.write_all(name.as_bytes())?;
@@ -105,6 +126,7 @@ pub fn export_review(path: &str) -> std::io::Result<()> {
             for n in m.v{f.write_all(&n.to_le_bytes())?;}
         }
         f.write_all(&0u32.to_le_bytes())?;
+          f.flush()?;
     }
     Ok(())
 }

@@ -40,6 +40,10 @@
     "sha256": "455cd2c374e09e932104a5f6053106e1ef582175d970be834f0451b6c3dc67fb"
   },
   {
+    "path": "Models/Stores/ALQ/alq.png",
+    "sha256": "4c79656ca74a27f23462ff507397b3749adac5fc6cc5feac80c376835886abc8"
+  },
+  {
     "path": "Models/Stores/ALQ/ALQ218l.ac",
     "sha256": "bb061fd0032a6a271a4493bd3b6dc3a73176698f5b199c8fc7681886a8c38e18"
   },

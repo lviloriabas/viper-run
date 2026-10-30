@@ -8,8 +8,8 @@
 //! degree wings droop 3 degrees from the tail booms, which carry the
 //! all-moving stabilators and the twin fins, canted out 6 degrees over their
 //! root extensions. Smooth (Gouraud) surfaces in vertex colours: a modern
-//! three-tone grey-blue digital (pixel) camouflage laid on by the aircraft
-//! shader over the upper skin, a pale belly, bare-metal engine bays and red
+//! grey-green FlightGear paint adapted to the procedural skin, a pale belly,
+//! bare-metal engine bays and red
 //! stars on the fins and under the wings. Body axes as for the F-16 model:
 //! x right, y up, z aft, the centre of gravity at the origin.
 use crate::math::*;
@@ -114,8 +114,7 @@ fn naca(c: f64) -> f64 {
     5.0 * (0.2969 * c.sqrt() - 0.1260 * c - 0.3516 * c * c + 0.2843 * c.powi(3) - 0.1036 * c.powi(4))
 }
 
-/// Upper skin is LIGHT, which `flag_camo` hands to the shader's digital
-/// camouflage; the belly stays pale.
+/// Upper skin and belly identify the surfaces that receive the paint atlas.
 fn skin(_p: V3, n: V3) -> Rgb {
     if n.y < -0.4 {
         BELLY
@@ -124,19 +123,16 @@ fn skin(_p: V3, n: V3) -> Rgb {
     }
 }
 
-/// Marks the vertices painted LIGHT (plain, or darkened on the moving
-/// surfaces) with uv (-2, -2): the aircraft shader lays the three-tone
-/// digital camouflage over them, in body coordinates, so the pattern runs on
-/// across the joins between parts.
-fn flag_camo(m: &mut Mesh) {
-    for c in m.v.chunks_mut(crate::mesh::STRIDE) {
-        let k = c[7] as f64 / LIGHT.1;
-        let grey = (c[6] as f64 - LIGHT.0 * k).abs() < 0.01 && (c[8] as f64 - LIGHT.2 * k).abs() < 0.01;
-        if grey && k > 0.85 && k < 1.01 {
-            c[9] = -2.0;
-            c[10] = -2.0;
+/// Project only painted skin. Keep existing stars, dielectric panels, intake
+/// darkness and bare engine/nozzle geometry in their separate materials.
+fn wrap_paint(m: &mut Mesh) {
+    crate::livery::wrap_mig(m,|c| {
+        for paint in [LIGHT,BELLY] {
+            let k=c[7] as f64/paint.1;
+            if (c[6] as f64-paint.0*k).abs()<0.005 && (c[8] as f64-paint.2*k).abs()<0.005 && k>0.85 && k<1.01{return Some(k as f32);}
         }
-    }
+        None
+    });
 }
 
 /// Flat polygon facing `out`, wound so its normal points that way.
@@ -564,9 +560,9 @@ pub fn build() -> Fulcrum {
     let mut stabs = [stab(1.0), stab(-1.0)];
     let mut brakes = [airbrake(true), airbrake(false)];
     for mesh in std::iter::once(&mut m).chain(stabs.iter_mut()).chain(brakes.iter_mut()) {
-        flag_camo(mesh);
+        wrap_paint(mesh);
     }
-    for c in &mut controls {flag_camo(&mut c.mesh);}
+    for c in &mut controls {wrap_paint(&mut c.mesh);}
     Fulcrum { body: m, canopy, stabs, gear: landing_gear(), brakes, controls }
 }
 

@@ -8,6 +8,10 @@ records SHA-256 hashes of the uncompressed upstream inputs.
 
 ## Sources and notices
 
+- F-16/MiG-29 exterior paint: pinned FlightGear sources and complete credits
+  are in `source/liveries/`; `livery-sources.json` records revisions, source
+  hashes, projection fits and output hashes. The procedural geometry is kept.
+  [Paint adaptation and offline rebuild](../../docs/MODEL-LIVERIES.md).
 - Legacy Hornet: Fabrice Kauffmann, FlightGear FGAddon `Aircraft/f18/Models`.
   [Upstream model](https://sourceforge.net/p/flightgear/fgaddon/21797/tree/trunk/Aircraft/f18/Models/f18.ac).
   Retrieved model SHA-256:

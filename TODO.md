@@ -8,6 +8,7 @@
 
 ## Completadas
 
+- [x] Corregir el mapeo de las libreas distintas de Super Hornet y Growler, texturar los ALQ-218 y adaptar pintura de FlightGear para mejorar el F-16 y MiG-29. [Fuentes y límites](docs/MODEL-LIVERIES.md).
 Revisión del 29 de octubre de 2026: [implementación, fuentes y límites](docs/PENDING-TASKS.md), [validación](docs/VALIDATION.md).
 
 - [x] Redondear todo el aro de la canopia Hornet, adelgazar y alargar los espejos y fijar la brújula al arco derecho con referencias reales.

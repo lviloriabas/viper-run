@@ -14,8 +14,8 @@ The game is a single native executable, written in Rust:
 | Linux x86_64 | `dist/viper-run-linux-x86_64` | X11 or XWayland, `libGL`, glibc 2.17+; PulseAudio, PipeWire or ALSA for sound |
 
 No installer, separate runtime, game engine or external asset files are needed.
-Terrain, F-16/MiG-29 models, instrument pages, font and engine sounds are generated
-procedurally. Adapted FlightGear Hornet/Su-27 meshes, native material images and
+Terrain, F-16/MiG-29 geometry, instrument pages, font and engine sounds are generated
+procedurally. FlightGear paint is adapted to the F-16 and MiG-29. Hornet/Su-27 meshes, native material images and
 original synthesised warning clips are embedded in the executable. Model sources,
 credits and licences are included in [assets/models](assets/models/README.md).
 
@@ -36,6 +36,10 @@ Hornet, with rectangular intakes, separate canopy lengths and front-panel UFCD.
 The Growler carries two occupants, fixed ALQ-218 wingtip pods and ejects both seats.
 [Hornet geometry references and limits](docs/HORNET-CANOPY-SUPER.md) records the
 variant adaptations, canopy fittings, store clearances and distinct damage marks.
+The E wears VFA-22 Fighting Redcocks paint and the Growler VAQ-129 Vikings paint,
+including its receiver pods. Their corrected UVs place insignia and lettering
+on the intended parts. The F-16 uses 52FW/480FS panel and marking textures; the
+MiG-29 uses grey-green FlightGear paint. [Paint sources and limits](docs/MODEL-LIVERIES.md).
 
 ONLINE, CREATE GAME starts the server inside the game. No separate program or
 server address is needed. Friends on the same network open NEARBY and select

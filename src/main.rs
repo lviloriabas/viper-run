@@ -24,6 +24,7 @@ mod gamepad;
 mod gfx;
 mod icon;
 mod keymap;
+mod livery;
 mod math;
 mod mesh;
 mod mig29;

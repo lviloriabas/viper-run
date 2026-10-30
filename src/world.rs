@@ -902,11 +902,15 @@ impl World {
         let aggressor = airframe::SCHEMES
             .iter()
             .map(|k| {
-                let t = ctx.new_texture_from_data_and_format(&airframe::aggressor_skin(k), skin_params);
+                let t = ctx.new_texture_from_data_and_format(&airframe::aggressor_skin(k), TextureParams{
+                    width:airframe::AGGRESSOR_W as u32,height:airframe::AGGRESSOR_H as u32,..skin_params});
                 ctx.texture_generate_mipmaps(t);
                 t
             })
             .collect();
+        let mig_pixels=crate::livery::pixels(Type::Mig29);
+        let mig_skin=ctx.new_texture_from_data_and_format(&mig_pixels,skin_params);
+        ctx.texture_generate_mipmaps(mig_skin);
         let air = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, depth);
         let glass = |cull| PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, color_blend: Some(gfx::alpha_blend()), cull_face: cull, ..Default::default() };
         let glass_back = ctx.new_pipeline(&[BufferLayout::default()], &MESH_ATTRS, s, glass(CullFace::Back));
@@ -932,12 +936,13 @@ impl World {
         let gear = [skinned(&airframe.gear[0]), skinned(&airframe.gear[1]), skinned(&airframe.gear[2])];
         let gear_doors = [skinned(&airframe.gear_doors[0])];
         let fulcrum = crate::mig29::build();
-        let (mig, mig_stab) = (skinned(&fulcrum.body), [skinned(&fulcrum.stabs[0]), skinned(&fulcrum.stabs[1])]);
-        let mig_controls=fulcrum.controls.iter().map(|c|MovingPart{part:skinned(&c.mesh),hinge:c.hinge}).collect();
-        let mig_gear = [skinned(&fulcrum.gear[0]), skinned(&fulcrum.gear[1]), skinned(&fulcrum.gear[2])];
-        let mig_canopy = skinned(&fulcrum.canopy);
-        let mig_brakes = [skinned(&fulcrum.brakes[0]), skinned(&fulcrum.brakes[1])];
         let scenery = crate::scenery::build().into_iter().map(|c| (c.origin, skinned(&c.mesh))).collect();
+        let mut mig_painted=|m:&Mesh|{let mut p=part(ctx,m);p.bind.images=vec![mig_skin];p};
+        let (mig, mig_stab) = (mig_painted(&fulcrum.body), [mig_painted(&fulcrum.stabs[0]), mig_painted(&fulcrum.stabs[1])]);
+        let mig_controls=fulcrum.controls.iter().map(|c|MovingPart{part:mig_painted(&c.mesh),hinge:c.hinge}).collect();
+        let mig_gear = [mig_painted(&fulcrum.gear[0]), mig_painted(&fulcrum.gear[1]), mig_painted(&fulcrum.gear[2])];
+        let mig_canopy = mig_painted(&fulcrum.canopy);
+        let mig_brakes = [mig_painted(&fulcrum.brakes[0]), mig_painted(&fulcrum.brakes[1])];
         let twins=[Type::F18,Type::Su27,Type::F18E,Type::EA18G].map(|kind|{
             let m=crate::hornet::build_for(kind);
             let bytes=match kind {Type::F18=>include_bytes!("../assets/models/f18-skin.qoi").as_slice(),Type::Su27=>include_bytes!("../assets/models/su27-skin.qoi").as_slice(),Type::EA18G=>include_bytes!("../assets/models/growler-skin.qoi").as_slice(),_=>include_bytes!("../assets/models/superhornet-skin.qoi").as_slice()};

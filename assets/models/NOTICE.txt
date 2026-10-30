@@ -21,4 +21,16 @@ in assets/models/ and tools/ in the same source repository. Full model licence
 texts accompany the distribution in model-licenses/. They are also available in
 assets/models/licenses/. See assets/models/README.md for rebuilding instructions.
 
+F-16 paint adaptation: FlightGear F-16, Erik Hofman, Nikolai V. Chr. and the
+contributors listed in source/liveries/f16/authors.txt, GPL version 2 or later.
+Pinned revision ef4f192f06243cf4061c2be794511db0576ac2f9. Paint 91-0352,
+52FW/480FS; adapted to Viper Run's existing procedural geometry.
+See model-licenses/F16-GPL-2.0.txt and livery-sources.json.
+
+MiG-29 paint adaptation: Sergey "Mercenary_Mercury" Salov and Enrique Laso Leon,
+GPL version 3. Pinned revision d4a299bf88412f579b2067874989a8088b2f6d66.
+Paint from the FlightGear 9-12 is adapted to Viper Run's procedural 9.13S.
+See source/liveries/mig29/ReadMeEng.txt, model-licenses/MiG29-GPL-3.0.txt and
+livery-sources.json. The geometry and cockpit remain Viper Run's own model.
+
 No aircraft manufacturer or FlightGear endorsement is implied.

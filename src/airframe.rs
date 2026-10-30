@@ -300,8 +300,10 @@ pub struct Airframe {
 // The skin texture holds four orthographic views: top and bottom on the
 // left half, right and left sides on the right half. Every skin triangle
 // takes the view its normal faces most.
-pub const SKIN_W: usize = 512;
-pub const SKIN_H: usize = 256;
+pub const SKIN_W: usize = crate::livery::WIDTH;
+pub const SKIN_H: usize = crate::livery::HEIGHT;
+pub const AGGRESSOR_W:usize=512;
+pub const AGGRESSOR_H:usize=256;
 const PAINT_Z: (f64, f64) = (-8.0, 7.6);
 const PLAN_X: f64 = 5.0;
 const SIDE_Y: (f64, f64) = (3.9, -0.7);
@@ -337,7 +339,13 @@ fn wrap_skin(m: &mut Mesh, first: usize) {
             let c = &m.v[base + k * STRIDE..];
             v3(c[0] as f64, c[1] as f64, c[2] as f64)
         });
-        let n = (p[1] - p[0]).cross(p[2] - p[0]);
+        // Mirrored procedural patches can share winding while their stored
+        // normals face opposite ways. Choose the visible skin, not winding.
+        let facing=(0..3).fold(V3::ZERO,|sum,k|{
+            let c=&m.v[base+k*STRIDE+3..];let n=v3(c[0] as f64,c[1] as f64,c[2] as f64);
+            if n.len().is_finite(){sum+n}else{sum}
+        });
+        let n=if facing.len()>1e-6{facing}else{(p[1]-p[0]).cross(p[2]-p[0])};
         let view = if n.y.abs() >= n.x.abs() * 0.8 {
             if n.y >= 0.0 { View::Top } else { View::Bottom }
         } else if n.x >= 0.0 {
@@ -603,10 +611,11 @@ fn paint(view: View, z: f64, a: f64, camo: Option<&Scheme>) -> [f32; 3] {
 
 /// Paints the four views into the skin texture, in flat palette colours.
 fn paint_skin(camo: Option<&Scheme>) -> Vec<u8> {
-    let mut out = vec![0u8; SKIN_W * SKIN_H * 4];
-    for py in 0..SKIN_H {
-        for px in 0..SKIN_W {
-            let (u, v) = ((px as f64 + 0.5) / SKIN_W as f64, (py as f64 + 0.5) / SKIN_H as f64);
+    if camo.is_none(){return crate::livery::pixels(crate::sim::Type::F16);}
+    let mut out = vec![0u8; AGGRESSOR_W * AGGRESSOR_H * 4];
+    for py in 0..AGGRESSOR_H {
+        for px in 0..AGGRESSOR_W {
+            let (u, v) = ((px as f64 + 0.5) / AGGRESSOR_W as f64, (py as f64 + 0.5) / AGGRESSOR_H as f64);
             let side = u >= 0.5;
             let lower = v >= 0.5;
             let view = match (side, lower) {
@@ -620,7 +629,7 @@ fn paint_skin(camo: Option<&Scheme>) -> Vec<u8> {
             let a = if side { SIDE_Y.0 - f * (SIDE_Y.0 - SIDE_Y.1) } else { f * 2.0 * PLAN_X - PLAN_X };
             let c = paint(view, z, a, camo);
 
-            let o = (py * SKIN_W + px) * 4;
+            let o = (py * AGGRESSOR_W + px) * 4;
             for k in 0..3 {
                 out[o + k] = c[k].clamp(0.0, 255.0) as u8;
             }
@@ -998,6 +1007,7 @@ mod tests {
             }
         }
         assert_eq!(a.skin.len(), SKIN_W * SKIN_H * 4);
+        assert_eq!(aggressor_skin(&SCHEMES[0]).len(),AGGRESSOR_W*AGGRESSOR_H*4);
     }
 
     #[test]
@@ -1005,6 +1015,16 @@ mod tests {
         let a = build();
         for c in a.exterior.v.chunks(STRIDE).filter(|c| c[9] >= 0.0) {
             assert!((0.0..=1.0).contains(&c[9]) && (0.0..=1.0).contains(&c[10]), "uv {} {}", c[9], c[10]);
+        }
+        for mesh in [&a.exterior,&a.rudder,&a.stab[0],&a.stab[1]] {
+            for tri in mesh.v.chunks(STRIDE*3) {
+                if tri.chunks(STRIDE).any(|v|v[9]<0.0){continue;}
+                let nx=tri.chunks(STRIDE).map(|v|v[3]).sum::<f32>();
+                let ny=tri.chunks(STRIDE).map(|v|v[4]).sum::<f32>();
+                if nx.abs()>ny.abs()/0.8 && nx.abs()>0.1 {
+                    assert!(tri.chunks(STRIDE).all(|v|(v[10]>=0.5)==(nx<0.0)),"opposite side atlas makes lettering mirror");
+                }
+            }
         }
     }
 

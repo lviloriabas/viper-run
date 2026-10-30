@@ -22,6 +22,11 @@ def canopy_e(p):
     if x>-4.754:x=-4.754+(x+4.754)*(2.35/3.662)
     return (x,y,z)
 
+def atlas_uv(u,v,rect,size):
+    # AC3D UVs start at the bottom; decoded QOI rows start at the top.
+    x,y,w,h=rect;aw,ah=size
+    return ((x+.5+u*(w-1))/aw,(y+.5+(1-v)*(h-1))/ah)
+
 def generate(source,out):
     from PIL import Image
     source=source.resolve();out.mkdir(parents=True,exist_ok=True)
@@ -30,10 +35,18 @@ def generate(source,out):
     used={main,source/'Models/Diffuse.jpg',source/'Models/common.xml',
           source/'F-18F-yasim-set.xml',source/'EA-18G-yasim-set.xml',
           source/'Systems/views.xml',source/'Models/PjedvajAutorization.png'}
-    for file,livery in [('superhornet-skin.qoi','Liveries/VFA22.png'),('growler-skin.qoi','LiveriesG/VAQ129.png')]:
+    skins={}
+    for variant,file,livery in [('f18e','superhornet-skin.qoi','Liveries/VFA22.png'),('ea18g','growler-skin.qoi','LiveriesG/VAQ129.png')]:
         used.add(source/'Models'/livery)
         used.add((source/'Models'/livery).with_suffix('.xml'))
         skin=fg.styled_texture(Image.open(source/'Models'/livery))
+        tiles={'body':(0,0,*skin.size)}
+        if variant=='ea18g':
+            path=source/'Models/Stores/ALQ/alq.png';used.add(path)
+            pod=fg.styled_texture(Image.open(path));atlas=Image.new('RGB',(skin.width,skin.height+pod.height),(145,153,158))
+            atlas.paste(skin,(0,0));atlas.paste(pod,(0,skin.height))
+            tiles['alq']=(0,skin.height,*pod.size);skin=atlas
+        skins[variant]=(skin.size,tiles)
         (out/file).write_bytes(fg.qoi(skin))
     report={}
     for variant in ('f18e','ea18g'):
@@ -42,7 +55,8 @@ def generate(source,out):
             'gear0','gear1','gear2','aileron0','aileron1',
             'slat_inner0','slat_inner1','slat_outer0','slat_outer1')}
         inventory=[]
-        def emit(o,vs,part,flat=None,remap=False):
+        size,tiles=skins[variant]
+        def emit(o,vs,part,flat=None,remap=False,tile='body'):
             vs=[point(canopy_e(v) if remap else v) for v in vs]
             if o.name.startswith(('Pylon1','Pylon2','Pylon3')):
                 side=1 if sum(v[0] for v in vs)>0 else -1
@@ -61,9 +75,11 @@ def generate(source,out):
                     a,b,c=[vs[r[0]] for r in tri]
                     n=fg.unit(fg.cross(fg.sub(b,a),fg.sub(c,a)))
                     if not all(math.isfinite(x) for x in n):raise ValueError(o.name)
-                    colour=flat or o.materials[material].rgb
+                    textured=flat is None and bool(o.texture)
+                    colour=flat or ((1.,1.,1.) if textured else o.materials[material].rgb)
                     for index,u,v in tri:
-                        arr.extend((*vs[index],*n,*colour,*( (-1.,-1.) if flat else (u,v))))
+                        uv=atlas_uv(u,v,tiles[tile],size) if textured else (-1.,-1.)
+                        arr.extend((*vs[index],*n,*colour,*uv))
             entry['vertex_count']=len(arr)//11-entry['vertex_start']
         def wheel(o,vs,part):
             # Preserve measured axle, radius and width with a compact tyre,
@@ -130,7 +146,7 @@ def generate(source,out):
                 used.add(ac)
                 for o,vs in fg.flatten(fg.read_ac(ac)):
                     vs=[fg.fg_ac(fg.add(fg.mv(r,fg.ac_fg(v)),t)) for v in vs]
-                    emit(o,vs,'body',(.52,.56,.58))
+                    emit(o,vs,'body',tile='alq')
         data=bytearray(b'VRM1'+struct.pack('<I',len(parts)))
         for name,arr in parts.items():
             b=name.encode();data.extend(struct.pack('<I',len(b))+b+struct.pack('<I',len(arr)))
@@ -139,7 +155,8 @@ def generate(source,out):
         (out/(variant+'.vrm')).write_bytes(data)
         (out/(variant+'.vrz')).write_bytes(b'VRZ1'+struct.pack('<I',len(data))+zlib.compress(data,9))
         report[variant]={'parts':{k:len(v)//33 for k,v in parts.items()},'objects':inventory,
-                         'transform':{'right':SX,'up':SY,'aft':SZ,'source_up_datum':2.20,'aft_offset':.15}}
+                         'transform':{'right':SX,'up':SY,'aft':SZ,'source_up_datum':2.20,'aft_offset':.15},
+                         'texture':{'size':size,'tiles':tiles,'row_origin':'top'}}
         print(variant,report[variant]['parts'],len(data),flush=True)
     (out/'superhornet-geometry.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8',newline='\n')
     manifest=[]

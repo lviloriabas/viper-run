@@ -52,6 +52,9 @@ respecto a la fuente F/G, con la zona posterior cerrada por el lomo. El Growler
 conserva la canopy larga, los dos ocupantes, receptores ALQ-218 en las puntas,
 antenas y cercas de ala propias. Las libreas proceden de VFA-22 y VAQ-129 del
 mismo paquete, adaptadas a la paleta plana del juego.
+La [revisión de texturas](MODEL-LIVERIES.md) corrige el origen vertical de las
+UV, coloca las insignias y rótulos sobre sus piezas y añade el atlas original
+de los receptores ALQ-218 del Growler.
 
 El aerofreno dorsal que el artista incluyó en la fuente no existe como
 superficie móvil en estas variantes. Se elimina su caja y se mantiene una

@@ -1,5 +1,74 @@
 # Validation
 
+## Corrected aircraft paint and FlightGear F-16/MiG-29 textures, 29 October 2026
+
+The Super Hornet and Growler now display their separate VFA-22 and VAQ-129
+markings on the correct parts. AC3D's bottom-origin V is converted to the
+top-origin image rows. Growler receivers use their own source texture tile.
+The procedural F-16 receives FlightGear 52FW/480FS panel and marking textures;
+the MiG-29 receives adapted grey-green paint. Mirrored procedural patches
+choose their atlas view from the stored outward normals, fixing reversed
+lettering and upper/lower paint selection. Sources, licences, projection fits
+and paint-variant limitations are in [MODEL-LIVERIES.md](MODEL-LIVERIES.md).
+
+Final verification:
+
+- All 353 game and 16 server tests passed, with zero failures or ignored tests.
+  Linux and Windows release builds completed without warnings.
+- All 21 Python tests passed. These cover source hashes, GPL permissions,
+  offline byte-identical reconstruction, packed geometry, UV row orientation,
+  source alpha, foreground depth, edge padding and preservation of isolated
+  white insignia when removing the F-16 canvas.
+- Native Linux and Windows each passed 32 capture cases: both sides, top,
+  bottom, oblique, nozzle and intermediate/full combined control positions
+  on all four aircraft. Native menu integration also passed on both platforms.
+  Reviewed sides show readable F-16 tail codes and distinct E/G lettering.
+- Four editable Blender scenes and 20 textured renders use the exact exported
+  game meshes, with the original FlightGear envelopes in separate collections.
+  The previews use the game's outward vertex normals and lighting rather than
+  reversing the shading of mirrored patches. Both sides and the top, bottom
+  and oblique views are included.
+- Mesh and texture provenance checks match every export to the final Windows
+  executable. PNG copies used by Blender contain exactly the QOI image pixels.
+  E/G imported mesh positions and normals are byte-identical to the previous
+  revision; their paint attributes and bindings changed.
+- The local Windows executable is byte-identical to the distribution, and all
+  four distribution checksums match `dist/SHA256SUMS.txt`.
+
+The first Windows mesh export exceeded its original 120-second deadline while
+writing individual floats over the WSL UNC path. Buffered writes and explicit
+flushes fixed the cause. The final export passed on the same UNC path and with
+the same deadline. The corrected source was rebuilt for both platforms before
+all final captures; no assertion or timeout was weakened.
+
+Resource comparison:
+
+| Resource | Previous | Final |
+| --- | ---: | ---: |
+| F-16 base paint | generated 512 x 256 | 2048 x 1024, 441,110 QOI bytes |
+| MiG-29 base paint | procedural digital shader | 2048 x 1024, 121,936 QOI bytes |
+| E paint image | 2048 x 2048, 221,028 bytes | unchanged image, corrected UVs |
+| G paint image | 2048 x 2048, 194,511 bytes | 2048 x 2560, 220,351 bytes |
+| E packed model bytes | 701,057 | 702,333 |
+| G packed model bytes | 753,785 | 786,406 |
+| Linux game bytes | 14,890,048 | 15,519,480 |
+| Windows game bytes | 14,697,984 | 15,324,672 |
+
+The complete fixed/movable exteriors and gear contain 5,007 triangles for
+F-16, 12,000 for MiG-29, 25,392 for E and 28,076 for G, excluding independently
+mounted inventory, cockpit and pilot. Paint transfer does not change geometry.
+The four special aggressor textures stay at 512 x 256 rather than allocating
+the larger base-paint dimensions for their existing procedural patterns.
+
+Logs, manifests, mesh exports and scenes are under `target/livery-review/`;
+native Windows evidence and the four-aircraft comparison are in this chat's
+`livery-review/` artifact folder. `final-proof.json` records the verified hashes.
+
+Final game SHA-256:
+
+- Linux: `fefe3b5265cdb6cdc0a153398766a0b7c41191dc079f26bf289c8cc954908587`.
+- Windows: `0f59dc10b4768d44f39b4e6ddb5fd575b26b65e49c01d61d47f726baaf0e4a89`.
+
 ## Hornet canopy, E/G exteriors and damage separation, 29 October 2026
 
 This revision replaces the shared C exterior for F/A-18E and EA-18G, reshapes

@@ -1,0 +1,182 @@
+{
+  "f16": {
+    "repo": "https://github.com/NikolaiVChr/f16",
+    "revision": "ef4f192f06243cf4061c2be794511db0576ac2f9",
+    "licence": "GPL-2.0-or-later",
+    "files": [
+      "LICENSE",
+      "copyright.txt",
+      "authors.txt",
+      "Models/f16.ac",
+      "Models/f16.png",
+      "Models/Liveries/Block50/91-0352.png",
+      "Models/Liveries/Block50/91-0352.xml"
+    ],
+    "source_transform": {
+      "axes": [
+        "-z",
+        "y",
+        "x"
+      ],
+      "scale": [
+        1.0042957942683868,
+        1.0369964643651706,
+        1.0460505689467574
+      ],
+      "offset": [
+        -0.0,
+        0.27,
+        0.9240758423547213
+      ],
+      "purpose": "paint fit only"
+    },
+    "atlas": {
+      "size": [
+        2048,
+        1024
+      ],
+      "layout": {
+        "z": [
+          -8.0,
+          7.6
+        ],
+        "x": 5.0,
+        "y": [
+          3.9,
+          -0.7
+        ]
+      },
+      "order": [
+        "top",
+        "bottom",
+        "right",
+        "left"
+      ],
+      "row_origin": "top"
+    },
+    "source_triangles": 13259,
+    "covered_pixels": [
+      159110,
+      159185,
+      156379,
+      156228
+    ],
+    "qoi_bytes": 441110,
+    "sha256": "f2faa4186263e8a6a32cc2d690391c31ce81bd22a137da194a8bf9fa1f823bdf",
+    "inputs": [
+      {
+        "path": "LICENSE",
+        "sha256": "f209c1adbb6e2d9d9b256c8bed21de5cd3e898fd0a63645f227882d6c5106c86"
+      },
+      {
+        "path": "copyright.txt",
+        "sha256": "094e31cdd632250a74b1e274e67a670c3a2119c0280956acbf1d069b19ed9ee8"
+      },
+      {
+        "path": "authors.txt",
+        "sha256": "b52e1028935a2e343059b4bbf024a69db3039cea4dfcd53c2064f0319c4f9ca4"
+      },
+      {
+        "path": "Models/f16.ac",
+        "sha256": "bd0e90c58456f64baef675b66f7b298ae8f7d72d6c3018f9459a64bcd751ff20"
+      },
+      {
+        "path": "Models/f16.png",
+        "sha256": "9d90c92b0237e5941dc615776552843d6963699d2e9eeb9aeca869ae8997032d"
+      },
+      {
+        "path": "Models/Liveries/Block50/91-0352.png",
+        "sha256": "2723d9c3b901ccf3dbc25ac1a506016ea75bffa42ae5296c50684730e4793ea9"
+      },
+      {
+        "path": "Models/Liveries/Block50/91-0352.xml",
+        "sha256": "90e68d0d0d496558e30c7c595d8103846861845cc7bb38719cd39aaa9896dcc5"
+      }
+    ]
+  },
+  "mig29": {
+    "repo": "https://github.com/Mercenary-Mercury/MiG-29_9-12",
+    "revision": "d4a299bf88412f579b2067874989a8088b2f6d66",
+    "licence": "GPL-3.0",
+    "files": [
+      "LICENSE",
+      "ReadMeEng.txt",
+      "Models/MiG-29.ac",
+      "Models/MiG-29_1.png",
+      "Models/MiG-29_2.png"
+    ],
+    "source_transform": {
+      "axes": [
+        "-z",
+        "y",
+        "x"
+      ],
+      "scale": [
+        0.9914591380938499,
+        1.0915406359780295,
+        1.0
+      ],
+      "offset": [
+        -0.0,
+        0.3,
+        0.34
+      ],
+      "purpose": "paint fit only"
+    },
+    "atlas": {
+      "size": [
+        2048,
+        1024
+      ],
+      "layout": {
+        "z": [
+          -9.0,
+          8.7
+        ],
+        "x": 6.0,
+        "y": [
+          3.6,
+          -1.6
+        ]
+      },
+      "order": [
+        "top",
+        "bottom",
+        "right",
+        "left"
+      ],
+      "row_origin": "top"
+    },
+    "source_triangles": 5227,
+    "covered_pixels": [
+      151879,
+      154247,
+      141205,
+      140382
+    ],
+    "qoi_bytes": 121936,
+    "sha256": "722d55f8f7c6120baef2cac195a2b81ee94376dfbb2944fc5f86b046a9b9fe19",
+    "inputs": [
+      {
+        "path": "LICENSE",
+        "sha256": "8726bf92880ccd30a5a0e7d6fbfe27a7b1779f18da4a8f2956ece096e93ef210"
+      },
+      {
+        "path": "ReadMeEng.txt",
+        "sha256": "e8cc572f4d62d3462f1fff368eb9b3057e50b3f4413bf5d0e4b847c858c4f7c5"
+      },
+      {
+        "path": "Models/MiG-29.ac",
+        "sha256": "c663f9189f89af9d61a3322346566ac9e8f7bdc26e8517a261b9b6e6a620167a"
+      },
+      {
+        "path": "Models/MiG-29_1.png",
+        "sha256": "86569dd53cf3f55b996e7b8d353a4a420d3d822ce5b1af8fb0728f6ec4e71b47"
+      },
+      {
+        "path": "Models/MiG-29_2.png",
+        "sha256": "dc98fe51606a0d26c1160788334383950361495e5d15b041a8a634905497203f"
+      }
+    ]
+  }
+}
